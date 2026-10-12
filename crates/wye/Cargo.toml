@@ -1,0 +1,23 @@
+[package]
+name = "wye"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gateway-core.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["http1", "server", "client"] }
+hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12", "webpki-roots"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server", "server-graceful", "tokio"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["sync"] }
+
+[lints]
+workspace = true
