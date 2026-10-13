@@ -109,12 +109,12 @@ impl Gateway {
         let mut info = RequestInfo {
             path,
             session_id: req.headers().get(SESSION_ID).cloned(),
-            subject: None,
+            identity: None,
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
             match authenticate(verifier, req.headers(), connection) {
-                Ok(identity) => info.subject = Some(identity.subject),
+                Ok(identity) => info.identity = Some(identity),
                 Err(_) => {
                     // One message for every failure: the reason is not the caller's business.
                     let res = error(
