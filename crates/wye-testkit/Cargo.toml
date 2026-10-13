@@ -11,6 +11,7 @@ bytes.workspace = true
 http.workspace = true
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["http1", "http2", "server", "server-auto", "tokio"] }
+ring = { workspace = true, features = ["alloc"] }
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tokio = { workspace = true, features = ["net", "rt"] }
