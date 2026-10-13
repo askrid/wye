@@ -9,7 +9,7 @@ use crate::{
     gateway_process::GatewayProcess,
     mock,
     scenarios::{self, Stream},
-    stats::{PERCENTILES, percentile, put, sorted},
+    stats::{PERCENTILES, percentile, phase, put, sorted},
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -103,10 +103,18 @@ pub(crate) async fn measure(
     scope: Scope,
     metrics: &mut BTreeMap<String, f64>,
 ) {
-    let via = Latency::measure(process.target()).await;
+    let via = phase(
+        format!("{prefix}latency"),
+        Latency::measure(process.target()),
+    )
+    .await;
     let cpu_before = process.cpu_secs();
     let (_, failed) = successes(
-        scenarios::unary(process.target(), UNARY_CONCURRENCY, CPU_PER_REQUEST_TOTAL).await,
+        phase(
+            format!("{prefix}cpu-per-request"),
+            scenarios::unary(process.target(), UNARY_CONCURRENCY, CPU_PER_REQUEST_TOTAL),
+        )
+        .await,
     );
     let cpu_after = process.cpu_secs();
     // `ps` reports CPU time in 10 ms steps; 20,000 requests make that ~0.5 µs per request.
@@ -155,7 +163,7 @@ pub(crate) async fn measure(
         return;
     }
     let cpu_before = process.cpu_secs();
-    let (mb_s, mb) = throughput(process.target()).await;
+    let (mb_s, mb) = phase(format!("{prefix}throughput"), throughput(process.target())).await;
     let cpu_after = process.cpu_secs();
     put(metrics, prefix, "via_throughput_mb_s", mb_s);
     // `ps` reports CPU time in 10 ms steps; the scenario streams enough data to make that negligible.
@@ -167,11 +175,16 @@ pub(crate) async fn measure(
     );
 
     if scope.streams_sse {
-        measure_idle_and_cancel(process, prefix, metrics).await;
+        phase(
+            format!("{prefix}idle+cancel"),
+            measure_idle_and_cancel(process, prefix, metrics),
+        )
+        .await;
     }
 
     let cpu_before = process.cpu_secs();
-    let (via_upload, upload_failed) = upload(process.target()).await;
+    let (via_upload, upload_failed) =
+        phase(format!("{prefix}upload"), upload(process.target())).await;
     put(
         metrics,
         prefix,
@@ -195,7 +208,11 @@ pub(crate) async fn measure(
         let rss_before = process.rss_kb();
         let cpu_before = process.cpu_secs();
         let mut rss_loaded = 0.0;
-        let paced = Paced::measure(process.target(), || rss_loaded = process.rss_kb()).await;
+        let paced = phase(
+            format!("{prefix}paced"),
+            Paced::measure(process.target(), || rss_loaded = process.rss_kb()),
+        )
+        .await;
         let cpu_after = process.cpu_secs();
         for (label, p) in PERCENTILES {
             let added =

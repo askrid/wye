@@ -11,7 +11,7 @@ use crate::{
     gateway_process::{Gateway, GatewayProcess},
     measure::{self, Direct, Scope},
     mock,
-    stats::{PERCENTILES, median, percentile, put},
+    stats::{PERCENTILES, median, percentile, phase, put},
 };
 
 /// One way of reaching the mock upstream.
@@ -76,7 +76,11 @@ pub async fn run(
     for i in 1..=repeat {
         let mut metrics = BTreeMap::new();
         for path in &paths {
-            let direct = Direct::measure(&path.direct, path.paced).await;
+            let direct = phase(
+                format!("{}direct", path.prefix),
+                Direct::measure(&path.direct, path.paced),
+            )
+            .await;
             put(
                 &mut metrics,
                 path.prefix,
@@ -114,7 +118,11 @@ pub async fn run(
         }
         if let Some(binary) = wye_alloc {
             eprintln!("run {i}/{repeat}: allocations");
-            allocations::measure(binary, &paths[0].base_url, dir, &mut metrics).await;
+            phase(
+                "allocations",
+                allocations::measure(binary, &paths[0].base_url, dir, &mut metrics),
+            )
+            .await;
         }
         runs.push(metrics);
     }
