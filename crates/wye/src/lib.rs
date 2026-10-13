@@ -5,8 +5,10 @@
 //! - `gateway`: routing and gateway-generated responses
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
+//! - `gauge`: in-flight counters released on drop
 
 mod gateway;
+mod gauge;
 mod server;
 mod startup;
 mod upstream;
