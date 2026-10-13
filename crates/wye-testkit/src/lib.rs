@@ -20,7 +20,7 @@ use hyper_util::{
     rt::{TokioExecutor, TokioIo},
     server::conn::auto,
 };
-use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
+use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
@@ -36,13 +36,27 @@ impl TestCa {
     pub fn generate() -> Self {
         let ca_key = KeyPair::generate().expect("CA key");
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
+        // Distinct subject names: rcgen's default is the same for every certificate,
+        // and OpenSSL treats a leaf whose subject equals its issuer as self-signed.
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "wye test CA");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        // Python 3.13+ (strict X.509 verification) rejects CAs without key usage.
+        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
         let ca = ca_params.self_signed(&ca_key).expect("CA certificate");
         let issuer = Issuer::new(ca_params, ca_key);
 
         let server_key = KeyPair::generate().expect("server key");
-        let server = CertificateParams::new(vec!["127.0.0.1".to_owned()])
-            .expect("server params")
+        let mut server_params =
+            CertificateParams::new(vec!["127.0.0.1".to_owned()]).expect("server params");
+        server_params
+            .distinguished_name
+            .push(DnType::CommonName, "127.0.0.1");
+        // Python 3.13+ (strict X.509 verification) rejects leaf certificates
+        // without an Authority Key Identifier.
+        server_params.use_authority_key_identifier_extension = true;
+        let server = server_params
             .signed_by(&server_key, &issuer)
             .expect("server certificate");
 
