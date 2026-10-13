@@ -60,6 +60,8 @@ impl Outcome {
 pub(crate) struct RequestInfo {
     pub path: &'static str,
     pub session_id: Option<HeaderValue>,
+    /// Verified credential subject, when gateway credentials are configured.
+    pub subject: Option<Box<str>>,
     pub started: Instant,
 }
 
@@ -156,6 +158,9 @@ fn push_line(buf: &mut Vec<u8>, r: &Record) {
     m.insert("duration_ms".into(), ms(r.duration));
     if let Some(after) = r.headers_after {
         m.insert("headers_ms".into(), ms(after));
+    }
+    if let Some(subject) = &r.info.subject {
+        m.insert("subject".into(), subject.as_ref().into());
     }
     if let Some(session) = r.info.session_id.as_ref().and_then(|v| v.to_str().ok()) {
         m.insert("session_id".into(), session.into());

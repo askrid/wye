@@ -1,9 +1,16 @@
+mod token;
+
 use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc};
 
 use gateway_core::config::Config;
 use wye::{Gateway, Resources};
 
-const USAGE: &str = "usage:\n  wye serve --config <path>\n  wye check-config <path>";
+const USAGE: &str = "usage:
+  wye serve --config <path>
+  wye check-config <path>
+  wye token keygen --out <key-file>
+  wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
+--subject <sub> --ttl-secs <n>";
 
 fn main() -> ExitCode {
     match run(std::env::args_os().skip(1).collect()) {
@@ -22,6 +29,8 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
         ["serve", "--config", path] => serve(load(path)?, config_dir(path)),
+        ["token", "keygen", "--out", path] => token::keygen(Path::new(path)),
+        ["token", "issue", flags @ ..] => token::issue(flags),
         ["check-config", path] => {
             load(path)?;
             println!("{path}: ok");

@@ -2,14 +2,17 @@
 
 use std::{
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
-use gateway_core::config::Config;
+use gateway_core::{
+    config::Config,
+    credential::{CredentialError, Identity, Verifier},
+};
 use http::{
-    HeaderName, Method, Request, Response, StatusCode,
-    header::{CONTENT_LENGTH, CONTENT_TYPE},
+    HeaderMap, HeaderName, Method, Request, Response, StatusCode,
+    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE},
 };
 use http_body_util::{Either, Full};
 use hyper::body::Incoming;
@@ -24,6 +27,7 @@ use crate::{
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
 const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
+const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
 const OVERLOADED: u16 = 529;
@@ -31,6 +35,8 @@ const OVERLOADED: u16 = 529;
 /// Per-process gateway state shared by every connection. Immutable after
 /// startup except the in-flight counter and the draining flag.
 pub struct Gateway {
+    /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
+    verifier: Option<Verifier>,
     upstream: Upstream,
     max_request_body_bytes: usize,
     in_flight: Gauge,
@@ -43,6 +49,7 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(config: &Config, resources: Resources) -> Result<Self, StartupError> {
         Ok(Self {
+            verifier: config.auth.as_ref().map(Verifier::new),
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
             max_request_body_bytes: usize::try_from(config.server.max_request_body_bytes)
                 .map_err(|_| StartupError::BodyLimitTooLarge)?,
@@ -86,11 +93,27 @@ impl Gateway {
             (&Method::POST, "/v1/messages/count_tokens") => "/v1/messages/count_tokens",
             (method, path) => return self.local(method, path),
         };
-        let info = RequestInfo {
+        let mut info = RequestInfo {
             path,
             session_id: req.headers().get(SESSION_ID).cloned(),
+            subject: None,
             started: Instant::now(),
         };
+        if let Some(verifier) = &self.verifier {
+            match authenticate(verifier, req.headers()) {
+                Ok(identity) => info.subject = Some(identity.subject),
+                Err(_) => {
+                    // One message for every failure: the reason is not the caller's business.
+                    let res = error(
+                        StatusCode::UNAUTHORIZED,
+                        "authentication_error",
+                        "invalid or missing gateway credential",
+                    );
+                    log.gateway_error(info, res.status());
+                    return res;
+                }
+            }
+        }
         self.forward(req, info, log).await
     }
 
@@ -153,6 +176,25 @@ impl Gateway {
             }
         }
     }
+}
+
+/// Verifies the gateway credential from `Authorization: Bearer` (Claude Code's
+/// `ANTHROPIC_AUTH_TOKEN`) or else `x-api-key` (`ANTHROPIC_API_KEY`).
+fn authenticate(verifier: &Verifier, headers: &HeaderMap) -> Result<Identity, CredentialError> {
+    let bearer = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| token.trim());
+    let token = bearer
+        .or_else(|| headers.get(X_API_KEY).and_then(|v| v.to_str().ok()))
+        .ok_or(CredentialError::Malformed)?;
+    // A clock before 1970 makes every credential look expired: fail closed.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(u64::MAX, |d| d.as_secs());
+    verifier.verify(token, now)
 }
 
 fn forward_error(e: ForwardError) -> Response<ResBody> {
