@@ -4,6 +4,7 @@ use std::fmt;
 
 mod server;
 mod upstream;
+mod usage_log;
 
 pub use server::{Gateway, serve};
 pub use upstream::UpstreamAuth;
