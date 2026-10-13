@@ -1,4 +1,4 @@
-# Minimal Wye configuration for Claude Code (M0: loopback only).
+# Minimal Wye configuration for Claude Code.
 #
 #   ANTHROPIC_API_KEY=... wye serve --config examples/wye.toml
 #   ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
@@ -23,3 +23,17 @@ api_key_env = "ANTHROPIC_API_KEY"
 # stream_idle_timeout_secs = 120
 # PEM file of extra trusted root certificates (e.g. a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
+
+# Gateway credentials. Required to listen beyond loopback; incompatible with
+# forward_caller_credential. Create a signing key and credentials offline:
+#   wye token keygen --out issuer.key
+#   wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod \
+#     --subject alice --ttl-secs 86400
+# Claude Code sends the credential with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
+# [auth]
+# issuer = "wye"
+# audience = "wye-prod"
+# max_credential_ttl_secs = 604800
+# [[auth.keys]]
+# id = "k1"
+# ed25519_public_key = "<printed by wye token keygen>"
