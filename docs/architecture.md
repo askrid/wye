@@ -214,6 +214,8 @@ Provider prompt caches are per account (and sometimes per region), and cached in
 
 When a route has several eligible candidates, Wye can choose deterministically by rendezvous hashing over the candidates, keyed by the credential subject plus a hash of a stable request prefix (system prompt and tool definitions). The same workload then reaches the same candidate from any replica, with no shared state, and moves only when the candidate set changes. Strategy name: `cache_affine` (illustrative). Its cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
 
+Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
+
 Prefer passthrough where native compatibility is safe; translate only for heterogeneous providers. If semantics cannot be preserved, reject with a documented incompatibility. Responses semantics are treated separately from Chat Completions. Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Tools and MCP
