@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Blocks commits that fail correctness or regress performance. See scripts/check.sh.
+# Commits that touch only docs or bench/baseline.json skip the run.
+set -euo pipefail
+if git diff --cached --name-only | grep -qvE '^(bench/baseline\.json|.*\.md)$'; then
+  exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
+fi
