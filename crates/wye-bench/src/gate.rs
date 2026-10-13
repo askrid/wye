@@ -37,6 +37,12 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_paced_event_added_p99_us", 0.50, 2_000.0),
     ("tls_paced_cpu_us_per_event", 0.25, 2.0),
     ("tls_paced_rss_kb_per_stream", 0.15, 1.0),
+    // Any failed request or dropped stream is a regression.
+    ("unary_failed_requests", 0.0, 0.0),
+    ("upload_failed_requests", 0.0, 0.0),
+    ("tls_unary_failed_requests", 0.0, 0.0),
+    ("tls_upload_failed_requests", 0.0, 0.0),
+    ("tls_paced_failed_streams", 0.0, 0.0),
     // Guard the property, not the microseconds: a release that waits for the
     // next upstream write would take seconds.
     ("cancel_upstream_release_max_us", 1.0, 20_000.0),

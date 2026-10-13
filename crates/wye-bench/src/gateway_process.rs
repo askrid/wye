@@ -1,23 +1,40 @@
-//! The gateway under test (Wye or KrakenD), as a child process.
+//! The gateway under test (Wye, KrakenD, or LiteLLM), as a child process.
 
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{collections::HashSet, path::Path, process::Stdio, time::Duration};
 
 use tokio::process::Child;
 
 use crate::client::Target;
 
-/// Which gateway to start.
+/// Which gateway to start, with the path to its executable.
 #[derive(Clone, Copy)]
 pub enum Gateway<'a> {
     Wye(&'a str),
     KrakenD(&'a str),
+    LiteLlm(&'a str),
 }
+
+/// LiteLLM refuses to start without a master key and then authenticates every route.
+const LITELLM_MASTER_KEY: &str = "sk-bench-master";
+/// LiteLLM's own `/v1/messages` is its Anthropic API (parses requests, needs a
+/// model mapping); its byte-level pass-through is mounted here instead.
+const LITELLM_API_PREFIX: &str = "/pt";
 
 impl Gateway<'_> {
     pub fn name(self) -> &'static str {
         match self {
             Self::Wye(_) => "wye",
             Self::KrakenD(_) => "krakend",
+            Self::LiteLlm(_) => "litellm",
+        }
+    }
+
+    /// Metric name prefix for this gateway.
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Wye(_) => "",
+            Self::KrakenD(_) => "krakend_",
+            Self::LiteLlm(_) => "litellm_",
         }
     }
 
@@ -26,16 +43,17 @@ impl Gateway<'_> {
     /// CE answers `"sse"` encoding with 500), so scenarios that wait for the
     /// first event of a long silent stream cannot run through it.
     pub fn streams_sse(self) -> bool {
-        matches!(self, Self::Wye(_))
+        !matches!(self, Self::KrakenD(_))
     }
+}
 
-    /// Metric name prefix for this gateway.
-    pub fn prefix(self) -> &'static str {
-        match self {
-            Self::Wye(_) => "",
-            Self::KrakenD(_) => "krakend_",
-        }
-    }
+/// How to launch one gateway in front of an upstream.
+struct Launch {
+    program: String,
+    args: Vec<String>,
+    env: Vec<(&'static str, String)>,
+    health: &'static str,
+    target: Target,
 }
 
 pub struct GatewayProcess {
@@ -60,56 +78,101 @@ impl GatewayProcess {
             probe.local_addr().unwrap().port()
         };
         // Absolute, because Wye resolves relative paths against its config file
-        // and KrakenD against its working directory.
+        // and the others against their working directory.
         let ca_file = ca_pem.map(|pem| {
             let path = dir.join(format!("bench-{name}-ca.pem"));
             std::fs::write(&path, pem).unwrap();
             std::fs::canonicalize(path).unwrap()
         });
-        let (binary, config_path, health) = match gateway {
-            Gateway::Wye(binary) => {
-                let mut config = format!(
-                    "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
-                     [upstream]\nbase_url = \"{upstream_base_url}\"\nforward_caller_credential = true\n"
-                );
-                if let Some(path) = &ca_file {
-                    config.push_str(&format!("ca_file = {:?}\n", path.display().to_string()));
-                }
-                // Tuning experiments: extra `[upstream]` lines without code changes.
-                if let Ok(extra) = std::env::var("WYE_BENCH_UPSTREAM") {
-                    config.push_str(&extra);
-                    config.push('\n');
-                }
-                let path = dir.join(format!("bench-{name}.toml"));
-                std::fs::write(&path, config).unwrap();
-                (binary, path, "/healthz")
-            }
-            Gateway::KrakenD(binary) => {
-                let path = dir.join(format!("bench-{name}.json"));
-                std::fs::write(
-                    &path,
-                    krakend_config(port, upstream_base_url, ca_file.as_deref()),
-                )
-                .unwrap();
-                (binary, path, "/__health")
-            }
+        let config = |extension: &str, contents: String| {
+            let path = dir.join(format!("bench-{name}-{}.{extension}", gateway.name()));
+            std::fs::write(&path, contents).unwrap();
+            path.display().to_string()
         };
-        let args: &[&str] = match gateway {
-            Gateway::Wye(_) => &["serve", "--config"],
-            Gateway::KrakenD(_) => &["run", "-c"],
+        let addr = format!("127.0.0.1:{port}").parse().unwrap();
+        let launch = match gateway {
+            Gateway::Wye(program) => Launch {
+                program: program.into(),
+                args: vec![
+                    "serve".into(),
+                    "--config".into(),
+                    config(
+                        "toml",
+                        wye_config(port, upstream_base_url, ca_file.as_deref()),
+                    ),
+                ],
+                env: Vec::new(),
+                health: "/healthz",
+                target: Target::plain(addr),
+            },
+            Gateway::KrakenD(program) => Launch {
+                program: program.into(),
+                args: vec![
+                    "run".into(),
+                    "-c".into(),
+                    config(
+                        "json",
+                        krakend_config(port, upstream_base_url, ca_file.as_deref()),
+                    ),
+                ],
+                env: Vec::new(),
+                health: "/__health",
+                target: Target::plain(addr),
+            },
+            Gateway::LiteLlm(program) => Launch {
+                program: program.into(),
+                args: vec![
+                    "--config".into(),
+                    config("yaml", litellm_config(upstream_base_url)),
+                    "--port".into(),
+                    port.to_string(),
+                    // LiteLLM's production recommendation: one worker per core.
+                    "--num_workers".into(),
+                    std::thread::available_parallelism()
+                        .map_or(1, |n| n.get())
+                        .to_string(),
+                ],
+                env: ca_file
+                    .iter()
+                    // Pass-through requests trust the CA path in SSL_VERIFY. Not
+                    // SSL_CERT_FILE: it replaces the system roots for every client,
+                    // breaking LiteLLM's other outbound HTTPS calls.
+                    .map(|path| ("SSL_VERIFY", path.display().to_string()))
+                    .chain([("LITELLM_LOG", "ERROR".into())])
+                    .collect(),
+                health: "/health/liveliness",
+                target: Target::gateway(
+                    addr,
+                    LITELLM_API_PREFIX,
+                    vec![("authorization", format!("Bearer {LITELLM_MASTER_KEY}"))],
+                ),
+            },
         };
-        let child = tokio::process::Command::new(binary)
-            .args(args)
-            .arg(&config_path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+
+        // `WYE_BENCH_GATEWAY_LOG=1` keeps each gateway's output next to its config.
+        let (stdout, stderr) = match std::env::var_os("WYE_BENCH_GATEWAY_LOG") {
+            Some(_) => {
+                let log = dir.join(format!("bench-{name}-{}.log", gateway.name()));
+                let file = std::fs::File::create(log).unwrap();
+                (Stdio::from(file.try_clone().unwrap()), Stdio::from(file))
+            }
+            None => (Stdio::null(), Stdio::null()),
+        };
+        let child = tokio::process::Command::new(&launch.program)
+            // Own process group, so `Drop` can stop workers the gateway forks.
+            .process_group(0)
+            .args(&launch.args)
+            .envs(launch.env)
+            .stdout(stdout)
+            .stderr(stderr)
             .kill_on_drop(true)
             .spawn()
-            .unwrap_or_else(|e| panic!("cannot start {binary}: {e}"));
+            .unwrap_or_else(|e| panic!("cannot start {}: {e}", launch.program));
         let pid = child.id().unwrap();
-        let target = Target::plain(format!("127.0.0.1:{port}").parse().unwrap());
-        for _ in 0..400 {
-            if let Ok(res) = target.client().request(target.get(health)).await
+        let target = launch.target;
+        // LiteLLM needs several seconds to import and start its workers.
+        for _ in 0..1_200 {
+            if let Ok(res) = target.client().request(target.get(launch.health)).await
                 && res.status().is_success()
             {
                 return Self {
@@ -120,35 +183,109 @@ impl GatewayProcess {
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        panic!("{binary} did not become healthy");
+        panic!("{} did not become healthy", launch.program);
     }
 
     pub fn target(&self) -> &Target {
         &self.target
     }
+}
 
+impl Drop for GatewayProcess {
+    /// `kill_on_drop` stops only the direct child; LiteLLM's workers would
+    /// outlive it and disturb later runs. Kill the whole process group.
+    fn drop(&mut self) {
+        let killed = std::process::Command::new("kill")
+            .args(["-KILL", "--", &format!("-{}", self.pid)])
+            .status();
+        if !killed.as_ref().is_ok_and(|status| status.success()) {
+            eprintln!(
+                "warning: could not stop process group {}: {killed:?}",
+                self.pid
+            );
+        }
+    }
+}
+
+impl GatewayProcess {
+    /// Resident memory of the gateway and every process it started, in KB.
     pub fn rss_kb(&self) -> f64 {
-        self.ps("rss").parse().unwrap()
+        self.tree_sum("rss", |raw| raw.parse().unwrap())
     }
 
-    /// Total CPU time (user + system) in seconds, from `ps -o time` (`[[dd-]hh:]mm:ss.cc`).
+    /// CPU time (user + system) of the gateway and every process it started, in seconds.
     pub fn cpu_secs(&self) -> f64 {
-        let raw = self.ps("time");
-        let (days, rest) = raw
-            .split_once('-')
-            .map_or((0.0, raw.as_str()), |(d, r)| (d.parse().unwrap(), r));
-        rest.split(':')
-            .fold(0.0, |acc, part| acc * 60.0 + part.parse::<f64>().unwrap())
-            + days * 86_400.0
+        self.tree_sum("time", parse_cpu_time)
     }
 
-    fn ps(&self, field: &str) -> String {
+    fn tree_sum(&self, field: &str, parse: impl Fn(&str) -> f64) -> f64 {
+        let pids: Vec<String> = process_tree(self.pid).iter().map(u32::to_string).collect();
         let out = std::process::Command::new("ps")
-            .args(["-o", &format!("{field}="), "-p", &self.pid.to_string()])
+            .args(["-o", &format!("{field}="), "-p", &pids.join(",")])
             .output()
             .unwrap();
-        String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(parse)
+            .sum()
     }
+}
+
+/// `root` and all of its descendants. Wye and KrakenD are one process; LiteLLM forks workers.
+fn process_tree(root: u32) -> Vec<u32> {
+    let out = std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid="])
+        .output()
+        .unwrap();
+    let pairs: Vec<(u32, u32)> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
+        })
+        .collect();
+    let mut tree = vec![root];
+    let mut seen = HashSet::from([root]);
+    let mut i = 0;
+    while let Some(&parent) = tree.get(i) {
+        for &(pid, ppid) in &pairs {
+            if ppid == parent && seen.insert(pid) {
+                tree.push(pid);
+            }
+        }
+        i += 1;
+    }
+    tree
+}
+
+/// `ps -o time` format: `[[dd-]hh:]mm:ss.cc`.
+fn parse_cpu_time(raw: &str) -> f64 {
+    let (days, rest) = raw
+        .split_once('-')
+        .map_or((0.0, raw), |(d, r)| (d.parse().unwrap(), r));
+    rest.split(':')
+        .fold(0.0, |acc, part| acc * 60.0 + part.parse::<f64>().unwrap())
+        + days * 86_400.0
+}
+
+fn wye_config(port: u16, upstream_base_url: &str, ca_file: Option<&Path>) -> String {
+    let mut config = format!(
+        "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
+         [upstream]\nbase_url = \"{upstream_base_url}\"\nforward_caller_credential = true\n"
+    );
+    if let Some(path) = ca_file {
+        config.push_str(&format!("ca_file = {:?}\n", path.display().to_string()));
+    }
+    // Tuning experiments: extra `[upstream]` lines without code changes.
+    if let Ok(extra) = std::env::var("WYE_BENCH_UPSTREAM") {
+        config.push_str(&extra);
+        config.push('\n');
+    }
+    config
 }
 
 /// KrakenD in its documented streaming pass-through mode: `no-op` encoding,
@@ -182,4 +319,16 @@ fn krakend_config(port: u16, upstream_base_url: &str, ca_file: Option<&Path>) ->
         config["client_tls"] = serde_json::json!({ "ca_certs": [path.display().to_string()] });
     }
     config.to_string()
+}
+
+/// LiteLLM's byte-level pass-through endpoint (streams SSE as it arrives),
+/// without a database, so no spend logging: its leanest proxy configuration.
+/// The upstream CA comes from `SSL_VERIFY`.
+fn litellm_config(upstream_base_url: &str) -> String {
+    format!(
+        "general_settings:\n  master_key: {LITELLM_MASTER_KEY}\n  pass_through_endpoints:\n    \
+         - path: \"{LITELLM_API_PREFIX}/v1/messages\"\n      \
+         target: \"{upstream_base_url}/v1/messages\"\n      \
+         forward_headers: true\n      merge_query_params: true\n      timeout: 600\n"
+    )
 }

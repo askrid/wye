@@ -6,7 +6,8 @@ use std::{
 };
 
 use bytes::Bytes;
-use http_body_util::BodyExt;
+use http::Request;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -24,6 +25,8 @@ pub struct Stream {
     /// Delay of each event from mock send to client receive.
     pub event_delays_us: Vec<u64>,
     pub bytes: u64,
+    /// The request or body failed before the stream ended.
+    pub failed: bool,
 }
 
 /// Runs `total` calls of `f` on `concurrency` workers.
@@ -52,38 +55,44 @@ where
     all
 }
 
-/// Latency in µs of small non-streaming requests.
-pub async fn unary(target: &Target, concurrency: usize, total: usize) -> Vec<u64> {
+/// Latency in µs of small non-streaming requests; `None` for a failed request.
+pub async fn unary(target: &Target, concurrency: usize, total: usize) -> Vec<Option<u64>> {
     let target = target.clone();
     run_workers(concurrency, total, move || {
         let target = target.clone();
-        async move {
-            let start = Instant::now();
-            let req = target.messages(&[("x-bench-unary", "512".into())]);
-            let res = target.client().request(req).await.unwrap();
-            res.into_body().collect().await.unwrap();
-            start.elapsed().as_micros() as u64
-        }
+        async move { timed(&target, target.messages(&[("x-bench-unary", "512".into())])).await }
     })
     .await
 }
 
 /// Latency in µs of requests uploading `body` (like a resent agent context),
-/// each answered with a small response.
-pub async fn upload(target: &Target, concurrency: usize, total: usize, body: Bytes) -> Vec<u64> {
+/// each answered with a small response; `None` for a failed request.
+pub async fn upload(
+    target: &Target,
+    concurrency: usize,
+    total: usize,
+    body: Bytes,
+) -> Vec<Option<u64>> {
     let target = target.clone();
     run_workers(concurrency, total, move || {
         let target = target.clone();
         let body = body.clone();
         async move {
-            let start = Instant::now();
             let req = target.messages_with_body(&[("x-bench-unary", "512".into())], body);
-            let res = target.client().request(req).await.unwrap();
-            res.into_body().collect().await.unwrap();
-            start.elapsed().as_micros() as u64
+            timed(&target, req).await
         }
     })
     .await
+}
+
+/// Time until the full response arrives, or `None` if the request or status
+/// failed: a fast error must never count as a fast response.
+async fn timed(target: &Target, req: Request<Full<Bytes>>) -> Option<u64> {
+    let start = Instant::now();
+    let res = target.client().request(req).await.ok()?;
+    let ok = res.status().is_success();
+    let complete = res.into_body().collect().await.is_ok();
+    (ok && complete).then(|| start.elapsed().as_micros() as u64)
 }
 
 /// SSE streams on `concurrency` workers, each worker reading its streams one after another.
@@ -137,13 +146,28 @@ async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64
         ("x-bench-size", size.to_string()),
         ("x-bench-interval-us", interval_us.to_string()),
     ]);
-    let mut body = target.client().request(req).await.unwrap().into_body();
     let mut ttfb_us = None;
     let mut event_delays_us = Vec::with_capacity(events as usize);
     let mut pending: Vec<u8> = Vec::new();
     let mut bytes = 0;
-    while let Some(frame) = body.frame().await {
-        let Ok(data) = frame.unwrap().into_data() else {
+    let mut failed = false;
+    // A gateway that drops streams is a result to report, not a reason to abort the run.
+    let mut body = match target.client().request(req).await {
+        Ok(res) if res.status().is_success() => Some(res.into_body()),
+        _ => None,
+    };
+    if body.is_none() {
+        failed = true;
+    }
+    while let Some(frame) = match body.as_mut() {
+        Some(body) => body.frame().await,
+        None => None,
+    } {
+        let Ok(frame) = frame else {
+            failed = true;
+            break;
+        };
+        let Ok(data) = frame.into_data() else {
             continue;
         };
         let received = now_nanos();
@@ -161,6 +185,7 @@ async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64
         ttfb_us: ttfb_us.unwrap_or(0),
         event_delays_us,
         bytes,
+        failed,
     }
 }
 

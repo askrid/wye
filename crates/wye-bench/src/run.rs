@@ -2,7 +2,6 @@
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
-use bytes::Bytes;
 use serde_json::{Value, json};
 use wye_testkit::TestCa;
 
@@ -54,10 +53,10 @@ struct UpstreamPath<'a> {
 }
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
-/// With `krakend`, the same scenarios also run through KrakenD (`krakend_` metrics).
-pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
+/// Competitors in `others` run the same scenarios under their own metric prefix.
+pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
     let mut gateways = vec![Gateway::Wye(wye)];
-    gateways.extend(krakend.map(Gateway::KrakenD));
+    gateways.extend_from_slice(others);
     let dir = Path::new(out)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -146,8 +145,8 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
     for (name, value) in report["metrics"].as_object().unwrap() {
         println!("{name:40} {value}");
     }
-    if krakend.is_some() {
-        print_versus(&report["metrics"]);
+    for other in others {
+        print_versus(&report["metrics"], *other);
     }
 }
 
@@ -157,13 +156,14 @@ fn put(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str, value: f64
     metrics.insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
 }
 
-/// Wye against KrakenD for each metric both measured; lower is better except MB/s.
-fn print_versus(metrics: &Value) {
-    println!("\n{:36} {:>10} {:>10}  winner", "metric", "wye", "krakend");
+/// Wye against `other` for each metric both measured; lower is better except MB/s.
+fn print_versus(metrics: &Value, other: Gateway<'_>) {
+    let name = other.name();
+    println!("\n{:36} {:>10} {:>10}  winner", "metric", "wye", name);
     let metrics = metrics.as_object().unwrap();
     for path in ["", "tls_"] {
-        for (name, wye) in metrics {
-            let Some(metric) = name.strip_prefix(path) else {
+        for (metric_name, wye) in metrics {
+            let Some(metric) = metric_name.strip_prefix(path) else {
                 continue;
             };
             if metric.starts_with("tls_")
@@ -172,19 +172,24 @@ fn print_versus(metrics: &Value) {
             {
                 continue;
             }
-            let Some(krakend) = metrics.get(&format!("{path}krakend_{metric}")) else {
+            let Some(other_value) = metrics.get(&format!("{path}{}{metric}", other.prefix()))
+            else {
                 continue;
             };
-            let (wye, krakend) = (wye.as_f64().unwrap(), krakend.as_f64().unwrap());
+            // Null when a gateway produced no samples (every request failed).
+            let (Some(wye), Some(other)) = (wye.as_f64(), other_value.as_f64()) else {
+                println!("{metric_name:36} {:>10} {:>10}  n/a", wye, other_value);
+                continue;
+            };
             let higher_is_better = metric.ends_with("_mb_s");
             let wye_wins = if higher_is_better {
-                wye >= krakend
+                wye >= other
             } else {
-                wye <= krakend
+                wye <= other
             };
             println!(
-                "{name:36} {wye:>10.2} {krakend:>10.2}  {}",
-                if wye_wins { "wye" } else { "KRAKEND" }
+                "{metric_name:36} {wye:>10.2} {other:>10.2}  {}",
+                if wye_wins { "wye" } else { loser_label(name) }
             );
         }
     }
@@ -194,7 +199,7 @@ fn print_versus(metrics: &Value) {
 struct Direct {
     latency: Latency,
     mb_s: f64,
-    upload: Vec<u64>,
+    upload: (Vec<u64>, usize),
     paced: Option<Paced>,
 }
 
@@ -243,6 +248,12 @@ async fn measure(
     let cpu_after = process.cpu_secs();
 
     let base = &direct.latency;
+    put(
+        metrics,
+        prefix,
+        "unary_failed_requests",
+        via.unary_failed as f64,
+    );
     for (label, p) in PERCENTILES {
         let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
         put(
@@ -284,10 +295,16 @@ async fn measure(
     }
 
     let cpu_before = process.cpu_secs();
-    let via_upload = upload(process.target()).await;
+    let (via_upload, upload_failed) = upload(process.target()).await;
+    put(
+        metrics,
+        prefix,
+        "upload_failed_requests",
+        upload_failed as f64,
+    );
     let cpu_after = process.cpu_secs();
     for (label, p) in PERCENTILES {
-        let added = percentile(&via_upload, p) - percentile(&direct.upload, p);
+        let added = percentile(&via_upload, p) - percentile(&direct.upload.0, p);
         put(metrics, prefix, &format!("upload_added_{label}_us"), added);
     }
     let uploaded_mb = (UPLOAD_BYTES * UPLOAD_REQUESTS) as f64 / 1e6;
@@ -325,6 +342,12 @@ async fn measure(
             prefix,
             "paced_cpu_us_per_event",
             (cpu_after - cpu_before) * 1e6 / paced.event_delay.len() as f64,
+        );
+        put(
+            metrics,
+            prefix,
+            "paced_failed_streams",
+            paced.failed_streams as f64,
         );
         put(
             metrics,
@@ -375,6 +398,7 @@ async fn measure_idle_and_cancel(
 /// Sorted latency samples of the unary and SSE scenarios.
 struct Latency {
     unary: Vec<u64>,
+    unary_failed: usize,
     ttfb: Vec<u64>,
     event_delay: Vec<u64>,
 }
@@ -385,7 +409,8 @@ impl Latency {
         scenarios::unary(target, UNARY_CONCURRENCY, 2_000).await;
         scenarios::sse(target, SSE_CONCURRENCY, 128, 5, 64, 0).await;
 
-        let unary = sorted(scenarios::unary(target, UNARY_CONCURRENCY, UNARY_TOTAL).await);
+        let (unary, unary_failed) =
+            successes(scenarios::unary(target, UNARY_CONCURRENCY, UNARY_TOTAL).await);
         let streams = scenarios::sse(
             target,
             SSE_CONCURRENCY,
@@ -397,6 +422,7 @@ impl Latency {
         .await;
         Self {
             unary,
+            unary_failed,
             ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
             event_delay: sorted(
                 streams
@@ -409,15 +435,29 @@ impl Latency {
 }
 
 /// Latency samples of agent-sized uploads.
-async fn upload(target: &Target) -> Vec<u64> {
-    let body = Bytes::from(vec![b'x'; UPLOAD_BYTES]);
-    sorted(scenarios::upload(target, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await)
+/// Sorted latencies of agent-sized uploads, and the number that failed.
+async fn upload(target: &Target) -> (Vec<u64>, usize) {
+    let body = mock::padded_json(
+        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#""}]}"#,
+        UPLOAD_BYTES,
+    );
+    successes(scenarios::upload(target, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await)
+}
+
+/// Sorted latencies of successful requests, and the number that failed.
+fn successes(samples: Vec<Option<u64>>) -> (Vec<u64>, usize) {
+    let total = samples.len();
+    let ok = sorted(samples.into_iter().flatten().collect());
+    let failed = total - ok.len();
+    (ok, failed)
 }
 
 /// Sorted samples of the token-paced scenario.
 struct Paced {
     ttfb: Vec<u64>,
     event_delay: Vec<u64>,
+    failed_streams: usize,
 }
 
 impl Paced {
@@ -442,6 +482,7 @@ impl Paced {
         tokio::time::sleep(PACED_RAMP + Duration::from_millis(100)).await;
         while_loaded();
         let streams = streams.await.unwrap();
+        let failed_streams = streams.iter().filter(|s| s.failed).count();
         Self {
             ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
             event_delay: sorted(
@@ -450,6 +491,7 @@ impl Paced {
                     .flat_map(|s| s.event_delays_us)
                     .collect(),
             ),
+            failed_streams,
         }
     }
 }
@@ -470,6 +512,15 @@ async fn throughput(target: &Target) -> (f64, f64) {
     (mb / start.elapsed().as_secs_f64(), mb)
 }
 
+/// Upper-cased name of the competitor, so losses stand out in the table.
+fn loser_label(name: &str) -> &'static str {
+    match name {
+        "krakend" => "KRAKEND",
+        "litellm" => "LITELLM",
+        _ => "OTHER",
+    }
+}
+
 fn median(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
     runs[0]
         .keys()
@@ -481,7 +532,11 @@ fn median(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
         .collect()
 }
 
+/// `NaN` (written as `null`) when a gateway produced no samples, e.g. every request failed.
 fn percentile(sorted: &[u64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
     sorted[((p / 100.0) * (sorted.len() - 1) as f64).round() as usize] as f64
 }
 
