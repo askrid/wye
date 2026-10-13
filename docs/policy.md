@@ -30,7 +30,7 @@ Use one fixed algorithm, Ed25519, determined by the key rather than by a header 
 
 **Identity-provider tokens.** Wye can also accept JWTs issued directly by a trusted OIDC identity provider, so teams need no token-minting service: GitHub Actions or another workload identity for CI, and the team's IdP (through `apiKeyHelper`) for developers. Each `[[auth.issuers]]` entry pins the issuer, audience, one algorithm, and its signing keys in config; claims (for example `sub` or a groups claim) map to model permissions and limits in config. Verification stays request-local and stateless. Tradeoffs: JWT parsing is a larger attack surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and never read from the token header; pinned keys need a config change when the IdP rotates them (fetching JWKS at runtime is a later, explicit option, cached in memory only).
 
-Macaroons or Biscuit allow attenuation (team → project → subagent). Their complexity is not needed for the MVP.
+Macaroons or Biscuit allow attenuation (team → project → subagent) without contacting an issuer; not needed for the MVP, and tracked as [delegable credentials](research.md#3-delegable-credentials-for-agent-swarms).
 
 A token can assert a **maximum per request**, never the cumulative amount spent. Short TTLs reduce exposure but do not make credentials single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
 

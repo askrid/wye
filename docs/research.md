@@ -41,6 +41,7 @@ Design decisions that depend on provider facts not yet checked. Each must be con
 | Bound ÷ actual cost on real Claude Code sessions with prompt caching | Positioning the ceiling as a guard | Opt-in telemetry from real sessions |
 | Anthropic tool-use system-prompt overhead and prompt-length price tiers per model | Provable cost ceiling | Anthropic pricing and tool-use docs; compare reported input tokens with and without `tools` |
 | Current Codex transport and configuration for Responses (HTTP SSE vs. other transports; custom base URL support) | M3 | Codex source and docs for the target version |
+| Share of `auxiliary`, `compaction`, and `subagent` requests in real Claude Code sessions, and quality impact of routing each to a smaller Claude model | [Agent-aware routing](#1-agent-aware-routing) | Opt-in telemetry with gateway hint headers enabled; task-level evaluation |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` injection default | SDK conformance tests in Python, TypeScript, Go, and common agent frameworks |
 
 ## Benchmarks
@@ -98,7 +99,7 @@ With equal CPU budgets (`TOKIO_WORKER_THREADS` / `GOMAXPROCS`), Wye still wins s
 
 **Relevance.** Bulk throughput, the one area KrakenD leads, matters least for LLM traffic: streams are token-paced (KB/s), and Wye's added 0.2–0.3 ms is under 0.1% of a typical model response. What matters to users is streaming without buffering, concurrency without queuing, memory per idle stream, cancellation, and p99 under load; the [realistic-workload benchmark](roadmap.md#realistic-workload-benchmark) measures those workloads.
 
-**Realistic workloads** (`upload_*`, `tls_paced_*`; median of 3):
+**Realistic workloads** (`upload_*`, `tls_paced_*`; single comparison run, so numbers differ slightly from the gated baseline above):
 
 | Workload | Metric | Wye | KrakenD |
 |---|---|---|---|
@@ -165,38 +166,86 @@ Microbenchmarks alone cannot establish proxy performance. Separate controlled ov
 
 ## Experiments
 
-- **A. Streaming backpressure at scale.** Thousands of mixed-speed SSE clients without memory growth or starvation? Measure RSS, chunk delay, cancellation cleanup, fairness.
-- **B. Cost-constrained tail latency.** Can price/capability routing or request-local hedging improve p99 TTFT without excessive duplicate charges? Compare fixed route, cheapest eligible, bounded fallback, bounded hedging.
-- **C. Cost-aware routing.** Evaluate cost per successful task at a quality threshold, not token price. Fit weights offline; deploy fixed parameters as Git-managed policy.
-- **D. Capability delegation.** Team → project → subagent attenuation with Biscuit or Macaroons. Measure verification overhead and ergonomics; document replay limits.
-- **E. Native Tokio versus Go.** Feature-equivalent proxies under long-lived streaming load: CPU, memory, p99 overhead, cancellation behavior, not just RPS.
-- **F. Edge versus native.** Same routing policy under native Tokio and a WASM adapter, accounting for provider distance and runtime limits.
+Each experiment names its status; feature-shaped experiments moved to [feature directions](#feature-directions).
 
-## Techniques for the gateway workload
+- **A. Streaming backpressure at scale.** Thousands of mixed-speed SSE clients without memory growth or starvation. *Partly done:* 2,000 token-paced streams and 1,000 idle streams are gated, and a slow-reader test proves upstream backpressure; 10k streams and mixed fast/slow consumers remain (M5).
+- **B. Cost-constrained tail latency.** Can routing or request-local hedging improve p99 TTFT without duplicate charges? Compare fixed route, cheapest eligible, bounded fallback, and connect-only hedging. *Open;* needs multiple candidates (M4).
+- **C. Cost-aware routing.** Evaluate cost per successful task at a quality threshold, not token price. *Became* [agent-aware routing](#1-agent-aware-routing).
+- **D. Capability delegation.** *Became* [delegable credentials](#3-delegable-credentials-for-agent-swarms).
+- **E. Native Tokio versus Go.** Feature-equivalent proxies under long-lived streaming load. *Partly done:* KrakenD (Go) measured; KrakenD CE cannot stream SSE, so the comparison is bulk-only there.
+- **F. Edge versus native.** Same policy under native Tokio and a WASM adapter. *Open* (M6).
 
-The workload is unusual: few, long-lived requests; tiny SSE events at token pace; time to first token matters more than throughput; and any duplicated request may be billed twice. Each technique below is a hypothesis until `wye-bench` measures it. Status reflects measurements so far.
+## Feature directions
+
+Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Together, 1–3 are the intended moat: a gateway that understands agent traffic, with no database. None is implemented yet.
+
+### 1. Agent-aware routing
+
+- **Basis:** LLM cascades and offline-trained routers (FrugalGPT, RouteLLM), applied to the gateway hint headers Claude Code documents for routers: `x-claude-code-request-class` (`main`, `subagent`, `workflow`, `compaction`, `auxiliary`), `x-claude-code-agent-type`, compaction markers.
+- **Function:** policy such as "auxiliary requests use the Haiku model" or "Explore subagents use Sonnet", applied as the allowlisted `model` rewrite, within Claude models only. Weights are fitted offline from usage telemetry and committed as fixed config (closed loop through Git: telemetry → fit → pull request → policy tests → deploy).
+- **Fit:** a pure function of headers and config.
+- **Limits:** a custom base URL receives hint headers only when developers set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` (deliverable through managed settings); without them, routing falls back to the requested model. Quality impact must be measured per request class before a default ships.
+
+### 2. Cache-miss diagnostics
+
+- **Basis:** prompt-cache pricing (cached input costs about a tenth of normal input) and content fingerprints.
+- **Function:** for each request, export a hash per cacheable block (system, tools, each message prefix) next to the reported cache usage. The telemetry backend compares consecutive requests of a session and names the cause of each miss: tools reordered, a timestamp in the system prompt, a compaction.
+- **Fit:** Wye hashes within one request; the comparison across requests happens in the user's backend, never in Wye.
+- **Pairs with** cache-affine routing ([architecture.md](architecture.md#cache-affine-routing)), which keeps a session on one provider account from any replica.
+- **Cost:** requires reading the request body (as model permissions will); hashing must stay within the benchmark gate.
+
+### 3. Delegable credentials for agent swarms
+
+- **Basis:** Macaroons and Biscuit: a token holder mints a narrower token offline.
+- **Function:** team → developer → CI job → subagent, each narrowing models, output caps, expiry, or scope without contacting an issuer.
+- **Fit:** verification is a pure computation over signatures.
+- **Limits:** caps each request, never cumulative spend (that stays with [provider-held budgets](policy.md#provider-held-budgets)); replay inside the validity window remains possible ([policy.md](policy.md#why-signed-balances-fail)).
+
+### 4. Signed usage receipts
+
+- **Basis:** tamper-evident logs and transparency-log Merkle batching.
+- **Function:** a signed receipt per request (request hash, usage, cost bound, config version, credential subject) exported through OTLP, optionally Merkle-chained so deletions are detectable. Chargeback and audit that finance can trust, without a billing database.
+- **Fit:** needs only a signing key; storage is the user's telemetry backend.
+
+### 5. Queryable and provable policy
+
+- **Basis:** automated reasoning over access policies (AWS Zelkova for IAM, using SMT).
+- **Function:** beyond `wye explain` for one request: "who can reach Opus?", "can any credential exceed $0.05 per request?", and a CI check that fails when a config change widens access.
+- **Fit:** static config and routing as a pure function are what make the analysis possible.
+
+### 6. Provable cost bound
+
+Planned for M2 ([policy.md](policy.md#provable-cost-ceiling)): a guaranteed upper bound per request without a tokenizer. Research: tighten it by subtracting non-billable framing (JSON syntax, separately priced image bytes) in one pass, and measure bound ÷ actual cost on real sessions.
+
+### 7. Reliability
+
+- **Connect-only hedging** (*The Tail at Scale*): race a second connection attempt, never a second request, so tail latency drops without duplicate billing.
+- **Deterministic simulation testing** (FoundationDB style): Wye, mock, and clients in a simulated network (turmoil or madsim) with seeded loss, slow readers, mid-stream drops, and shutdown.
+- **Clean stream endings:** when the upstream stalls, emit an Anthropic `error` event before closing, so Claude Code shows a retryable overload instead of a dropped connection.
+- **Proof-of-possession credentials** without a replay cache: bind tokens to a client key; replay inside a short window remains possible.
+
+### Excluded: needs shared state
+
+Semantic or response caching (a cache store), global rate limits and redemption-based tokens such as Privacy Pass (shared counters or spent-token state), and adaptive per-node concurrency (cross-request history). See [policy.md](policy.md#rejected-approaches).
+
+## Performance techniques
+
+The workload: few long-lived requests, tiny SSE events at token pace, time to first token more important than throughput, and any duplicated request possibly billed twice. Each technique is a hypothesis until `wye-bench` measures it.
 
 | Technique | Idea | Status |
 |---|---|---|
-| HTTP/2 to the provider | Multiplex client streams over few upstream connections: fewer TLS sessions, less memory, fewer cold handshakes | **Already in effect.** The client negotiates HTTP/2 by ALPN; 12 concurrent requests to `api.anthropic.com` shared one connection. Benchmark lacks a TLS/HTTP/2 mock, so its memory effect is unmeasured |
-| Fast cancellation as a cost metric | When a client disconnects (Claude Code: Esc), release the upstream immediately, even while it is silent; every millisecond of delay can be billed output | **Measured and gated**: 77 µs p50, 157 µs max with a silent upstream (`cancel_upstream_release_*`). Provider-side effect (does generation and billing stop?) still to verify |
-| Zero-copy usage extraction | Scan forwarded SSE bytes with SIMD `memchr`; parse JSON only in `message_start`/`message_delta` | **Implemented.** Byte-by-byte scanning cost +49% CPU per MB and was blocked by the gate; with `memchr`, +5.8% CPU per MB in an A/B run |
-| Pre-warmed connections and connect-only hedging | Keep warm TLS connections to each provider; race a second connect when one stalls, never a second request | Planned. Needs a TLS mock with configurable connect delay to measure cold-start TTFB |
-| Adaptive write coalescing | Write events immediately when the client keeps up; batch backlogged events into one `writev` | Measure first: hyper may already batch. Target is the ~3× CPU gap to the bare mock path |
-| Cache-affine routing by session header | Rendezvous hashing on `x-claude-code-session-id` keeps a session on one account and its prompt-cache discount, without parsing the body | Design ([architecture.md](architecture.md#cache-affine-routing)); needs multi-candidate routing (M4) |
-| Closed-loop policy through GitOps | OTLP usage → offline fit of routing weights → pull request to `wye.toml` → CI policy tests → deploy | Research; keeps adaptation outside the stateless runtime |
-| Tighter provable cost bound | Subtract non-billable framing (JSON syntax, base64 image bytes priced separately) in a single pass, keeping the bound provable | Research; measure bound ÷ actual cost |
-| Deterministic simulation testing | Run Wye, mock, and clients in a simulated network (turmoil or madsim) with seeded loss, slow readers, mid-stream drops, shutdown | Planned for stage 3 lifecycle tests |
-| Proof-of-possession tokens without replay cache | Bind tokens to a client key; accept signed request proofs within a short window | Research; cannot stop exact replay inside the window |
-| kTLS + splice | Kernel TLS lets bytes move socket to socket without user-space copies | Research only: Linux-only, pays off only at high throughput, incompatible with usage extraction |
-| Lazy idle deadline | Record a timestamp per frame and re-arm the idle timer only when it fires early, instead of resetting the timer wheel when a stream starts waiting | **Rejected (measured).** No gain in A/B; under load the stream rarely waits, so the old code rarely reset the timer |
-| Fat LTO + one codegen unit | Whole-program optimization of the release build | **Not adopted (inconclusive).** Two A/B runs: CPU per MB −8% and −6%, binary 5.8 → 3.7 MB, but SSE per-event p99 worse in both (+266%, +80%) and release builds about 2× slower. Revisit with a dedicated tail-latency investigation |
-| Spread streams over connections | Least-loaded lane selection instead of packing up to 100 streams behind one `h2` mutex | **Adopted.** TLS: unary added latency −80%, CPU per MB −66%, throughput 4×; process RSS after load 10 → 30 MB with up to 64 connections |
-| Adaptive write coalescing | Merge already-available frames into one write | **Rejected (measured).** No CPU gain; hyper already batches ready frames into one `writev` |
-| Fewer runtime threads | Size Tokio workers to the CPU budget | **Measured, not adopted as default.** CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, but unary latency under load rises; a deployment knob (`TOKIO_WORKER_THREADS`) |
-| Multiple HTTP/2 connections per upstream | hyper-util's pool keeps one HTTP/2 connection per host; requests beyond the provider's stream limit queued silently | **Adopted (correctness).** 64 lanes with atomic slot admission, `upstream.max_streams_per_connection` (default 100). A 4-stream TLS mock now serves 10 concurrent streams; before, the 5th hung |
-| One HTTP/2 lock acquisition per frame | `h2` guards each connection's stream state with one mutex; the usage wrapper's extra `is_end_stream()` per frame takes it again. Record completion inside hyper's own `is_end_stream()` call instead | **Candidate, not adopted.** Strictly less work, but A/B on the TLS path was inconclusive (CPU per MB −5% then +12%); TLS noise is larger than the effect |
-| mimalloc | Replace the system allocator | **Rejected (measured).** Memory per idle stream +9%, process RSS +12%, CPU per MB +4%, throughput −5% |
+| HTTP/2 to the provider | Multiplex client streams over few upstream connections | **In effect.** Negotiated by ALPN (verified against `api.anthropic.com`); benchmarked on the TLS path |
+| Spread streams over connections | 64 lanes, least-loaded selection, instead of one shared HTTP/2 connection per host | **Adopted.** Fixed silent queuing beyond the provider's stream limit (a 4-stream mock now serves 10 streams), and avoids the single `h2` connection mutex: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; process RSS after load 10 → 30 MB |
+| Fast cancellation as a cost metric | Release the upstream immediately when a client disconnects, even while it is silent | **Measured and gated:** release within ~80 µs p50, under 0.2 ms max. Provider-side effect (does billing stop?) unverified |
+| Zero-copy usage extraction | SIMD `memchr` line scanning; JSON only for usage events | **Implemented.** Byte-by-byte scanning cost +49% CPU per MB and was blocked by the gate; `memchr` costs +5.8% |
+| Pre-warmed connections | Keep warm TLS connections per provider to cut cold-start TTFB | Planned; needs a mock with configurable connect delay |
+| Adaptive write coalescing | Merge already-available frames into one write | **Rejected (measured):** no CPU gain; hyper already batches ready frames into one `writev` |
+| Lazy idle deadline | Timestamp per frame instead of resetting the idle timer | **Rejected (measured):** no gain |
+| Fat LTO + one codegen unit | Whole-program optimization | **Not adopted:** CPU per MB −6% to −8%, binary 5.8 → 3.7 MB, but per-event p99 worse in both A/B runs and builds 2× slower |
+| One HTTP/2 lock acquisition per frame | Record completion inside hyper's own `is_end_stream()` call | **Candidate:** strictly less work, but A/B inconclusive (−5%, +12%) within TLS noise |
+| Fewer runtime threads | Size Tokio workers to the CPU budget | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, but latency under load rises |
+| mimalloc | Replace the system allocator | **Rejected (measured):** idle memory per stream +9%, RSS +12%, CPU per MB +4% |
+| kTLS + splice | Kernel TLS, socket-to-socket without user-space copies | Research only: Linux-only, high-throughput only, incompatible with usage extraction |
 | Thread-per-core runtime | monoio or glommio instead of Tokio work stealing | Research only, if CPU per MB becomes the limit |
-| Transparent stream repair | Resume a dropped stream with assistant prefill of the partial output | Rejected for the product: changes semantics and billing, breaks preserved thinking, and Claude Code already retries |
-| One policy core everywhere | `gateway-core` as a WASI component, with identical decisions in the server, at the edge, and in `wye explain` | Research; aligns with M6 edge adapter |
+| Transparent stream repair | Resume a dropped stream with assistant prefill | **Rejected:** changes semantics and billing, breaks preserved thinking; Claude Code already retries |
+| One policy core everywhere | `gateway-core` as a WASI component, identical in server, edge, and `wye explain` | Research; M6 |

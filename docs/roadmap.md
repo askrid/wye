@@ -47,7 +47,7 @@ The first reviewable implementation stops after stages 1–2. Resource bounds an
 | --- | --- | --- |
 | 4 | (**4a done:** Ed25519 JWT credentials, `wye token keygen`/`issue`, `[auth]` lifts the loopback-only restriction, subject in usage log. **4b next:** model permissions, which require reading `model` from the buffered body.) Ed25519 gateway credentials and pinned-issuer IdP JWTs from `Authorization` or `x-api-key`, `wye token issue`, claim → permission mapping, limit precedence, `max_credential_ttl`, `apiKeyHelper` renewal example | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
 | 5 | Usage observer (`message_start`, `message_delta`; **done**, with an interim JSON-lines log), minimal OTLP telemetry with developer and Claude Code session attribution, OCI image, baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
-| 6 | `wye claude`, prebuilt binaries, Compose example | Wrapper launches Claude Code against Wye and cleans up |
+| 6 | `wye claude`, prebuilt binaries, Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes)) | Wrapper launches Claude Code against Wye and cleans up; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
 
@@ -58,6 +58,8 @@ Stage 4 is required before any non-loopback deployment.
 - Pricing metadata and the [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
 - [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
 - `wye explain` and committed policy tests in CI.
+- [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry.
+- [Agent-aware routing](research.md#1-agent-aware-routing) for Claude models, once its quality impact per request class is measured.
 
 **Exit:** a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.
 
@@ -90,7 +92,7 @@ Stage 4 is required before any non-loopback deployment.
 
 ### M6: optional extensions
 
-Edge/WASM adapter, offline-trained quality-aware routing, capability attenuation, cost-constrained hedging and other request-local experiments.
+Edge/WASM adapter, [delegable credentials](research.md#3-delegable-credentials-for-agent-swarms), [signed usage receipts](research.md#4-signed-usage-receipts), [queryable policy](research.md#5-queryable-and-provable-policy), connect-only hedging, and other request-local experiments.
 
 **Exit:** each extension preserves or explicitly revises statelessness and compatibility guarantees.
 

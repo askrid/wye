@@ -92,6 +92,27 @@ For a public app, a shared internal Deployment is preferred when many app replic
 
 **Edge.** A portable core with a platform adapter can run at the edge, but edge is not automatically faster: provider and telemetry location, network hops, and runtime limits matter. Do not promise identical native and WASM performance.
 
+### Without Kubernetes
+
+Statelessness makes every multi-node setup the same shape: a load balancer in front of identical processes reading the same config. Realistic options:
+
+| Platform | Shape |
+|---|---|
+| EC2 Auto Scaling group + ALB | Instances fetch the binary and `wye.toml` (S3) and the provider key (SSM) at boot; instance refresh rolls deploys |
+| ECS / Fargate | One service with N tasks; the load balancer health check targets `/readyz` |
+| Docker Swarm | `docker service create --replicas N`, configs and secrets built in, `--update-order start-first` |
+| Nomad | One job with `count = N`, Consul health checks |
+| VMs + HAProxy or Caddy | systemd units; config from Ansible or Git |
+| Fly.io-style regional hosting | The native binary in several regions behind anycast: the practical form of "edge" today |
+
+For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`. Load balancers in front must not buffer SSE, and their idle timeout must exceed silent gaps in a stream (around 300 s; the AWS ALB default of 60 s is too short).
+
+Two small additions are planned for container platforms (M1 stage 6): `upstream.api_key_file`, reading the provider key from a mounted secret file at startup (Docker and Kubernetes secrets, systemd credentials), and `wye probe <url>`, a one-shot health check for images without `curl`. Both are startup or client-side, so the gateway stays stateless.
+
+### Sizing (estimate)
+
+From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) costs Wye about 10 ms of CPU per second, about 1% of a core, and under 100 KB of memory. A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
+
 ## Telemetry
 
 Wye emits OTLP. External systems collect, store, alert, and visualize. A collector is optional if the backend accepts OTLP directly. No separate Prometheus `/metrics` endpoint.
