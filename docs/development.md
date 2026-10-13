@@ -26,7 +26,7 @@ git config core.hooksPath .githooks
 - New metrics enter the baseline with `wye-bench adopt-new`, which adds them without touching existing values.
 - The baseline is machine-specific: on a new machine, record a fresh one from an unchanged checkout first.
 
-A check takes about 12 minutes. Each benchmark is the median of 3 runs, and a failed comparison is re-run once before it counts, because laptop noise can push a single run past a limit. The gate reliably blocks about 100 µs of added latency per request and about 25% more CPU per unit of work; smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`, which runs two binaries in alternating rounds. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric. Results and rejected experiments are recorded in [research.md](research.md).
+A check takes about 100 seconds after an ordinary code change: tests 11 s, incremental builds a few seconds, benchmark about 80 s (one run takes about 27 s; `wye-bench` prints the duration of each phase to stderr). Changes to dependencies take several minutes longer, because both release targets rebuild from scratch. Each benchmark is the median of 3 runs, and a failed comparison is re-run once before it counts, because laptop noise can push a single run past a limit. The gate reliably blocks about 100 µs of added latency per request and about 25% more CPU per unit of work; smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`, which runs two binaries in alternating rounds. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric. Results and rejected experiments are recorded in [research.md](research.md).
 
 ## Benchmark
 

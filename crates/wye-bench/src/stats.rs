@@ -1,6 +1,6 @@
 //! Percentiles, medians, and metric bookkeeping.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Display, future::Future, time::Instant};
 
 pub(crate) const PERCENTILES: [(&str, f64); 2] = [("p50", 50.0), ("p99", 99.0)];
 
@@ -30,4 +30,12 @@ pub(crate) fn percentile(sorted: &[u64], p: f64) -> f64 {
 pub(crate) fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v.sort_unstable();
     v
+}
+
+/// Runs `work` and reports its duration on stderr, to show where benchmark time goes.
+pub(crate) async fn phase<T>(name: impl Display, work: impl Future<Output = T>) -> T {
+    let start = Instant::now();
+    let out = work.await;
+    eprintln!("  phase {name}: {:.1}s", start.elapsed().as_secs_f64());
+    out
 }
