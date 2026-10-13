@@ -12,12 +12,8 @@
 //! that lock the dominant cost (benchmark: 1.4 ms added unary latency and 12 ms
 //! CPU per MB at 100 streams per connection, against 0.26 ms and 3.9 ms spread).
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-
 use super::UpstreamClient;
+use crate::gauge::{Gauge, Held};
 
 /// Upper bound on upstream connections per process.
 const LANES: usize = 64;
@@ -28,16 +24,7 @@ pub(crate) struct ClientPool {
 
 struct Lane {
     client: UpstreamClient,
-    in_flight: Arc<AtomicUsize>,
-}
-
-/// A reserved stream on one lane; released on drop.
-pub(crate) struct Slot(Arc<AtomicUsize>);
-
-impl Drop for Slot {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
+    in_flight: Gauge,
 }
 
 impl ClientPool {
@@ -46,7 +33,7 @@ impl ClientPool {
             lanes: (0..LANES)
                 .map(|_| Lane {
                     client: client(),
-                    in_flight: Arc::default(),
+                    in_flight: Gauge::default(),
                 })
                 .collect(),
         }
@@ -58,22 +45,22 @@ impl ClientPool {
     /// per-connection stream limit is reached only at `LANES` times that limit,
     /// after which requests queue inside the least loaded connection.
     ///
-    /// `Relaxed` is enough: counters only steer load, and each is changed by
-    /// read-modify-write operations, which are totally ordered per atomic.
     /// Two requests may pick the same lane concurrently; that only shifts load.
-    pub(crate) fn acquire(&self) -> (&UpstreamClient, Slot) {
+    /// The returned guard holds the lane until the response body is dropped.
+    pub(crate) fn acquire(&self) -> (&UpstreamClient, Held) {
         let lane = self
             .lanes
             .iter()
-            .min_by_key(|lane| lane.in_flight.load(Ordering::Relaxed))
+            .min_by_key(|lane| lane.in_flight.current())
             .unwrap_or_else(|| unreachable!("LANES > 0"));
-        lane.in_flight.fetch_add(1, Ordering::Relaxed);
-        (&lane.client, Slot(Arc::clone(&lane.in_flight)))
+        (&lane.client, lane.in_flight.hold())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     fn pool() -> ClientPool {
@@ -100,7 +87,7 @@ mod tests {
     fn loads(pool: &ClientPool) -> Vec<usize> {
         pool.lanes
             .iter()
-            .map(|lane| lane.in_flight.load(Ordering::Relaxed))
+            .map(|lane| lane.in_flight.current())
             .take(3)
             .collect()
     }
@@ -108,7 +95,7 @@ mod tests {
     #[test]
     fn spreads_concurrent_requests_and_releases_on_drop() {
         let pool = pool();
-        let slots: Vec<Slot> = (0..3).map(|_| pool.acquire().1).collect();
+        let slots: Vec<Held> = (0..3).map(|_| pool.acquire().1).collect();
         assert_eq!(loads(&pool), [1, 1, 1]);
         drop(slots);
         assert_eq!(loads(&pool), [0, 0, 0]);
@@ -127,7 +114,7 @@ mod tests {
     #[test]
     fn beyond_one_per_lane_load_stays_even() {
         let pool = pool();
-        let _all: Vec<Slot> = (0..LANES * 2 + 1).map(|_| pool.acquire().1).collect();
+        let _all: Vec<Held> = (0..LANES * 2 + 1).map(|_| pool.acquire().1).collect();
         assert_eq!(loads(&pool), [3, 2, 2]);
     }
 }
