@@ -13,7 +13,7 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{Gateway, usage_log::UsageLog};
+use crate::{Gateway, auth::ConnectionAuth, usage_log::UsageLog};
 
 /// How long `serve` waits for the usage log to be written after connections close.
 const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
@@ -46,10 +46,13 @@ pub async fn serve(
         let _ = stream.set_nodelay(true);
         let gateway = Arc::clone(&gateway);
         let log = log.clone();
+        // One per connection, dropped with it; see `auth`.
+        let auth = Arc::new(ConnectionAuth::default());
         let service = service_fn(move |req| {
             let gateway = Arc::clone(&gateway);
             let log = log.clone();
-            async move { Ok::<_, Infallible>(gateway.handle(req, &log).await) }
+            let auth = Arc::clone(&auth);
+            async move { Ok::<_, Infallible>(gateway.handle(req, &log, &auth).await) }
         });
         // Watched by `graceful` so shutdown can ask it to finish its current request.
         connections.spawn(graceful.watch(http.serve_connection(TokioIo::new(stream), service)));
