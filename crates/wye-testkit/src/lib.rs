@@ -81,7 +81,12 @@ impl TestCa {
 ///
 /// With `tls`, connections use TLS and negotiate HTTP/2 or HTTP/1.1 by ALPN;
 /// without it, plain HTTP/1.1 (or HTTP/2 with prior knowledge).
-pub async fn spawn_upstream<F, Fut, B>(handler: F, tls: Option<&TestCa>) -> SocketAddr
+/// `max_streams` sets the HTTP/2 concurrent stream limit per connection (hyper's default: 200).
+pub async fn spawn_upstream<F, Fut, B>(
+    handler: F,
+    tls: Option<&TestCa>,
+    max_streams: Option<u32>,
+) -> SocketAddr
 where
     F: Fn(Request<Incoming>) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = Response<B>> + Send + 'static,
@@ -104,7 +109,10 @@ where
                     let response = handler(req);
                     async move { Ok::<_, Infallible>(response.await) }
                 });
-                let builder = auto::Builder::new(TokioExecutor::new());
+                let mut builder = auto::Builder::new(TokioExecutor::new());
+                if let Some(max) = max_streams {
+                    builder.http2().max_concurrent_streams(max);
+                }
                 // Connection errors (client went away, failed handshake) end only that connection.
                 let _ = match acceptor {
                     Some(acceptor) => match acceptor.accept(stream).await {

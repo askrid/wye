@@ -4,7 +4,8 @@
 //! Only the URI, hop-by-hop headers, and (in API-key mode) the credential
 //! headers are changed.
 
-mod idle_timeout;
+mod body;
+mod pool;
 
 use std::{fmt, sync::Arc, time::Duration};
 
@@ -26,7 +27,8 @@ use hyper_util::{
 };
 use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 
-pub(crate) use idle_timeout::IdleTimeout;
+pub(crate) use body::UpstreamBody;
+use pool::ClientPool;
 
 use crate::StartupError;
 
@@ -81,7 +83,7 @@ pub(crate) enum ForwardError {
 }
 
 pub(crate) struct Upstream {
-    client: UpstreamClient,
+    clients: ClientPool,
     scheme: Scheme,
     authority: Authority,
     path_prefix: Box<str>,
@@ -108,7 +110,10 @@ impl Upstream {
             .enable_http2()
             .wrap_connector(http);
         Ok(Self {
-            client: Client::builder(TokioExecutor::new()).build(https),
+            clients: ClientPool::new(
+                || Client::builder(TokioExecutor::new()).build(https.clone()),
+                config.max_streams_per_connection,
+            ),
             scheme: config.scheme.clone(),
             authority: config.authority.clone(),
             path_prefix: config.path_prefix.as_str().into(),
@@ -123,7 +128,7 @@ impl Upstream {
         &self,
         req: Request<Incoming>,
         max_body_bytes: usize,
-    ) -> Result<Response<IdleTimeout<Incoming>>, ForwardError> {
+    ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         let (mut parts, body) = req.into_parts();
         parts.uri = self.upstream_uri(parts.uri.path_and_query())?;
         // The client negotiates HTTP/2 or HTTP/1.1 with the upstream through TLS ALPN
@@ -139,7 +144,8 @@ impl Upstream {
         }
         let req = Request::from_parts(parts, Limited::new(body, max_body_bytes));
 
-        let res = tokio::time::timeout(self.response_header_timeout, self.client.request(req))
+        let (client, slot) = self.clients.acquire();
+        let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
             .await
             .map_err(|_| ForwardError::HeaderTimeout)?
             .map_err(|_| ForwardError::Upstream)?;
@@ -148,7 +154,7 @@ impl Upstream {
         strip_hop_by_hop(&mut parts.headers);
         Ok(Response::from_parts(
             parts,
-            IdleTimeout::new(body, self.stream_idle_timeout),
+            UpstreamBody::new(body, self.stream_idle_timeout, slot),
         ))
     }
 
