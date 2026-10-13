@@ -27,10 +27,13 @@
 mod allocations;
 mod client;
 mod gate;
+mod gateway_config;
 mod gateway_process;
+mod measure;
 mod mock;
 mod run;
 mod scenarios;
+mod stats;
 
 use std::process::ExitCode;
 
