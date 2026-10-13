@@ -21,19 +21,20 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::config::Config;
-use http::{HeaderMap, Method, Request, Response, StatusCode, Uri};
+use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 use http_body_util::{BodyExt, Either, Full};
 use hyper::body::{Body, Frame, Incoming};
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
-    rt::{TokioExecutor, TokioIo},
+    rt::TokioExecutor,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader, DuplexStream, Lines},
     net::TcpListener,
     sync::{Mutex, mpsc},
 };
-use wye::{Gateway, UpstreamAuth};
+use wye::{Gateway, Resources, UpstreamAuth};
+use wye_testkit::TestCa;
 
 const API_KEY: &str = "sk-test-provider-key";
 const WAIT: Duration = Duration::from_secs(5);
@@ -57,6 +58,7 @@ impl Body for ChannelBody {
 type UpBody = Either<Full<Bytes>, ChannelBody>;
 
 struct Seen {
+    version: Version,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
@@ -74,15 +76,51 @@ struct Harness {
 }
 
 impl Harness {
+    /// Gateway in front of a plain-HTTP mock upstream.
     async fn start(handler: Handler, upstream_extra: &str, auth: UpstreamAuth) -> Self {
-        let upstream_hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&upstream_hits)).await;
+        let hits = Arc::new(AtomicUsize::new(0));
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), None).await;
+        let resources = Resources {
+            auth,
+            extra_roots: Vec::new(),
+        };
+        Self::launch(
+            &format!("http://{upstream}"),
+            upstream_extra,
+            resources,
+            hits,
+        )
+        .await
+    }
+
+    /// Gateway in front of a TLS mock upstream; `trusted` adds the mock's CA to Wye's roots.
+    async fn start_tls(handler: Handler, ca: &TestCa, trusted: bool) -> Self {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca)).await;
+        let resources = Resources {
+            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            extra_roots: if trusted {
+                vec![ca.ca_cert()]
+            } else {
+                Vec::new()
+            },
+        };
+        let base_url = format!("https://{upstream}");
+        Self::launch(&base_url, "api_key_env = \"UNUSED\"", resources, hits).await
+    }
+
+    async fn launch(
+        base_url: &str,
+        upstream_extra: &str,
+        resources: Resources,
+        upstream_hits: Arc<AtomicUsize>,
+    ) -> Self {
         let config = Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\n\
-             [upstream]\nbase_url = \"http://{upstream}\"\n{upstream_extra}"
+             [upstream]\nbase_url = \"{base_url}\"\n{upstream_extra}"
         ))
         .unwrap();
-        let gateway = Arc::new(Gateway::new(&config, auth).unwrap());
+        let gateway = Arc::new(Gateway::new(&config, resources).unwrap());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (usage_out, usage_in) = tokio::io::duplex(64 * 1024);
@@ -121,9 +159,7 @@ impl Harness {
             .unwrap()
             .unwrap()
     }
-}
 
-impl Harness {
     /// Next usage record written by the gateway.
     async fn usage_record(&self) -> serde_json::Value {
         let line = tokio::time::timeout(WAIT, self.usage.lock().await.next_line())
@@ -135,36 +171,28 @@ impl Harness {
     }
 }
 
-async fn spawn_upstream(handler: Handler, hits: Arc<AtomicUsize>) -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        loop {
-            let (stream, _) = listener.accept().await.unwrap();
-            let handler = Arc::clone(&handler);
-            let hits = Arc::clone(&hits);
-            let service = hyper::service::service_fn(move |req: Request<Incoming>| {
-                let handler = Arc::clone(&handler);
-                hits.fetch_add(1, Ordering::Relaxed);
-                async move {
-                    let (parts, body) = req.into_parts();
-                    let body = body.collect().await.unwrap().to_bytes();
-                    let seen = Seen {
-                        method: parts.method,
-                        uri: parts.uri,
-                        headers: parts.headers,
-                        body,
-                    };
-                    Ok::<_, Infallible>(handler(seen).await)
-                }
-            });
-            tokio::spawn(
-                hyper::server::conn::http1::Builder::new()
-                    .serve_connection(TokioIo::new(stream), service),
-            );
+async fn spawn_upstream(
+    handler: Handler,
+    hits: Arc<AtomicUsize>,
+    tls: Option<&TestCa>,
+) -> SocketAddr {
+    let serve = move |req: Request<Incoming>| {
+        let handler = Arc::clone(&handler);
+        hits.fetch_add(1, Ordering::Relaxed);
+        async move {
+            let (parts, body) = req.into_parts();
+            let body = body.collect().await.unwrap().to_bytes();
+            handler(Seen {
+                version: parts.version,
+                method: parts.method,
+                uri: parts.uri,
+                headers: parts.headers,
+                body,
+            })
+            .await
         }
-    });
-    addr
+    };
+    wye_testkit::spawn_upstream(serve, tls).await
 }
 
 fn full(status: StatusCode, body: &'static str) -> Response<UpBody> {
@@ -577,4 +605,62 @@ async fn gateway_errors_and_non_stream_responses_are_logged() {
     assert_eq!(record["path"], "/v1/messages/count_tokens");
     assert_eq!(record["outcome"], "completed");
     assert_eq!(record["usage_status"], "not_observed");
+}
+
+#[tokio::test]
+async fn forwards_over_tls_with_http2_to_a_trusted_upstream() {
+    let ca = TestCa::generate();
+    let (tx, mut rx) = mpsc::channel(1);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send((seen.version, seen.headers, seen.body))
+                .await
+                .unwrap();
+            full(StatusCode::OK, r#"{"id":"msg_tls"}"#)
+        })
+    });
+    let h = Harness::start_tls(handler, &ca, true).await;
+    let res = h.send(messages(), r#"{"model":"claude-x"}"#).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(read_body(res).await, r#"{"id":"msg_tls"}"#);
+    let (version, headers, body) = rx.recv().await.unwrap();
+    assert_eq!(version, Version::HTTP_2);
+    assert_eq!(headers["x-api-key"], API_KEY);
+    assert_eq!(body, r#"{"model":"claude-x"}"#);
+}
+
+#[tokio::test]
+async fn untrusted_upstream_certificate_is_rejected() {
+    let ca = TestCa::generate();
+    let h = Harness::start_tls(
+        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        &ca,
+        false,
+    )
+    .await;
+    let res = h.send(messages(), "{}").await;
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn ca_file_resolves_relative_to_the_config_directory() {
+    let ca = TestCa::generate();
+    let dir = std::env::temp_dir().join(format!("wye-test-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("certs")).unwrap();
+    std::fs::write(dir.join("certs/ca.pem"), ca.ca_pem()).unwrap();
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:0\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+         forward_caller_credential = true\nca_file = \"certs/ca.pem\"",
+    )
+    .unwrap();
+
+    let resources = Resources::resolve(&config, &dir).unwrap();
+    assert_eq!(resources.extra_roots, vec![ca.ca_cert()]);
+
+    std::fs::write(dir.join("certs/ca.pem"), "not a certificate").unwrap();
+    let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
+    assert!(err.contains("no PEM certificates found"), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }

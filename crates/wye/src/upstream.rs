@@ -4,17 +4,10 @@
 //! Only the URI, hop-by-hop headers, and (in API-key mode) the credential
 //! headers are changed.
 
-use std::{
-    error::Error as StdError,
-    fmt,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::Duration,
-};
+mod idle_timeout;
 
-use bytes::Bytes;
+use std::{fmt, sync::Arc, time::Duration};
+
 use gateway_core::config;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Request, Response, Uri, Version,
@@ -25,17 +18,18 @@ use http::{
     uri::{Authority, PathAndQuery, Scheme},
 };
 use http_body_util::Limited;
-use hyper::body::{Body, Frame, Incoming, SizeHint};
+use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use tokio::time::{Instant, Sleep};
+use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
+
+pub(crate) use idle_timeout::IdleTimeout;
 
 use crate::StartupError;
 
-type BoxError = Box<dyn StdError + Send + Sync>;
 type UpstreamClient = Client<HttpsConnector<HttpConnector>, Limited<Incoming>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
@@ -97,14 +91,17 @@ pub(crate) struct Upstream {
 }
 
 impl Upstream {
-    pub(crate) fn new(config: &config::Upstream, auth: UpstreamAuth) -> Result<Self, StartupError> {
+    pub(crate) fn new(
+        config: &config::Upstream,
+        auth: UpstreamAuth,
+        extra_roots: &[CertificateDer<'static>],
+    ) -> Result<Self, StartupError> {
         let mut http = HttpConnector::new();
         http.enforce_http(false);
         http.set_connect_timeout(Some(config.connect_timeout));
         http.set_nodelay(true);
         let https = HttpsConnectorBuilder::new()
-            .with_provider_and_webpki_roots(Arc::new(rustls::crypto::ring::default_provider()))
-            .map_err(|e| StartupError::Tls(e.to_string()))?
+            .with_tls_config(tls_config(extra_roots)?)
             // Plain http is accepted by config validation only for loopback hosts.
             .https_or_http()
             .enable_http1()
@@ -175,6 +172,25 @@ impl Upstream {
     }
 }
 
+/// Built-in web PKI roots plus the configured extra roots.
+fn tls_config(extra_roots: &[CertificateDer<'static>]) -> Result<ClientConfig, StartupError> {
+    let mut roots = RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    for cert in extra_roots {
+        roots
+            .add(cert.clone())
+            .map_err(|e| StartupError::Tls(format!("invalid CA certificate: {e}")))?;
+    }
+    Ok(
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .map_err(|e| StartupError::Tls(e.to_string()))?
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+    )
+}
+
 fn strip_hop_by_hop(headers: &mut HeaderMap) {
     // Allocates only when `Connection` names extra headers, which is rare.
     let named: Vec<HeaderName> = headers
@@ -186,79 +202,6 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
         .collect();
     for name in named.iter().chain(HOP_BY_HOP.iter()) {
         headers.remove(name);
-    }
-}
-
-/// Fails the stream when the upstream sends nothing for `timeout`.
-///
-/// The timer runs only while this body waits on the upstream. Time spent
-/// while the downstream is not polling (backpressure) never counts.
-pub(crate) struct IdleTimeout<B> {
-    inner: B,
-    timeout: Duration,
-    sleep: Pin<Box<Sleep>>,
-    waiting: bool,
-}
-
-impl<B> IdleTimeout<B> {
-    fn new(inner: B, timeout: Duration) -> Self {
-        Self {
-            inner,
-            timeout,
-            sleep: Box::pin(tokio::time::sleep(timeout)),
-            waiting: false,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct StreamIdleTimeout;
-
-impl fmt::Display for StreamIdleTimeout {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("upstream stream idle timeout")
-    }
-}
-
-impl StdError for StreamIdleTimeout {}
-
-impl<B> Body for IdleTimeout<B>
-where
-    B: Body<Data = Bytes> + Unpin,
-    B::Error: Into<BoxError>,
-{
-    type Data = Bytes;
-    type Error = BoxError;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
-        let this = self.get_mut();
-        match Pin::new(&mut this.inner).poll_frame(cx) {
-            Poll::Ready(frame) => {
-                this.waiting = false;
-                Poll::Ready(frame.map(|f| f.map_err(Into::into)))
-            }
-            Poll::Pending => {
-                if !this.waiting {
-                    this.waiting = true;
-                    this.sleep.as_mut().reset(Instant::now() + this.timeout);
-                }
-                match this.sleep.as_mut().poll(cx) {
-                    Poll::Ready(()) => Poll::Ready(Some(Err(StreamIdleTimeout.into()))),
-                    Poll::Pending => Poll::Pending,
-                }
-            }
-        }
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
     }
 }
 

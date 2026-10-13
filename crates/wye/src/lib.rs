@@ -1,39 +1,18 @@
-//! Wye runtime: HTTP server, upstream forwarding, and startup glue.
+//! Wye runtime: startup resolution, HTTP server, routing, and upstream forwarding.
+//!
+//! - `startup`: secrets and files referenced by the config
+//! - `server`: listener, connections, graceful shutdown
+//! - `gateway`: routing and gateway-generated responses
+//! - `upstream`: forwarding to the provider
+//! - `usage_log`: per-request usage records
 
-use std::fmt;
-
+mod gateway;
 mod server;
+mod startup;
 mod upstream;
 mod usage_log;
 
-pub use server::{Gateway, serve};
+pub use gateway::Gateway;
+pub use server::serve;
+pub use startup::{Resources, StartupError};
 pub use upstream::UpstreamAuth;
-
-/// Failures that prevent the gateway from starting.
-#[derive(Debug)]
-pub enum StartupError {
-    MissingEnv(String),
-    InvalidApiKey,
-    Tls(String),
-    BodyLimitTooLarge,
-}
-
-impl fmt::Display for StartupError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingEnv(name) => write!(
-                f,
-                "environment variable {name} is not set or not valid UTF-8"
-            ),
-            Self::InvalidApiKey => {
-                f.write_str("upstream API key contains characters not allowed in an HTTP header")
-            }
-            Self::Tls(msg) => write!(f, "TLS setup failed: {msg}"),
-            Self::BodyLimitTooLarge => {
-                f.write_str("server.max_request_body_bytes exceeds this platform's address space")
-            }
-        }
-    }
-}
-
-impl std::error::Error for StartupError {}
