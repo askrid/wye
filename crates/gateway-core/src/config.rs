@@ -33,6 +33,29 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 pub struct Config {
     pub server: Server,
     pub upstream: Upstream,
+    /// Gateway credentials callers must present. Without it, Wye listens on
+    /// loopback only.
+    pub auth: Option<Auth>,
+}
+
+/// Signed gateway credentials (see [`crate::credential`]).
+#[derive(Debug, Clone)]
+pub struct Auth {
+    /// Required `iss` claim.
+    pub issuer: String,
+    /// Required `aud` claim (one of them, if a list).
+    pub audience: String,
+    /// Longest accepted `exp - iat`: without a revocation list, offboarding
+    /// takes effect when the person's last credential expires.
+    pub max_credential_ttl: Duration,
+    /// Verification keys, selected by the token's `kid`; several allow rotation.
+    pub keys: Vec<PublicKey>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PublicKey {
+    pub id: String,
+    pub ed25519_public_key: [u8; 32],
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +103,7 @@ pub enum ConfigError {
     Parse(String),
     InvalidListen(String),
     NonLoopbackListen(SocketAddr),
+    Auth(String),
     InvalidBaseUrl { url: String, reason: &'static str },
     Credential(&'static str),
     InvalidEnvName(String),
@@ -96,8 +120,9 @@ impl fmt::Display for ConfigError {
             }
             Self::NonLoopbackListen(addr) => write!(
                 f,
-                "server.listen: {addr} is not a loopback address; network exposure requires gateway credentials, which are not implemented yet"
+                "server.listen: {addr} is not a loopback address; network exposure requires an [auth] section"
             ),
+            Self::Auth(msg) => write!(f, "auth: {msg}"),
             Self::InvalidBaseUrl { url, reason } => {
                 write!(f, "upstream.base_url {url:?}: {reason}")
             }
@@ -121,6 +146,23 @@ impl std::error::Error for ConfigError {}
 struct RawConfig {
     server: RawServer,
     upstream: RawUpstream,
+    auth: Option<RawAuth>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAuth {
+    issuer: String,
+    audience: String,
+    max_credential_ttl_secs: Option<u64>,
+    keys: Vec<RawPublicKey>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPublicKey {
+    id: String,
+    ed25519_public_key: String,
 }
 
 #[derive(Deserialize)]
@@ -151,19 +193,71 @@ impl Config {
     pub fn from_toml_str(source: &str) -> Result<Self, ConfigError> {
         let raw: RawConfig =
             toml::from_str(source).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let auth = raw.auth.map(validate_auth).transpose()?;
+        let upstream = validate_upstream(raw.upstream)?;
+        if auth.is_some() && upstream.credential == UpstreamCredential::ForwardCaller {
+            return Err(ConfigError::Auth(
+                "cannot be combined with upstream.forward_caller_credential: the caller's \
+                 credential would be the gateway credential, not a provider credential"
+                    .into(),
+            ));
+        }
         Ok(Self {
-            server: validate_server(raw.server)?,
-            upstream: validate_upstream(raw.upstream)?,
+            server: validate_server(raw.server, auth.is_some())?,
+            upstream,
+            auth,
         })
     }
 }
 
-fn validate_server(raw: RawServer) -> Result<Server, ConfigError> {
+/// Default `max_credential_ttl_secs`: one week.
+const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
+
+fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
+    let err = |msg: String| ConfigError::Auth(msg);
+    if raw.issuer.is_empty() || raw.audience.is_empty() {
+        return Err(err("issuer and audience must not be empty".into()));
+    }
+    if raw.keys.is_empty() {
+        return Err(err("at least one key is required".into()));
+    }
+    let mut keys = Vec::with_capacity(raw.keys.len());
+    for key in raw.keys {
+        if key.id.is_empty() {
+            return Err(err("key id must not be empty".into()));
+        }
+        if keys.iter().any(|k: &PublicKey| k.id == key.id) {
+            return Err(err(format!("duplicate key id {:?}", key.id)));
+        }
+        let Some(public) = crate::credential::decode_public_key(&key.ed25519_public_key) else {
+            return Err(err(format!(
+                "key {:?}: ed25519_public_key must be 32 bytes in unpadded base64url",
+                key.id
+            )));
+        };
+        keys.push(PublicKey {
+            id: key.id,
+            ed25519_public_key: public,
+        });
+    }
+    Ok(Auth {
+        issuer: raw.issuer,
+        audience: raw.audience,
+        max_credential_ttl: secs(
+            raw.max_credential_ttl_secs
+                .unwrap_or(DEFAULT_MAX_CREDENTIAL_TTL_SECS),
+            "auth.max_credential_ttl_secs",
+        )?,
+        keys,
+    })
+}
+
+fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
     let listen: SocketAddr = raw
         .listen
         .parse()
         .map_err(|_| ConfigError::InvalidListen(raw.listen.clone()))?;
-    if !listen.ip().is_loopback() {
+    if !listen.ip().is_loopback() && !authenticated {
         return Err(ConfigError::NonLoopbackListen(listen));
     }
     Ok(Server {
@@ -341,6 +435,42 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, ConfigError::NonLoopbackListen(_)));
+    }
+
+    #[test]
+    fn auth_allows_network_listen_and_validates_keys() {
+        // A valid 32-byte key, base64url without padding.
+        let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
+        let with_auth = |listen: &str, upstream: &str, auth: &str| {
+            Config::from_toml_str(&format!(
+                "[server]\nlisten = \"{listen}\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+                 {upstream}\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth}"
+            ))
+        };
+        let keys = format!("[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\"");
+        let config = with_auth("0.0.0.0:8080", "api_key_env = \"K\"", &keys).unwrap();
+        let auth = config.auth.unwrap();
+        assert_eq!(auth.keys.len(), 1);
+        assert_eq!(auth.max_credential_ttl, Duration::from_secs(7 * 24 * 3600));
+
+        assert!(matches!(
+            with_auth("0.0.0.0:8080", "forward_caller_credential = true", &keys),
+            Err(ConfigError::Auth(_))
+        ));
+        assert!(matches!(
+            with_auth("127.0.0.1:8080", "api_key_env = \"K\"", "keys = []"),
+            Err(ConfigError::Auth(_))
+        ));
+        let bad = "[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"not-a-key\"";
+        assert!(matches!(
+            with_auth("127.0.0.1:8080", "api_key_env = \"K\"", bad),
+            Err(ConfigError::Auth(_))
+        ));
+        let twice = format!("{keys}\n{keys}");
+        assert!(matches!(
+            with_auth("127.0.0.1:8080", "api_key_env = \"K\"", &twice),
+            Err(ConfigError::Auth(_))
+        ));
     }
 
     #[test]

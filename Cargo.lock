@@ -229,9 +229,11 @@ dependencies = [
 name = "gateway-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "http",
  "memchr",
  "proptest",
+ "ring",
  "serde",
  "serde_json",
  "toml",
@@ -1102,6 +1104,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 name = "wye"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "gateway-core",
  "http",
@@ -1109,6 +1112,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "ring",
  "rustls",
  "serde_json",
  "tokio",
