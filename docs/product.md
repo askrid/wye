@@ -115,8 +115,8 @@ Users are untrusted. Never issue a reusable provider key to the browser. The app
 
 | Product | General position | Why Wye might be selected |
 |---|---|---|
-| KrakenD | Mature general API gateway; AI features vary by edition | Narrow LLM streaming/API compatibility, simpler inference config |
-| LiteLLM | Broad provider coverage, virtual keys, budgets, management | Smaller footprint by excluding persistent budget state |
+| KrakenD | Mature general API gateway; AI features vary by edition | Streams SSE as it arrives; KrakenD CE buffers whole responses (measured), streaming is Enterprise-only |
+| LiteLLM | Broad provider coverage, virtual keys, budgets, management | No database to run; about 10× less CPU per streamed event and far less memory in the same benchmark ([research.md](research.md#against-litellm)) |
 | OmniRoute | Multi-account routing, quotas, compression, management | Deterministic GitOps policy, lean serving path, protocol-focused scope |
 | Vercel AI Gateway | Managed, convenient within Vercel | Self-hosted, cross-platform, customer-controlled path |
 | Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
@@ -134,3 +134,18 @@ Each follows from statelessness rather than working around it:
 | Cache-affine routing | Keeps provider prompt-cache discounts across replicas without shared state | [architecture.md](architecture.md#cache-affine-routing) |
 | Policy as testable code | `wye explain` and CI policy tests: routing and cost decisions reviewed like code | [operations.md](operations.md#server) |
 | Test-generated support matrix | Every claimed endpoint × provider × feature is backed by a passing test | [roadmap.md](roadmap.md#release-acceptance-checklist) |
+| Performance gated on every commit | Added latency, CPU, and memory measured against a baseline before each commit; published, reproducible comparisons | [development.md](development.md#commit-gate) |
+
+Planned differentiators that use what only an agent-aware gateway sees, still request-local and stateless (detail in [research.md](research.md#feature-directions)):
+
+| Direction | What it gives |
+|---|---|
+| Agent-aware routing | Claude Code's request-class hints route auxiliary and compaction calls to cheaper Claude models by policy |
+| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss |
+| Delegable credentials | Agents mint narrower credentials for subagents offline |
+| Signed usage receipts | Tamper-evident chargeback and audit without a billing database |
+| Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI |
+
+### Moat
+
+Speed and statelessness are necessary but copyable. What compounds: correctness for agent traffic, proven per client release by contract tests; performance enforced on every commit and published reproducibly; policy as code with provable properties and no database; and the agent-aware directions above. The target niche is teams running several coding agents who need service credentials and reviewed policy, which neither a single-vendor gateway nor a stateful platform serves well.
