@@ -19,6 +19,8 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::usage::{SseUsageScanner, Usage};
+
+use crate::gauge::Held;
 use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
 use serde_json::{Map, Value};
@@ -201,6 +203,8 @@ pub(crate) struct Observed<B> {
     headers_after: Duration,
     outcome: Outcome,
     log: UsageLog,
+    /// The request's concurrency permit, released when the response body is dropped.
+    _permit: Held,
 }
 
 impl<B> Observed<B> {
@@ -210,6 +214,7 @@ impl<B> Observed<B> {
         status: StatusCode,
         is_event_stream: bool,
         log: UsageLog,
+        permit: Held,
     ) -> Self {
         let headers_after = info.started.elapsed();
         Self {
@@ -220,6 +225,7 @@ impl<B> Observed<B> {
             headers_after,
             outcome: Outcome::Cancelled,
             log,
+            _permit: permit,
         }
     }
 }

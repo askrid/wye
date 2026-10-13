@@ -49,14 +49,7 @@ fn serve(config: Config, config_dir: &Path) -> Result<(), Box<dyn Error>> {
     runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind(config.server.listen).await?;
         eprintln!("wye: listening on http://{}", listener.local_addr()?);
-        wye::serve(
-            listener,
-            gateway,
-            shutdown_signal(),
-            config.server.shutdown_grace,
-            tokio::io::stderr(),
-        )
-        .await;
+        wye::serve(listener, gateway, shutdown_signal(), tokio::io::stderr()).await;
         eprintln!("wye: stopped");
         Ok(())
     })

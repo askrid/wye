@@ -20,6 +20,8 @@ use serde::Deserialize;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
+/// Generous for one process: an idle Claude Code stream costs Wye about 5-30 KB.
+const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 10_000;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// Non-streaming generations send no headers until they complete.
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS: u64 = 600;
@@ -38,6 +40,14 @@ pub struct Server {
     /// Always a loopback address until gateway credentials are implemented.
     pub listen: SocketAddr,
     pub max_request_body_bytes: u64,
+    /// Proxied requests in flight (until their response body ends) before new
+    /// ones are answered with an overload error instead of queueing.
+    pub max_concurrent_requests: usize,
+    /// After a shutdown signal, `/readyz` fails but connections are still
+    /// accepted for this long, so load balancers stop routing here before
+    /// new connections are refused. Zero for local use.
+    pub drain_delay: Duration,
+    /// After the drain delay, active requests get this long to finish.
     pub shutdown_grace: Duration,
 }
 
@@ -118,6 +128,8 @@ struct RawConfig {
 struct RawServer {
     listen: String,
     max_request_body_bytes: Option<u64>,
+    max_concurrent_requests: Option<usize>,
+    drain_delay_secs: Option<u64>,
     shutdown_grace_secs: Option<u64>,
 }
 
@@ -161,6 +173,11 @@ fn validate_server(raw: RawServer) -> Result<Server, ConfigError> {
                 .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
             "server.max_request_body_bytes",
         )?,
+        max_concurrent_requests: match raw.max_concurrent_requests {
+            Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
+            value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
+        },
+        drain_delay: Duration::from_secs(raw.drain_delay_secs.unwrap_or(0)),
         // Zero is valid: cancel active streams immediately on shutdown.
         shutdown_grace: Duration::from_secs(
             raw.shutdown_grace_secs
@@ -379,6 +396,21 @@ mod tests {
             parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
             ConfigError::EmptyPath("upstream.ca_file")
         );
+    }
+
+    #[test]
+    fn lifecycle_defaults_and_zero_concurrency_rejected() {
+        let config =
+            parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
+                .unwrap();
+        assert_eq!(config.server.max_concurrent_requests, 10_000);
+        assert_eq!(config.server.drain_delay, Duration::ZERO);
+        let err = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\nmax_concurrent_requests = 0\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true",
+        )
+        .unwrap_err();
+        assert_eq!(err, ConfigError::Zero("server.max_concurrent_requests"));
     }
 
     #[test]
