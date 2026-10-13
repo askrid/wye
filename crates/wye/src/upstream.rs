@@ -129,6 +129,9 @@ impl Upstream {
     ) -> Result<Response<IdleTimeout<Incoming>>, ForwardError> {
         let (mut parts, body) = req.into_parts();
         parts.uri = self.upstream_uri(parts.uri.path_and_query())?;
+        // The client negotiates HTTP/2 or HTTP/1.1 with the upstream through TLS ALPN
+        // (Anthropic: HTTP/2, so concurrent streams share one connection); this only
+        // resets the caller's version so it cannot select the upstream protocol.
         parts.version = Version::HTTP_11;
         parts.extensions.clear();
         strip_hop_by_hop(&mut parts.headers);

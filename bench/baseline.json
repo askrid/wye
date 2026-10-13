@@ -6,6 +6,8 @@
     "os": "macos"
   },
   "metrics": {
+    "cancel_upstream_release_max_us": 157.0,
+    "cancel_upstream_release_p50_us": 77.0,
     "direct_throughput_mb_s": 3848.34,
     "direct_unary_p50_us": 292.0,
     "direct_unary_p99_us": 603.0,
