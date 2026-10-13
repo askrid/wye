@@ -68,6 +68,17 @@ impl Gateway {
                 empty(StatusCode::SERVICE_UNAVAILABLE)
             }
             (&Method::GET, "/readyz") => empty(StatusCode::OK),
+            #[cfg(feature = "alloc-stats")]
+            (&Method::GET, "/debug/alloc") => {
+                let mut res = Response::new(Either::Left(Full::new(Bytes::from(
+                    crate::alloc_stats::snapshot().to_json(),
+                ))));
+                res.headers_mut().insert(
+                    CONTENT_TYPE,
+                    http::HeaderValue::from_static("application/json"),
+                );
+                res
+            }
             _ => error(
                 StatusCode::NOT_FOUND,
                 "not_found_error",

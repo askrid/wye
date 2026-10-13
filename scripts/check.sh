@@ -20,13 +20,15 @@ echo "==> fmt";    cargo fmt --all --check
 echo "==> clippy"; cargo clippy --all-targets --quiet -- -D warnings
 echo "==> test";   cargo test --quiet
 echo "==> build release"; cargo build --release --quiet -p wye -p wye-bench
+# Allocation-counting build, in its own target dir so it never replaces the measured binary.
+cargo build --release --quiet -p wye --features alloc-stats --target-dir target/alloc
 
 # 1000 idle streams need several thousand file descriptors.
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 
 result=target/bench/latest.json
 echo "==> bench"
-./target/release/wye-bench run --wye target/release/wye --out "$result" >/dev/null
+./target/release/wye-bench run --wye target/release/wye --out "$result" --wye-alloc target/alloc/release/wye >/dev/null
 
 if $update; then
   cp "$result" bench/baseline.json
@@ -43,5 +45,5 @@ if ./target/release/wye-bench compare bench/baseline.json "$result"; then
 fi
 # Laptop noise can push one run past a limit. A real regression fails twice in a row.
 echo "==> regression reported; re-running the benchmark to rule out noise"
-./target/release/wye-bench run --wye target/release/wye --out "$result" >/dev/null
+./target/release/wye-bench run --wye target/release/wye --out "$result" --wye-alloc target/alloc/release/wye >/dev/null
 ./target/release/wye-bench compare bench/baseline.json "$result"

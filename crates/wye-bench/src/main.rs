@@ -6,11 +6,13 @@
 //! with HTTP/2, like the real provider (`tls_` prefix). With `--krakend`, the
 //! same scenarios also run through KrakenD (`krakend_` prefix); with `--litellm`,
 //! through LiteLLM's pass-through endpoint (`litellm_` prefix).
+//! With `--wye-alloc`, a `--features alloc-stats` build of Wye adds heap allocation
+//! metrics (`alloc_` prefix).
 //! `WYE_BENCH_UPSTREAM` appends lines to Wye's `[upstream]` config, for tuning experiments.
 //! `WYE_BENCH_GATEWAY_LOG=1` writes each gateway's output to a log next to its config.
 //!
 //! Usage:
-//!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--krakend <path>] [--litellm <path>]
+//!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
 //!   wye-bench compare <baseline.json> <results.json>
 //!   wye-bench adopt-new <baseline.json> <results.json>
 
@@ -22,6 +24,7 @@
     clippy::panic
 )]
 
+mod allocations;
 mod client;
 mod gate;
 mod gateway_process;
@@ -38,6 +41,7 @@ fn main() -> ExitCode {
         ["run", "--wye", binary, "--out", out, flags @ ..] => {
             let mut repeat = 3;
             let mut others = Vec::new();
+            let mut wye_alloc = None;
             let mut rest: &[&str] = flags;
             while let [flag, value, tail @ ..] = rest {
                 match *flag {
@@ -47,6 +51,7 @@ fn main() -> ExitCode {
                     },
                     "--krakend" => others.push(gateway_process::Gateway::KrakenD(value)),
                     "--litellm" => others.push(gateway_process::Gateway::LiteLlm(value)),
+                    "--wye-alloc" => wye_alloc = Some(*value),
                     _ => return usage(),
                 }
                 rest = tail;
@@ -59,7 +64,7 @@ fn main() -> ExitCode {
                 .enable_all()
                 .build()
                 .unwrap()
-                .block_on(run::run(binary, &others, out, repeat));
+                .block_on(run::run(binary, wye_alloc, &others, out, repeat));
             ExitCode::SUCCESS
         }
         ["compare", baseline, current] => {
@@ -80,7 +85,7 @@ fn main() -> ExitCode {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--krakend <path>] [--litellm <path>]\n  \
+        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
          wye-bench adopt-new <baseline.json> <results.json>"
     );

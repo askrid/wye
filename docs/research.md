@@ -73,7 +73,20 @@ Current baseline on the development laptop (i9-9880H, loopback, release build; m
 | 2,000 token-paced streams: delay per event p50 / p99 | (TLS only) | 1.8 / 4.9 ms |
 | 2,000 token-paced streams: CPU per event, memory per stream | (TLS only) | 36 µs, 9.5 KB |
 
-Run-to-run noise on this machine is about 10–15% for CPU per MB and larger for tail latency, and ±25% on the TLS path, so the gate reliably catches regressions of roughly 25% or ~100 µs, not smaller ones. The paced scenario saturates the whole laptop, so its latencies include machine load. Gateway credentials (`auth_` metrics, plain path, per-request scenarios only): full verification costs about +88 µs of CPU per request (the Ed25519 check alone measured 55–62 µs in isolation); with the per-connection credential cache, authenticated requests on reused connections cost the same CPU as unauthenticated ones. Not covered yet: Linux and multi-machine load.
+Run-to-run noise on this machine is about 10–15% for CPU per MB and larger for tail latency, and ±25% on the TLS path, so the gate reliably catches regressions of roughly 25% or ~100 µs, not smaller ones. The paced scenario saturates the whole laptop, so its latencies include machine load. **Heap allocations** (`alloc_` metrics, plain path, `alloc-stats` build; median of 3, spread under 1% except uploads):
+
+| Metric | Value |
+|---|---|
+| Allocations per streamed SSE event | 0 |
+| Allocations per stream setup | 36 |
+| Allocations / allocated bytes per unary request | 33.5 / 22 KB |
+| Allocations per authenticated request (cached credential) | 37.5 |
+| Live heap per idle stream | 49 KB |
+| 1 MiB upload: allocations / allocated bytes | 39 / 1.38 MB |
+
+Findings: the relay path allocates nothing per event. An idle stream holds about 49 KB of live heap while RSS grows only about 28 KB, because large connection buffers are allocated but not fully touched: per-connection buffer sizing in hyper is the main memory target. A cached credential still costs 4 allocations per request (cloning the identity's strings), avoidable by sharing it behind an `Arc`. Uploads allocate about 1.35× the body as receive buffers grow, relevant once model permissions buffer bodies.
+
+Gateway credentials (`auth_` metrics, plain path, per-request scenarios only): full verification costs about +88 µs of CPU per request (the Ed25519 check alone measured 55–62 µs in isolation); with the per-connection credential cache, authenticated requests on reused connections cost the same CPU as unauthenticated ones. Not covered yet: Linux and multi-machine load.
 
 **Profiles.** On the plain path, Wye's CPU is almost all system calls (`writev` and `recvfrom` per frame, connection setup); its own code is a small share. On the TLS path, profiles were first dominated by lock contention in `h2`, which guards all streams of one connection with one mutex; spreading streams over connections ([architecture.md](architecture.md#upstream-connections)) cut CPU per MB from 12.3 to 4.1 ms and unary added latency from 1.5 to 0.3 ms. Remaining CPU gaps come from relaying each frame as it arrives and from handing each chunk between the upstream and downstream connection tasks.
 
@@ -246,6 +259,8 @@ The workload: few long-lived requests, tiny SSE events at token pace, time to fi
 | HTTP/2 to the provider | Multiplex client streams over few upstream connections | **In effect.** Negotiated by ALPN (verified against `api.anthropic.com`); benchmarked on the TLS path |
 | Spread streams over connections | 64 lanes, least-loaded selection, instead of one shared HTTP/2 connection per host | **Adopted.** Fixed silent queuing beyond the provider's stream limit (a 4-stream mock now serves 10 streams), and avoids the single `h2` connection mutex: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; process RSS after load 10 → 30 MB |
 | Per-connection credential cache | Verify a credential once per connection; later requests with the same bytes compare in constant time and recheck expiry | **Adopted.** Two A/B runs: CPU per authenticated request −38% and −44% (195 → 121, 199 → 112 µs, equal to unauthenticated), added latency p50 −16% and −34%; other metrics unchanged. Memory: one verified token (~0.3 KB) per connection |
+| Shared cached identity | Keep the cached credential's identity behind an `Arc` instead of cloning its strings per request | Candidate: removes 4 allocations per authenticated request (`alloc_auth_unary_per_request` 37.5 → ~33.5) |
+| Smaller per-connection buffers | Tune hyper's HTTP/1.1 read and write buffer sizes for small SSE events | Candidate: idle streams hold 49 KB of live heap each; measure memory per stream and per-event latency |
 | Fast cancellation as a cost metric | Release the upstream immediately when a client disconnects, even while it is silent | **Measured and gated:** release within ~80 µs p50, under 0.2 ms max. Provider-side effect (does billing stop?) unverified |
 | Zero-copy usage extraction | SIMD `memchr` line scanning; JSON only for usage events | **Implemented.** Byte-by-byte scanning cost +49% CPU per MB and was blocked by the gate; `memchr` costs +5.8% |
 | Pre-warmed connections | Keep warm TLS connections per provider to cut cold-start TTFB | Planned; needs a mock with configurable connect delay |

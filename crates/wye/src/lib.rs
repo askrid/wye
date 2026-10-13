@@ -7,7 +7,10 @@
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
 //! - `gauge`: in-flight counters released on drop
+//! - `alloc_stats`: heap allocation counters (feature `alloc-stats`, benchmarks only)
 
+#[cfg(feature = "alloc-stats")]
+pub mod alloc_stats;
 mod auth;
 mod gateway;
 mod gauge;

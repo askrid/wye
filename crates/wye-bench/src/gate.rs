@@ -34,6 +34,17 @@ const GATES: &[(&str, f64, f64)] = &[
     ("auth_unary_added_p50_us", 0.20, 40.0),
     ("auth_sse_ttfb_added_p50_us", 0.40, 100.0),
     ("auth_unary_failed_requests", 0.0, 0.0),
+    // Heap allocations (alloc-stats build). Nearly deterministic, so the
+    // limits catch one extra allocation per request, stream, or event.
+    ("alloc_unary_per_request", 0.02, 0.5),
+    ("alloc_unary_bytes_per_request", 0.02, 256.0),
+    ("alloc_auth_unary_per_request", 0.02, 0.5),
+    ("alloc_sse_per_stream", 0.02, 0.5),
+    ("alloc_sse_per_event", 0.0, 0.05),
+    ("alloc_idle_live_bytes_per_stream", 0.05, 1024.0),
+    // Uploads vary about 5% with how the body arrives in chunks.
+    ("alloc_upload_per_request", 0.15, 2.0),
+    ("alloc_upload_bytes_per_request", 0.15, 0.0),
     // Realistic workloads: agent-sized uploads and token-paced streams at scale.
     // These load the whole machine, so latency tolerances are wide; CPU per
     // unit of work and memory per stream are the precise signals.
