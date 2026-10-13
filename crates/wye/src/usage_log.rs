@@ -26,7 +26,7 @@ use gateway_core::{
 use crate::gauge::Held;
 use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
-use serde_json::{Map, Value};
+use serde::Serialize;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     sync::mpsc,
@@ -151,54 +151,69 @@ where
     }
 }
 
+/// One JSON line, serialized from borrowed fields: no per-record allocation
+/// beyond growing the writer's reused buffer.
+#[derive(Serialize)]
+struct Line<'a> {
+    event: &'static str,
+    unix_ms: u64,
+    path: &'a str,
+    status: u16,
+    outcome: &'static str,
+    duration_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    headers_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subject: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
+    usage_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_creation_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_read_input_tokens: Option<u64>,
+}
+
 fn push_line(buf: &mut Vec<u8>, r: &Record) {
-    let mut m = Map::new();
-    m.insert("event".into(), "request".into());
-    m.insert("unix_ms".into(), Value::from(r.unix_ms as u64));
-    m.insert("path".into(), r.info.path.into());
-    m.insert("status".into(), r.status.as_u16().into());
-    m.insert("outcome".into(), r.outcome.as_str().into());
-    m.insert("duration_ms".into(), ms(r.duration));
-    if let Some(after) = r.headers_after {
-        m.insert("headers_ms".into(), ms(after));
-    }
-    if let Some(identity) = &r.info.identity {
-        m.insert("subject".into(), identity.subject.as_ref().into());
-    }
-    if let Some(session) = r.info.session_id.as_ref().and_then(|v| v.to_str().ok()) {
-        m.insert("session_id".into(), session.into());
-    }
-    if let Some(model) = &r.model {
-        m.insert("model".into(), model.as_ref().into());
-    }
-    match &r.usage {
-        Some((usage, status)) => {
-            m.insert("usage_status".into(), (*status).into());
-            for (name, value) in [
-                ("input_tokens", usage.input_tokens),
-                ("output_tokens", usage.output_tokens),
-                (
-                    "cache_creation_input_tokens",
-                    usage.cache_creation_input_tokens,
-                ),
-                ("cache_read_input_tokens", usage.cache_read_input_tokens),
-            ] {
-                if let Some(value) = value {
-                    m.insert(name.into(), value.into());
-                }
-            }
-        }
-        None => {
-            m.insert("usage_status".into(), "not_observed".into());
-        }
-    }
-    // Serializing a map of plain values cannot fail.
-    let _ = serde_json::to_writer(&mut *buf, &Value::Object(m));
+    let usage = r
+        .usage
+        .as_ref()
+        .map(|(usage, _)| *usage)
+        .unwrap_or_default();
+    let line = Line {
+        event: "request",
+        unix_ms: r.unix_ms as u64,
+        path: r.info.path,
+        status: r.status.as_u16(),
+        outcome: r.outcome.as_str(),
+        duration_ms: ms(r.duration),
+        headers_ms: r.headers_after.map(ms),
+        subject: r.info.identity.as_ref().map(|i| &*i.subject),
+        session_id: r.info.session_id.as_ref().and_then(|v| v.to_str().ok()),
+        model: r.model.as_deref(),
+        usage_status: r
+            .usage
+            .as_ref()
+            .map_or("not_observed", |(_, status)| status),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+    };
+    // Serializing plain fields into a Vec cannot fail.
+    let _ = serde_json::to_writer(&mut *buf, &line);
     buf.push(b'\n');
 }
 
-fn ms(d: Duration) -> Value {
-    Value::from((d.as_secs_f64() * 1000.0 * 100.0).round() / 100.0)
+/// Milliseconds rounded to two decimals.
+fn ms(d: Duration) -> f64 {
+    (d.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
 
 /// Response body wrapper that observes usage and emits a record on drop.
