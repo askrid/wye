@@ -1125,11 +1125,13 @@ name = "wye-bench"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "gateway-core",
  "http",
  "http-body-util",
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "ring",
  "rustls",
  "serde_json",
  "tokio",
