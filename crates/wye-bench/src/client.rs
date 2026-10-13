@@ -63,18 +63,27 @@ impl Target {
         &self.clients[self.next.fetch_add(1, Ordering::Relaxed) % POOLS]
     }
 
-    /// `POST /v1/messages` with the mock's control headers.
+    /// `POST /v1/messages` with the mock's control headers and a small body.
     pub fn messages(&self, headers: &[(&'static str, String)]) -> Request<Full<Bytes>> {
+        self.messages_with_body(
+            headers,
+            Bytes::from_static(br#"{"model":"bench","max_tokens":1,"messages":[]}"#),
+        )
+    }
+
+    /// `POST /v1/messages` with the mock's control headers and `body`.
+    pub fn messages_with_body(
+        &self,
+        headers: &[(&'static str, String)],
+        body: Bytes,
+    ) -> Request<Full<Bytes>> {
         let mut req = Request::post(format!("{}/v1/messages?beta=true", self.base))
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01");
         for (name, value) in headers {
             req = req.header(*name, value.as_str());
         }
-        req.body(Full::new(Bytes::from_static(
-            br#"{"model":"bench","max_tokens":1,"messages":[]}"#,
-        )))
-        .unwrap()
+        req.body(Full::new(body)).unwrap()
     }
 
     pub fn get(&self, path: &str) -> Request<Full<Bytes>> {

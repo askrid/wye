@@ -42,8 +42,12 @@ pub fn report_drops_to(tx: mpsc::UnboundedSender<u64>) {
     *BODY_DROPPED.lock().unwrap() = Some(tx);
 }
 
+/// HTTP/2 stream limit per mock connection: above the paced scenario's
+/// concurrency per client pool, so the direct baseline never queues.
+const MAX_STREAMS: u32 = 1_000;
+
 pub async fn spawn(tls: Option<&TestCa>) -> SocketAddr {
-    wye_testkit::spawn_upstream(handle, tls, None).await
+    wye_testkit::spawn_upstream(handle, tls, Some(MAX_STREAMS)).await
 }
 
 async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>> {

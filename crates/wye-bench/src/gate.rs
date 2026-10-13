@@ -6,9 +6,10 @@ use serde_json::Value;
 /// better for all of them. Tolerances come from the spread of repeated runs of
 /// unchanged code on the baseline machine.
 ///
-/// Reported but not gated: p99 time to first byte on both paths (swung from
-/// -521 to 1694 µs between identical runs), and the TLS unary p99, whose direct
-/// baseline is bottlenecked by the load client's single HTTP/2 connection.
+/// Reported but not gated: p99 time to first byte (swung from -521 to 1694 µs
+/// between identical runs; in the paced scenario it is dominated by connection
+/// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
+/// the TLS + HTTP/2 path.
 const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),
@@ -25,6 +26,17 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_sse_event_added_p99_us", 0.50, 300.0),
     ("tls_throughput_cpu_ms_per_mb", 0.25, 0.05),
     ("tls_idle_rss_kb_per_stream", 0.15, 2.0),
+    // Realistic workloads: agent-sized uploads and token-paced streams at scale.
+    // These load the whole machine, so latency tolerances are wide; CPU per
+    // unit of work and memory per stream are the precise signals.
+    ("upload_added_p50_us", 0.30, 1_000.0),
+    ("upload_cpu_ms_per_mb", 0.20, 0.1),
+    ("tls_upload_added_p50_us", 0.50, 1_000.0),
+    ("tls_upload_cpu_ms_per_mb", 0.25, 0.1),
+    ("tls_paced_event_added_p50_us", 0.50, 1_000.0),
+    ("tls_paced_event_added_p99_us", 0.50, 2_000.0),
+    ("tls_paced_cpu_us_per_event", 0.25, 2.0),
+    ("tls_paced_rss_kb_per_stream", 0.15, 1.0),
     // Guard the property, not the microseconds: a release that waits for the
     // next upstream write would take seconds.
     ("cancel_upstream_release_max_us", 1.0, 20_000.0),

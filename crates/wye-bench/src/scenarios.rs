@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use tokio::{sync::mpsc, task::JoinSet};
@@ -67,6 +68,25 @@ pub async fn unary(target: &Target, concurrency: usize, total: usize) -> Vec<u64
     .await
 }
 
+/// Latency in µs of requests uploading `body` (like a resent agent context),
+/// each answered with a small response.
+pub async fn upload(target: &Target, concurrency: usize, total: usize, body: Bytes) -> Vec<u64> {
+    let target = target.clone();
+    run_workers(concurrency, total, move || {
+        let target = target.clone();
+        let body = body.clone();
+        async move {
+            let start = Instant::now();
+            let req = target.messages_with_body(&[("x-bench-unary", "512".into())], body);
+            let res = target.client().request(req).await.unwrap();
+            res.into_body().collect().await.unwrap();
+            start.elapsed().as_micros() as u64
+        }
+    })
+    .await
+}
+
+/// SSE streams on `concurrency` workers, each worker reading its streams one after another.
 pub async fn sse(
     target: &Target,
     concurrency: usize,
@@ -78,41 +98,70 @@ pub async fn sse(
     let target = target.clone();
     run_workers(concurrency, total, move || {
         let target = target.clone();
-        async move {
-            let start = Instant::now();
-            let req = target.messages(&[
-                ("x-bench-events", events.to_string()),
-                ("x-bench-size", size.to_string()),
-                ("x-bench-interval-us", interval_us.to_string()),
-            ]);
-            let mut body = target.client().request(req).await.unwrap().into_body();
-            let mut ttfb_us = None;
-            let mut event_delays_us = Vec::with_capacity(events as usize);
-            let mut pending: Vec<u8> = Vec::new();
-            let mut bytes = 0;
-            while let Some(frame) = body.frame().await {
-                let Ok(data) = frame.unwrap().into_data() else {
-                    continue;
-                };
-                let received = now_nanos();
-                ttfb_us.get_or_insert_with(|| start.elapsed().as_micros() as u64);
-                bytes += data.len() as u64;
-                pending.extend_from_slice(&data);
-                while let Some(end) = find(&pending, b"\n\n") {
-                    let event: Vec<u8> = pending.drain(..end + 2).collect();
-                    if let Some(sent) = event_timestamp(&event) {
-                        event_delays_us.push(received.saturating_sub(sent) / 1_000);
-                    }
-                }
-            }
-            Stream {
-                ttfb_us: ttfb_us.unwrap_or(0),
-                event_delays_us,
-                bytes,
-            }
-        }
+        async move { read_stream(&target, events, size, interval_us).await }
     })
     .await
+}
+
+/// `streams` concurrent SSE streams whose starts are spread evenly over `ramp`,
+/// as independent clients arrive, instead of all connecting in one instant.
+pub async fn paced(
+    target: &Target,
+    streams: usize,
+    ramp: Duration,
+    events: u32,
+    size: usize,
+    interval_us: u64,
+) -> Vec<Stream> {
+    let mut set = JoinSet::new();
+    for i in 0..streams {
+        let target = target.clone();
+        let delay = ramp.mul_f64(i as f64 / streams as f64);
+        set.spawn(async move {
+            tokio::time::sleep(delay).await;
+            read_stream(&target, events, size, interval_us).await
+        });
+    }
+    let mut out = Vec::with_capacity(streams);
+    while let Some(stream) = set.join_next().await {
+        out.push(stream.unwrap());
+    }
+    out
+}
+
+/// Requests one SSE stream from the mock and records its timings.
+async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64) -> Stream {
+    let start = Instant::now();
+    let req = target.messages(&[
+        ("x-bench-events", events.to_string()),
+        ("x-bench-size", size.to_string()),
+        ("x-bench-interval-us", interval_us.to_string()),
+    ]);
+    let mut body = target.client().request(req).await.unwrap().into_body();
+    let mut ttfb_us = None;
+    let mut event_delays_us = Vec::with_capacity(events as usize);
+    let mut pending: Vec<u8> = Vec::new();
+    let mut bytes = 0;
+    while let Some(frame) = body.frame().await {
+        let Ok(data) = frame.unwrap().into_data() else {
+            continue;
+        };
+        let received = now_nanos();
+        ttfb_us.get_or_insert_with(|| start.elapsed().as_micros() as u64);
+        bytes += data.len() as u64;
+        pending.extend_from_slice(&data);
+        while let Some(end) = find(&pending, b"\n\n") {
+            let event: Vec<u8> = pending.drain(..end + 2).collect();
+            if let Some(sent) = event_timestamp(&event) {
+                event_delays_us.push(received.saturating_sub(sent) / 1_000);
+            }
+        }
+    }
+    Stream {
+        ttfb_us: ttfb_us.unwrap_or(0),
+        event_delays_us,
+        bytes,
+    }
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
