@@ -12,7 +12,7 @@
 //! verified, so its size is bounded by the token size limit.
 
 use std::{
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -31,7 +31,8 @@ pub(crate) struct ConnectionAuth {
 
 struct Verified {
     token: Box<[u8]>,
-    identity: Identity,
+    /// Shared with each request it authenticates, so a cache hit allocates nothing.
+    identity: Arc<Identity>,
 }
 
 /// Checks the credential in `Authorization: Bearer` (Claude Code's
@@ -40,7 +41,7 @@ pub(crate) fn authenticate(
     verifier: &Verifier,
     headers: &HeaderMap,
     connection: &ConnectionAuth,
-) -> Result<Identity, CredentialError> {
+) -> Result<Arc<Identity>, CredentialError> {
     let token = credential_from(headers).ok_or(CredentialError::Malformed)?;
     // A clock before 1970 makes every credential look expired: fail closed.
     let now = SystemTime::now()
@@ -64,7 +65,7 @@ fn authenticate_at(
     token: &str,
     now: u64,
     connection: &ConnectionAuth,
-) -> Result<Identity, CredentialError> {
+) -> Result<Arc<Identity>, CredentialError> {
     // A poisoned lock only means another request on this connection panicked;
     // the cached value is still a fully verified credential.
     let mut last = connection
@@ -78,17 +79,17 @@ fn authenticate_at(
             *last = None;
             return Err(CredentialError::Expired);
         }
-        return Ok(verified.identity.clone());
+        return Ok(Arc::clone(&verified.identity));
     }
     drop(last);
 
-    let identity = verifier.verify(token, now)?;
+    let identity = Arc::new(verifier.verify(token, now)?);
     *connection
         .last
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Verified {
         token: token.as_bytes().into(),
-        identity: identity.clone(),
+        identity: Arc::clone(&identity),
     });
     Ok(identity)
 }
