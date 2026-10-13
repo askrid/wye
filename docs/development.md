@@ -1,0 +1,41 @@
+# Development
+
+How changes are made, verified, and committed. Speed and statelessness are the product: Wye must never be the bottleneck between a client and the provider, so performance is checked on every commit, like correctness.
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `crates/gateway-core` | Portable policy: config validation, credential verification, usage scanning. No I/O, no Tokio. |
+| `crates/wye` | The binary: CLI (`main.rs`, `token.rs`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), forwarding (`upstream/`), usage log |
+| `crates/wye-testkit` | Test support: throwaway CA, mock upstream (plain, or TLS with HTTP/2) |
+| `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, competitor runs |
+| `bench/baseline.json` | Gated benchmark baseline for the development machine |
+| `scripts/check.sh`, `scripts/ab.sh` | Commit gate; A/B comparison of two binaries |
+
+## Commit gate
+
+`scripts/check.sh` runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, all tests, a release build, and the benchmark, then compares the benchmark with `bench/baseline.json`. The pre-commit hook runs it for every commit that touches more than docs; enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test, a tolerance, or the baseline to pass.
+- `scripts/check.sh --update-baseline` records a new baseline only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message. Never commit with `--no-verify`.
+- New metrics enter the baseline with `wye-bench adopt-new`, which adds them without touching existing values.
+- The baseline is machine-specific: on a new machine, record a fresh one from an unchanged checkout first.
+
+A check takes about 12 minutes. Each benchmark is the median of 3 runs, and a failed comparison is re-run once before it counts, because laptop noise can push a single run past a limit. The gate reliably blocks about 100 µs of added latency per request and about 25% more CPU per unit of work; smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`, which runs two binaries in alternating rounds. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric. Results and rejected experiments are recorded in [research.md](research.md).
+
+## Benchmark
+
+`wye-bench run --wye <path> --out <results.json>` measures each scenario directly against the mock and through the gateway, on a plain HTTP/1.1 upstream and on TLS + HTTP/2 (`tls_` metrics), and reports what the gateway adds: latency (unary, time to first byte, per SSE event), CPU per MB and per event, memory per idle and active stream, upstream release after a disconnect, uploads, 2,000 token-paced streams, and failed requests (gated at zero). `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways and print a comparison table.
+
+## Code changes
+
+- Correctness and protocol compatibility first; then no unnecessary allocation, buffering, locks, or blocking on the request path.
+- Every change ends with a review pass over the files it touched: names, duplication, dead code, stale comments, module boundaries. Refactor instead of patching when logic repeats, a module does two jobs, or a name no longer fits.
+- A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
+- Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
+- `unwrap`, `expect`, panics, and indexing are denied outside tests; `unsafe` is forbidden in `gateway-core` and denied elsewhere.
