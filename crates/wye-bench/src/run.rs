@@ -7,9 +7,9 @@ use wye_testkit::TestCa;
 
 use crate::{
     client::Target,
+    gateway_process::{Gateway, GatewayProcess},
     mock,
     scenarios::{self, Stream},
-    wye_process::WyeProcess,
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -36,7 +36,10 @@ struct UpstreamPath<'a> {
 }
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
-pub async fn run(binary: &str, out: &str, repeat: usize) {
+/// With `krakend`, the same scenarios also run through KrakenD (`krakend_` metrics).
+pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
+    let mut gateways = vec![Gateway::Wye(wye)];
+    gateways.extend(krakend.map(Gateway::KrakenD));
     let dir = Path::new(out)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -67,10 +70,42 @@ pub async fn run(binary: &str, out: &str, repeat: usize) {
     for i in 1..=repeat {
         let mut metrics = BTreeMap::new();
         for path in &paths {
-            eprintln!("run {i}/{repeat}: {} upstream", path.name);
-            // A fresh process per run, so memory retained from earlier runs cannot hide new allocations.
-            let wye = WyeProcess::start(binary, &path.base_url, path.ca_pem, dir, path.name).await;
-            measure(path, &wye, &mut metrics).await;
+            let direct = Direct::measure(&path.direct).await;
+            put(
+                &mut metrics,
+                path.prefix,
+                "direct_throughput_mb_s",
+                direct.mb_s,
+            );
+            for (label, p) in PERCENTILES {
+                let name = format!("direct_unary_{label}_us");
+                put(
+                    &mut metrics,
+                    path.prefix,
+                    &name,
+                    percentile(&direct.latency.unary, p),
+                );
+            }
+            for &gateway in &gateways {
+                eprintln!(
+                    "run {i}/{repeat}: {} upstream, {}",
+                    path.name,
+                    gateway.name()
+                );
+                // A fresh process per run, so memory retained from earlier runs cannot hide new allocations.
+                let process =
+                    GatewayProcess::start(gateway, &path.base_url, path.ca_pem, dir, path.name)
+                        .await;
+                let prefix = format!("{}{}", path.prefix, gateway.prefix());
+                measure(
+                    &direct,
+                    &process,
+                    &prefix,
+                    gateway.streams_sse(),
+                    &mut metrics,
+                )
+                .await;
+            }
         }
         runs.push(metrics);
     }
@@ -90,68 +125,147 @@ pub async fn run(binary: &str, out: &str, repeat: usize) {
     });
     std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
     for (name, value) in report["metrics"].as_object().unwrap() {
-        println!("{name:36} {value}");
+        println!("{name:40} {value}");
+    }
+    if krakend.is_some() {
+        print_versus(&report["metrics"]);
     }
 }
 
-/// Measures one path directly and through `wye`, adding `prefix`ed metrics.
-async fn measure(path: &UpstreamPath<'_>, wye: &WyeProcess, metrics: &mut BTreeMap<String, f64>) {
-    let mut put = |name: &str, value: f64| {
-        metrics.insert(
-            format!("{}{name}", path.prefix),
-            (value * 100.0).round() / 100.0,
-        );
-    };
+const PERCENTILES: [(&str, f64); 2] = [("p50", 50.0), ("p99", 99.0)];
 
-    let direct = Latency::measure(&path.direct).await;
-    let (direct_mb_s, _) = throughput(&path.direct).await;
-    let via = Latency::measure(wye.target()).await;
-    let cpu_before = wye.cpu_secs();
-    let (wye_mb_s, wye_mb) = throughput(wye.target()).await;
-    let cpu_after = wye.cpu_secs();
+fn put(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str, value: f64) {
+    metrics.insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
+}
 
-    for (label, p) in [("p50", 50.0), ("p99", 99.0)] {
+/// Wye against KrakenD for each metric both measured; lower is better except MB/s.
+fn print_versus(metrics: &Value) {
+    println!("\n{:36} {:>10} {:>10}  winner", "metric", "wye", "krakend");
+    let metrics = metrics.as_object().unwrap();
+    for path in ["", "tls_"] {
+        for (name, wye) in metrics {
+            let Some(metric) = name.strip_prefix(path) else {
+                continue;
+            };
+            if metric.starts_with("tls_")
+                || metric.starts_with("krakend_")
+                || metric.starts_with("direct_")
+            {
+                continue;
+            }
+            let Some(krakend) = metrics.get(&format!("{path}krakend_{metric}")) else {
+                continue;
+            };
+            let (wye, krakend) = (wye.as_f64().unwrap(), krakend.as_f64().unwrap());
+            let higher_is_better = metric.ends_with("_mb_s");
+            let wye_wins = if higher_is_better {
+                wye >= krakend
+            } else {
+                wye <= krakend
+            };
+            println!(
+                "{name:36} {wye:>10.2} {krakend:>10.2}  {}",
+                if wye_wins { "wye" } else { "KRAKEND" }
+            );
+        }
+    }
+}
+
+/// The direct baseline of one path: what a client sees without a gateway.
+struct Direct {
+    latency: Latency,
+    mb_s: f64,
+}
+
+impl Direct {
+    async fn measure(target: &Target) -> Self {
+        let latency = Latency::measure(target).await;
+        let (mb_s, _) = throughput(target).await;
+        Self { latency, mb_s }
+    }
+}
+
+/// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
+async fn measure(
+    direct: &Direct,
+    process: &GatewayProcess,
+    prefix: &str,
+    streams_sse: bool,
+    metrics: &mut BTreeMap<String, f64>,
+) {
+    let via = Latency::measure(process.target()).await;
+    let cpu_before = process.cpu_secs();
+    let (mb_s, mb) = throughput(process.target()).await;
+    let cpu_after = process.cpu_secs();
+
+    let direct = &direct.latency;
+    for (label, p) in PERCENTILES {
+        let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
         put(
-            &format!("direct_unary_{label}_us"),
-            percentile(&direct.unary, p),
+            metrics,
+            prefix,
+            &format!("via_unary_{label}_us"),
+            percentile(&via.unary, p),
         );
-        put(&format!("wye_unary_{label}_us"), percentile(&via.unary, p));
         put(
+            metrics,
+            prefix,
             &format!("unary_added_{label}_us"),
-            percentile(&via.unary, p) - percentile(&direct.unary, p),
+            added(&via.unary, &direct.unary),
         );
         put(
+            metrics,
+            prefix,
             &format!("sse_ttfb_added_{label}_us"),
-            percentile(&via.ttfb, p) - percentile(&direct.ttfb, p),
+            added(&via.ttfb, &direct.ttfb),
         );
         put(
+            metrics,
+            prefix,
             &format!("sse_event_added_{label}_us"),
-            percentile(&via.event_delay, p) - percentile(&direct.event_delay, p),
+            added(&via.event_delay, &direct.event_delay),
         );
     }
-    put("direct_throughput_mb_s", direct_mb_s);
-    put("wye_throughput_mb_s", wye_mb_s);
+    put(metrics, prefix, "via_throughput_mb_s", mb_s);
     // `ps` reports CPU time in 10 ms steps; the scenario streams enough data to make that negligible.
     put(
+        metrics,
+        prefix,
         "throughput_cpu_ms_per_mb",
-        (cpu_after - cpu_before) * 1_000.0 / wye_mb,
+        (cpu_after - cpu_before) * 1_000.0 / mb,
     );
 
+    put(metrics, prefix, "rss_after_load_kb", process.rss_kb());
+    if !streams_sse {
+        return;
+    }
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let rss_before = wye.rss_kb();
-    let held = scenarios::open_idle_streams(wye.target(), IDLE_STREAMS).await;
+    let rss_before = process.rss_kb();
+    let held = scenarios::open_idle_streams(process.target(), IDLE_STREAMS).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let rss_open = wye.rss_kb();
+    let rss_open = process.rss_kb();
     drop(held);
     put(
+        metrics,
+        prefix,
         "idle_rss_kb_per_stream",
         (rss_open - rss_before) / IDLE_STREAMS as f64,
     );
-    put("wye_rss_idle_kb", rss_before);
+    put(metrics, prefix, "rss_idle_kb", rss_before);
 
-    let cancel = sorted(scenarios::cancel_latency(wye.target(), CANCEL_ROUNDS).await);
-    put("cancel_upstream_release_p50_us", percentile(&cancel, 50.0));
-    put("cancel_upstream_release_max_us", percentile(&cancel, 100.0));
+    let cancel = sorted(scenarios::cancel_latency(process.target(), CANCEL_ROUNDS).await);
+    put(
+        metrics,
+        prefix,
+        "cancel_upstream_release_p50_us",
+        percentile(&cancel, 50.0),
+    );
+    put(
+        metrics,
+        prefix,
+        "cancel_upstream_release_max_us",
+        percentile(&cancel, 100.0),
+    );
 }
 
 /// Sorted latency samples of the unary and SSE scenarios.
