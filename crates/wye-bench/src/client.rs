@@ -1,6 +1,12 @@
 //! Load client for the mock (plain or TLS) and for Wye.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{
+    net::SocketAddr,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use bytes::Bytes;
 use http::Request;
@@ -14,12 +20,18 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 
 type HttpClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
 
-/// An endpoint to load: base URL plus a pooled client that trusts the test CA.
+/// Independent connection pools per target. Each HTTP/2 pool holds one
+/// connection, so without this the direct TLS baseline would be limited by a
+/// single connection, the same limit Wye's upstream pool works around.
+const POOLS: usize = 8;
+
+/// An endpoint to load: base URL plus pooled clients that trust the test CA.
 #[derive(Clone)]
 pub struct Target {
     base: Arc<str>,
     root: Option<CertificateDer<'static>>,
-    client: HttpClient,
+    clients: Arc<[HttpClient]>,
+    next: Arc<AtomicUsize>,
 }
 
 impl Target {
@@ -33,11 +45,11 @@ impl Target {
     }
 
     fn new(base: String, root: Option<CertificateDer<'static>>) -> Self {
-        let client = build_client(root.as_ref());
         Self {
             base: base.into(),
+            clients: (0..POOLS).map(|_| build_client(root.as_ref())).collect(),
             root,
-            client,
+            next: Arc::default(),
         }
     }
 
@@ -46,8 +58,9 @@ impl Target {
         Self::new(self.base.to_string(), self.root.clone())
     }
 
+    /// The next client, round-robin over the pools.
     pub fn client(&self) -> &HttpClient {
-        &self.client
+        &self.clients[self.next.fetch_add(1, Ordering::Relaxed) % POOLS]
     }
 
     /// `POST /v1/messages` with the mock's control headers.
