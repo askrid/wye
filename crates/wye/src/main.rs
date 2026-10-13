@@ -56,6 +56,7 @@ fn serve(config: Config) -> Result<(), Box<dyn Error>> {
             gateway,
             shutdown_signal(),
             config.server.shutdown_grace,
+            tokio::io::stderr(),
         )
         .await;
         eprintln!("wye: stopped");
