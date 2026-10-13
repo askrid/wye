@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
+use bytes::Bytes;
 use serde_json::{Value, json};
 use wye_testkit::TestCa;
 
@@ -23,6 +24,19 @@ const THROUGHPUT_STREAMS: usize = 32;
 const THROUGHPUT_EVENTS: u32 = 2_000;
 const THROUGHPUT_EVENT_BYTES: usize = 4_096;
 const IDLE_STREAMS: usize = 1_000;
+/// Agent-sized request bodies: Claude Code resends its whole context each turn.
+const UPLOAD_BYTES: usize = 1024 * 1024;
+const UPLOAD_CONCURRENCY: usize = 16;
+const UPLOAD_REQUESTS: usize = 256;
+/// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
+const PACED_STREAMS: usize = 2_000;
+const PACED_EVENTS: u32 = 100;
+const PACED_INTERVAL_US: u64 = 20_000;
+const PACED_EVENT_BYTES: usize = 100;
+/// Stream starts are spread over this time (one per millisecond): macOS caps
+/// the listen backlog at 128, and over HTTP/1.1 every stream needs its own
+/// upstream connection, so faster bursts would measure SYN retries.
+const PACED_RAMP: Duration = Duration::from_millis(2_000);
 const CANCEL_ROUNDS: usize = 20;
 
 /// One way of reaching the mock upstream.
@@ -33,6 +47,10 @@ struct UpstreamPath<'a> {
     direct: Target,
     base_url: String,
     ca_pem: Option<&'a str>,
+    /// Runs the token-paced scenario. Only on TLS + HTTP/2, the production
+    /// path: over HTTP/1.1 every stream opens its own connections, and
+    /// repeated runs exhaust the laptop's ephemeral ports.
+    paced: bool,
 }
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
@@ -56,6 +74,7 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
             direct: Target::plain(plain),
             base_url: format!("http://{plain}"),
             ca_pem: None,
+            paced: false,
         },
         UpstreamPath {
             prefix: "tls_",
@@ -63,6 +82,7 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
             direct: Target::tls(tls, ca.ca_cert()),
             base_url: format!("https://{tls}"),
             ca_pem: Some(ca.ca_pem()),
+            paced: true,
         },
     ];
 
@@ -70,7 +90,7 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
     for i in 1..=repeat {
         let mut metrics = BTreeMap::new();
         for path in &paths {
-            let direct = Direct::measure(&path.direct).await;
+            let direct = Direct::measure(&path.direct, path.paced).await;
             put(
                 &mut metrics,
                 path.prefix,
@@ -97,14 +117,11 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
                     GatewayProcess::start(gateway, &path.base_url, path.ca_pem, dir, path.name)
                         .await;
                 let prefix = format!("{}{}", path.prefix, gateway.prefix());
-                measure(
-                    &direct,
-                    &process,
-                    &prefix,
-                    gateway.streams_sse(),
-                    &mut metrics,
-                )
-                .await;
+                let scope = Scope {
+                    streams_sse: gateway.streams_sse(),
+                    paced: path.paced,
+                };
+                measure(&direct, &process, &prefix, scope, &mut metrics).await;
             }
         }
         runs.push(metrics);
@@ -120,6 +137,8 @@ pub async fn run(wye: &str, krakend: Option<&str>, out: &str, repeat: usize) {
             "throughput": {"concurrency": THROUGHPUT_CONCURRENCY, "streams": THROUGHPUT_STREAMS, "events": THROUGHPUT_EVENTS, "event_bytes": THROUGHPUT_EVENT_BYTES},
             "idle": {"streams": IDLE_STREAMS},
             "cancel": {"rounds": CANCEL_ROUNDS},
+            "upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": UPLOAD_REQUESTS, "body_bytes": UPLOAD_BYTES},
+            "paced": {"streams": PACED_STREAMS, "events": PACED_EVENTS, "interval_us": PACED_INTERVAL_US, "event_bytes": PACED_EVENT_BYTES, "ramp_ms": PACED_RAMP.as_millis() as u64},
         },
         "metrics": median(&runs),
     });
@@ -175,22 +194,47 @@ fn print_versus(metrics: &Value) {
 struct Direct {
     latency: Latency,
     mb_s: f64,
+    upload: Vec<u64>,
+    paced: Option<Paced>,
 }
 
 impl Direct {
-    async fn measure(target: &Target) -> Self {
+    async fn measure(target: &Target, paced: bool) -> Self {
         let latency = Latency::measure(target).await;
         let (mb_s, _) = throughput(target).await;
-        Self { latency, mb_s }
+        let upload = upload(target).await;
+        let paced = if paced {
+            Some(Paced::measure(target, || {}).await)
+        } else {
+            None
+        };
+        Self {
+            latency,
+            mb_s,
+            upload,
+            paced,
+        }
     }
 }
 
+/// Which scenarios apply to a gateway on a path.
+#[derive(Clone, Copy)]
+struct Scope {
+    /// The gateway relays SSE events as they arrive (idle and cancel scenarios).
+    streams_sse: bool,
+    /// The path runs the token-paced scenario.
+    paced: bool,
+}
+
 /// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
+///
+/// Scenario order matters for memory metrics: idle streams are measured before
+/// the upload and paced scenarios, whose allocations would otherwise distort them.
 async fn measure(
     direct: &Direct,
     process: &GatewayProcess,
     prefix: &str,
-    streams_sse: bool,
+    scope: Scope,
     metrics: &mut BTreeMap<String, f64>,
 ) {
     let via = Latency::measure(process.target()).await;
@@ -198,7 +242,7 @@ async fn measure(
     let (mb_s, mb) = throughput(process.target()).await;
     let cpu_after = process.cpu_secs();
 
-    let direct = &direct.latency;
+    let base = &direct.latency;
     for (label, p) in PERCENTILES {
         let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
         put(
@@ -211,19 +255,19 @@ async fn measure(
             metrics,
             prefix,
             &format!("unary_added_{label}_us"),
-            added(&via.unary, &direct.unary),
+            added(&via.unary, &base.unary),
         );
         put(
             metrics,
             prefix,
             &format!("sse_ttfb_added_{label}_us"),
-            added(&via.ttfb, &direct.ttfb),
+            added(&via.ttfb, &base.ttfb),
         );
         put(
             metrics,
             prefix,
             &format!("sse_event_added_{label}_us"),
-            added(&via.event_delay, &direct.event_delay),
+            added(&via.event_delay, &base.event_delay),
         );
     }
     put(metrics, prefix, "via_throughput_mb_s", mb_s);
@@ -235,10 +279,70 @@ async fn measure(
         (cpu_after - cpu_before) * 1_000.0 / mb,
     );
 
-    put(metrics, prefix, "rss_after_load_kb", process.rss_kb());
-    if !streams_sse {
-        return;
+    if scope.streams_sse {
+        measure_idle_and_cancel(process, prefix, metrics).await;
     }
+
+    let cpu_before = process.cpu_secs();
+    let via_upload = upload(process.target()).await;
+    let cpu_after = process.cpu_secs();
+    for (label, p) in PERCENTILES {
+        let added = percentile(&via_upload, p) - percentile(&direct.upload, p);
+        put(metrics, prefix, &format!("upload_added_{label}_us"), added);
+    }
+    let uploaded_mb = (UPLOAD_BYTES * UPLOAD_REQUESTS) as f64 / 1e6;
+    put(
+        metrics,
+        prefix,
+        "upload_cpu_ms_per_mb",
+        (cpu_after - cpu_before) * 1_000.0 / uploaded_mb,
+    );
+
+    if let (true, Some(direct_paced)) = (scope.paced, &direct.paced) {
+        let rss_before = process.rss_kb();
+        let cpu_before = process.cpu_secs();
+        let mut rss_loaded = 0.0;
+        let paced = Paced::measure(process.target(), || rss_loaded = process.rss_kb()).await;
+        let cpu_after = process.cpu_secs();
+        for (label, p) in PERCENTILES {
+            let added =
+                percentile(&paced.event_delay, p) - percentile(&direct_paced.event_delay, p);
+            put(
+                metrics,
+                prefix,
+                &format!("paced_event_added_{label}_us"),
+                added,
+            );
+        }
+        put(
+            metrics,
+            prefix,
+            "paced_ttfb_added_p99_us",
+            percentile(&paced.ttfb, 99.0) - percentile(&direct_paced.ttfb, 99.0),
+        );
+        put(
+            metrics,
+            prefix,
+            "paced_cpu_us_per_event",
+            (cpu_after - cpu_before) * 1e6 / paced.event_delay.len() as f64,
+        );
+        put(
+            metrics,
+            prefix,
+            "paced_rss_kb_per_stream",
+            (rss_loaded - rss_before) / PACED_STREAMS as f64,
+        );
+    }
+
+    put(metrics, prefix, "rss_after_load_kb", process.rss_kb());
+}
+
+/// Memory per open idle stream, and upstream release after a client disconnect.
+async fn measure_idle_and_cancel(
+    process: &GatewayProcess,
+    prefix: &str,
+    metrics: &mut BTreeMap<String, f64>,
+) {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let rss_before = process.rss_kb();
     let held = scenarios::open_idle_streams(process.target(), IDLE_STREAMS).await;
@@ -293,6 +397,52 @@ impl Latency {
         .await;
         Self {
             unary,
+            ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
+            event_delay: sorted(
+                streams
+                    .into_iter()
+                    .flat_map(|s| s.event_delays_us)
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// Latency samples of agent-sized uploads.
+async fn upload(target: &Target) -> Vec<u64> {
+    let body = Bytes::from(vec![b'x'; UPLOAD_BYTES]);
+    sorted(scenarios::upload(target, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await)
+}
+
+/// Sorted samples of the token-paced scenario.
+struct Paced {
+    ttfb: Vec<u64>,
+    event_delay: Vec<u64>,
+}
+
+impl Paced {
+    /// Runs all streams concurrently; `while_loaded` runs once every stream is open.
+    async fn measure(target: &Target, while_loaded: impl FnOnce()) -> Self {
+        let streams = {
+            let target = target.clone();
+            tokio::spawn(async move {
+                scenarios::paced(
+                    &target,
+                    PACED_STREAMS,
+                    PACED_RAMP,
+                    PACED_EVENTS,
+                    PACED_EVENT_BYTES,
+                    PACED_INTERVAL_US,
+                )
+                .await
+            })
+        };
+        // Each stream lasts 2 s and starts within the 2 s ramp: just after the
+        // ramp, every stream is open and streaming.
+        tokio::time::sleep(PACED_RAMP + Duration::from_millis(100)).await;
+        while_loaded();
+        let streams = streams.await.unwrap();
+        Self {
             ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
             event_delay: sorted(
                 streams
