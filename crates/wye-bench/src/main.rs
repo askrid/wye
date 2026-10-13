@@ -3,10 +3,12 @@
 //! Runs the same scenarios directly against a mock Anthropic upstream and
 //! through a real `wye` binary, then reports Wye's added cost. Two upstream
 //! paths are measured: plain HTTP/1.1 (metric names without prefix) and TLS
-//! with HTTP/2, like the real provider (`tls_` prefix).
+//! with HTTP/2, like the real provider (`tls_` prefix). With `--krakend`, the
+//! same scenarios also run through KrakenD (`krakend_` prefix) for comparison.
+//! `WYE_BENCH_UPSTREAM` appends lines to Wye's `[upstream]` config, for tuning experiments.
 //!
 //! Usage:
-//!   wye-bench run --wye <path> --out <results.json> [--repeat N]
+//!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--krakend <path>]
 //!   wye-bench compare <baseline.json> <results.json>
 //!   wye-bench adopt-new <baseline.json> <results.json>
 
@@ -20,10 +22,10 @@
 
 mod client;
 mod gate;
+mod gateway_process;
 mod mock;
 mod run;
 mod scenarios;
-mod wye_process;
 
 use std::process::ExitCode;
 
@@ -31,21 +33,30 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match args.as_slice() {
-        ["run", "--wye", binary, "--out", out, rest @ ..] => {
-            let repeat = match rest {
-                [] => 3,
-                ["--repeat", n] => match n.parse() {
-                    Ok(n) if n > 0 => n,
+        ["run", "--wye", binary, "--out", out, flags @ ..] => {
+            let mut repeat = 3;
+            let mut krakend = None;
+            let mut rest: &[&str] = flags;
+            while let [flag, value, tail @ ..] = rest {
+                match *flag {
+                    "--repeat" => match value.parse() {
+                        Ok(n) if n > 0 => repeat = n,
+                        _ => return usage(),
+                    },
+                    "--krakend" => krakend = Some(*value),
                     _ => return usage(),
-                },
-                _ => return usage(),
-            };
+                }
+                rest = tail;
+            }
+            if !rest.is_empty() {
+                return usage();
+            }
             mock::init_clock();
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .unwrap()
-                .block_on(run::run(binary, out, repeat));
+                .block_on(run::run(binary, krakend, out, repeat));
             ExitCode::SUCCESS
         }
         ["compare", baseline, current] => {
@@ -66,7 +77,7 @@ fn main() -> ExitCode {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N]\n  \
+        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--krakend <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
          wye-bench adopt-new <baseline.json> <results.json>"
     );
