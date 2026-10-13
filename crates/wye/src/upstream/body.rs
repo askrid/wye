@@ -13,7 +13,7 @@ use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 use tokio::time::{Instant, Sleep};
 
-use super::pool::Slot;
+use crate::gauge::Held;
 
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
@@ -29,11 +29,11 @@ pub(crate) struct UpstreamBody<B> {
     timeout: Duration,
     sleep: Pin<Box<Sleep>>,
     waiting: bool,
-    _slot: Slot,
+    _slot: Held,
 }
 
 impl<B> UpstreamBody<B> {
-    pub(super) fn new(inner: B, timeout: Duration, slot: Slot) -> Self {
+    pub(super) fn new(inner: B, timeout: Duration, slot: Held) -> Self {
         Self {
             inner,
             timeout,
