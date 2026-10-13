@@ -9,6 +9,8 @@
 //! - `sse_ttfb_*`: added time to the first streamed byte.
 //! - `throughput_*`: Wye CPU per streamed MB and achieved MB/s.
 //! - `idle_rss_kb_per_stream`: Wye memory per open, idle stream.
+//! - `cancel_upstream_release_*`: time from a client disconnect to Wye
+//!   releasing the upstream stream, while the upstream is silent.
 //!
 //! `compare` fails when any gated metric is worse than the baseline beyond its
 //! tolerance. Mock, load client, and Wye share one machine, so absolute numbers
@@ -17,6 +19,7 @@
 //! Usage:
 //!   wye-bench run --wye <path-to-wye> --out <results.json>
 //!   wye-bench compare <baseline.json> <results.json>
+//!   wye-bench adopt-new <baseline.json> <results.json>
 
 // Development tool, not on the request path: panics abort a benchmark run.
 #![allow(
@@ -50,6 +53,11 @@ use tokio::{net::TcpListener, process::Child, task::JoinSet, time::Sleep};
 
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 
+/// Receives the time each mock SSE body is dropped, so the cancel scenario can
+/// see when Wye released the upstream stream.
+static BODY_DROPPED: std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<u64>>> =
+    std::sync::Mutex::new(None);
+
 fn now_nanos() -> u64 {
     EPOCH.get_or_init(Instant::now).elapsed().as_nanos() as u64
 }
@@ -62,6 +70,18 @@ struct SseBody {
     payload: Bytes,
     interval: Duration,
     sleep: Option<Pin<Box<Sleep>>>,
+    /// Report the drop time (cancel scenario only).
+    report_drop: bool,
+}
+
+impl Drop for SseBody {
+    fn drop(&mut self) {
+        if self.report_drop
+            && let Some(tx) = BODY_DROPPED.lock().unwrap().as_ref()
+        {
+            let _ = tx.send(now_nanos());
+        }
+    }
 }
 
 impl Body for SseBody {
@@ -116,6 +136,7 @@ async fn mock_handle(
         payload: Bytes::from(vec![b'x'; size]),
         interval: Duration::from_micros(header_u64(&headers, "x-bench-interval-us").unwrap_or(0)),
         sleep: None,
+        report_drop: headers.contains_key("x-bench-report-drop"),
     }));
     res.headers_mut()
         .insert("content-type", "text/event-stream".parse().unwrap());
@@ -379,6 +400,46 @@ async fn open_idle_streams(target: SocketAddr, count: usize) -> Vec<Incoming> {
     bodies
 }
 
+/// Time from the client dropping a stream to the upstream body being dropped, in µs.
+///
+/// The upstream sends one event and then pauses for 60 s, like a model thinking,
+/// so the gateway has no write on which to notice the disconnect. Runs
+/// sequentially so each drop report belongs to the current stream.
+async fn cancel_latency(target: SocketAddr, rounds: usize) -> Vec<u64> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    // Each call installs its own channel; the mock lives for the whole process.
+    *BODY_DROPPED.lock().unwrap() = Some(tx);
+    let mut out = Vec::with_capacity(rounds);
+    for _ in 0..rounds {
+        // A fresh client per round: dropping a pooled connection's body would otherwise
+        // only return the connection to the pool.
+        let res = client()
+            .request(request(
+                target,
+                &[
+                    ("x-bench-events", "2".into()),
+                    ("x-bench-size", "16".into()),
+                    ("x-bench-interval-us", "60000000".into()),
+                    ("x-bench-report-drop", "1".into()),
+                ],
+            ))
+            .await
+            .unwrap();
+        let mut body = res.into_body();
+        body.frame().await.unwrap().unwrap();
+        let cancelled = now_nanos();
+        drop(body);
+        let latency = match tokio::time::timeout(CANCEL_TIMEOUT, rx.recv()).await {
+            Ok(Some(dropped)) => dropped.saturating_sub(cancelled) / 1_000,
+            _ => CANCEL_TIMEOUT.as_micros() as u64,
+        };
+        out.push(latency);
+        // Drain reports from a late drop so the next round starts clean.
+        while rx.try_recv().is_ok() {}
+    }
+    out
+}
+
 fn percentile(sorted: &[u64], p: f64) -> f64 {
     sorted[((p / 100.0) * (sorted.len() - 1) as f64).round() as usize] as f64
 }
@@ -401,6 +462,9 @@ const THROUGHPUT_STREAMS: usize = 32;
 const THROUGHPUT_EVENTS: u32 = 2_000;
 const THROUGHPUT_EVENT_BYTES: usize = 4_096;
 const IDLE_STREAMS: usize = 1_000;
+const CANCEL_ROUNDS: usize = 20;
+/// Reported when the upstream is not released at all within this time.
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct Measured {
     unary: Vec<u64>,
@@ -541,6 +605,9 @@ async fn once(mock: SocketAddr, wye: &WyeProcess) -> BTreeMap<String, f64> {
         (rss_open - rss_before) / IDLE_STREAMS as f64,
     );
     put("wye_rss_idle_kb", rss_before);
+    let cancel = sorted(cancel_latency(wye.addr, CANCEL_ROUNDS).await);
+    put("cancel_upstream_release_p50_us", percentile(&cancel, 50.0));
+    put("cancel_upstream_release_max_us", percentile(&cancel, 100.0));
     metrics
 }
 
@@ -583,6 +650,9 @@ const GATES: &[(&str, f64, f64)] = &[
     ("sse_event_added_p99_us", 0.50, 150.0),
     ("throughput_cpu_ms_per_mb", 0.12, 0.05),
     ("idle_rss_kb_per_stream", 0.10, 2.0),
+    // Guards the property, not the microseconds: a release that waits for the
+    // next upstream write would take seconds.
+    ("cancel_upstream_release_max_us", 1.0, 20_000.0),
 ];
 
 fn compare(baseline: &str, current: &str) -> bool {
@@ -624,6 +694,28 @@ fn compare(baseline: &str, current: &str) -> bool {
     ok
 }
 
+/// Copies metrics that exist in `current` but not in `baseline` into the baseline.
+///
+/// Used when a new metric is added: existing baseline values stay untouched, so
+/// adding a metric never loosens an existing gate.
+fn adopt_new(baseline: &str, current: &str) {
+    let mut base: Value =
+        serde_json::from_str(&std::fs::read_to_string(baseline).unwrap()).unwrap();
+    let cur: Value = serde_json::from_str(&std::fs::read_to_string(current).unwrap()).unwrap();
+    let metrics = base["metrics"].as_object_mut().unwrap();
+    for (name, value) in cur["metrics"].as_object().unwrap() {
+        if !metrics.contains_key(name) {
+            println!("adopted {name} = {value}");
+            metrics.insert(name.clone(), value.clone());
+        }
+    }
+    std::fs::write(
+        baseline,
+        serde_json::to_string_pretty(&base).unwrap() + "\n",
+    )
+    .unwrap();
+}
+
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -643,6 +735,10 @@ fn main() -> std::process::ExitCode {
                 .block_on(run(binary, out, repeat));
             std::process::ExitCode::SUCCESS
         }
+        ["adopt-new", baseline, current] => {
+            adopt_new(baseline, current);
+            std::process::ExitCode::SUCCESS
+        }
         ["compare", baseline, current] => {
             if compare(baseline, current) {
                 std::process::ExitCode::SUCCESS
@@ -657,7 +753,7 @@ fn main() -> std::process::ExitCode {
 
 fn usage() -> std::process::ExitCode {
     eprintln!(
-        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N]\n  wye-bench compare <baseline.json> <results.json>"
+        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N]\n  wye-bench compare <baseline.json> <results.json>\n  wye-bench adopt-new <baseline.json> <results.json>"
     );
     std::process::ExitCode::from(2)
 }
