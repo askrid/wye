@@ -3,10 +3,7 @@
 use std::path::Path;
 
 use gateway_core::credential::{self, NewCredential};
-use ring::{
-    rand::SystemRandom,
-    signature::{Ed25519KeyPair, KeyPair},
-};
+use ring::signature::KeyPair;
 
 /// LiteLLM refuses to start without a master key and then authenticates every route.
 pub(crate) const LITELLM_MASTER_KEY: &str = "sk-bench-master";
@@ -25,8 +22,7 @@ pub(crate) struct BenchCredentials {
 
 impl BenchCredentials {
     pub(crate) fn generate() -> Self {
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-        let key = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let key = wye_testkit::ed25519_keypair();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

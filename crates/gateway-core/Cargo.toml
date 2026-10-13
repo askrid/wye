@@ -16,6 +16,7 @@ toml = { workspace = true, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 proptest.workspace = true
+wye-testkit.workspace = true
 
 [lints]
 workspace = true
