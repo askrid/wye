@@ -31,7 +31,8 @@ use hyper_util::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader, DuplexStream, Lines},
     net::TcpListener,
-    sync::{Mutex, mpsc},
+    sync::{Mutex, mpsc, oneshot},
+    task::JoinHandle,
 };
 use wye::{Gateway, Resources, UpstreamAuth};
 use wye_testkit::TestCa;
@@ -73,6 +74,9 @@ struct Harness {
     upstream_hits: Arc<AtomicUsize>,
     client: Client<HttpConnector, Full<Bytes>>,
     usage: Mutex<Lines<BufReader<DuplexStream>>>,
+    /// Sending (or dropping) triggers the gateway's shutdown.
+    shutdown: Option<oneshot::Sender<()>>,
+    served: JoinHandle<()>,
 }
 
 impl Harness {
@@ -86,7 +90,27 @@ impl Harness {
         };
         Self::launch(
             &format!("http://{upstream}"),
+            "",
             upstream_extra,
+            resources,
+            hits,
+        )
+        .await
+    }
+
+    /// API-key gateway in front of a plain mock upstream, with extra `[server]` lines.
+    async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let resources = Resources {
+            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            extra_roots: Vec::new(),
+        };
+        let base_url = format!("http://{upstream}");
+        Self::launch(
+            &base_url,
+            server_extra,
+            "api_key_env = \"UNUSED\"",
             resources,
             hits,
         )
@@ -118,17 +142,18 @@ impl Harness {
         };
         let base_url = format!("https://{upstream}");
         let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
-        Self::launch(&base_url, &extra, resources, hits).await
+        Self::launch(&base_url, "", &extra, resources, hits).await
     }
 
     async fn launch(
         base_url: &str,
+        server_extra: &str,
         upstream_extra: &str,
         resources: Resources,
         upstream_hits: Arc<AtomicUsize>,
     ) -> Self {
         let config = Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\n\
+            "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
              [upstream]\nbase_url = \"{base_url}\"\n{upstream_extra}"
         ))
         .unwrap();
@@ -136,11 +161,13 @@ impl Harness {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (usage_out, usage_in) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(wye::serve(
+        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
+        let served = tokio::spawn(wye::serve(
             listener,
             gateway,
-            std::future::pending(),
-            Duration::ZERO,
+            async move {
+                let _ = shutdown_rx.await;
+            },
             usage_out,
         ));
         Self {
@@ -148,7 +175,14 @@ impl Harness {
             upstream_hits,
             client: Client::builder(TokioExecutor::new()).build_http(),
             usage: Mutex::new(BufReader::new(usage_in).lines()),
+            shutdown: Some(shutdown),
+            served,
         }
+    }
+
+    /// Triggers shutdown, as a SIGTERM would.
+    fn begin_shutdown(&mut self) {
+        let _ = self.shutdown.take().unwrap().send(());
     }
 
     async fn api_key(handler: Handler) -> Self {
@@ -702,4 +736,136 @@ async fn concurrent_streams_beyond_one_connection_limit_are_not_queued() {
     }
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), STREAMS);
     drop(open);
+}
+
+/// Upstream response that stays open, silent, until the returned senders drop.
+fn held_open(open: &Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>>) -> Handler {
+    let open = Arc::clone(open);
+    Arc::new(move |_| {
+        let (tx, rx) = mpsc::channel(1);
+        open.lock().unwrap().push(tx);
+        Box::pin(async move {
+            let mut res = Response::new(Either::Right(ChannelBody(rx)));
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    })
+}
+
+#[tokio::test]
+async fn requests_beyond_the_concurrency_limit_get_overloaded_error() {
+    let open = Arc::default();
+    let h = Harness::with_server_config(held_open(&open), "max_concurrent_requests = 2").await;
+    let first = h.send(messages(), "{}").await;
+    let _second = h.send(messages(), "{}").await;
+
+    let res = h.send(messages(), "{}").await;
+    assert_eq!(res.status().as_u16(), 529);
+    assert!(
+        read_body(res)
+            .await
+            .starts_with(br#"{"type":"error","error":{"type":"overloaded_error""#)
+    );
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 2);
+
+    // The permit is released with the response body.
+    drop(first);
+    let mut status = 0;
+    for _ in 0..50 {
+        status = h.send(messages(), "{}").await.status().as_u16();
+        if status == 200 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn shutdown_drains_then_stops_within_the_deadline() {
+    let open = Arc::default();
+    let mut h = Harness::with_server_config(
+        held_open(&open),
+        "drain_delay_secs = 1\nshutdown_grace_secs = 1",
+    )
+    .await;
+    let stream = h.send(messages(), "{}").await;
+    assert_eq!(stream.status(), StatusCode::OK);
+
+    let started = std::time::Instant::now();
+    h.begin_shutdown();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Draining: not ready, but still alive and serving new requests.
+    assert_eq!(
+        h.send(Request::get("/readyz"), "").await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        h.send(Request::get("/healthz"), "").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(h.send(messages(), "{}").await.status(), StatusCode::OK);
+
+    // The never-ending stream cannot hold shutdown past drain delay + grace.
+    tokio::time::timeout(Duration::from_secs(5), &mut h.served)
+        .await
+        .expect("serve did not stop within the deadline")
+        .unwrap();
+    let took = started.elapsed();
+    assert!(
+        took >= Duration::from_secs(1),
+        "drain delay skipped: {took:?}"
+    );
+    assert!(took < Duration::from_secs(4), "deadline exceeded: {took:?}");
+
+    // The open stream was cut, not left hanging.
+    let ended = tokio::time::timeout(WAIT, stream.into_body().collect()).await;
+    assert!(ended.is_ok(), "stream still open after shutdown");
+    drop(open);
+}
+
+#[tokio::test]
+async fn slow_reader_backpressures_the_upstream() {
+    const CHUNK: usize = 1024 * 1024;
+    const CHUNKS: usize = 64;
+    let produced = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&produced);
+    let handler: Handler = Arc::new(move |_| {
+        let counter = Arc::clone(&counter);
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move {
+                let chunk = Bytes::from(vec![b'x'; CHUNK]);
+                for _ in 0..CHUNKS {
+                    if tx.send(chunk.clone()).await.is_err() {
+                        return;
+                    }
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            Response::new(Either::Right(ChannelBody(rx)))
+        })
+    });
+    let h = Harness::api_key(handler).await;
+
+    // Receive headers, then read nothing.
+    let res = h.send(messages(), "{}").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let buffered = produced.load(Ordering::Relaxed);
+    // Socket buffers on both hops hold a few MiB; without backpressure the
+    // upstream would have produced all 64 MiB by now.
+    assert!(
+        buffered < CHUNKS / 4,
+        "upstream produced {buffered} MiB for a reader that read none"
+    );
+
+    // Reading resumes the flow to the end.
+    let body = tokio::time::timeout(Duration::from_secs(20), res.into_body().collect())
+        .await
+        .unwrap()
+        .unwrap()
+        .to_bytes();
+    assert_eq!(body.len(), CHUNK * CHUNKS);
 }

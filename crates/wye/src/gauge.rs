@@ -31,6 +31,17 @@ impl Gauge {
         self.0.fetch_add(1, Ordering::Relaxed);
         Held(Arc::clone(&self.0))
     }
+
+    /// Holds one unit unless `max` are already held. Concurrent callers cannot
+    /// both take the last unit: the increment itself decides.
+    pub(crate) fn try_hold(&self, max: usize) -> Option<Held> {
+        if self.0.fetch_add(1, Ordering::Relaxed) < max {
+            Some(Held(Arc::clone(&self.0)))
+        } else {
+            self.0.fetch_sub(1, Ordering::Relaxed);
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -46,5 +57,15 @@ mod tests {
         drop(a);
         drop(b);
         assert_eq!(gauge.current(), 0);
+    }
+
+    #[test]
+    fn try_hold_stops_at_max_and_reopens_after_release() {
+        let gauge = Gauge::default();
+        let first = gauge.try_hold(1).unwrap();
+        assert!(gauge.try_hold(1).is_none());
+        assert_eq!(gauge.current(), 1);
+        drop(first);
+        assert!(gauge.try_hold(1).is_some());
     }
 }

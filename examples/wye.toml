@@ -6,6 +6,11 @@
 [server]
 listen = "127.0.0.1:8080"
 # max_request_body_bytes = 33554432
+# Requests in flight before new ones get an overload (529) error:
+# max_concurrent_requests = 10000
+# Behind a load balancer: keep serving with /readyz failing this long after
+# SIGTERM, so traffic moves away before connections are refused.
+# drain_delay_secs = 0
 # shutdown_grace_secs = 30
 
 [upstream]
