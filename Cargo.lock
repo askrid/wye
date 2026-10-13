@@ -1114,6 +1114,7 @@ dependencies = [
  "hyper-util",
  "ring",
  "rustls",
+ "serde",
  "serde_json",
  "tokio",
  "webpki-roots",
