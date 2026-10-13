@@ -79,7 +79,7 @@ impl Harness {
     /// Gateway in front of a plain-HTTP mock upstream.
     async fn start(handler: Handler, upstream_extra: &str, auth: UpstreamAuth) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), None).await;
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
             auth,
             extra_roots: Vec::new(),
@@ -95,8 +95,19 @@ impl Harness {
 
     /// Gateway in front of a TLS mock upstream; `trusted` adds the mock's CA to Wye's roots.
     async fn start_tls(handler: Handler, ca: &TestCa, trusted: bool) -> Self {
+        Self::start_tls_with(handler, ca, trusted, None, "").await
+    }
+
+    /// Like `start_tls`, with the mock's HTTP/2 stream limit and extra `[upstream]` lines.
+    async fn start_tls_with(
+        handler: Handler,
+        ca: &TestCa,
+        trusted: bool,
+        mock_max_streams: Option<u32>,
+        upstream_extra: &str,
+    ) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca)).await;
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca), mock_max_streams).await;
         let resources = Resources {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
             extra_roots: if trusted {
@@ -106,7 +117,8 @@ impl Harness {
             },
         };
         let base_url = format!("https://{upstream}");
-        Self::launch(&base_url, "api_key_env = \"UNUSED\"", resources, hits).await
+        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
+        Self::launch(&base_url, &extra, resources, hits).await
     }
 
     async fn launch(
@@ -175,6 +187,7 @@ async fn spawn_upstream(
     handler: Handler,
     hits: Arc<AtomicUsize>,
     tls: Option<&TestCa>,
+    max_streams: Option<u32>,
 ) -> SocketAddr {
     let serve = move |req: Request<Incoming>| {
         let handler = Arc::clone(&handler);
@@ -192,7 +205,7 @@ async fn spawn_upstream(
             .await
         }
     };
-    wye_testkit::spawn_upstream(serve, tls).await
+    wye_testkit::spawn_upstream(serve, tls, max_streams).await
 }
 
 fn full(status: StatusCode, body: &'static str) -> Response<UpBody> {
@@ -663,4 +676,37 @@ fn ca_file_resolves_relative_to_the_config_directory() {
     let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
     assert!(err.contains("no PEM certificates found"), "{err}");
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[tokio::test]
+async fn concurrent_streams_beyond_one_connection_limit_are_not_queued() {
+    const PEER_LIMIT: u32 = 4;
+    const STREAMS: usize = 10;
+    let ca = TestCa::generate();
+    // Streams stay open until the test ends, holding their HTTP/2 stream slots.
+    let open: Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>> = Arc::default();
+    let held = Arc::clone(&open);
+    let handler: Handler = Arc::new(move |_| {
+        let (tx, rx) = mpsc::channel(1);
+        held.lock().unwrap().push(tx);
+        Box::pin(async move { Response::new(Either::Right(ChannelBody(rx))) })
+    });
+    let h = Harness::start_tls_with(
+        handler,
+        &ca,
+        true,
+        Some(PEER_LIMIT),
+        &format!("max_streams_per_connection = {PEER_LIMIT}"),
+    )
+    .await;
+
+    // Each response keeps its stream open, so stream n needs a free slot while n-1 are held.
+    let mut responses = Vec::new();
+    for _ in 0..STREAMS {
+        let res = h.send(messages(), "{}").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        responses.push(res);
+    }
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), STREAMS);
+    drop(open);
 }

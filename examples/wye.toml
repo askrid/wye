@@ -16,3 +16,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 # connect_timeout_secs = 10
 # response_header_timeout_secs = 600
 # stream_idle_timeout_secs = 120
+# Concurrent requests per upstream connection before another is opened;
+# keep at or below the provider's HTTP/2 stream limit.
+# max_streams_per_connection = 100
+# PEM file of extra trusted root certificates (e.g. a TLS-inspecting proxy):
+# ca_file = "corporate-ca.pem"

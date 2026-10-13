@@ -13,11 +13,11 @@ use hyper::body::Incoming;
 
 use crate::{
     Resources, StartupError,
-    upstream::{ForwardError, IdleTimeout, Upstream},
+    upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{Observed, RequestInfo, UsageLog},
 };
 
-pub(crate) type ResBody = Either<Full<Bytes>, Observed<IdleTimeout<Incoming>>>;
+pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
 const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
 
@@ -61,43 +61,52 @@ impl Gateway {
             .get(CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok());
-        let res = if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
-            error(
+        if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
+            let res = error(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request_too_large",
                 "request body exceeds the gateway limit",
-            )
-        } else {
-            match self
-                .upstream
-                .forward(req, self.max_request_body_bytes)
-                .await
-            {
-                Ok(res) => {
-                    let status = res.status();
-                    let is_event_stream = res
-                        .headers()
-                        .get(CONTENT_TYPE)
-                        .is_some_and(|v| v.as_bytes().starts_with(b"text/event-stream"));
-                    let log = log.clone();
-                    return res.map(|body| {
-                        Either::Right(Observed::new(body, info, status, is_event_stream, log))
-                    });
-                }
-                Err(ForwardError::HeaderTimeout) => error(
-                    StatusCode::GATEWAY_TIMEOUT,
-                    "api_error",
-                    "upstream did not respond in time",
-                ),
-                Err(ForwardError::Upstream) => error(
-                    StatusCode::BAD_GATEWAY,
-                    "api_error",
-                    "upstream request failed",
-                ),
+            );
+            log.gateway_error(info, res.status());
+            return res;
+        }
+        match self
+            .upstream
+            .forward(req, self.max_request_body_bytes)
+            .await
+        {
+            Ok(res) => {
+                let status = res.status();
+                let is_event_stream = res
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .is_some_and(|v| v.as_bytes().starts_with(b"text/event-stream"));
+                let log = log.clone();
+                res.map(|body| {
+                    Either::Right(Observed::new(body, info, status, is_event_stream, log))
+                })
             }
-        };
-        log.gateway_error(info, res.status());
-        res
+            Err(e) => {
+                let res = forward_error(e);
+                log.gateway_error(info, res.status());
+                res
+            }
+        }
+    }
+}
+
+fn forward_error(e: ForwardError) -> Response<ResBody> {
+    match e {
+        ForwardError::HeaderTimeout => error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "api_error",
+            "upstream did not respond in time",
+        ),
+        ForwardError::Upstream => error(
+            StatusCode::BAD_GATEWAY,
+            "api_error",
+            "upstream request failed",
+        ),
     }
 }
 

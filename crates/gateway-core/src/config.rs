@@ -25,6 +25,8 @@ const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS: u64 = 600;
 /// Must exceed the provider's SSE `ping` interval during long thinking pauses.
 const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
+/// RFC 9113 recommends that peers allow at least 100 concurrent streams.
+const DEFAULT_MAX_STREAMS_PER_CONNECTION: u32 = 100;
 
 /// Validated gateway configuration.
 #[derive(Debug, Clone)]
@@ -51,6 +53,9 @@ pub struct Upstream {
     /// PEM file of extra root certificates trusted for the upstream, in addition
     /// to the built-in roots. Relative paths are relative to the config file.
     pub ca_file: Option<PathBuf>,
+    /// Concurrent requests per upstream connection before another is opened.
+    /// Set it at or below the provider's HTTP/2 stream limit.
+    pub max_streams_per_connection: u32,
     pub connect_timeout: Duration,
     pub response_header_timeout: Duration,
     pub stream_idle_timeout: Duration,
@@ -129,6 +134,7 @@ struct RawUpstream {
     #[serde(default)]
     forward_caller_credential: bool,
     ca_file: Option<PathBuf>,
+    max_streams_per_connection: Option<u32>,
     connect_timeout_secs: Option<u64>,
     response_header_timeout_secs: Option<u64>,
     stream_idle_timeout_secs: Option<u64>,
@@ -200,6 +206,10 @@ fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
                 return Err(ConfigError::EmptyPath("upstream.ca_file"));
             }
             path => path,
+        },
+        max_streams_per_connection: match raw.max_streams_per_connection {
+            Some(0) => return Err(ConfigError::Zero("upstream.max_streams_per_connection")),
+            value => value.unwrap_or(DEFAULT_MAX_STREAMS_PER_CONNECTION),
         },
         connect_timeout: secs(
             raw.connect_timeout_secs
@@ -378,6 +388,16 @@ mod tests {
         assert_eq!(
             parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
             ConfigError::EmptyPath("upstream.ca_file")
+        );
+    }
+
+    #[test]
+    fn max_streams_per_connection_defaults_and_rejects_zero() {
+        let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+        assert_eq!(parse(ok).unwrap().upstream.max_streams_per_connection, 100);
+        assert_eq!(
+            parse(&format!("{ok}max_streams_per_connection = 0")).unwrap_err(),
+            ConfigError::Zero("upstream.max_streams_per_connection")
         );
     }
 
