@@ -84,7 +84,7 @@ Stage 4 is required before any non-loopback deployment.
 
 ### M5: benchmarks and optimization
 
-- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, slow-reader backpressure (integration test), KrakenD and LiteLLM. M5 adds 10k streams, Linux and multi-machine runs, and Envoy AI Gateway.
+- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, slow-reader backpressure (integration test), KrakenD and LiteLLM. M5 adds 10k streams, Linux and multi-machine runs, Envoy AI Gateway, and replay of the public TraceLab coding-agent trace (real context sizes, output lengths, and turn gaps) as a workload ([research.md](research.md#related-work)).
 - Equivalent baseline configurations and published methodology ([research.md](research.md#benchmarks)).
 - Profiling and targeted optimization of memory, TTFT, backpressure, and CPU.
 
