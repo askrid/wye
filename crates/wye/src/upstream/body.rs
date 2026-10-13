@@ -45,15 +45,15 @@ impl<B> UpstreamBody<B> {
 }
 
 #[derive(Debug)]
-struct StreamUpstreamBody;
+struct IdleTimeoutError;
 
-impl fmt::Display for StreamUpstreamBody {
+impl fmt::Display for IdleTimeoutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("upstream stream idle timeout")
     }
 }
 
-impl StdError for StreamUpstreamBody {}
+impl StdError for IdleTimeoutError {}
 
 impl<B> Body for UpstreamBody<B>
 where
@@ -79,7 +79,7 @@ where
                     this.sleep.as_mut().reset(Instant::now() + this.timeout);
                 }
                 match this.sleep.as_mut().poll(cx) {
-                    Poll::Ready(()) => Poll::Ready(Some(Err(StreamUpstreamBody.into()))),
+                    Poll::Ready(()) => Poll::Ready(Some(Err(IdleTimeoutError.into()))),
                     Poll::Pending => Poll::Pending,
                 }
             }

@@ -110,10 +110,7 @@ impl Upstream {
             .enable_http2()
             .wrap_connector(http);
         Ok(Self {
-            clients: ClientPool::new(
-                || Client::builder(TokioExecutor::new()).build(https.clone()),
-                config.max_streams_per_connection,
-            ),
+            clients: ClientPool::new(|| Client::builder(TokioExecutor::new()).build(https.clone())),
             scheme: config.scheme.clone(),
             authority: config.authority.clone(),
             path_prefix: config.path_prefix.as_str().into(),
