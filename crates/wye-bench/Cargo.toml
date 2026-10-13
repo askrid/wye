@@ -7,6 +7,8 @@ publish.workspace = true
 
 [dependencies]
 wye-testkit.workspace = true
+gateway-core.workspace = true
+ring = { workspace = true, features = ["alloc"] }
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
