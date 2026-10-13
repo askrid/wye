@@ -2,23 +2,21 @@
 
 use std::{
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use bytes::Bytes;
-use gateway_core::{
-    config::Config,
-    credential::{CredentialError, Identity, Verifier},
-};
+use gateway_core::{config::Config, credential::Verifier};
 use http::{
-    HeaderMap, HeaderName, Method, Request, Response, StatusCode,
-    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE},
+    HeaderName, Method, Request, Response, StatusCode,
+    header::{CONTENT_LENGTH, CONTENT_TYPE},
 };
 use http_body_util::{Either, Full};
 use hyper::body::Incoming;
 
 use crate::{
     Resources, StartupError,
+    auth::{ConnectionAuth, authenticate},
     gauge::Gauge,
     upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{Observed, RequestInfo, UsageLog},
@@ -27,7 +25,6 @@ use crate::{
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
 const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
-const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
 const OVERLOADED: u16 = 529;
@@ -87,7 +84,12 @@ impl Gateway {
         self.draining.store(true, Ordering::Relaxed);
     }
 
-    pub(crate) async fn handle(&self, req: Request<Incoming>, log: &UsageLog) -> Response<ResBody> {
+    pub(crate) async fn handle(
+        &self,
+        req: Request<Incoming>,
+        log: &UsageLog,
+        connection: &ConnectionAuth,
+    ) -> Response<ResBody> {
         let path = match (req.method(), req.uri().path()) {
             (&Method::POST, "/v1/messages") => "/v1/messages",
             (&Method::POST, "/v1/messages/count_tokens") => "/v1/messages/count_tokens",
@@ -100,7 +102,7 @@ impl Gateway {
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
-            match authenticate(verifier, req.headers()) {
+            match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => info.subject = Some(identity.subject),
                 Err(_) => {
                     // One message for every failure: the reason is not the caller's business.
@@ -176,25 +178,6 @@ impl Gateway {
             }
         }
     }
-}
-
-/// Verifies the gateway credential from `Authorization: Bearer` (Claude Code's
-/// `ANTHROPIC_AUTH_TOKEN`) or else `x-api-key` (`ANTHROPIC_API_KEY`).
-fn authenticate(verifier: &Verifier, headers: &HeaderMap) -> Result<Identity, CredentialError> {
-    let bearer = headers
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split_once(' '))
-        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-        .map(|(_, token)| token.trim());
-    let token = bearer
-        .or_else(|| headers.get(X_API_KEY).and_then(|v| v.to_str().ok()))
-        .ok_or(CredentialError::Malformed)?;
-    // A clock before 1970 makes every credential look expired: fail closed.
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(u64::MAX, |d| d.as_secs());
-    verifier.verify(token, now)
 }
 
 fn forward_error(e: ForwardError) -> Response<ResBody> {

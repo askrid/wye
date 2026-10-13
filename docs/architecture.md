@@ -62,7 +62,8 @@ wye/
 │   │   ├── main.rs, token.rs    CLI, `wye token`
 │   │   ├── startup.rs           secrets and files the config references
 │   │   ├── server.rs            listener, connections, two-phase shutdown
-│   │   ├── gateway.rs           routing, authentication, admission, gateway errors
+│   │   ├── gateway.rs           routing, admission, gateway errors
+│   │   ├── auth.rs              credential checks, cached per connection
 │   │   ├── upstream.rs          forwarding, TLS client
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
