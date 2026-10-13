@@ -15,7 +15,7 @@ How changes are made, verified, and committed. Speed and statelessness are the p
 
 ## Commit gate
 
-`scripts/check.sh` runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, all tests, a release build, and the benchmark, then compares the benchmark with `bench/baseline.json`. The pre-commit hook runs it for every commit that touches more than docs; enable it once per clone:
+`scripts/check.sh` runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, all tests, a release build plus an allocation-counting build (`--features alloc-stats`, in `target/alloc`), and the benchmark, then compares the benchmark with `bench/baseline.json`. The pre-commit hook runs it for every commit that touches more than docs; enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -31,6 +31,10 @@ A check takes about 12 minutes. Each benchmark is the median of 3 runs, and a fa
 ## Benchmark
 
 `wye-bench run --wye <path> --out <results.json>` measures each scenario directly against the mock and through the gateway, on a plain HTTP/1.1 upstream and on TLS + HTTP/2 (`tls_` metrics), plus Wye with `[auth]` on the plain path (`auth_` metrics, per-request scenarios only), and reports what the gateway adds: latency (unary, time to first byte, per SSE event), CPU per request, per MB, and per event, memory per idle and active stream, upstream release after a disconnect, uploads, 2,000 token-paced streams, and failed requests (gated at zero). `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways and print a comparison table.
+
+`--wye-alloc <path>` takes a Wye build with `--features alloc-stats`, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (that build only; never ship it). It adds `alloc_` metrics: allocations and bytes per request, allocations per streamed event and per stream setup, live heap per idle stream, and allocations per 1 MiB upload. Counts are nearly deterministic (under 1% spread, uploads about 5%), so the gate catches a single extra allocation per request, stream, or event that CPU timing would never resolve.
+
+For diagnosis beyond these numbers, profile a running benchmark: macOS `sample <pid>` or Linux `perf` for CPU and wait stacks.
 
 ## Code changes
 

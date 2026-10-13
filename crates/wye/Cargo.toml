@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Benchmark builds only: counts heap allocations, served at GET /debug/alloc.
+alloc-stats = []
+
 [dependencies]
 gateway-core.workspace = true
 base64.workspace = true

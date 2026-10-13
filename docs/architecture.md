@@ -68,7 +68,8 @@ wye/
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── usage_log.rs         per-request records, bounded writer
-│   │   └── gauge.rs             in-flight counters released on drop
+│   │   ├── gauge.rs             in-flight counters released on drop
+│   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA and mock upstream
 │   └── wye-bench/               benchmark, regression gate, competitor runs
 ├── bench/baseline.json
