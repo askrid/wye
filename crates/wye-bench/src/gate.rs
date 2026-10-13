@@ -1,0 +1,92 @@
+//! Regression gate: `compare` and `adopt-new`.
+
+use serde_json::Value;
+
+/// Gated metrics as (name, relative tolerance, absolute tolerance). Lower is
+/// better for all of them. Tolerances come from the spread of repeated runs of
+/// unchanged code on the baseline machine.
+///
+/// Reported but not gated: p99 time to first byte on both paths (swung from
+/// -521 to 1694 µs between identical runs), and the TLS unary p99, whose direct
+/// baseline is bottlenecked by the load client's single HTTP/2 connection.
+const GATES: &[(&str, f64, f64)] = &[
+    // Plain HTTP/1.1 upstream.
+    ("unary_added_p50_us", 0.20, 40.0),
+    ("unary_added_p99_us", 0.50, 400.0),
+    ("sse_ttfb_added_p50_us", 0.40, 100.0),
+    ("sse_event_added_p50_us", 0.20, 40.0),
+    ("sse_event_added_p99_us", 0.50, 150.0),
+    ("throughput_cpu_ms_per_mb", 0.12, 0.05),
+    ("idle_rss_kb_per_stream", 0.10, 2.0),
+    // TLS + HTTP/2 upstream, the production path; noisier on this machine.
+    ("tls_unary_added_p50_us", 0.50, 200.0),
+    ("tls_sse_ttfb_added_p50_us", 1.50, 200.0),
+    ("tls_sse_event_added_p50_us", 0.50, 100.0),
+    ("tls_sse_event_added_p99_us", 0.50, 300.0),
+    ("tls_throughput_cpu_ms_per_mb", 0.25, 0.05),
+    ("tls_idle_rss_kb_per_stream", 0.15, 2.0),
+    // Guard the property, not the microseconds: a release that waits for the
+    // next upstream write would take seconds.
+    ("cancel_upstream_release_max_us", 1.0, 20_000.0),
+    ("tls_cancel_upstream_release_max_us", 1.0, 20_000.0),
+];
+
+/// Prints a comparison table; returns false if any gated metric regressed or is missing.
+pub fn compare(baseline: &str, current: &str) -> bool {
+    let (base, cur) = (load(baseline), load(current));
+    if base["machine"] != cur["machine"] {
+        eprintln!(
+            "warning: baseline was recorded on a different machine; comparison is unreliable"
+        );
+    }
+    println!(
+        "{:36} {:>10} {:>10} {:>10}  result",
+        "metric", "baseline", "current", "limit"
+    );
+    let mut ok = true;
+    for &(name, rel, abs) in GATES {
+        let (Some(b), Some(c)) = (
+            base["metrics"][name].as_f64(),
+            cur["metrics"][name].as_f64(),
+        ) else {
+            println!("{name:36} missing");
+            ok = false;
+            continue;
+        };
+        // Added-latency metrics can be near zero or negative (noise); the absolute floor absorbs that.
+        let limit = b.max(0.0) * (1.0 + rel) + abs;
+        let pass = c <= limit;
+        ok &= pass;
+        println!(
+            "{name:36} {b:>10.2} {c:>10.2} {limit:>10.2}  {}",
+            if pass { "ok" } else { "REGRESSED" }
+        );
+    }
+    ok
+}
+
+/// Copies metrics that exist in `current` but not in `baseline` into the baseline.
+///
+/// Used when a metric is added: existing baseline values stay untouched, so
+/// adding a metric never loosens an existing gate.
+pub fn adopt_new(baseline: &str, current: &str) {
+    let mut base = load(baseline);
+    let cur = load(current);
+    let metrics = base["metrics"].as_object_mut().unwrap();
+    for (name, value) in cur["metrics"].as_object().unwrap() {
+        if !metrics.contains_key(name) {
+            println!("adopted {name} = {value}");
+            metrics.insert(name.clone(), value.clone());
+        }
+    }
+    std::fs::write(
+        baseline,
+        serde_json::to_string_pretty(&base).unwrap() + "\n",
+    )
+    .unwrap();
+}
+
+fn load(path: &str) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}")))
+        .unwrap()
+}

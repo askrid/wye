@@ -6,13 +6,16 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+wye-testkit.workspace = true
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["http1", "server", "client"] }
-hyper-util = { workspace = true, features = ["client-legacy", "http1", "server", "tokio"] }
+hyper = { workspace = true, features = ["http1", "http2", "client"] }
+hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde_json = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time", "process"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time", "process", "sync"] }
 
 [lints]
 workspace = true
