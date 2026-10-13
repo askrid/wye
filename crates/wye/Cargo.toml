@@ -14,10 +14,11 @@ hyper = { workspace = true, features = ["http1", "server", "client"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12", "webpki-roots"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server", "server-graceful", "tokio"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["io-util", "sync"] }
 
 [lints]
 workspace = true

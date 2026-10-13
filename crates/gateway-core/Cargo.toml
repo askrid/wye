@@ -7,8 +7,13 @@ publish.workspace = true
 
 [dependencies]
 http.workspace = true
+memchr = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
 toml = { workspace = true, features = ["parse", "serde", "std"] }
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
