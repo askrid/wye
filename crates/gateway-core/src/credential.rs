@@ -224,17 +224,14 @@ pub fn decode_public_key(encoded: &str) -> Option<[u8; 32]> {
 mod tests {
     use std::time::Duration;
 
-    use ring::{rand::SystemRandom, signature::KeyPair};
+    use ring::signature::KeyPair;
 
     use super::*;
     use crate::config::PublicKey;
 
     const NOW: u64 = 1_800_000_000;
 
-    fn keypair() -> Ed25519KeyPair {
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-        Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap()
-    }
+    use wye_testkit::ed25519_keypair as keypair;
 
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
         Verifier::new(&Auth {

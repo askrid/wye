@@ -8,7 +8,7 @@ How changes are made, verified, and committed. Speed and statelessness are the p
 |---|---|
 | `crates/gateway-core` | Portable policy: config validation, credential verification, usage scanning. No I/O, no Tokio. |
 | `crates/wye` | The binary: CLI (`main.rs`, `token.rs`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), forwarding (`upstream/`), usage log |
-| `crates/wye-testkit` | Test support: throwaway CA, mock upstream (plain, or TLS with HTTP/2) |
+| `crates/wye-testkit` | Test support: throwaway CA, test signing keys, mock upstream (plain, or TLS with HTTP/2) |
 | `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, competitor runs |
 | `bench/baseline.json` | Gated benchmark baseline for the development machine |
 | `scripts/check.sh`, `scripts/ab.sh` | Commit gate; A/B comparison of two binaries |

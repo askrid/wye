@@ -109,19 +109,13 @@ mod tests {
         config::{Auth, PublicKey},
         credential::{self, NewCredential},
     };
-    use ring::{
-        rand::SystemRandom,
-        signature::{Ed25519KeyPair, KeyPair},
-    };
+    use ring::signature::{Ed25519KeyPair, KeyPair};
 
     use super::*;
 
     const NOW: u64 = 1_800_000_000;
 
-    fn keypair() -> Ed25519KeyPair {
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
-        Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap()
-    }
+    use wye_testkit::ed25519_keypair as keypair;
 
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
         Verifier::new(&Auth {
