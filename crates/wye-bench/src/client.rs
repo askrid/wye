@@ -28,7 +28,12 @@ const POOLS: usize = 8;
 /// An endpoint to load: base URL plus pooled clients that trust the test CA.
 #[derive(Clone)]
 pub struct Target {
-    base: Arc<str>,
+    /// Scheme and authority, e.g. `http://127.0.0.1:8080`.
+    origin: Arc<str>,
+    /// Prefix before `/v1/messages`; empty except for gateways that mount it elsewhere.
+    api_prefix: Arc<str>,
+    /// Added to every request, e.g. a gateway's own credential.
+    extra_headers: Arc<[(&'static str, String)]>,
     root: Option<CertificateDer<'static>>,
     clients: Arc<[HttpClient]>,
     next: Arc<AtomicUsize>,
@@ -44,9 +49,25 @@ impl Target {
         Self::new(format!("https://{addr}"), Some(root))
     }
 
-    fn new(base: String, root: Option<CertificateDer<'static>>) -> Self {
+    /// A gateway endpoint that serves `/v1/messages` under `api_prefix` and
+    /// requires `extra_headers`.
+    pub fn gateway(
+        addr: SocketAddr,
+        api_prefix: &str,
+        extra_headers: Vec<(&'static str, String)>,
+    ) -> Self {
         Self {
-            base: base.into(),
+            api_prefix: api_prefix.into(),
+            extra_headers: extra_headers.into(),
+            ..Self::plain(addr)
+        }
+    }
+
+    fn new(origin: String, root: Option<CertificateDer<'static>>) -> Self {
+        Self {
+            origin: origin.into(),
+            api_prefix: "".into(),
+            extra_headers: Arc::new([]),
             clients: (0..POOLS).map(|_| build_client(root.as_ref())).collect(),
             root,
             next: Arc::default(),
@@ -55,7 +76,11 @@ impl Target {
 
     /// Same endpoint with its own connection pool.
     pub fn fresh(&self) -> Self {
-        Self::new(self.base.to_string(), self.root.clone())
+        Self {
+            api_prefix: Arc::clone(&self.api_prefix),
+            extra_headers: Arc::clone(&self.extra_headers),
+            ..Self::new(self.origin.to_string(), self.root.clone())
+        }
     }
 
     /// The next client, round-robin over the pools.
@@ -77,17 +102,19 @@ impl Target {
         headers: &[(&'static str, String)],
         body: Bytes,
     ) -> Request<Full<Bytes>> {
-        let mut req = Request::post(format!("{}/v1/messages?beta=true", self.base))
+        let url = format!("{}{}/v1/messages?beta=true", self.origin, self.api_prefix);
+        let mut req = Request::post(url)
             .header("content-type", "application/json")
             .header("anthropic-version", "2023-06-01");
-        for (name, value) in headers {
+        for (name, value) in headers.iter().chain(self.extra_headers.iter()) {
             req = req.header(*name, value.as_str());
         }
         req.body(Full::new(body)).unwrap()
     }
 
+    /// `GET` of `path` on the origin, without the API prefix or extra headers.
     pub fn get(&self, path: &str) -> Request<Full<Bytes>> {
-        Request::get(format!("{}{path}", self.base))
+        Request::get(format!("{}{path}", self.origin))
             .body(Full::new(Bytes::new()))
             .unwrap()
     }

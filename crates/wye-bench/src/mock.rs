@@ -1,6 +1,6 @@
 //! Mock Anthropic upstream driven by request headers.
 //!
-//! - `x-bench-unary: N`: JSON-like body of N bytes.
+//! - `x-bench-unary: N`: a Messages-shaped JSON response of N bytes.
 //! - otherwise SSE: `x-bench-events`, `x-bench-size` (payload bytes),
 //!   `x-bench-interval-us`. Each event carries the send time (`"t"`, ns since
 //!   process start), so the client can measure per-event delay.
@@ -55,10 +55,12 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     // Drain the request body like a real upstream would.
     let _ = req.into_body().collect().await;
     if let Some(size) = header_u64(&headers, "x-bench-unary") {
-        return Response::new(Either::Left(Full::new(Bytes::from(vec![
-            b'x';
-            size as usize
-        ]))));
+        let body = padded_json(
+            r#"{"id":"msg_bench","type":"message","role":"assistant","content":[{"type":"text","text":""#,
+            r#""}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+            size as usize,
+        );
+        return Response::new(Either::Left(Full::new(body)));
     }
     let size = header_u64(&headers, "x-bench-size").unwrap_or(64) as usize;
     let mut res = Response::new(Either::Right(SseBody {
@@ -71,6 +73,18 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     res.headers_mut()
         .insert("content-type", "text/event-stream".parse().unwrap());
     res
+}
+
+/// Valid JSON of exactly `size` bytes (at least the fixed parts): `head`, then
+/// filler text, then `tail`. Gateways that parse bodies must not fail on the
+/// benchmark's payloads where real traffic would pass.
+pub fn padded_json(head: &str, tail: &str, size: usize) -> Bytes {
+    let filler = size.saturating_sub(head.len() + tail.len());
+    let mut body = Vec::with_capacity(head.len() + filler + tail.len());
+    body.extend_from_slice(head.as_bytes());
+    body.resize(head.len() + filler, b'x');
+    body.extend_from_slice(tail.as_bytes());
+    Bytes::from(body)
 }
 
 fn header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
