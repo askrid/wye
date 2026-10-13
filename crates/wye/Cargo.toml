@@ -11,14 +11,16 @@ bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["http1", "server", "client"] }
-hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12", "webpki-roots"] }
+hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server", "server-graceful", "tokio"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde_json = { workspace = true, features = ["std"] }
+webpki-roots.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["io-util", "sync"] }
+wye-testkit.workspace = true
 
 [lints]
 workspace = true

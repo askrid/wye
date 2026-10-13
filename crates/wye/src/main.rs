@@ -1,7 +1,7 @@
-use std::{error::Error, ffi::OsString, process::ExitCode, sync::Arc};
+use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc};
 
-use gateway_core::config::{Config, UpstreamCredential};
-use wye::{Gateway, StartupError, UpstreamAuth};
+use gateway_core::config::Config;
+use wye::{Gateway, Resources};
 
 const USAGE: &str = "usage:\n  wye serve --config <path>\n  wye check-config <path>";
 
@@ -21,7 +21,7 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         .map(|a| a.to_str().ok_or("arguments must be valid UTF-8"))
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
-        ["serve", "--config", path] => serve(load(path)?),
+        ["serve", "--config", path] => serve(load(path)?, config_dir(path)),
         ["check-config", path] => {
             load(path)?;
             println!("{path}: ok");
@@ -36,15 +36,13 @@ fn load(path: &str) -> Result<Config, Box<dyn Error>> {
     Ok(Config::from_toml_str(&source)?)
 }
 
-fn serve(config: Config) -> Result<(), Box<dyn Error>> {
-    let auth = match &config.upstream.credential {
-        UpstreamCredential::ApiKeyEnv(name) => {
-            let key = std::env::var(name).map_err(|_| StartupError::MissingEnv(name.clone()))?;
-            UpstreamAuth::api_key(&key)?
-        }
-        UpstreamCredential::ForwardCaller => UpstreamAuth::ForwardCaller,
-    };
-    let gateway = Arc::new(Gateway::new(&config, auth)?);
+fn config_dir(path: &str) -> &Path {
+    Path::new(path).parent().unwrap_or(Path::new("."))
+}
+
+fn serve(config: Config, config_dir: &Path) -> Result<(), Box<dyn Error>> {
+    let resources = Resources::resolve(&config, config_dir)?;
+    let gateway = Arc::new(Gateway::new(&config, resources)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;

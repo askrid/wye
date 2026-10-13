@@ -1,0 +1,20 @@
+[package]
+name = "wye-testkit"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Test and benchmark support: test CA and mock upstream server"
+
+[dependencies]
+bytes.workspace = true
+http.workspace = true
+hyper = { workspace = true, features = ["http1", "http2", "server"] }
+hyper-util = { workspace = true, features = ["http1", "http2", "server", "server-auto", "tokio"] }
+rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+tokio = { workspace = true, features = ["net", "rt"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
+
+[lints]
+workspace = true

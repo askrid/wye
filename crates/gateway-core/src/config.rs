@@ -1,12 +1,13 @@
 //! `wye.toml` parsing and validation.
 //!
 //! Raw TOML is parsed into private `Raw*` types and validated once into public
-//! types whose invariants later code relies on. Secrets are referenced by
-//! environment variable name and never resolved here.
+//! types whose invariants later code relies on. Secrets and files are referenced
+//! by environment variable name or path and never read here.
 
 use std::{
     fmt,
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -47,6 +48,9 @@ pub struct Upstream {
     /// Base path without a trailing slash; empty for a bare origin.
     pub path_prefix: String,
     pub credential: UpstreamCredential,
+    /// PEM file of extra root certificates trusted for the upstream, in addition
+    /// to the built-in roots. Relative paths are relative to the config file.
+    pub ca_file: Option<PathBuf>,
     pub connect_timeout: Duration,
     pub response_header_timeout: Duration,
     pub stream_idle_timeout: Duration,
@@ -69,6 +73,7 @@ pub enum ConfigError {
     InvalidBaseUrl { url: String, reason: &'static str },
     Credential(&'static str),
     InvalidEnvName(String),
+    EmptyPath(&'static str),
     Zero(&'static str),
 }
 
@@ -93,6 +98,7 @@ impl fmt::Display for ConfigError {
                     "upstream.api_key_env: {name:?} is not a valid environment variable name"
                 )
             }
+            Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
         }
     }
@@ -122,6 +128,7 @@ struct RawUpstream {
     api_key_env: Option<String>,
     #[serde(default)]
     forward_caller_credential: bool,
+    ca_file: Option<PathBuf>,
     connect_timeout_secs: Option<u64>,
     response_header_timeout_secs: Option<u64>,
     stream_idle_timeout_secs: Option<u64>,
@@ -188,6 +195,12 @@ fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
         authority,
         path_prefix,
         credential,
+        ca_file: match raw.ca_file {
+            Some(path) if path.as_os_str().is_empty() => {
+                return Err(ConfigError::EmptyPath("upstream.ca_file"));
+            }
+            path => path,
+        },
         connect_timeout: secs(
             raw.connect_timeout_secs
                 .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
@@ -354,6 +367,18 @@ mod tests {
             ));
             assert_eq!(result.is_ok(), ok, "{url}: {result:?}");
         }
+    }
+
+    #[test]
+    fn ca_file_is_kept_as_written() {
+        let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+        let config = parse(&format!("{ok}ca_file = \"certs/ca.pem\"")).unwrap();
+        assert_eq!(config.upstream.ca_file, Some(PathBuf::from("certs/ca.pem")));
+        assert_eq!(parse(ok).unwrap().upstream.ca_file, None);
+        assert_eq!(
+            parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
+            ConfigError::EmptyPath("upstream.ca_file")
+        );
     }
 
     #[test]
