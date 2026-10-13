@@ -26,6 +26,14 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_sse_event_added_p99_us", 0.50, 300.0),
     ("tls_throughput_cpu_ms_per_mb", 0.25, 0.05),
     ("tls_idle_rss_kb_per_stream", 0.15, 2.0),
+    // CPU per request, and Wye with gateway credentials (plain path): the
+    // credential check costs per request, so these catch auth regressions.
+    ("unary_cpu_us_per_request", 0.20, 10.0),
+    ("tls_unary_cpu_us_per_request", 0.25, 10.0),
+    ("auth_unary_cpu_us_per_request", 0.20, 10.0),
+    ("auth_unary_added_p50_us", 0.20, 40.0),
+    ("auth_sse_ttfb_added_p50_us", 0.40, 100.0),
+    ("auth_unary_failed_requests", 0.0, 0.0),
     // Realistic workloads: agent-sized uploads and token-paced streams at scale.
     // These load the whole machine, so latency tolerances are wide; CPU per
     // unit of work and memory per stream are the precise signals.

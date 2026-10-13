@@ -2,6 +2,11 @@
 
 use std::{collections::HashSet, path::Path, process::Stdio, time::Duration};
 
+use gateway_core::credential::{self, NewCredential};
+use ring::{
+    rand::SystemRandom,
+    signature::{Ed25519KeyPair, KeyPair},
+};
 use tokio::process::Child;
 
 use crate::client::Target;
@@ -10,6 +15,8 @@ use crate::client::Target;
 #[derive(Clone, Copy)]
 pub enum Gateway<'a> {
     Wye(&'a str),
+    /// Wye with `[auth]`: every request carries a gateway credential to verify.
+    WyeAuth(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
 }
@@ -24,6 +31,7 @@ impl Gateway<'_> {
     pub fn name(self) -> &'static str {
         match self {
             Self::Wye(_) => "wye",
+            Self::WyeAuth(_) => "wye-auth",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
         }
@@ -33,6 +41,7 @@ impl Gateway<'_> {
     pub fn prefix(self) -> &'static str {
         match self {
             Self::Wye(_) => "",
+            Self::WyeAuth(_) => "auth_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
         }
@@ -98,13 +107,40 @@ impl GatewayProcess {
                     "--config".into(),
                     config(
                         "toml",
-                        wye_config(port, upstream_base_url, ca_file.as_deref()),
+                        wye_config(port, upstream_base_url, ca_file.as_deref(), None),
                     ),
                 ],
                 env: Vec::new(),
                 health: "/healthz",
                 target: Target::plain(addr),
             },
+            Gateway::WyeAuth(program) => {
+                let credentials = BenchCredentials::generate();
+                Launch {
+                    program: program.into(),
+                    args: vec![
+                        "serve".into(),
+                        "--config".into(),
+                        config(
+                            "toml",
+                            wye_config(
+                                port,
+                                upstream_base_url,
+                                ca_file.as_deref(),
+                                Some(&credentials.public_key),
+                            ),
+                        ),
+                    ],
+                    // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
+                    env: vec![(BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".into())],
+                    health: "/healthz",
+                    target: Target::gateway(
+                        addr,
+                        "",
+                        vec![("authorization", format!("Bearer {}", credentials.token))],
+                    ),
+                }
+            }
             Gateway::KrakenD(program) => Launch {
                 program: program.into(),
                 args: vec![
@@ -272,10 +308,55 @@ fn parse_cpu_time(raw: &str) -> f64 {
         + days * 86_400.0
 }
 
-fn wye_config(port: u16, upstream_base_url: &str, ca_file: Option<&Path>) -> String {
+/// Provider key variable for the authenticated Wye variant.
+const BENCH_PROVIDER_KEY_ENV: &str = "WYE_BENCH_PROVIDER_KEY";
+
+/// A throwaway signing key and one credential it signed.
+struct BenchCredentials {
+    public_key: String,
+    token: String,
+}
+
+impl BenchCredentials {
+    fn generate() -> Self {
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+        let key = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let token = credential::issue(
+            &key,
+            "bench",
+            &NewCredential {
+                iss: "wye-bench",
+                sub: "bench",
+                aud: "wye-bench",
+                iat: now,
+                exp: now + 3_600,
+            },
+        );
+        Self {
+            public_key: credential::encode_public_key(key.public_key().as_ref()),
+            token,
+        }
+    }
+}
+
+/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it.
+fn wye_config(
+    port: u16,
+    upstream_base_url: &str,
+    ca_file: Option<&Path>,
+    auth_public_key: Option<&str>,
+) -> String {
+    let credential = match auth_public_key {
+        Some(_) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
+        None => "forward_caller_credential = true".to_owned(),
+    };
     let mut config = format!(
         "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
-         [upstream]\nbase_url = \"{upstream_base_url}\"\nforward_caller_credential = true\n"
+         [upstream]\nbase_url = \"{upstream_base_url}\"\n{credential}\n"
     );
     if let Some(path) = ca_file {
         config.push_str(&format!("ca_file = {:?}\n", path.display().to_string()));
@@ -284,6 +365,12 @@ fn wye_config(port: u16, upstream_base_url: &str, ca_file: Option<&Path>) -> Str
     if let Ok(extra) = std::env::var("WYE_BENCH_UPSTREAM") {
         config.push_str(&extra);
         config.push('\n');
+    }
+    if let Some(key) = auth_public_key {
+        config.push_str(&format!(
+            "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n\
+             [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n"
+        ));
     }
     config
 }

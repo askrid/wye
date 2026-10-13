@@ -37,6 +37,8 @@ const PACED_EVENT_BYTES: usize = 100;
 /// upstream connection, so faster bursts would measure SYN retries.
 const PACED_RAMP: Duration = Duration::from_millis(2_000);
 const CANCEL_ROUNDS: usize = 20;
+/// Requests whose total gateway CPU gives the per-request cost.
+const CPU_PER_REQUEST_TOTAL: usize = 20_000;
 
 /// One way of reaching the mock upstream.
 struct UpstreamPath<'a> {
@@ -50,6 +52,8 @@ struct UpstreamPath<'a> {
     /// path: over HTTP/1.1 every stream opens its own connections, and
     /// repeated runs exhaust the laptop's ephemeral ports.
     paced: bool,
+    /// Also measures Wye with `[auth]` (per-request scenarios only).
+    auth: bool,
 }
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
@@ -74,6 +78,7 @@ pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
             base_url: format!("http://{plain}"),
             ca_pem: None,
             paced: false,
+            auth: true,
         },
         UpstreamPath {
             prefix: "tls_",
@@ -82,6 +87,7 @@ pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
             base_url: format!("https://{tls}"),
             ca_pem: Some(ca.ca_pem()),
             paced: true,
+            auth: false,
         },
     ];
 
@@ -105,7 +111,8 @@ pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
                     percentile(&direct.latency.unary, p),
                 );
             }
-            for &gateway in &gateways {
+            let auth_variant = path.auth.then_some(Gateway::WyeAuth(wye));
+            for &gateway in gateways.iter().chain(auth_variant.iter()) {
                 eprintln!(
                     "run {i}/{repeat}: {} upstream, {}",
                     path.name,
@@ -119,6 +126,7 @@ pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
                 let scope = Scope {
                     streams_sse: gateway.streams_sse(),
                     paced: path.paced,
+                    per_request_only: matches!(gateway, Gateway::WyeAuth(_)),
                 };
                 measure(&direct, &process, &prefix, scope, &mut metrics).await;
             }
@@ -229,6 +237,9 @@ struct Scope {
     streams_sse: bool,
     /// The path runs the token-paced scenario.
     paced: bool,
+    /// Only per-request scenarios (latency and CPU per request): for variants
+    /// whose cost is per request, such as credential verification.
+    per_request_only: bool,
 }
 
 /// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
@@ -244,8 +255,17 @@ async fn measure(
 ) {
     let via = Latency::measure(process.target()).await;
     let cpu_before = process.cpu_secs();
-    let (mb_s, mb) = throughput(process.target()).await;
+    let (_, failed) = successes(
+        scenarios::unary(process.target(), UNARY_CONCURRENCY, CPU_PER_REQUEST_TOTAL).await,
+    );
     let cpu_after = process.cpu_secs();
+    // `ps` reports CPU time in 10 ms steps; 20,000 requests make that ~0.5 µs per request.
+    put(
+        metrics,
+        prefix,
+        "unary_cpu_us_per_request",
+        (cpu_after - cpu_before) * 1e6 / (CPU_PER_REQUEST_TOTAL - failed).max(1) as f64,
+    );
 
     let base = &direct.latency;
     put(
@@ -281,6 +301,12 @@ async fn measure(
             added(&via.event_delay, &base.event_delay),
         );
     }
+    if scope.per_request_only {
+        return;
+    }
+    let cpu_before = process.cpu_secs();
+    let (mb_s, mb) = throughput(process.target()).await;
+    let cpu_after = process.cpu_secs();
     put(metrics, prefix, "via_throughput_mb_s", mb_s);
     // `ps` reports CPU time in 10 ms steps; the scenario streams enough data to make that negligible.
     put(
