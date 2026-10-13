@@ -691,14 +691,7 @@ async fn concurrent_streams_beyond_one_connection_limit_are_not_queued() {
         held.lock().unwrap().push(tx);
         Box::pin(async move { Response::new(Either::Right(ChannelBody(rx))) })
     });
-    let h = Harness::start_tls_with(
-        handler,
-        &ca,
-        true,
-        Some(PEER_LIMIT),
-        &format!("max_streams_per_connection = {PEER_LIMIT}"),
-    )
-    .await;
+    let h = Harness::start_tls_with(handler, &ca, true, Some(PEER_LIMIT), "").await;
 
     // Each response keeps its stream open, so stream n needs a free slot while n-1 are held.
     let mut responses = Vec::new();
