@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use wye_testkit::TestCa;
 
 use crate::{
+    allocations,
     client::Target,
     gateway_process::{Gateway, GatewayProcess},
     mock,
@@ -58,7 +59,14 @@ struct UpstreamPath<'a> {
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
 /// Competitors in `others` run the same scenarios under their own metric prefix.
-pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
+/// With `wye_alloc` (a `--features alloc-stats` build), allocation metrics are added.
+pub async fn run(
+    wye: &str,
+    wye_alloc: Option<&str>,
+    others: &[Gateway<'_>],
+    out: &str,
+    repeat: usize,
+) {
     let mut gateways = vec![Gateway::Wye(wye)];
     gateways.extend_from_slice(others);
     let dir = Path::new(out)
@@ -130,6 +138,10 @@ pub async fn run(wye: &str, others: &[Gateway<'_>], out: &str, repeat: usize) {
                 };
                 measure(&direct, &process, &prefix, scope, &mut metrics).await;
             }
+        }
+        if let Some(binary) = wye_alloc {
+            eprintln!("run {i}/{repeat}: allocations");
+            allocations::measure(binary, &paths[0].base_url, dir, &mut metrics).await;
         }
         runs.push(metrics);
     }

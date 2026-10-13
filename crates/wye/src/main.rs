@@ -1,5 +1,9 @@
 mod token;
 
+#[cfg(feature = "alloc-stats")]
+#[global_allocator]
+static ALLOCATOR: wye::alloc_stats::Counting = wye::alloc_stats::Counting;
+
 use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc};
 
 use gateway_core::config::Config;
