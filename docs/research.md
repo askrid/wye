@@ -163,6 +163,13 @@ Microbenchmarks alone cannot establish proxy performance. Separate controlled ov
 | Privacy Pass / offline e-cash | Redemption and double-spend limits | Shows need for spent-token state or trusted hardware |
 | RLN / nullifier rate limiting | Anonymous cryptographic rate limiting | Verification stateless; replay tracking is not |
 | Bounded Counter CRDT / escrow | Distributed numeric invariants | Requires coordination; rejected for core ([policy.md](policy.md#rejected-approaches)) |
+| [TraceLab](https://arxiv.org/abs/2606.30560) (2026) | Public trace of ~4,300 Claude Code and Codex sessions (~350k LLM steps): long loops, long contexts with short outputs, heavy-tailed tool calls, high but imperfect prefix-cache hit rates | Workload source for the benchmark; evidence for cache-miss diagnostics |
+| [CacheWise](https://huggingface.co/papers/2606.16824.md) (2026), [Agentic Coding in the Wild](https://www.microsoft.com/en-us/research/publication/agentic-coding-in-the-wild-characterizing-github-copilot-at-production-scale/) (Microsoft/UIUC, 2026) | Coding-agent traces: large repeated prefixes; agent loops coupled nearly 1:1 with tool calls (761M Copilot calls) | Confirms uploads and per-event cost, not bulk throughput, as the metrics that matter |
+| [CacheRoute](https://arxiv.org/pdf/2608.19677) (Meta, 2026), [KV-cache-aware load balancing](https://www.arxiv.org/pdf/2601.18999) (2026), llm-d, Ray Serve prefix routing | Prefix-affinity routing among model servers; served cache hits 64% → 93%, with a warning that affinity can cost capacity | Applies to routing among provider accounts; motivates a stateless load bound on `cache_affine` |
+| [R2-Router](https://arxiv.org/abs/2602.02823) (ICML 2026), [When Routing Collapses](https://arxiv.org/abs/2602.03478) (2026), [ContextualRouter](https://aclanthology.org/2026.eacl-srw.22) (EACL 2026) | Route by model and output-length budget together; routers drift toward the strongest model; kNN baselines match complex routers | Offline-fitted, simple routing tables fit static config; length budgets match the allowlisted `max_tokens` rewrite |
+| [IETF Attenuating Agent Tokens](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00) (draft, 2026), WIMSE agent delegation chains (draft), DeepMind Delegation Capability Tokens ([survey](https://arxiv.org/pdf/2603.24775)) | JWT-based offline attenuation for task-scoped agent delegation, with depth and lifetime limits | Standards-track format for delegable credentials; aligns with Wye's EdDSA JWTs. Drafts may still change |
+
+Summaries come from abstracts and secondary sources; check figures against the papers before citing them.
 
 ## Experiments
 
@@ -181,9 +188,10 @@ Research-backed functionality that fits the constraints: request-local decisions
 
 ### 1. Agent-aware routing
 
-- **Basis:** LLM cascades and offline-trained routers (FrugalGPT, RouteLLM), applied to the gateway hint headers Claude Code documents for routers: `x-claude-code-request-class` (`main`, `subagent`, `workflow`, `compaction`, `auxiliary`), `x-claude-code-agent-type`, compaction markers.
+- **Basis:** LLM cascades and offline-trained routers (FrugalGPT, RouteLLM; 2026: R2-Router, EquiRouter, ContextualRouter), applied to the gateway hint headers Claude Code documents for routers: `x-claude-code-request-class` (`main`, `subagent`, `workflow`, `compaction`, `auxiliary`), `x-claude-code-agent-type`, compaction markers.
 - **Function:** policy such as "auxiliary requests use the Haiku model" or "Explore subagents use Sonnet", applied as the allowlisted `model` rewrite, within Claude models only. Weights are fitted offline from usage telemetry and committed as fixed config (closed loop through Git: telemetry → fit → pull request → policy tests → deploy).
 - **Fit:** a pure function of headers and config.
+- **Design notes from 2026 work:** simple tables over request features (kNN-like) are competitive, so the fitted policy can stay a readable config table; choosing an output-length budget with the model saves more than model choice alone, and maps onto the allowlisted `max_tokens` rewrite; telemetry should watch for routing collapse (a growing share sent to the strongest model).
 - **Limits:** a custom base URL receives hint headers only when developers set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` (deliverable through managed settings); without them, routing falls back to the requested model. Quality impact must be measured per request class before a default ships.
 
 ### 2. Cache-miss diagnostics
@@ -191,12 +199,13 @@ Research-backed functionality that fits the constraints: request-local decisions
 - **Basis:** prompt-cache pricing (cached input costs about a tenth of normal input) and content fingerprints.
 - **Function:** for each request, export a hash per cacheable block (system, tools, each message prefix) next to the reported cache usage. The telemetry backend compares consecutive requests of a session and names the cause of each miss: tools reordered, a timestamp in the system prompt, a compaction.
 - **Fit:** Wye hashes within one request; the comparison across requests happens in the user's backend, never in Wye.
-- **Pairs with** cache-affine routing ([architecture.md](architecture.md#cache-affine-routing)), which keeps a session on one provider account from any replica.
+- **Evidence:** coding-agent traces (TraceLab, CacheWise) show high but imperfect prefix-cache hit rates, with misses concentrated around user-initiated turns and compaction, so misses have explainable causes.
+- **Pairs with** cache-affine routing ([architecture.md](architecture.md#cache-affine-routing)), which keeps a session on one provider account from any replica; prefix-affinity serving research (CacheRoute) shows large hit-rate gains and warns that affinity needs a load bound.
 - **Cost:** requires reading the request body (as model permissions will); hashing must stay within the benchmark gate.
 
 ### 3. Delegable credentials for agent swarms
 
-- **Basis:** Macaroons and Biscuit: a token holder mints a narrower token offline.
+- **Basis:** Macaroons and Biscuit: a token holder mints a narrower token offline. The 2026 IETF draft "Attenuating Agent Tokens" specifies this as a JWT format with delegation-depth and lifetime limits, motivated by prompt injection and compromised subagents misusing over-broad tokens; implementing it rather than a private format makes Wye interoperable with other agent tooling, once the draft stabilizes.
 - **Function:** team → developer → CI job → subagent, each narrowing models, output caps, expiry, or scope without contacting an issuer.
 - **Fit:** verification is a pure computation over signatures.
 - **Limits:** caps each request, never cumulative spend (that stays with [provider-held budgets](policy.md#provider-held-budgets)); replay inside the validity window remains possible ([policy.md](policy.md#why-signed-balances-fail)).
