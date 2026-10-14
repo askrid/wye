@@ -9,11 +9,8 @@ use serde_json::Value;
 /// Reported but not gated: p99 time to first byte (swung from -521 to 1694 µs
 /// between identical runs; in the paced scenario it is dominated by connection
 /// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
-/// the TLS + HTTP/2 path. Also reported but not yet gated: the agent-shaped
-/// upload, the model-permissions variant, and the cache-diagnostics variant
-/// (`agent_upload_*`, `models_*`, `diag_*`, `alloc_*agent_upload*`,
-/// `alloc_models_*`, `alloc_diag_*`; plain path only), until their baseline is
-/// reviewed.
+/// the TLS + HTTP/2 path. Upload allocation counts for the agent-shaped body
+/// are reported but not gated: they swing about 20% with read timing.
 const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),
@@ -73,6 +70,25 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_paced_event_added_p99_us", 0.50, 2_000.0),
     ("tls_paced_cpu_us_per_event", 0.25, 2.0),
     ("tls_paced_rss_kb_per_stream", 0.15, 1.0),
+    // The agent-shaped upload (plain path), and the variants whose cost grows
+    // with the request body: model permissions (`models_`, the repeated-key
+    // check) and cache diagnostics (`diag_`, the prompt scanner).
+    ("agent_upload_cpu_ms_per_mb", 0.20, 0.1),
+    ("models_unary_cpu_us_per_request", 0.20, 10.0),
+    ("models_unary_added_p50_us", 0.20, 40.0),
+    ("models_agent_upload_cpu_ms_per_mb", 0.25, 0.1),
+    ("alloc_models_unary_per_request", 0.02, 0.5),
+    ("diag_unary_cpu_us_per_request", 0.20, 10.0),
+    ("diag_agent_upload_cpu_ms_per_mb", 0.25, 0.1),
+    ("alloc_diag_unary_per_request", 0.02, 0.5),
+    ("alloc_diag_unary_bytes_per_request", 0.02, 256.0),
+    ("agent_upload_failed_requests", 0.0, 0.0),
+    ("models_unary_failed_requests", 0.0, 0.0),
+    ("models_upload_failed_requests", 0.0, 0.0),
+    ("models_agent_upload_failed_requests", 0.0, 0.0),
+    ("diag_unary_failed_requests", 0.0, 0.0),
+    ("diag_upload_failed_requests", 0.0, 0.0),
+    ("diag_agent_upload_failed_requests", 0.0, 0.0),
     // Any failed request or dropped stream is a regression.
     ("unary_failed_requests", 0.0, 0.0),
     ("upload_failed_requests", 0.0, 0.0),
