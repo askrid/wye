@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs. Steps 3–5 are not built.
+**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs. Not built: the per-request limits of step 3, and steps 4–5 (aliases and routing; one upstream today).
 
 ## Repository and workspace
 
