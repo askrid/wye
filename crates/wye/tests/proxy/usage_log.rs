@@ -99,3 +99,51 @@ async fn gateway_errors_and_non_stream_responses_are_logged() {
     assert_eq!(record["outcome"], "completed");
     assert_eq!(record["usage_status"], "not_observed");
 }
+
+#[tokio::test]
+async fn cache_diagnostics_log_keyed_prompt_hashes() {
+    const BODY: &str = r#"{"model":"claude-test","system":"be brief","tools":[{"name":"Read"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}"#;
+    let (tx, mut rx) = mpsc::channel::<Bytes>(2);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send(seen.body).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let key = [7u8; 32];
+    let h = Harness::with_cache_diagnostics(handler, &key).await;
+
+    let res = h.send(messages(), BODY).await;
+    assert_eq!(read_body(res).await, "{}");
+    assert_eq!(rx.recv().await.unwrap(), BODY, "body forwarded unchanged");
+    let prompt = h.usage_record().await["prompt"].clone();
+    assert_eq!(prompt["status"], "complete");
+    assert_eq!(prompt["tools"]["count"], 1);
+    assert_eq!(prompt["messages"], 1);
+    assert_eq!(prompt["breakpoint_count"], 1);
+    assert_eq!(prompt["breakpoints"][0]["section"], "messages");
+    // Keyed: the tag of the hash, which only the key holder can recompute.
+    let mut scanner = gateway_core::prompt::PromptScanner::new();
+    scanner.feed(BODY.as_bytes());
+    let system = scanner.finish().unwrap().system.unwrap().hash;
+    let tag = HashKey::new(&key).unwrap().tag(system);
+    assert_eq!(prompt["system"]["hash"], format!("{tag:016x}"));
+    assert_eq!(prompt["system"]["hash"].as_str().unwrap().len(), 16);
+
+    let res = h.send(messages(), "not json").await;
+    assert_eq!(read_body(res).await, "{}");
+    assert_eq!(rx.recv().await.unwrap(), "not json");
+    assert_eq!(
+        h.usage_record().await["prompt"],
+        serde_json::json!({"status": "unknown"})
+    );
+}
+
+#[tokio::test]
+async fn usage_records_omit_prompt_without_diagnostics() {
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let res = h.send(messages(), r#"{"messages":[]}"#).await;
+    read_body(res).await;
+    assert!(h.usage_record().await.get("prompt").is_none());
+}

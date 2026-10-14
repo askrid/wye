@@ -75,6 +75,41 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     res
 }
 
+/// A Messages request shaped like Claude Code's, of at least `size` bytes:
+/// tool definitions with JSON schemas, a cached system prompt, then turns of
+/// tool calls and code-carrying tool results (quotes, backslashes, newlines),
+/// the last one marked with `cache_control`. Exercises the cache diagnostics
+/// scanner on realistic structure, where one long string would be its best case.
+pub fn agent_json(size: usize) -> Bytes {
+    const CODE: &str = "fn main() {\n    let path = \"src/main.rs\";\n    println!(\"{}\\n\", path);\n    if args.len() > 1 { return Err(\"usage: wye <cmd>\".into()); }\n}\n";
+    let code = serde_json::to_string(&CODE.repeat(12)).unwrap();
+    let words =
+        serde_json::to_string(&"Reads a file from the local filesystem. ".repeat(30)).unwrap();
+    let tools: Vec<String> = (0..24)
+        .map(|i| {
+            format!(
+                r#"{{"name":"Tool{i}","description":{words},"input_schema":{{"type":"object","properties":{{"file_path":{{"type":"string","description":"Absolute path"}},"offset":{{"type":"number"}},"limit":{{"type":"number"}}}},"required":["file_path"],"additionalProperties":false}}}}"#
+            )
+        })
+        .collect();
+    let mut body = format!(
+        r#"{{"model":"bench","max_tokens":32000,"stream":true,"system":[{{"type":"text","text":{words}}},{{"type":"text","text":{words},"cache_control":{{"type":"ephemeral"}}}}],"tools":[{}],"messages":["#,
+        tools.join(",")
+    );
+    let mut turn = 0;
+    while body.len() < size {
+        if turn > 0 {
+            body.push(',');
+        }
+        body.push_str(&format!(
+            r#"{{"role":"assistant","content":[{{"type":"text","text":"Let me look at that file."}},{{"type":"tool_use","id":"toolu_{turn:04}","name":"Tool1","input":{{"file_path":"/repo/src/main.rs","offset":{turn},"limit":200}}}}]}},{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"toolu_{turn:04}","content":{code}}}]}}"#
+        ));
+        turn += 1;
+    }
+    body.push_str(r#",{"role":"user","content":[{"type":"text","text":"Now fix it.","cache_control":{"type":"ephemeral"}}]}]}"#);
+    Bytes::from(body)
+}
+
 /// Valid JSON of exactly `size` bytes (at least the fixed parts): `head`, then
 /// filler text, then `tail`. Gateways that parse bodies must not fail on the
 /// benchmark's payloads where real traffic would pass.

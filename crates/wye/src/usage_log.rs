@@ -20,10 +20,14 @@ use std::{
 use bytes::Bytes;
 use gateway_core::{
     credential::Identity,
+    prompt::HashKey,
     usage::{SseUsageScanner, Usage},
 };
 
-use crate::gauge::Held;
+use crate::{
+    diagnostics::{PromptRecord, PromptSlot},
+    gauge::Held,
+};
 use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
 use serde::Serialize;
@@ -65,6 +69,8 @@ pub(crate) struct RequestInfo {
     pub session_id: Option<HeaderValue>,
     /// Verified gateway credential, when credentials are configured.
     pub identity: Option<Arc<Identity>>,
+    /// Filled with the request body's prompt hashes when cache diagnostics are on.
+    pub prompt: Option<PromptSlot>,
     pub started: Instant,
 }
 
@@ -88,13 +94,14 @@ pub(crate) struct UsageLog {
 
 impl UsageLog {
     /// Starts the writer task. It ends after every handle is dropped and the queue is written.
-    pub(crate) fn start<W>(out: W) -> (Self, JoinHandle<()>)
+    /// `prompt_key` keys the prompt hashes of records that carry them.
+    pub(crate) fn start<W>(out: W, prompt_key: Option<Arc<HashKey>>) -> (Self, JoinHandle<()>)
     where
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(0));
-        let writer = tokio::spawn(write_records(rx, out, Arc::clone(&dropped)));
+        let writer = tokio::spawn(write_records(rx, out, Arc::clone(&dropped), prompt_key));
         (Self { tx, dropped }, writer)
     }
 
@@ -127,16 +134,21 @@ fn unix_ms() -> u128 {
         .map_or(0, |d| d.as_millis())
 }
 
-async fn write_records<W>(mut rx: mpsc::Receiver<Record>, mut out: W, dropped: Arc<AtomicU64>)
-where
+async fn write_records<W>(
+    mut rx: mpsc::Receiver<Record>,
+    mut out: W,
+    dropped: Arc<AtomicU64>,
+    prompt_key: Option<Arc<HashKey>>,
+) where
     W: AsyncWrite + Unpin,
 {
     let mut buf = Vec::with_capacity(4096);
+    let key = prompt_key.as_deref();
     while let Some(record) = rx.recv().await {
-        push_line(&mut buf, &record);
+        push_line(&mut buf, &record, key);
         // Batch whatever else is queued into one write.
         while let Ok(record) = rx.try_recv() {
-            push_line(&mut buf, &record);
+            push_line(&mut buf, &record, key);
         }
         if out.write_all(&buf).await.is_err() || out.flush().await.is_err() {
             return;
@@ -178,9 +190,11 @@ struct Line<'a> {
     cache_creation_input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_read_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<PromptRecord>,
 }
 
-fn push_line(buf: &mut Vec<u8>, r: &Record) {
+fn push_line(buf: &mut Vec<u8>, r: &Record, prompt_key: Option<&HashKey>) {
     let usage = r
         .usage
         .as_ref()
@@ -205,6 +219,12 @@ fn push_line(buf: &mut Vec<u8>, r: &Record) {
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens,
+        prompt: r
+            .info
+            .prompt
+            .as_ref()
+            .zip(prompt_key)
+            .map(|(slot, key)| PromptRecord::new(slot, key)),
     };
     // Serializing plain fields into a Vec cannot fail.
     let _ = serde_json::to_writer(&mut *buf, &line);

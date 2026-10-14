@@ -92,6 +92,10 @@ async fn idle_live_bytes(t: &Target, count: usize, body: Option<Bytes>) -> f64 {
     (live_open - live_before) / count as f64
 }
 
+async fn agent_uploads(t: &Target) {
+    scenarios::upload(t, 16, UPLOAD_REQUESTS, mock::agent_json(UPLOAD_BYTES)).await;
+}
+
 fn upload_body(bytes: usize) -> Bytes {
     mock::padded_json(
         r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
@@ -158,6 +162,17 @@ pub async fn measure(
         "alloc_upload_bytes_per_request",
         bytes / UPLOAD_REQUESTS as f64,
     );
+    // The same size shaped like Claude Code's, for comparison with the
+    // cache-diagnostics variant below.
+    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
+    put(
+        "alloc_agent_upload_per_request",
+        allocations / UPLOAD_REQUESTS as f64,
+    );
+    put(
+        "alloc_agent_upload_bytes_per_request",
+        bytes / UPLOAD_REQUESTS as f64,
+    );
 
     put(
         "alloc_idle_live_bytes_per_stream",
@@ -213,5 +228,35 @@ pub async fn measure(
     put(
         "alloc_auth_unary_per_request",
         allocations / UNARY_REQUESTS as f64,
+    );
+    drop(auth);
+
+    let diag = GatewayProcess::start(
+        Gateway::WyeDiag(binary),
+        upstream_base_url,
+        None,
+        dir,
+        "alloc",
+    )
+    .await;
+    let t = diag.target();
+    scenarios::unary(t, CONCURRENCY, 2_000).await;
+    let (allocations, bytes) = delta(t, unary(t)).await;
+    put(
+        "alloc_diag_unary_per_request",
+        allocations / UNARY_REQUESTS as f64,
+    );
+    put(
+        "alloc_diag_unary_bytes_per_request",
+        bytes / UNARY_REQUESTS as f64,
+    );
+    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
+    put(
+        "alloc_diag_agent_upload_per_request",
+        allocations / UPLOAD_REQUESTS as f64,
+    );
+    put(
+        "alloc_diag_agent_upload_bytes_per_request",
+        bytes / UPLOAD_REQUESTS as f64,
     );
 }

@@ -14,7 +14,7 @@ pub(crate) use std::{
 };
 
 pub(crate) use bytes::Bytes;
-pub(crate) use gateway_core::config::Config;
+pub(crate) use gateway_core::{config::Config, prompt::HashKey};
 pub(crate) use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 pub(crate) use http_body_util::{BodyExt, Either, Full};
 pub(crate) use hyper::body::{Body, Frame, Incoming};
@@ -81,6 +81,7 @@ impl Harness {
         let resources = Resources {
             auth,
             extra_roots: Vec::new(),
+            prompt_key: None,
         };
         Self::launch(
             &format!("http://{upstream}"),
@@ -99,6 +100,7 @@ impl Harness {
         let resources = Resources {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
             extra_roots: Vec::new(),
+            prompt_key: None,
         };
         let base_url = format!("http://{upstream}");
         Self::launch(
@@ -109,6 +111,20 @@ impl Harness {
             hits,
         )
         .await
+    }
+
+    /// API-key gateway with cache diagnostics on, keyed with `key`.
+    pub(crate) async fn with_cache_diagnostics(handler: Handler, key: &[u8]) -> Self {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let resources = Resources {
+            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            extra_roots: Vec::new(),
+            prompt_key: Some(HashKey::new(key).unwrap()),
+        };
+        let base_url = format!("http://{upstream}");
+        let extra = "api_key_env = \"UNUSED\"\n[cache_diagnostics]\nhash_key_env = \"UNUSED\"";
+        Self::launch(&base_url, "", extra, resources, hits).await
     }
 
     /// Gateway in front of a TLS mock upstream; `trusted` adds the mock's CA to Wye's roots.
@@ -133,6 +149,7 @@ impl Harness {
             } else {
                 Vec::new()
             },
+            prompt_key: None,
         };
         let base_url = format!("https://{upstream}");
         let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
