@@ -9,6 +9,7 @@
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
+use bytes::Bytes;
 use http_body_util::BodyExt;
 use serde_json::Value;
 
@@ -27,6 +28,9 @@ const SSE_LONG_EVENTS: u32 = 110;
 const UPLOAD_REQUESTS: usize = 64;
 const UPLOAD_BYTES: usize = 1024 * 1024;
 const IDLE_STREAMS: usize = 1_000;
+/// Idle streams whose request carried an agent-sized context.
+const IDLE_AFTER_UPLOAD_STREAMS: usize = 200;
+const IDLE_UPLOAD_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Copy)]
 struct Counters {
@@ -76,10 +80,34 @@ async fn unary(t: &Target) {
     );
 }
 
-/// Runs the allocation scenarios against `binary` in front of the plain upstream.
+/// Live heap per stream while `count` streams stay open and silent.
+async fn idle_live_bytes(t: &Target, count: usize, body: Option<Bytes>) -> f64 {
+    let live_before = counters(t).await.live_bytes;
+    let held = scenarios::open_idle_streams_with_body(t, count, body).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let live_open = counters(t).await.live_bytes;
+    drop(held);
+    // Let the gateway release the closed streams before the next measurement.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    (live_open - live_before) / count as f64
+}
+
+fn upload_body(bytes: usize) -> Bytes {
+    mock::padded_json(
+        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#""}]}"#,
+        bytes,
+    )
+}
+
+/// Runs the allocation scenarios against `binary`: the full set in front of the
+/// plain upstream, and idle-stream memory in front of the TLS + HTTP/2 upstream
+/// (`tls_base_url`, trusting `tls_ca_pem`), the production connection shape.
 pub async fn measure(
     binary: &str,
     upstream_base_url: &str,
+    tls_base_url: &str,
+    tls_ca_pem: &str,
     dir: &Path,
     metrics: &mut BTreeMap<String, f64>,
 ) {
@@ -117,11 +145,7 @@ pub async fn measure(
         short / SSE_STREAMS as f64 - per_event * f64::from(SSE_SHORT_EVENTS),
     );
 
-    let body = mock::padded_json(
-        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
-        r#""}]}"#,
-        UPLOAD_BYTES,
-    );
+    let body = upload_body(UPLOAD_BYTES);
     let (allocations, bytes) = delta(t, async {
         scenarios::upload(t, 16, UPLOAD_REQUESTS, body).await;
     })
@@ -135,16 +159,45 @@ pub async fn measure(
         bytes / UPLOAD_REQUESTS as f64,
     );
 
-    let live_before = counters(t).await.live_bytes;
-    let held = scenarios::open_idle_streams(t, IDLE_STREAMS).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let live_open = counters(t).await.live_bytes;
-    drop(held);
     put(
         "alloc_idle_live_bytes_per_stream",
-        (live_open - live_before) / IDLE_STREAMS as f64,
+        idle_live_bytes(t, IDLE_STREAMS, None).await,
+    );
+    put(
+        "alloc_idle_after_upload_live_bytes_per_stream",
+        idle_live_bytes(
+            t,
+            IDLE_AFTER_UPLOAD_STREAMS,
+            Some(upload_body(IDLE_UPLOAD_BYTES)),
+        )
+        .await,
     );
     drop(wye);
+
+    let tls = GatewayProcess::start(
+        Gateway::Wye(binary),
+        tls_base_url,
+        Some(tls_ca_pem),
+        dir,
+        "alloc-tls",
+    )
+    .await;
+    let t = tls.target();
+    scenarios::unary(t, CONCURRENCY, 2_000).await;
+    put(
+        "alloc_tls_idle_live_bytes_per_stream",
+        idle_live_bytes(t, IDLE_STREAMS, None).await,
+    );
+    put(
+        "alloc_tls_idle_after_upload_live_bytes_per_stream",
+        idle_live_bytes(
+            t,
+            IDLE_AFTER_UPLOAD_STREAMS,
+            Some(upload_body(IDLE_UPLOAD_BYTES)),
+        )
+        .await,
+    );
+    drop(tls);
 
     let auth = GatewayProcess::start(
         Gateway::WyeAuth(binary),

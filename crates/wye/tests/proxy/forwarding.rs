@@ -165,3 +165,30 @@ async fn count_tokens_is_forwarded() {
         .await;
     assert_eq!(read_body(res).await, r#"{"input_tokens":3}"#);
 }
+
+#[tokio::test]
+async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected() {
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    // An 8 KiB gateway credential plus other headers fits the connection buffer.
+    let credential = "x".repeat(8 * 1024);
+    let res = h
+        .send(
+            messages()
+                .header("authorization", format!("Bearer {credential}"))
+                .header("x-claude-code-extra", "y".repeat(4 * 1024)),
+            "{}",
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Headers beyond the buffer bound are refused without reaching the upstream.
+    let hits = h.upstream_hits.load(Ordering::Relaxed);
+    let res = h
+        .send(
+            messages().header("x-oversized", "z".repeat(64 * 1024)),
+            "{}",
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), hits);
+}
