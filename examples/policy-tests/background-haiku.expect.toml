@@ -1,0 +1,5 @@
+# Claude Code's background requests use Haiku; a team credential must allow it.
+decision = "forward"
+[credential]
+subject = "team-research"
+models = ["claude-sonnet-*", "claude-haiku-*"]
