@@ -37,3 +37,10 @@ api_key_env = "ANTHROPIC_API_KEY"
 # [[auth.keys]]
 # id = "k1"
 # ed25519_public_key = "<printed by wye token keygen>"
+
+# Cache-miss diagnostics: keyed hashes of the prompt sections in each usage
+# record, so a telemetry backend can tell why a prompt-cache read missed
+# (docs/research.md, "Cache-miss diagnostics"). The key is required and must be
+# the same on every replica; generate one with `openssl rand -hex 32`.
+# [cache_diagnostics]
+# hash_key_env = "WYE_CACHE_HASH_KEY"

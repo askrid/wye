@@ -1,6 +1,7 @@
 //! Forwarding to the configured upstream.
 //!
-//! Request and response bodies stream through without buffering or parsing.
+//! Request and response bodies stream through without buffering or changes;
+//! the request body is read in passing only when cache diagnostics are on.
 //! Only the URI, hop-by-hop headers, and (in API-key mode) the credential
 //! headers are changed.
 
@@ -30,9 +31,12 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 pub(crate) use body::UpstreamBody;
 use pool::ClientPool;
 
-use crate::StartupError;
+use crate::{
+    StartupError,
+    diagnostics::{PromptBody, PromptSlot},
+};
 
-type UpstreamClient = Client<HttpsConnector<HttpConnector>, Limited<Incoming>>;
+type UpstreamClient = Client<HttpsConnector<HttpConnector>, PromptBody<Limited<Incoming>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
@@ -121,10 +125,12 @@ impl Upstream {
     }
 
     /// Forwards `req` and returns the upstream response with a streaming body.
+    /// With a `prompt` slot, the request body's prompt hashes land there.
     pub(crate) async fn forward(
         &self,
         req: Request<Incoming>,
         max_body_bytes: usize,
+        prompt: Option<PromptSlot>,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         let (mut parts, body) = req.into_parts();
         parts.uri = self.upstream_uri(parts.uri.path_and_query())?;
@@ -139,7 +145,8 @@ impl Upstream {
             parts.headers.remove(AUTHORIZATION);
             parts.headers.insert(X_API_KEY, key.clone());
         }
-        let req = Request::from_parts(parts, Limited::new(body, max_body_bytes));
+        let body = PromptBody::new(Limited::new(body, max_body_bytes), prompt);
+        let req = Request::from_parts(parts, body);
 
         let (client, slot) = self.clients.acquire();
         let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
