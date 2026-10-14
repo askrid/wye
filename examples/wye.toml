@@ -42,6 +42,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Models any credential may use (exact names or prefixes ending in *); a
 # credential issued with --models narrows this further. Omit to allow all.
 # models = ["claude-sonnet-*", "claude-haiku-*"]
+# Largest max_tokens a request may ask for (credentials issued with
+# --max-output-tokens can only lower it):
+# max_output_tokens = 32000
 # [[auth.keys]]
 # id = "k1"
 # ed25519_public_key = "<printed by wye token keygen>"

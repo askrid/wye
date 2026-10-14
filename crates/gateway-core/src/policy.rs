@@ -1,5 +1,5 @@
-//! Model permissions: which models a request may name, and reading `model`
-//! from a streamed request body.
+//! Per-request policy: which models a request may name, its output-token
+//! ceiling, and reading `model` and `max_tokens` from a streamed request body.
 //!
 //! [`PolicyScanner`] follows the body's structure (strings, escapes, nesting)
 //! with constant memory and chunk boundaries anywhere. It reports the
@@ -64,6 +64,15 @@ impl fmt::Display for ModelPattern {
     }
 }
 
+/// The output-token ceiling of a request: the stricter of the configured
+/// and the credential's limit, if either is set.
+pub fn token_limit(configured: Option<u64>, credential: Option<u64>) -> Option<u64> {
+    match (configured, credential) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 /// Whether `model` is allowed by both lists; an absent list allows every
 /// model. The configured list is the ceiling and a credential's list can only
 /// narrow it, so the stricter one always applies.
@@ -80,7 +89,7 @@ pub fn permitted(
 
 /// Why a request body's `model` cannot be checked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelError {
+pub enum PolicyError {
     /// The body ended without a top-level `model`.
     Missing,
     /// `model` is not a plain string of at most [`MAX_MODEL_BYTES`] bytes
@@ -92,9 +101,13 @@ pub enum ModelError {
     EscapedKey,
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
+    /// `max_tokens` is not a non-negative integer.
+    InvalidMaxTokens,
+    /// A second top-level `max_tokens` key.
+    RepeatedMaxTokens,
 }
 
-impl ModelError {
+impl PolicyError {
     /// A client-facing description.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -103,17 +116,19 @@ impl ModelError {
             Self::Repeated => "request names model more than once",
             Self::EscapedKey => "top-level keys must not contain escapes",
             Self::Malformed => "request body is not a JSON object",
+            Self::InvalidMaxTokens => "max_tokens must be a non-negative integer",
+            Self::RepeatedMaxTokens => "request names max_tokens more than once",
         }
     }
 }
 
-impl fmt::Display for ModelError {
+impl fmt::Display for PolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::error::Error for ModelError {}
+impl std::error::Error for PolicyError {}
 
 /// What the bytes of the current top-level string are for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,12 +140,12 @@ enum Capture {
     Model,
 }
 
-/// Bytes kept of a top-level key: enough to compare with `model`.
-const KEY_CAP: usize = 8;
+/// Bytes kept of a top-level key: enough to compare with `max_tokens`.
+const KEY_CAP: usize = 16;
 
 /// Incremental reader of one request body's top-level `model`.
 pub struct PolicyScanner {
-    error: Option<ModelError>,
+    error: Option<PolicyError>,
     started: bool,
     depth: u32,
     /// Bit `d` is set when the container at depth `d` is an array (`d < 64`).
@@ -148,6 +163,14 @@ pub struct PolicyScanner {
     model: [u8; MAX_MODEL_BYTES],
     model_len: usize,
     found: bool,
+    /// The last top-level key was `max_tokens` and its value comes next.
+    tokens_next: bool,
+    /// Digits of `max_tokens` are being read.
+    tokens_reading: bool,
+    tokens_value: u64,
+    tokens_seen: bool,
+    /// `max_tokens`, once its value has been read completely.
+    max_tokens: Option<u64>,
 }
 
 impl Default for PolicyScanner {
@@ -175,6 +198,11 @@ impl PolicyScanner {
             model: [0; MAX_MODEL_BYTES],
             model_len: 0,
             found: false,
+            tokens_next: false,
+            tokens_reading: false,
+            tokens_value: 0,
+            tokens_seen: false,
+            max_tokens: None,
         }
     }
 
@@ -188,20 +216,25 @@ impl PolicyScanner {
         std::str::from_utf8(self.model.get(..self.model_len)?).ok()
     }
 
+    /// `max_tokens`, once its value has been read completely.
+    pub fn max_tokens(&self) -> Option<u64> {
+        self.max_tokens
+    }
+
     /// The first problem found, if any. Scanning stops there.
-    pub fn error(&self) -> Option<ModelError> {
+    pub fn error(&self) -> Option<PolicyError> {
         self.error
     }
 
     /// The outcome once the body has ended.
-    pub fn finish(&self) -> Result<&str, ModelError> {
+    pub fn finish(&self) -> Result<&str, PolicyError> {
         if let Some(error) = self.error {
             return Err(error);
         }
         self.model().ok_or(if self.found {
-            ModelError::Invalid
+            PolicyError::Invalid
         } else {
-            ModelError::Missing
+            PolicyError::Missing
         })
     }
 
@@ -227,17 +260,24 @@ impl PolicyScanner {
             let Some(&byte) = chunk.get(i) else { break };
             i += 1;
             if is_space(byte) {
+                if self.tokens_reading {
+                    self.end_tokens();
+                }
                 continue;
             }
             if !self.started {
                 self.started = true;
                 if byte != b'{' {
-                    self.error = Some(ModelError::Malformed);
+                    self.error = Some(PolicyError::Malformed);
                     break;
                 }
             }
             match byte {
                 b'"' => {
+                    if self.tokens_next {
+                        self.error = Some(PolicyError::InvalidMaxTokens);
+                        break;
+                    }
                     let top_key = self.depth == 1 && self.expect_key;
                     let model_value = self.depth == 1 && self.model_next;
                     self.expect_key = false;
@@ -266,7 +306,11 @@ impl PolicyScanner {
                 }
                 b'{' | b'[' => {
                     if self.depth == 1 && self.model_next {
-                        self.error = Some(ModelError::Invalid);
+                        self.error = Some(PolicyError::Invalid);
+                        break;
+                    }
+                    if self.tokens_next {
+                        self.error = Some(PolicyError::InvalidMaxTokens);
                         break;
                     }
                     self.depth = self.depth.saturating_add(1);
@@ -280,21 +324,29 @@ impl PolicyScanner {
                     self.expect_key = byte == b'{';
                 }
                 b'}' | b']' => {
+                    self.end_tokens();
+                    if self.error.is_some() {
+                        break;
+                    }
                     let is_array = self.depth < 64 && self.arrays & (1 << self.depth) != 0;
                     if self.depth == 0 || (self.depth < 64 && is_array != (byte == b']')) {
-                        self.error = Some(ModelError::Malformed);
+                        self.error = Some(PolicyError::Malformed);
                         break;
                     }
                     if self.depth == 1 && self.model_next {
-                        self.error = Some(ModelError::Invalid);
+                        self.error = Some(PolicyError::Invalid);
                         break;
                     }
                     self.depth -= 1;
                     self.expect_key = false;
                 }
                 b',' => {
+                    self.end_tokens();
+                    if self.error.is_some() {
+                        break;
+                    }
                     if self.depth == 1 && self.model_next {
-                        self.error = Some(ModelError::Invalid);
+                        self.error = Some(PolicyError::Invalid);
                         break;
                     }
                     let in_object = self.depth > 0
@@ -305,11 +357,38 @@ impl PolicyScanner {
                 // A number, `true`, `false`, or `null`.
                 _ => {
                     if self.depth == 1 && self.model_next {
-                        self.error = Some(ModelError::Invalid);
+                        self.error = Some(PolicyError::Invalid);
                         break;
+                    }
+                    if self.tokens_next || self.tokens_reading {
+                        self.tokens_next = false;
+                        self.tokens_reading = true;
+                        let digit = byte.wrapping_sub(b'0');
+                        let next = (digit < 10)
+                            .then(|| self.tokens_value.checked_mul(10))
+                            .flatten()
+                            .and_then(|v| v.checked_add(u64::from(digit)));
+                        match next {
+                            Some(value) => self.tokens_value = value,
+                            None => {
+                                self.error = Some(PolicyError::InvalidMaxTokens);
+                                break;
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// Completes a `max_tokens` value at a terminator; a key whose value
+    /// never started is an error.
+    fn end_tokens(&mut self) {
+        if self.tokens_reading {
+            self.tokens_reading = false;
+            self.max_tokens = Some(self.tokens_value);
+        } else if self.tokens_next {
+            self.error = Some(PolicyError::InvalidMaxTokens);
         }
     }
 
@@ -340,17 +419,23 @@ impl PolicyScanner {
             Capture::None => {}
             Capture::Key => {
                 if self.escaped {
-                    self.error = Some(ModelError::EscapedKey);
+                    self.error = Some(PolicyError::EscapedKey);
                 } else if !self.key_long && self.key.get(..self.key_len) == Some(b"model") {
                     if self.found {
-                        self.error = Some(ModelError::Repeated);
+                        self.error = Some(PolicyError::Repeated);
                     }
                     self.model_next = true;
+                } else if !self.key_long && self.key.get(..self.key_len) == Some(b"max_tokens") {
+                    if self.tokens_seen {
+                        self.error = Some(PolicyError::RepeatedMaxTokens);
+                    }
+                    self.tokens_seen = true;
+                    self.tokens_next = true;
                 }
             }
             Capture::Model => {
                 if self.escaped || self.key_long {
-                    self.error = Some(ModelError::Invalid);
+                    self.error = Some(PolicyError::Invalid);
                 } else {
                     self.found = true;
                 }

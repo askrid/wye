@@ -27,8 +27,8 @@ use crate::{
     auth::{ConnectionAuth, authenticate},
     diagnostics::PromptSlot,
     gauge::Gauge,
-    permissions::{HoldError, RequestBody, hold_until_model},
-    upstream::{ForwardError, Upstream, UpstreamBody},
+    permissions::{HoldError, OverTokenLimit, RequestBody, hold_until_model},
+    upstream::{ForwardError, PolicyRefusal, Upstream, UpstreamBody},
     usage_log::{Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
 };
 
@@ -49,6 +49,8 @@ pub struct Gateway {
     upstream: Upstream,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
+    /// Largest `max_tokens` any credential may request.
+    max_output_tokens: Option<u64>,
     /// Request bytes held while reading `model`, across all requests.
     held_bytes: Gauge,
     max_held_request_bytes: usize,
@@ -72,6 +74,7 @@ impl Gateway {
             verifier: config.auth.as_ref().map(Verifier::new),
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
+            max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),
             held_bytes: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
@@ -212,7 +215,17 @@ impl Gateway {
         }
         let (parts, mut body) = req.into_parts();
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
-        let body = if self.models.is_none() && credential_models.is_none() {
+        // `max_tokens` bounds generation; count_tokens generates nothing.
+        let token_limit = (info.path == "/v1/messages")
+            .then(|| {
+                policy::token_limit(
+                    self.max_output_tokens,
+                    info.identity.as_ref().and_then(|i| i.max_output_tokens),
+                )
+            })
+            .flatten();
+        let body = if self.models.is_none() && credential_models.is_none() && token_limit.is_none()
+        {
             RequestBody::new(body)
         } else {
             let held = match hold_until_model(
@@ -220,6 +233,7 @@ impl Gateway {
                 &self.held_bytes,
                 self.max_held_request_bytes,
                 self.max_request_body_bytes,
+                token_limit,
             )
             .await
             {
@@ -239,6 +253,14 @@ impl Gateway {
                     "permission_error",
                     "this credential may not use the requested model",
                 );
+                log.gateway_error(info, res.status());
+                return res;
+            }
+            if let (Some(limit), Some(requested)) = (token_limit, held.max_tokens())
+                && requested > limit
+            {
+                let message = OverTokenLimit { requested, limit }.to_string();
+                let res = error(StatusCode::FORBIDDEN, "permission_error", &message);
                 log.gateway_error(info, res.status());
                 return res;
             }
@@ -343,6 +365,12 @@ fn forward_error(e: ForwardError) -> Response<ResBody> {
             "api_error",
             "upstream request failed",
         ),
+        ForwardError::Policy(PolicyRefusal::Invalid(e)) => {
+            error(StatusCode::BAD_REQUEST, "invalid_request_error", e.as_str())
+        }
+        ForwardError::Policy(PolicyRefusal::OverTokenLimit(message)) => {
+            error(StatusCode::FORBIDDEN, "permission_error", &message)
+        }
     }
 }
 
@@ -353,7 +381,7 @@ fn empty(status: StatusCode) -> Response<ResBody> {
 }
 
 /// Gateway-generated errors use Anthropic's error shape so clients handle them like upstream errors.
-fn error(status: StatusCode, kind: &'static str, message: &'static str) -> Response<ResBody> {
+fn error(status: StatusCode, kind: &'static str, message: &str) -> Response<ResBody> {
     let body = format!(r#"{{"type":"error","error":{{"type":"{kind}","message":"{message}"}}}}"#);
     let mut res = Response::new(Either::Left(Full::new(Bytes::from(body))));
     *res.status_mut() = status;

@@ -18,7 +18,7 @@ const USAGE: &str = "usage:
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
---subject <sub> --ttl-secs <n> [--models <name,prefix*,...>]";
+--subject <sub> --ttl-secs <n> [--models <name,prefix*,...>] [--max-output-tokens <n>]";
 
 fn main() -> ExitCode {
     match run(std::env::args_os().skip(1).collect()) {

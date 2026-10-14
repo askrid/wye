@@ -109,6 +109,18 @@ fn auth_models_are_validated_patterns() {
             "{bad}"
         );
     }
+    assert_eq!(
+        with_models("max_output_tokens = 8000")
+            .unwrap()
+            .auth
+            .unwrap()
+            .max_output_tokens,
+        Some(8000)
+    );
+    assert_eq!(
+        with_models("max_output_tokens = 0").unwrap_err(),
+        ConfigError::Zero("auth.max_output_tokens")
+    );
     let held = parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
         .unwrap()
         .server

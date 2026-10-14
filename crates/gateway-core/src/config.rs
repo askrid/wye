@@ -89,6 +89,9 @@ pub struct Auth {
     /// Models any credential may use; `None` allows every model. A
     /// credential's `models` claim narrows this, never widens it.
     pub models: Option<Vec<ModelPattern>>,
+    /// Largest `max_tokens` any credential may request on `/v1/messages`;
+    /// a credential's `max_output_tokens` claim can only lower it.
+    pub max_output_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,6 +236,7 @@ struct RawAuth {
     max_credential_ttl_secs: Option<u64>,
     keys: Vec<RawPublicKey>,
     models: Option<Vec<String>>,
+    max_output_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -360,6 +364,10 @@ fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     Ok(Auth {
         issuer: raw.issuer,
         models,
+        max_output_tokens: raw
+            .max_output_tokens
+            .map(|n| nonzero(n, "auth.max_output_tokens"))
+            .transpose()?,
         audience: raw.audience,
         max_credential_ttl: secs(
             raw.max_credential_ttl_secs

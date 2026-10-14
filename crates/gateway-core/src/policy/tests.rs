@@ -4,13 +4,13 @@ use proptest::prelude::*;
 
 use super::*;
 
-fn scan(body: &[u8]) -> Result<String, ModelError> {
+fn scan(body: &[u8]) -> Result<String, PolicyError> {
     let mut scanner = PolicyScanner::new();
     scanner.feed(body);
     scanner.finish().map(str::to_owned)
 }
 
-fn scan_chunked(body: &[u8], sizes: &[usize]) -> (Result<String, ModelError>, Option<usize>) {
+fn scan_chunked(body: &[u8], sizes: &[usize]) -> (Result<String, PolicyError>, Option<usize>) {
     let mut scanner = PolicyScanner::new();
     let mut fed = 0;
     let mut known_after = None;
@@ -88,19 +88,22 @@ fn reads_the_top_level_model_only() {
 #[test]
 fn rejects_what_it_cannot_check() {
     for (body, error) in [
-        (&br#"{"max_tokens":1}"#[..], ModelError::Missing),
-        (br#"{"model":1}"#, ModelError::Invalid),
-        (br#"{"model":["a"]}"#, ModelError::Invalid),
-        (br#"{"model":"a\u0062"}"#, ModelError::Invalid),
-        (br#"{"model":"a","x":1,"model":"b"}"#, ModelError::Repeated),
-        (br#"{"model":"a","mod\u0065l":"b"}"#, ModelError::EscapedKey),
-        (br#"["model"]"#, ModelError::Malformed),
-        (br#"{"model":"a"]"#, ModelError::Malformed),
+        (&br#"{"max_tokens":1}"#[..], PolicyError::Missing),
+        (br#"{"model":1}"#, PolicyError::Invalid),
+        (br#"{"model":["a"]}"#, PolicyError::Invalid),
+        (br#"{"model":"a\u0062"}"#, PolicyError::Invalid),
+        (br#"{"model":"a","x":1,"model":"b"}"#, PolicyError::Repeated),
+        (
+            br#"{"model":"a","mod\u0065l":"b"}"#,
+            PolicyError::EscapedKey,
+        ),
+        (br#"["model"]"#, PolicyError::Malformed),
+        (br#"{"model":"a"]"#, PolicyError::Malformed),
     ] {
         assert_eq!(scan(body), Err(error), "{}", String::from_utf8_lossy(body));
     }
     let long = format!(r#"{{"model":"{}"}}"#, "m".repeat(MAX_MODEL_BYTES + 1));
-    assert_eq!(scan(long.as_bytes()), Err(ModelError::Invalid));
+    assert_eq!(scan(long.as_bytes()), Err(PolicyError::Invalid));
 }
 
 #[test]
@@ -145,7 +148,7 @@ proptest! {
         members in prop::collection::vec(
             prop_oneof![
                 "[a-z0-9.-]{1,40}".prop_map(Member::Model),
-                (prop::sample::select(vec!["max_tokens", "messages", "metadata", "models", "mode"]), value_text())
+                (prop::sample::select(vec!["temperature", "messages", "metadata", "models", "mode"]), value_text())
                     .prop_map(|(k, v)| Member::Other(k.to_owned(), v)),
             ],
             0..6,
@@ -170,9 +173,9 @@ proptest! {
             .filter_map(|m| match m { Member::Model(n) => Some(n), Member::Other(..) => None })
             .collect();
         let want = match models.as_slice() {
-            [] => Err(ModelError::Missing),
+            [] => Err(PolicyError::Missing),
             [one] => Ok((*one).clone()),
-            _ => Err(ModelError::Repeated),
+            _ => Err(PolicyError::Repeated),
         };
         let (got, known_after) = scan_chunked(body.as_bytes(), &sizes);
         prop_assert_eq!(&got, &want, "{}", body);
@@ -192,4 +195,47 @@ proptest! {
     ) {
         let _ = scan_chunked(&bytes, &sizes);
     }
+}
+
+#[test]
+fn reads_max_tokens_and_rejects_bad_values() {
+    let tokens = |body: &[u8]| {
+        let mut scanner = PolicyScanner::new();
+        scanner.feed(body);
+        scanner.error().map_or(Ok(scanner.max_tokens()), Err)
+    };
+    assert_eq!(
+        tokens(br#"{"model":"m","max_tokens":32000}"#),
+        Ok(Some(32000))
+    );
+    assert_eq!(tokens(br#"{"max_tokens" : 7 ,"model":"m"}"#), Ok(Some(7)));
+    assert_eq!(
+        tokens(br#"{"model":"m","metadata":{"max_tokens":9}}"#),
+        Ok(None)
+    );
+    // Known as soon as its terminator arrives, not before.
+    assert_eq!(tokens(br#"{"max_tokens":123"#), Ok(None));
+    for bad in [
+        &br#"{"max_tokens":-1}"#[..],
+        br#"{"max_tokens":1.5}"#,
+        br#"{"max_tokens":"9"}"#,
+        br#"{"max_tokens":null}"#,
+        br#"{"max_tokens":,"model":"m"}"#,
+        br#"{"max_tokens":99999999999999999999999}"#,
+    ] {
+        assert_eq!(
+            tokens(bad),
+            Err(PolicyError::InvalidMaxTokens),
+            "{}",
+            String::from_utf8_lossy(bad)
+        );
+    }
+    assert_eq!(
+        tokens(br#"{"max_tokens":1,"max_tokens":2}"#),
+        Err(PolicyError::RepeatedMaxTokens)
+    );
+    assert_eq!(token_limit(None, None), None);
+    assert_eq!(token_limit(Some(8000), None), Some(8000));
+    assert_eq!(token_limit(Some(8000), Some(32000)), Some(8000));
+    assert_eq!(token_limit(None, Some(4000)), Some(4000));
 }
