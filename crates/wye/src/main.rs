@@ -13,6 +13,7 @@ const USAGE: &str = "usage:
   wye serve --config <path>
   wye check-config <path>
   wye probe <http-url>
+  wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
 --subject <sub> --ttl-secs <n> [--models <name,prefix*,...>]";
@@ -36,6 +37,10 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         ["serve", "--config", path] => serve(load(path)?, config_dir(path)),
         ["token", "keygen", "--out", path] => token::keygen(Path::new(path)),
         ["token", "issue", flags @ ..] => token::issue(flags),
+        ["claude", rest @ ..] => {
+            let code = wye::claude(rest)?;
+            std::process::exit(code);
+        }
         ["probe", url] => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
