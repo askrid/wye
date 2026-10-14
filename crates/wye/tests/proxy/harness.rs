@@ -254,7 +254,10 @@ pub(crate) async fn spawn_upstream(
         hits.fetch_add(1, Ordering::Relaxed);
         async move {
             let (parts, body) = req.into_parts();
-            let body = body.collect().await.unwrap().to_bytes();
+            // An aborted request body never reaches the handler.
+            let Ok(body) = body.collect().await.map(|b| b.to_bytes()) else {
+                return full(StatusCode::BAD_REQUEST, "incomplete request body");
+            };
             handler(Seen {
                 version: parts.version,
                 method: parts.method,

@@ -77,6 +77,12 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
             format!("--models: {bad:?} is not a model name or a prefix ending in *").into(),
         );
     }
+    let max_output_tokens = optional("--max-output-tokens")
+        .map(|n| match n.parse::<u64>() {
+            Ok(n) if n > 0 => Ok(n),
+            _ => Err("--max-output-tokens must be a positive number"),
+        })
+        .transpose()?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let token = credential::issue(
         &key,
@@ -88,6 +94,7 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
             iat: now,
             exp: now.checked_add(ttl).ok_or("--ttl-secs too large")?,
             models: models.as_deref(),
+            max_output_tokens,
         },
     );
     println!("{token}");

@@ -31,10 +31,12 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 pub(crate) use body::{BoxError, UpstreamBody};
 use pool::ClientPool;
 
+use gateway_core::policy::PolicyError;
+
 use crate::{
     StartupError,
     diagnostics::{PromptBody, PromptSlot},
-    permissions::RequestBody,
+    permissions::{OverTokenLimit, RequestBody},
 };
 
 type UpstreamClient =
@@ -86,6 +88,18 @@ pub(crate) enum ForwardError {
     HeaderTimeout,
     /// Connection, TLS, protocol, or request-body failure.
     Upstream,
+    /// The request body broke the policy after forwarding began; the
+    /// upstream request was aborted.
+    Policy(PolicyRefusal),
+}
+
+/// A policy failure found in the streamed part of the body.
+#[derive(Debug)]
+pub(crate) enum PolicyRefusal {
+    /// A repeated `model`, an escaped top-level key, or a bad `max_tokens`.
+    Invalid(PolicyError),
+    /// `max_tokens` above the request's ceiling.
+    OverTokenLimit(String),
 }
 
 pub(crate) struct Upstream {
@@ -154,7 +168,7 @@ impl Upstream {
         let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
             .await
             .map_err(|_| ForwardError::HeaderTimeout)?
-            .map_err(|_| ForwardError::Upstream)?;
+            .map_err(|e| policy_refusal(&e).map_or(ForwardError::Upstream, ForwardError::Policy))?;
 
         let (mut parts, body) = res.into_parts();
         strip_hop_by_hop(&mut parts.headers);
@@ -182,6 +196,22 @@ impl Upstream {
             .build()
             .map_err(|_| ForwardError::Upstream)
     }
+}
+
+/// The policy failure our request body raised, if that is why the upstream
+/// request failed (hyper keeps the body's error as a source).
+fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Option<PolicyRefusal> {
+    let mut cause = Some(error);
+    while let Some(e) = cause {
+        if let Some(e) = e.downcast_ref::<PolicyError>() {
+            return Some(PolicyRefusal::Invalid(*e));
+        }
+        if let Some(e) = e.downcast_ref::<OverTokenLimit>() {
+            return Some(PolicyRefusal::OverTokenLimit(e.to_string()));
+        }
+        cause = e.source();
+    }
+    None
 }
 
 /// Built-in web PKI roots plus the configured extra roots.

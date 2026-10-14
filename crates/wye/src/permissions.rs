@@ -16,7 +16,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::policy::{ModelError, PolicyScanner};
+use gateway_core::policy::{PolicyError, PolicyScanner};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Frame, SizeHint};
 
@@ -29,7 +29,7 @@ use crate::{
 #[derive(Debug)]
 pub(crate) enum HoldError {
     /// The body's `model` cannot be checked.
-    Model(ModelError),
+    Model(PolicyError),
     /// The process-wide hold budget is used up.
     Overloaded,
     /// The body exceeded the request size limit while being held.
@@ -80,7 +80,28 @@ struct Hold {
     scanner: PolicyScanner,
     /// The whole body is in `chunks`.
     ended: bool,
+    /// The request's `max_tokens` ceiling, checked again as the rest streams.
+    token_limit: Option<u64>,
 }
+
+/// A `max_tokens` above the request's ceiling, found after forwarding began.
+#[derive(Debug)]
+pub(crate) struct OverTokenLimit {
+    pub(crate) requested: u64,
+    pub(crate) limit: u64,
+}
+
+impl std::fmt::Display for OverTokenLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "max_tokens {} exceeds this credential's limit of {}",
+            self.requested, self.limit
+        )
+    }
+}
+
+impl std::error::Error for OverTokenLimit {}
 
 /// The start of a request body, read until its model was known.
 ///
@@ -95,6 +116,11 @@ impl HeldStart {
     pub(crate) fn model(&self) -> Option<&str> {
         self.0.scanner.model()
     }
+
+    /// The request's `max_tokens`, if it was read before the hold ended.
+    pub(crate) fn max_tokens(&self) -> Option<u64> {
+        self.0.scanner.max_tokens()
+    }
 }
 
 /// Reads `body` until its model is known (or it ends), holding what it read.
@@ -106,6 +132,7 @@ pub(crate) async fn hold_until_model<B>(
     budget: &Gauge,
     max_held: usize,
     max_body: usize,
+    token_limit: Option<u64>,
 ) -> Result<HeldStart, HoldError>
 where
     B: Body<Data = Bytes> + Unpin,
@@ -115,6 +142,7 @@ where
         budget: budget.hold_none(),
         scanner: PolicyScanner::new(),
         ended: false,
+        token_limit,
     });
     let mut total = 0usize;
     while hold.scanner.model().is_none() {
@@ -196,11 +224,17 @@ where
             && let Some(data) = frame.data_ref()
         {
             hold.scanner.feed(data);
+            // Either failure stops the upstream request mid-body: the provider
+            // never sees a complete request that breaks the policy.
             if let Some(error) = hold.scanner.error() {
-                // Fails the upstream request mid-body: the provider never
-                // sees a complete request naming another model.
                 this.inner = None;
                 return Poll::Ready(Some(Err(Box::new(error))));
+            }
+            if let (Some(limit), Some(requested)) = (hold.token_limit, hold.scanner.max_tokens())
+                && requested > limit
+            {
+                this.inner = None;
+                return Poll::Ready(Some(Err(Box::new(OverTokenLimit { requested, limit }))));
             }
         }
         polled.map(|frame| frame.map(|f| f.map_err(Into::into)))
@@ -267,7 +301,7 @@ mod tests {
         let budget = Gauge::default();
         let parts = [r#"{"model":"m","#, r#""messages":[]"#, "}"];
         let mut client = chunks(&parts);
-        let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20)
+        let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20, None)
             .await
             .unwrap();
         assert_eq!(held.model(), Some("m"));
@@ -282,16 +316,30 @@ mod tests {
     async fn a_repeated_model_later_fails_the_body() {
         let budget = Gauge::default();
         let mut client = chunks(&[r#"{"model":"allowed","#, r#""model":"other"}"#]);
-        let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20)
+        let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20, None)
             .await
             .unwrap();
         let error = collect(RequestBody::after_hold(held, client))
             .await
             .unwrap_err();
         assert_eq!(
-            error.downcast_ref::<ModelError>(),
-            Some(&ModelError::Repeated)
+            error.downcast_ref::<PolicyError>(),
+            Some(&PolicyError::Repeated)
         );
+    }
+
+    #[tokio::test]
+    async fn a_late_max_tokens_above_the_limit_fails_the_body() {
+        let mut client = chunks(&[r#"{"model":"m","messages":[],"#, r#""max_tokens":9000}"#]);
+        let held = hold_until_model(&mut client, &Gauge::default(), 1 << 20, 1 << 20, Some(4000))
+            .await
+            .unwrap();
+        assert_eq!(held.max_tokens(), None, "not read before the hold ended");
+        let error = collect(RequestBody::after_hold(held, client))
+            .await
+            .unwrap_err();
+        let over = error.downcast_ref::<OverTokenLimit>().unwrap();
+        assert_eq!((over.requested, over.limit), (9000, 4000));
     }
 
     #[tokio::test]
@@ -303,7 +351,7 @@ mod tests {
             other
         };
         let mut client = chunks(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
-        let error = hold_until_model(&mut client, &budget, 100, 1 << 20)
+        let error = hold_until_model(&mut client, &budget, 100, 1 << 20, None)
             .await
             .err()
             .unwrap();
@@ -311,14 +359,14 @@ mod tests {
         assert_eq!(budget.current(), 90);
 
         let mut client = chunks(&[r#"{"messages":[]}"#]);
-        let error = hold_until_model(&mut client, &Gauge::default(), 100, 1 << 20)
+        let error = hold_until_model(&mut client, &Gauge::default(), 100, 1 << 20, None)
             .await
             .err()
             .unwrap();
-        assert!(matches!(error, HoldError::Model(ModelError::Missing)));
+        assert!(matches!(error, HoldError::Model(PolicyError::Missing)));
 
         let mut client = chunks(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]);
-        let error = hold_until_model(&mut client, &Gauge::default(), 100, 10)
+        let error = hold_until_model(&mut client, &Gauge::default(), 100, 10, None)
             .await
             .err()
             .unwrap();

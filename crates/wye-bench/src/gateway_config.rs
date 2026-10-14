@@ -40,6 +40,7 @@ impl BenchCredentials {
                 iat: now,
                 exp: now + 3_600,
                 models,
+                max_output_tokens: None,
             },
         );
         Self {

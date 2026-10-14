@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs. Not built: the per-request limits of step 3, and steps 4–5 (aliases and routing; one upstream today).
+**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, and steps 4–5 (aliases and routing; one upstream today).
 
 ## Repository and workspace
 
@@ -270,6 +270,7 @@ max_credential_ttl_secs = 604800
 id = "k1"
 ed25519_public_key = "<from wye token keygen>"
 # models = ["claude-sonnet-*", "claude-haiku-*"]  # ceiling; a credential's models claim narrows it
+# max_output_tokens = 32000            # max_tokens ceiling; a credential's claim can only lower it
 
 [telemetry]                            # optional: usage records as OTLP logs
 otlp_endpoint = "http://collector:4318" # POST {otlp_endpoint}/v1/logs, OTLP/HTTP JSON

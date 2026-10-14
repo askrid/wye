@@ -57,6 +57,8 @@ A developer on a claude.ai subscription authenticates with their own login, not 
 
 Admission rejects requests that violate model allowances, payload or token bounds, or a **conservatively computable** monetary ceiling.
 
+**Implemented: output-token ceilings.** `[auth] max_output_tokens` and a credential's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bound the `max_tokens` a `/v1/messages` request may ask for; the stricter one applies, so a credential only lowers the configured ceiling. Wye reads the top-level `max_tokens` with the same scanner and hold as [model permissions](#gateway-credentials) and does not rewrite it: a value above the ceiling gets `403 permission_error` before any upstream contact when it was read during the hold, and otherwise aborts the upstream request mid-body (the provider never sees a complete request) and still answers `403`. A `max_tokens` that is not a non-negative integer, or appears twice, gets `400`; a request without it is forwarded, since the provider rejects it anyway. `count_tokens` generates nothing and is not bounded. This caps output tokens per request; it is not a dollar cap (see below).
+
 A hard cost ceiling requires conservative bounds on every billable dimension: input tokens, output tokens (including hidden reasoning tokens), provider-hosted tools, service tiers, and any other usage charge. Tokenization and billing differ by provider; `max_output_tokens` is not a dollar cap. If a safe bound cannot be established, reject in hard-cap mode or label enforcement **estimated-only**. Never advertise estimation as a guaranteed ceiling.
 
 ### Provable cost ceiling

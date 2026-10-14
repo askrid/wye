@@ -25,6 +25,7 @@ fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {
             iat,
             exp,
             models: None,
+            max_output_tokens: None,
         },
     )
 }
@@ -121,6 +122,7 @@ fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
             iat: now(),
             exp: now() + 600,
             models: Some(models),
+            max_output_tokens: None,
         },
     )
 }
@@ -218,4 +220,102 @@ async fn credentials_without_any_model_list_skip_the_check() {
         .await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(bodies.recv().await.unwrap(), "not json");
+}
+
+fn token_with_output_limit(key: &Ed25519KeyPair, max_output_tokens: u64) -> String {
+    credential::issue(
+        key,
+        "k1",
+        &NewCredential {
+            iss: "wye",
+            sub: "alice",
+            aud: "wye-prod",
+            iat: now(),
+            exp: now() + 600,
+            models: None,
+            max_output_tokens: Some(max_output_tokens),
+        },
+    )
+}
+
+#[tokio::test]
+async fn max_tokens_above_the_stricter_limit_is_refused() {
+    let key = keypair();
+    let (h, mut bodies) = body_harness(&key, "max_output_tokens = 8000").await;
+    let t = token_with_output_limit(&key, 4000);
+    let bearer = || messages().header("authorization", format!("Bearer {t}"));
+    let within = r#"{"model":"claude-haiku-4-5","max_tokens":4000,"messages":[]}"#;
+    assert_eq!(h.send(bearer(), within).await.status(), StatusCode::OK);
+    assert_eq!(bodies.recv().await.unwrap(), within);
+    h.usage_record().await;
+
+    // The credential's 4000 is stricter than the configured 8000.
+    let res = h
+        .send(
+            bearer(),
+            r#"{"model":"claude-haiku-4-5","max_tokens":6000,"messages":[]}"#,
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let text = read_body(res).await;
+    assert!(
+        String::from_utf8_lossy(&text)
+            .contains("max_tokens 6000 exceeds this credential's limit of 4000"),
+        "{text:?}"
+    );
+    assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 1);
+    h.usage_record().await;
+
+    // count_tokens generates nothing; the ceiling does not apply.
+    let count =
+        Request::post("/v1/messages/count_tokens").header("authorization", format!("Bearer {t}"));
+    let res = h
+        .send(
+            count,
+            r#"{"model":"claude-haiku-4-5","max_tokens":999999,"messages":[]}"#,
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_late_max_tokens_above_the_limit_aborts_the_upstream_request() {
+    let key = keypair();
+    let (h, mut bodies) = body_harness(&key, "max_output_tokens = 4000").await;
+    let t = token(&key, now(), now() + 600);
+    // The client streams the body: model first, max_tokens in a later chunk.
+    let (tx, rx) = mpsc::channel::<Bytes>(2);
+    let client: Client<HttpConnector, ChannelBody> =
+        Client::builder(TokioExecutor::new()).build_http();
+    let req = Request::post(format!("http://{}/v1/messages", h.gateway))
+        .header("authorization", format!("Bearer {t}"))
+        .body(ChannelBody(rx))
+        .unwrap();
+    let response = tokio::spawn(async move { client.request(req).await });
+    tx.send(Bytes::from_static(
+        br#"{"model":"claude-haiku-4-5","messages":[],"#,
+    ))
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    tx.send(Bytes::from_static(br#""max_tokens":9000}"#))
+        .await
+        .unwrap();
+    drop(tx);
+    let res = tokio::time::timeout(WAIT, response)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let text = read_body(res).await;
+    assert!(
+        String::from_utf8_lossy(&text).contains("max_tokens 9000"),
+        "{text:?}"
+    );
+    // The upstream saw the request start, never a complete body.
+    assert!(
+        bodies.try_recv().is_err(),
+        "the upstream received a complete body"
+    );
 }

@@ -29,6 +29,9 @@ pub struct Identity {
     /// Models this credential may use (`models` claim); `None` leaves the
     /// configured list in charge.
     pub models: Option<Box<[ModelPattern]>>,
+    /// Largest `max_tokens` this credential may request
+    /// (`max_output_tokens` claim).
+    pub max_output_tokens: Option<u64>,
 }
 
 /// Why a credential was rejected. Deliberately coarse in client responses;
@@ -84,6 +87,7 @@ struct Claims {
     iat: u64,
     nbf: Option<u64>,
     models: Option<Vec<String>>,
+    max_output_tokens: Option<u64>,
 }
 
 /// `aud` may be one string or a list (RFC 7519 §4.1.3).
@@ -187,8 +191,12 @@ impl Verifier {
             ),
             None => None,
         };
+        if claims.max_output_tokens == Some(0) {
+            return Err(CredentialError::Malformed);
+        }
         Ok(Identity {
             models,
+            max_output_tokens: claims.max_output_tokens,
             subject: claims.sub.into(),
             key_id: header.kid.into(),
             expires_at: claims.exp,
@@ -211,6 +219,9 @@ pub struct NewCredential<'a> {
     /// Allowed models (names or prefixes ending in `*`); `None` omits the claim.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<&'a [&'a str]>,
+    /// Largest `max_tokens`; `None` omits the claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
 }
 
 /// Signs `claims` with `key` under key id `kid`.
@@ -254,6 +265,7 @@ mod tests {
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
         Verifier::new(&Auth {
             models: None,
+            max_output_tokens: None,
             issuer: "wye".into(),
             audience: "wye-prod".into(),
             max_credential_ttl: Duration::from_secs(86_400),
@@ -272,6 +284,7 @@ mod tests {
             iat: NOW,
             exp: NOW + 3_600,
             models: None,
+            max_output_tokens: None,
         }
     }
 
@@ -301,6 +314,14 @@ mod tests {
         assert!(!models[1].matches("claude-sonnet-4-5-20250929"));
         assert_eq!(with_models(&[]), Err(CredentialError::Malformed));
         assert_eq!(with_models(&["a*b"]), Err(CredentialError::Malformed));
+
+        let with_limit = |limit: u64| {
+            let mut c = claims();
+            c.max_output_tokens = Some(limit);
+            v.verify(&issue(&key, "k1", &c), NOW + 10)
+        };
+        assert_eq!(with_limit(4000).unwrap().max_output_tokens, Some(4000));
+        assert_eq!(with_limit(0), Err(CredentialError::Malformed));
     }
 
     #[test]
