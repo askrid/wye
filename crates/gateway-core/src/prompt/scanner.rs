@@ -2,15 +2,14 @@
 
 use xxhash_rust::xxh3::Xxh3Default;
 
+use crate::json::{StringEnd, is_space, short_string_len};
+
 use super::{Breakpoint, MessagePrefix, PromptHashes, Section, SectionHash};
 
 /// Longest key kept for classification; longer keys match nothing we look for.
 const KEY_CAP: usize = 16;
 const CACHE_CONTROL: &[u8] = b"cache_control";
 const QUOTED_CACHE_CONTROL: &[u8] = b"\"cache_control\"";
-/// Strings shorter than this are scanned with a plain loop: keys and short
-/// values end before a vector search would pay off.
-const SHORT_STRING: usize = 16;
 /// Nesting depths whose container kind is tracked; deeper JSON is followed
 /// without the bracket-kind check.
 const TRACKED_DEPTH: u32 = 64;
@@ -44,8 +43,7 @@ pub struct PromptScanner {
     arrays: u64,
     in_string: bool,
     string_is_key: bool,
-    /// The bytes of the current string seen so far end in an unpaired backslash.
-    backslash_odd: bool,
+    string: StringEnd,
     /// Inside an object, the next string is a key.
     expect_key: bool,
 
@@ -102,7 +100,7 @@ impl PromptScanner {
             arrays: 0,
             in_string: false,
             string_is_key: false,
-            backslash_odd: false,
+            string: StringEnd::default(),
             expect_key: false,
             capture: Capture::None,
             key: [0; KEY_CAP],
@@ -138,7 +136,10 @@ impl PromptScanner {
             }
             if self.in_string {
                 // Most bytes are string content: jump to the closing quote.
-                let end = self.closing_quote(chunk, i);
+                let end = self
+                    .string
+                    .find(chunk.get(i..).unwrap_or_default())
+                    .map(|quote| i + quote);
                 self.capture_key(chunk, i, end.unwrap_or(chunk.len()), &mut run);
                 match end {
                     Some(quote) => {
@@ -175,7 +176,7 @@ impl PromptScanner {
                         Some(len) => i += len + 1,
                         None => {
                             self.in_string = true;
-                            self.backslash_odd = false;
+                            self.string.start();
                             return i + 1;
                         }
                     }
@@ -191,7 +192,7 @@ impl PromptScanner {
                         return i + 1;
                     }
                 }
-                byte if is_json_space(byte) => {
+                byte if is_space(byte) => {
                     self.flush(chunk, run, i);
                     *run = i + 1;
                 }
@@ -288,33 +289,6 @@ impl PromptScanner {
             && self.is_array(4)
     }
 
-    /// Index of the closing quote at or after `from`, if it is in this chunk.
-    #[inline(always)]
-    fn closing_quote(&mut self, chunk: &[u8], from: usize) -> Option<usize> {
-        let segment = chunk.get(from..).unwrap_or_default();
-        for quote in memchr::memchr_iter(b'"', segment) {
-            if !self.escaped_at(segment, quote) {
-                self.backslash_odd = false;
-                return Some(from + quote);
-            }
-        }
-        self.backslash_odd = self.escaped_at(segment, segment.len());
-        None
-    }
-
-    /// Whether `segment[at]` follows an odd number of backslashes. A run that
-    /// reaches the segment start continues the previous chunk's.
-    fn escaped_at(&self, segment: &[u8], at: usize) -> bool {
-        let before = segment.get(..at).unwrap_or_default();
-        let run = before.iter().rev().take_while(|&&b| b == b'\\').count();
-        let odd = run % 2 == 1;
-        if run == at {
-            odd != self.backslash_odd
-        } else {
-            odd
-        }
-    }
-
     /// Keeps the key bytes `chunk[from..to]` when the name matters.
     fn capture_key(&mut self, chunk: &[u8], from: usize, to: usize, run: &mut usize) {
         if self.capture == Capture::None {
@@ -361,7 +335,7 @@ impl PromptScanner {
     /// Handles a byte outside strings; returns the index after the bytes consumed.
     #[inline(always)]
     fn structural(&mut self, chunk: &[u8], i: usize, byte: u8, run: &mut usize) -> usize {
-        if is_json_space(byte) {
+        if is_space(byte) {
             self.flush(chunk, run, i);
             *run = i + 1;
             return i + 1;
@@ -458,7 +432,7 @@ impl PromptScanner {
             }
         }
         self.in_string = true;
-        self.backslash_odd = false;
+        self.string.start();
         i + 1
     }
 
@@ -674,23 +648,6 @@ impl PromptScanner {
         };
         self.out.push_breakpoint(breakpoint);
     }
-}
-
-fn is_json_space(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
-}
-
-/// Length of a string whose content starts `rest`, if it ends within
-/// [`SHORT_STRING`] bytes without an escape.
-fn short_string_len(rest: &[u8]) -> Option<usize> {
-    for (at, &byte) in rest.iter().take(SHORT_STRING).enumerate() {
-        match byte {
-            b'"' => return Some(at),
-            b'\\' => return None,
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Whether a key starting at `rest` may be `"cache_control"`: it is, or the

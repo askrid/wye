@@ -7,5 +7,6 @@
 
 pub mod config;
 pub mod credential;
+mod json;
 pub mod prompt;
 pub mod usage;
