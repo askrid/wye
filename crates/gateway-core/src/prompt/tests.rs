@@ -211,6 +211,27 @@ fn escapes_split_across_chunks() {
 }
 
 #[test]
+fn session_sampling_is_deterministic_and_proportional() {
+    let ids: Vec<String> = (0..10_000).map(|i| format!("session-{i}")).collect();
+    let sampled = |percent| {
+        ids.iter()
+            .filter(|id| session_sampled(Some(id.as_bytes()), percent))
+            .count()
+    };
+    assert_eq!(sampled(100), 10_000);
+    let ten = sampled(10);
+    assert!((800..1_200).contains(&ten), "{ten}");
+    // A session sampled at a lower rate stays sampled at a higher one.
+    assert!(
+        ids.iter()
+            .all(|id| !session_sampled(Some(id.as_bytes()), 10)
+                || session_sampled(Some(id.as_bytes()), 50))
+    );
+    assert!(session_sampled(None, 100));
+    assert!(!session_sampled(None, 99));
+}
+
+#[test]
 fn hash_key_redacts_and_requires_length() {
     assert!(HashKey::new(&[7; 31]).is_none());
     let key = HashKey::new(&[7; 32]).unwrap();
