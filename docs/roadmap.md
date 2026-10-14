@@ -10,7 +10,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, KrakenD and LiteLLM comparisons |
 | M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
 | M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
-| M1 stages 5–6 | Usage scanner, OTLP log and metric export, `upstream.api_key_file`, `wye probe`, and `wye claude` done; OTLP traces, OCI image, binaries, and Compose not started |
+| M1 stages 5–6 | Usage scanner, OTLP log and metric export, `upstream.api_key_file`, `wye probe`, and `wye claude` done, and an OCI image with a smoke test; OTLP traces, published images and binaries, and Compose not started |
 | Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
 | M2–M6 | Not started |
 
@@ -47,7 +47,7 @@ The first reviewable implementation stops after stages 1–2. Resource bounds an
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
 | 4 | (**4a done:** Ed25519 JWT credentials, `wye token keygen`/`issue`, `[auth]` lifts the loopback-only restriction, subject in usage log. **4b done:** model permissions from config and the credential's `models` claim, read from the held start of the body.) Remaining in this stage: pinned-issuer IdP JWTs and per-request limits. Ed25519 gateway credentials and pinned-issuer IdP JWTs from `Authorization` or `x-api-key`, `wye token issue`, claim → permission mapping, limit precedence, `max_credential_ttl`, `apiKeyHelper` renewal example | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
-| 5 | Usage observer (`message_start`, `message_delta`; **done**), minimal OTLP telemetry (**logs and metrics done**: usage records with session and subject attribution, cumulative request, duration, token, and active-request metrics; traces next) with developer and Claude Code session attribution, OCI image, baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
+| 5 | Usage observer (`message_start`, `message_delta`; **done**), minimal OTLP telemetry (**logs and metrics done**: usage records with session and subject attribution, cumulative request, duration, token, and active-request metrics; traces next) with developer and Claude Code session attribution, OCI image (**done** locally with a smoke test; publishing open), baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
 | 6 | `wye claude`, prebuilt binaries, Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes); **both done**, as is a first `wye claude`) | Wrapper launches Claude Code against Wye and cleans up; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
