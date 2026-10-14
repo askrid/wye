@@ -5,7 +5,7 @@ Distribution, CLI, deployment, telemetry, and failure behavior. The gateway bina
 ## Distribution
 
 - Versioned Linux and macOS binaries (x86-64, ARM64 as supported).
-- Signed, versioned OCI image; no consumer Dockerfile required.
+- Signed, versioned OCI image; no consumer Dockerfile required. **Implemented locally:** the repository `Dockerfile` builds a release binary into distroless `cc` (glibc, no shell, non-root; about 12 MB), with a `HEALTHCHECK` that runs `wye probe` against `/readyz`. Inside a container Wye listens on `0.0.0.0`, which requires an `[auth]` section. `scripts/image-smoke.sh` builds the image and checks that it becomes healthy, answers `/readyz`, and rejects an unauthenticated request before any upstream contact. Publishing and signing are not set up.
 - Docker Compose example for a VM.
 - Helm chart for Kubernetes.
 - Terraform reference examples where useful.
