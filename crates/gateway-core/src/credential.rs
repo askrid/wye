@@ -13,7 +13,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use ring::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
 
-use crate::{config::Auth, model::ModelPattern};
+use crate::{config::Auth, policy::ModelPattern};
 
 /// Longer tokens are rejected before any decoding.
 const MAX_TOKEN_BYTES: usize = 8 * 1024;
