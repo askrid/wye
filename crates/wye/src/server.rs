@@ -15,6 +15,17 @@ use tokio::{
 
 use crate::{Gateway, auth::ConnectionAuth, usage_log::UsageLog};
 
+/// Upper bound on a client connection's read buffer (hyper's default is ~400 KiB).
+///
+/// hyper grows the buffer while a large request body arrives and keeps it for
+/// the connection's lifetime. An agent resends its whole context (hundreds of
+/// KB) and then holds the stream open for minutes, so the grown buffer
+/// dominated per-stream memory: 150 KB of live heap per idle stream after a
+/// 512 KB request on the TLS path, 48 KB with this cap, at no measurable
+/// upload cost there. The cap also bounds request headers, so it stays well
+/// above an 8 KiB gateway credential plus Claude Code's headers.
+const MAX_CONNECTION_BUFFER: usize = 32 * 1024;
+
 /// How long `serve` waits for the usage log to be written after connections close.
 const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -35,6 +46,7 @@ pub async fn serve(
     let graceful = GracefulShutdown::new();
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new());
+    http.max_buf_size(MAX_CONNECTION_BUFFER);
     // Owns every connection task; aborted after the grace period.
     let mut connections = JoinSet::new();
     // Takes `connections` as an argument, not a capture, so the select loops can

@@ -207,11 +207,25 @@ fn event_timestamp(event: &[u8]) -> Option<u64> {
 
 /// Opens `count` streams that stay open and silent; returns the held bodies.
 pub async fn open_idle_streams(target: &Target, count: usize) -> Vec<Incoming> {
+    open_idle_streams_with_body(target, count, None).await
+}
+
+/// Like `open_idle_streams`, each request carrying `body` (an agent's resent
+/// context) instead of a small one.
+pub async fn open_idle_streams_with_body(
+    target: &Target,
+    count: usize,
+    body: Option<Bytes>,
+) -> Vec<Incoming> {
     let mut set = JoinSet::new();
     for _ in 0..count {
         let target = target.clone();
+        let body = body.clone();
         set.spawn(async move {
-            let req = target.messages(&idle_stream_headers());
+            let req = match body {
+                Some(body) => target.messages_with_body(&idle_stream_headers(), body),
+                None => target.messages(&idle_stream_headers()),
+            };
             let mut body = target.client().request(req).await.unwrap().into_body();
             body.frame().await.unwrap().unwrap();
             body

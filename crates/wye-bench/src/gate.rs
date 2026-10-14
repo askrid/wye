@@ -42,6 +42,19 @@ const GATES: &[(&str, f64, f64)] = &[
     ("alloc_sse_per_stream", 0.02, 0.5),
     ("alloc_sse_per_event", 0.0, 0.05),
     ("alloc_idle_live_bytes_per_stream", 0.05, 1024.0),
+    // Idle streams after an agent-sized (512 KB) request, and on the TLS +
+    // HTTP/2 upstream: the production shape of per-stream memory.
+    (
+        "alloc_idle_after_upload_live_bytes_per_stream",
+        0.10,
+        2048.0,
+    ),
+    ("alloc_tls_idle_live_bytes_per_stream", 0.05, 1024.0),
+    (
+        "alloc_tls_idle_after_upload_live_bytes_per_stream",
+        0.10,
+        2048.0,
+    ),
     // Uploads vary about 5% with how the body arrives in chunks.
     ("alloc_upload_per_request", 0.15, 2.0),
     ("alloc_upload_bytes_per_request", 0.15, 0.0),

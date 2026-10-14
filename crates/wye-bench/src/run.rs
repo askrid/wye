@@ -120,7 +120,14 @@ pub async fn run(
             eprintln!("run {i}/{repeat}: allocations");
             phase(
                 "allocations",
-                allocations::measure(binary, &paths[0].base_url, dir, &mut metrics),
+                allocations::measure(
+                    binary,
+                    &paths[0].base_url,
+                    &paths[1].base_url,
+                    ca.ca_pem(),
+                    dir,
+                    &mut metrics,
+                ),
             )
             .await;
         }
