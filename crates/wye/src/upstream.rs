@@ -185,7 +185,9 @@ impl Upstream {
 }
 
 /// Built-in web PKI roots plus the configured extra roots.
-fn tls_config(extra_roots: &[CertificateDer<'static>]) -> Result<ClientConfig, StartupError> {
+pub(crate) fn tls_config(
+    extra_roots: &[CertificateDer<'static>],
+) -> Result<ClientConfig, StartupError> {
     let mut roots = RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };

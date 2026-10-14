@@ -82,6 +82,7 @@ impl Harness {
             auth,
             extra_roots: Vec::new(),
             prompt_key: None,
+            otlp_headers: HeaderMap::new(),
         };
         Self::launch(
             &format!("http://{upstream}"),
@@ -101,6 +102,7 @@ impl Harness {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
             extra_roots: Vec::new(),
             prompt_key: None,
+            otlp_headers: HeaderMap::new(),
         };
         let base_url = format!("http://{upstream}");
         Self::launch(
@@ -126,6 +128,7 @@ impl Harness {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
             extra_roots: Vec::new(),
             prompt_key: Some(HashKey::new(key).unwrap()),
+            otlp_headers: HeaderMap::new(),
         };
         let base_url = format!("http://{upstream}");
         let extra = format!(
@@ -157,6 +160,7 @@ impl Harness {
                 Vec::new()
             },
             prompt_key: None,
+            otlp_headers: HeaderMap::new(),
         };
         let base_url = format!("https://{upstream}");
         let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");

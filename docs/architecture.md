@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as a JSON-lines usage log (OTLP export pending). Steps 3–5 are not built.
+**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs. Steps 3–5 are not built.
 
 ## Repository and workspace
 
@@ -95,7 +95,7 @@ Core, runtime, tests, and deployment artifacts change together and need coordina
 | Credentials | `ring` Ed25519, `base64` |
 | Config / JSON | Serde, `toml`, `serde_json` |
 | Buffers | `bytes` and streaming bodies |
-| Instrumentation | Interim JSON-lines usage log on stderr; OpenTelemetry Rust SDK planned |
+| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack); metrics and traces planned |
 | Edge | Separate WASM adapter later |
 
 Direct Hyper gives explicit control over request and response bodies. Reconsider Axum if routing and middleware grow enough to justify it.
@@ -269,6 +269,11 @@ max_credential_ttl_secs = 604800
 id = "k1"
 ed25519_public_key = "<from wye token keygen>"
 # models = ["claude-sonnet-*", "claude-haiku-*"]  # ceiling; a credential's models claim narrows it
+
+[telemetry]                            # optional: usage records as OTLP logs
+otlp_endpoint = "http://collector:4318" # POST {otlp_endpoint}/v1/logs, OTLP/HTTP JSON
+# otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2"
+service_name = "wye"
 
 [cache_diagnostics]                    # optional: prompt hashes in the usage log
 hash_key_env = "WYE_CACHE_HASH_KEY"    # required; at least 32 bytes, same on every replica
