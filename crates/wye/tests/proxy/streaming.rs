@@ -75,6 +75,69 @@ async fn client_disconnect_releases_upstream_stream() {
         .expect("upstream stream was not released");
 }
 
+/// An event stream that stalls (or breaks) at an event boundary ends with
+/// an Anthropic `error` event instead of a dropped connection; one that
+/// stalls mid-event still fails, since appending would corrupt the event.
+#[tokio::test]
+async fn stalled_event_stream_ends_with_an_error_event() {
+    let handler: Handler = Arc::new(|seen: Seen| {
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel::<Bytes>(1);
+            let first: &'static [u8] = if seen.uri.query() == Some("mid=1") {
+                b"event: content_block_delta\ndata: {\"partial"
+            } else {
+                b"event: ping\ndata: {\"type\":\"ping\"}\n\n"
+            };
+            tx.send(Bytes::from_static(first)).await.unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                drop(tx);
+            });
+            let mut res = Response::new(Either::Right(ChannelBody(rx)));
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    });
+    let h = Harness::start(
+        handler,
+        "api_key_env = \"UNUSED\"\nstream_idle_timeout_secs = 1",
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )
+    .await;
+    let res = h.send(messages(), "{}").await;
+    let body = tokio::time::timeout(WAIT, res.into_body().collect())
+        .await
+        .unwrap()
+        .expect("the stream ends cleanly")
+        .to_bytes();
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.starts_with("event: ping\n"), "{text}");
+    assert!(
+        text.ends_with("\n\n")
+            && text.contains(
+                "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\""
+            ),
+        "{text}"
+    );
+    assert_eq!(h.usage_record().await["outcome"], "failed");
+
+    let res = h
+        .send(
+            Request::post("/v1/messages?mid=1").header("x-claude-code-session-id", "s-1"),
+            "{}",
+        )
+        .await;
+    let mut body = res.into_body();
+    tokio::time::timeout(WAIT, body.frame())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let next = tokio::time::timeout(WAIT, body.frame()).await.unwrap();
+    assert!(matches!(next, Some(Err(_))), "mid-event stall: {next:?}");
+}
+
 #[tokio::test]
 async fn idle_upstream_stream_is_terminated() {
     let handler: Handler = Arc::new(|_| {
