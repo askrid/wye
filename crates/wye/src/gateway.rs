@@ -29,7 +29,7 @@ use crate::{
     gauge::Gauge,
     permissions::{HoldError, RequestBody, hold_until_model},
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{Observed, OtlpTarget, RequestInfo, UsageLog},
+    usage_log::{Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
 };
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
@@ -125,12 +125,13 @@ impl Gateway {
         }
     }
 
-    pub(crate) fn prompt_key(&self) -> Option<Arc<HashKey>> {
-        self.prompt_key.clone()
-    }
-
-    pub(crate) fn otlp(&self) -> Option<Arc<OtlpTarget>> {
-        self.otlp.clone()
+    /// What the usage log writes besides stderr.
+    pub(crate) fn sinks(&self) -> Sinks {
+        Sinks {
+            prompt_key: self.prompt_key.clone(),
+            otlp: self.otlp.clone(),
+            active: self.in_flight.clone(),
+        }
     }
 
     /// From now on `/readyz` fails; requests are still served.
@@ -298,6 +299,7 @@ fn otlp_target(
         .build(https);
     Ok(OtlpTarget::new(
         telemetry.otlp_logs_uri.clone(),
+        telemetry.otlp_metrics_uri.clone(),
         headers,
         client,
         &telemetry.service_name,

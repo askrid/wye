@@ -8,6 +8,7 @@
 //! with `[telemetry]`, exports them as OTLP logs; when the channel is full the
 //! record is dropped and counted, so a slow sink never slows a stream.
 
+mod metrics;
 mod observed;
 mod otlp;
 
@@ -28,7 +29,10 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::diagnostics::{PromptRecord, PromptSlot};
+use crate::{
+    diagnostics::{PromptRecord, PromptSlot},
+    gauge::Gauge,
+};
 
 pub(crate) use observed::Observed;
 pub(crate) use otlp::{OtlpTarget, parse_headers};
@@ -37,6 +41,8 @@ pub(crate) use otlp::{OtlpTarget, parse_headers};
 const QUEUE_CAPACITY: usize = 4096;
 /// A partly filled OTLP batch is sent after at most this long.
 const OTLP_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+/// Cumulative OTLP metrics are exported this often.
+const OTLP_METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -83,6 +89,16 @@ pub(crate) struct Record {
     unix_ms: u128,
 }
 
+/// What the writer task writes besides the stderr log.
+pub(crate) struct Sinks {
+    /// Keys the prompt hashes of records that carry them.
+    pub(crate) prompt_key: Option<Arc<HashKey>>,
+    /// Exports records as OTLP logs and aggregates them into OTLP metrics.
+    pub(crate) otlp: Option<Arc<OtlpTarget>>,
+    /// Requests in flight, reported as `wye.requests.active`.
+    pub(crate) active: Gauge,
+}
+
 /// Cloneable handle that queues records for the writer task.
 #[derive(Clone)]
 pub(crate) struct UsageLog {
@@ -92,25 +108,13 @@ pub(crate) struct UsageLog {
 
 impl UsageLog {
     /// Starts the writer task. It ends after every handle is dropped and the queue is written.
-    /// `prompt_key` keys the prompt hashes of records that carry them; with
-    /// `otlp`, records are also exported as OTLP log records.
-    pub(crate) fn start<W>(
-        out: W,
-        prompt_key: Option<Arc<HashKey>>,
-        otlp: Option<Arc<OtlpTarget>>,
-    ) -> (Self, JoinHandle<()>)
+    pub(crate) fn start<W>(out: W, sinks: Sinks) -> (Self, JoinHandle<()>)
     where
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(0));
-        let writer = tokio::spawn(write_records(
-            rx,
-            out,
-            Arc::clone(&dropped),
-            prompt_key,
-            otlp,
-        ));
+        let writer = tokio::spawn(write_records(rx, out, Arc::clone(&dropped), sinks));
         (Self { tx, dropped }, writer)
     }
 
@@ -147,30 +151,52 @@ async fn write_records<W>(
     mut rx: mpsc::Receiver<Record>,
     mut out: W,
     dropped: Arc<AtomicU64>,
-    prompt_key: Option<Arc<HashKey>>,
-    otlp: Option<Arc<OtlpTarget>>,
+    sinks: Sinks,
 ) where
     W: AsyncWrite + Unpin,
 {
     let mut buf = Vec::with_capacity(4096);
-    let key = prompt_key.as_deref();
+    let key = sinks.prompt_key.as_deref();
     // The exporter task is owned here and finishes its queue after the loop.
-    let (mut batch, exporter) = match otlp {
+    let (mut otlp, exporter) = match sinks.otlp {
         Some(target) => {
             let (batch, exporter) = otlp::Batch::start(target);
-            (Some(batch), Some(exporter))
+            let metrics = metrics::Metrics::new(unix_nanos());
+            (Some((batch, metrics)), Some(exporter))
         }
         None => (None, None),
     };
-    let mut tick = tokio::time::interval(OTLP_FLUSH_INTERVAL);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let export_metrics = |batch: &otlp::Batch, metrics: &metrics::Metrics| {
+        let lost = batch
+            .dropped()
+            .saturating_add(dropped.load(Ordering::Relaxed));
+        let body = metrics.encode(
+            &batch.target().resource,
+            unix_nanos(),
+            sinks.active.current(),
+            lost,
+        );
+        batch.send_metrics(body);
+    };
+    // The first ticks come one period after start, not immediately.
+    let after = |period| tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let mut logs_tick = after(OTLP_FLUSH_INTERVAL);
+    logs_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut metrics_tick = after(OTLP_METRICS_INTERVAL);
+    metrics_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        // Cancel safety: `recv` and `tick` lose nothing when the other branch wins.
+        // Cancel safety: `recv` and the ticks lose nothing when another branch wins.
         let record = tokio::select! {
             record = rx.recv() => record,
-            _ = tick.tick(), if batch.is_some() => {
-                if let Some(batch) = batch.as_mut() {
+            _ = logs_tick.tick(), if otlp.is_some() => {
+                if let Some((batch, _)) = otlp.as_mut() {
                     batch.flush();
+                }
+                continue;
+            }
+            _ = metrics_tick.tick(), if otlp.is_some() => {
+                if let Some((batch, metrics)) = otlp.as_ref() {
+                    export_metrics(batch, metrics);
                 }
                 continue;
             }
@@ -181,7 +207,8 @@ async fn write_records<W>(
         while let Some(r) = record.take().or_else(|| rx.try_recv().ok()) {
             let line = line(&r, key);
             push_line(&mut buf, &line);
-            if let Some(batch) = batch.as_mut() {
+            if let Some((batch, metrics)) = otlp.as_mut() {
+                metrics.record(&line);
                 batch.push(&line);
                 if batch.is_full() {
                     batch.flush();
@@ -194,8 +221,9 @@ async fn write_records<W>(
         buf.clear();
     }
     let mut lost = Vec::new();
-    if let Some(mut batch) = batch {
+    if let Some((mut batch, metrics)) = otlp {
         batch.flush();
+        export_metrics(&batch, &metrics);
         let otlp_dropped = batch.dropped();
         drop(batch);
         if let Some(exporter) = exporter {
@@ -217,6 +245,12 @@ async fn write_records<W>(
         let _ = out.write_all(line.as_bytes()).await;
     }
     let _ = out.flush().await;
+}
+
+fn unix_nanos() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
 }
 
 /// One JSON line, serialized from borrowed fields: no per-record allocation

@@ -51,6 +51,8 @@ pub struct Config {
 pub struct Telemetry {
     /// Logs endpoint: the configured base URL with `/v1/logs` appended.
     pub otlp_logs_uri: Uri,
+    /// Metrics endpoint: the base URL with `/v1/metrics` appended.
+    pub otlp_metrics_uri: Uri,
     /// Environment variable with extra request headers, in the OpenTelemetry
     /// format `key1=value1,key2=value2` (for example a backend API key).
     pub otlp_headers_env: Option<String>,
@@ -477,14 +479,19 @@ fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
         Some(pq) => pq.path().trim_end_matches('/').to_owned(),
         None => String::new(),
     };
-    let otlp_logs_uri = Uri::builder()
-        .scheme(scheme)
-        .authority(authority)
-        .path_and_query(format!("{base}/v1/logs"))
-        .build()
-        .map_err(|_| invalid("not a valid URL"))?;
+    let signal_uri = |signal: &str| {
+        Uri::builder()
+            .scheme(scheme.clone())
+            .authority(authority.clone())
+            .path_and_query(format!("{base}/v1/{signal}"))
+            .build()
+            .map_err(|_| invalid("not a valid URL"))
+    };
+    let otlp_logs_uri = signal_uri("logs")?;
+    let otlp_metrics_uri = signal_uri("metrics")?;
     Ok(Telemetry {
         otlp_logs_uri,
+        otlp_metrics_uri,
         otlp_headers_env: raw
             .otlp_headers_env
             .map(|name| env_name(name, "telemetry.otlp_headers_env"))

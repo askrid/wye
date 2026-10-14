@@ -36,34 +36,43 @@ type ExportClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
 
 /// Where and how usage records are exported, resolved at startup.
 pub(crate) struct OtlpTarget {
-    pub(crate) logs_uri: Uri,
+    logs_uri: Uri,
+    metrics_uri: Uri,
     /// Extra headers, sensitive values marked as such.
-    pub(crate) headers: HeaderMap,
-    pub(crate) client: ExportClient,
-    /// The batch envelope up to the first log record: resource and scope.
+    headers: HeaderMap,
+    client: ExportClient,
+    /// The `Resource` object shared by both signals.
+    pub(super) resource: Box<[u8]>,
+    /// The log batch envelope up to the first log record.
     prefix: Box<[u8]>,
 }
 
 impl OtlpTarget {
     pub(crate) fn new(
         logs_uri: Uri,
+        metrics_uri: Uri,
         headers: HeaderMap,
         client: ExportClient,
         service_name: &str,
     ) -> Self {
-        let mut prefix = br#"{"resourceLogs":[{"resource":{"attributes":["#.to_vec();
-        write_attribute(&mut prefix, "service.name", Value::Str(service_name));
-        prefix.push(b',');
+        let mut resource = br#"{"attributes":["#.to_vec();
+        write_attribute(&mut resource, "service.name", Value::Str(service_name));
+        resource.push(b',');
         write_attribute(
-            &mut prefix,
+            &mut resource,
             "service.version",
             Value::Str(env!("CARGO_PKG_VERSION")),
         );
-        prefix.extend_from_slice(br#"]},"scopeLogs":[{"scope":{"name":"wye"},"logRecords":["#);
+        resource.extend_from_slice(b"]}");
+        let mut prefix = br#"{"resourceLogs":[{"resource":"#.to_vec();
+        prefix.extend_from_slice(&resource);
+        prefix.extend_from_slice(br#","scopeLogs":[{"scope":{"name":"wye"},"logRecords":["#);
         Self {
             logs_uri,
+            metrics_uri,
             headers,
             client,
+            resource: resource.into(),
             prefix: prefix.into(),
         }
     }
@@ -74,7 +83,7 @@ pub(super) struct Batch {
     target: Arc<OtlpTarget>,
     buf: Vec<u8>,
     records: usize,
-    queue: mpsc::Sender<(Bytes, usize)>,
+    queue: mpsc::Sender<Export>,
     /// Records lost to a full queue or a failed export.
     dropped: Arc<AtomicU64>,
 }
@@ -118,7 +127,12 @@ impl Batch {
         let body = Bytes::copy_from_slice(&self.buf);
         let records = std::mem::take(&mut self.records);
         self.buf.clear();
-        if self.queue.try_send((body, records)).is_err() {
+        let export = Export {
+            metrics: false,
+            body,
+            records,
+        };
+        if self.queue.try_send(export).is_err() {
             // Statistics counter only.
             self.dropped.fetch_add(records as u64, Ordering::Relaxed);
         }
@@ -128,18 +142,46 @@ impl Batch {
     pub(super) fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
+
+    /// Queues a metrics export; a full queue skips it, and the next one
+    /// carries the cumulative totals.
+    pub(super) fn send_metrics(&self, body: Vec<u8>) {
+        let _ = self.queue.try_send(Export {
+            metrics: true,
+            body: body.into(),
+            records: 0,
+        });
+    }
+
+    pub(super) fn target(&self) -> &OtlpTarget {
+        &self.target
+    }
+}
+
+/// One request for the exporter task.
+struct Export {
+    /// Metrics instead of logs.
+    metrics: bool,
+    body: Bytes,
+    /// Log records in `body`, counted as lost if it is not delivered.
+    records: usize,
 }
 
 /// Sends queued batches one at a time until the writer drops its sender.
-async fn export(
-    target: Arc<OtlpTarget>,
-    mut rx: mpsc::Receiver<(Bytes, usize)>,
-    dropped: Arc<AtomicU64>,
-) {
-    while let Some((body, records)) = rx.recv().await {
+async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped: Arc<AtomicU64>) {
+    while let Some(Export {
+        metrics,
+        body,
+        records,
+    }) = rx.recv().await
+    {
         let mut req = Request::new(Full::new(body));
         *req.method_mut() = Method::POST;
-        *req.uri_mut() = target.logs_uri.clone();
+        *req.uri_mut() = if metrics {
+            target.metrics_uri.clone()
+        } else {
+            target.logs_uri.clone()
+        };
         let headers = req.headers_mut();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         for (name, value) in &target.headers {
@@ -159,7 +201,8 @@ async fn export(
     }
 }
 
-enum Value<'a> {
+#[derive(Clone, Copy)]
+pub(super) enum Value<'a> {
     Str(&'a str),
     Int(u64),
     Double(f64),
@@ -167,7 +210,7 @@ enum Value<'a> {
 
 /// One OTLP `KeyValue`. Strings are escaped by serde_json; 64-bit integers
 /// are strings in the protobuf JSON mapping.
-fn write_attribute(buf: &mut Vec<u8>, key: &str, value: Value<'_>) {
+pub(super) fn write_attribute(buf: &mut Vec<u8>, key: &str, value: Value<'_>) {
     buf.extend_from_slice(br#"{"key":"#);
     let _ = serde_json::to_writer(&mut *buf, key);
     buf.extend_from_slice(br#","value":{"#);
