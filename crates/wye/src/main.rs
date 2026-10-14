@@ -13,6 +13,7 @@ const USAGE: &str = "usage:
   wye serve --config <path>
   wye check-config <path>
   wye probe <http-url>
+  wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
@@ -41,6 +42,7 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             let code = wye::claude(rest)?;
             std::process::exit(code);
         }
+        ["explain", rest @ ..] => explain(rest),
         ["probe", url] => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -53,6 +55,43 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         }
         _ => Err(USAGE.into()),
     }
+}
+
+/// Prints the decision; exits 3 when the request would be refused.
+fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
+    let (mut config, mut credential, mut session, mut path) = (None, None, None, "/v1/messages");
+    let mut rest = args;
+    let request = loop {
+        match rest {
+            ["--config", value, tail @ ..] => (config, rest) = (Some(*value), tail),
+            ["--credential", value, tail @ ..] => (credential, rest) = (Some(*value), tail),
+            ["--session", value, tail @ ..] => (session, rest) = (Some(*value), tail),
+            ["--path", value, tail @ ..] => (path, rest) = (*value, tail),
+            [request] => break *request,
+            _ => return Err(USAGE.into()),
+        }
+    };
+    let config = load(config.ok_or(USAGE)?)?;
+    let token = credential
+        .map(|file| std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}")))
+        .transpose()?;
+    let body = std::fs::read(request).map_err(|e| format!("cannot read {request}: {e}"))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let explanation = wye::explain(
+        &config,
+        path,
+        token.as_deref().map(str::trim),
+        session,
+        &body,
+        now,
+    );
+    print!("{}", explanation.report());
+    if explanation.refused.is_some() {
+        std::process::exit(3);
+    }
+    Ok(())
 }
 
 fn load(path: &str) -> Result<Config, Box<dyn Error>> {

@@ -4,6 +4,7 @@
 //! - `server`: listener, connections, graceful shutdown
 //! - `auth`: gateway credential checks, cached per connection
 //! - `gateway`: routing and gateway-generated responses
+//! - `explain`: `wye explain`, the server's decisions for one request, offline
 //! - `permissions`: model permissions, checked before forwarding
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
@@ -17,6 +18,7 @@
 pub mod alloc_stats;
 mod auth;
 mod diagnostics;
+mod explain;
 mod gateway;
 mod gauge;
 mod permissions;
@@ -27,6 +29,7 @@ mod upstream;
 mod usage_log;
 mod wrapper;
 
+pub use explain::{Explanation, explain};
 pub use gateway::Gateway;
 pub use probe::probe;
 pub use server::serve;
