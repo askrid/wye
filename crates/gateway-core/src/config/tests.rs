@@ -285,3 +285,26 @@ fn telemetry_endpoint_gets_the_logs_path() {
     }
     assert!(Config::from_toml_str(base).unwrap().telemetry.is_none());
 }
+
+#[test]
+fn api_key_file_is_a_third_exclusive_credential_mode() {
+    let config =
+        parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"secrets/key\"").unwrap();
+    assert_eq!(
+        config.upstream.credential,
+        UpstreamCredential::ApiKeyFile(PathBuf::from("secrets/key"))
+    );
+    for both in [
+        "api_key_file = \"k\"\napi_key_env = \"K\"",
+        "api_key_file = \"k\"\nforward_caller_credential = true",
+    ] {
+        assert!(matches!(
+            parse(&format!("base_url = \"https://api.anthropic.com\"\n{both}")),
+            Err(ConfigError::Credential(_))
+        ));
+    }
+    assert_eq!(
+        parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"\"").unwrap_err(),
+        ConfigError::EmptyPath("upstream.api_key_file")
+    );
+}

@@ -21,8 +21,13 @@ wye check-config wye.toml
 wye explain --config wye.toml --credential token.txt request.json
 wye token keygen --out issuer.key
 wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --subject team-research --ttl-secs 3600
+wye probe http://127.0.0.1:8080/readyz
 wye doctor
 ```
+
+Implemented: `serve`, `check-config`, `token`, and `probe`; `explain` and `doctor` are planned.
+
+`probe` sends one `GET` over plain HTTP and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`).
 
 `doctor` checks local config, resolved environment variables, DNS/TLS/provider connectivity, model availability, and compatibility warnings, without an admin API.
 
@@ -107,7 +112,7 @@ Statelessness makes every multi-node setup the same shape: a load balancer in fr
 
 For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`. Load balancers in front must not buffer SSE, and their idle timeout must exceed silent gaps in a stream (around 300 s; the AWS ALB default of 60 s is too short).
 
-Two small additions are planned for container platforms (M1 stage 6): `upstream.api_key_file`, reading the provider key from a mounted secret file at startup (Docker and Kubernetes secrets, systemd credentials), and `wye probe <url>`, a one-shot health check for images without `curl`. Both are startup or client-side, so the gateway stays stateless.
+For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup (Docker and Kubernetes secrets, systemd credentials; relative to the config file, surrounding whitespace trimmed), and [`wye probe`](#server) is the health check for images without `curl`. Both are startup or client-side, so the gateway stays stateless.
 
 ### Sizing (estimate)
 

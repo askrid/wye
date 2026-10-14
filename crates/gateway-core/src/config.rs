@@ -132,6 +132,9 @@ pub struct Upstream {
 pub enum UpstreamCredential {
     /// Provider API key read from this environment variable at startup.
     ApiKeyEnv(String),
+    /// Provider API key read from this file at startup (a mounted secret);
+    /// relative to the config file.
+    ApiKeyFile(PathBuf),
     /// Forward the caller's own credential (loopback only).
     ForwardCaller,
 }
@@ -251,6 +254,7 @@ struct RawServer {
 struct RawUpstream {
     base_url: String,
     api_key_env: Option<String>,
+    api_key_file: Option<PathBuf>,
     #[serde(default)]
     forward_caller_credential: bool,
     ca_file: Option<PathBuf>,
@@ -396,19 +400,29 @@ fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, Config
 }
 
 fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
-    let credential = match (raw.api_key_env, raw.forward_caller_credential) {
-        (Some(name), false) => {
+    let credential = match (
+        raw.api_key_env,
+        raw.api_key_file,
+        raw.forward_caller_credential,
+    ) {
+        (Some(name), None, false) => {
             UpstreamCredential::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
         }
-        (None, true) => UpstreamCredential::ForwardCaller,
-        (Some(_), true) => {
+        (None, Some(path), false) => {
+            if path.as_os_str().is_empty() {
+                return Err(ConfigError::EmptyPath("upstream.api_key_file"));
+            }
+            UpstreamCredential::ApiKeyFile(path)
+        }
+        (None, None, true) => UpstreamCredential::ForwardCaller,
+        (None, None, false) => {
             return Err(ConfigError::Credential(
-                "set either api_key_env or forward_caller_credential, not both",
+                "set api_key_env, api_key_file, or forward_caller_credential = true",
             ));
         }
-        (None, false) => {
+        _ => {
             return Err(ConfigError::Credential(
-                "set api_key_env, or forward_caller_credential = true",
+                "set only one of api_key_env, api_key_file, and forward_caller_credential",
             ));
         }
     };
