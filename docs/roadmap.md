@@ -11,7 +11,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
 | M1 stage 4b: model permissions | Next. Needs the request body buffered to read `model`. |
 | M1 stages 5–6 | Usage scanner done with an interim JSON-lines log; OTLP export, `wye claude`, binaries, and Compose not started |
-| Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log. Costs more CPU than its target on structure-dense bodies; `diag_` metrics are reported, not yet gated |
+| Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics are reported, not yet gated |
 | M2–M6 | Not started |
 
 ## Milestones

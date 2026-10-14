@@ -112,7 +112,7 @@ async fn cache_diagnostics_log_keyed_prompt_hashes() {
         })
     });
     let key = [7u8; 32];
-    let h = Harness::with_cache_diagnostics(handler, &key).await;
+    let h = Harness::with_cache_diagnostics(handler, &key, "").await;
 
     let res = h.send(messages(), BODY).await;
     assert_eq!(read_body(res).await, "{}");
@@ -146,4 +146,32 @@ async fn usage_records_omit_prompt_without_diagnostics() {
     let res = h.send(messages(), r#"{"messages":[]}"#).await;
     read_body(res).await;
     assert!(h.usage_record().await.get("prompt").is_none());
+}
+
+#[tokio::test]
+async fn cache_diagnostics_sample_whole_sessions() {
+    let h = Harness::with_cache_diagnostics(
+        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        &[7; 32],
+        "sample_percent = 50",
+    )
+    .await;
+    let sampled = |id: &String| gateway_core::prompt::session_sampled(Some(id.as_bytes()), 50);
+    let ids: Vec<String> = (0..100).map(|i| format!("s-{i}")).collect();
+    let (inside, outside) = (
+        ids.iter().find(|id| sampled(id)).unwrap(),
+        ids.iter().find(|id| !sampled(id)).unwrap(),
+    );
+    for (id, diagnosed) in [(Some(inside), true), (Some(outside), false), (None, false)] {
+        let mut req = messages();
+        req.headers_mut()
+            .unwrap()
+            .remove("x-claude-code-session-id");
+        if let Some(id) = id {
+            req = req.header("x-claude-code-session-id", id.as_str());
+        }
+        read_body(h.send(req, r#"{"messages":[]}"#).await).await;
+        let record = h.usage_record().await;
+        assert_eq!(record.get("prompt").is_some(), diagnosed, "{id:?}");
+    }
 }

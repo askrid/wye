@@ -113,8 +113,13 @@ impl Harness {
         .await
     }
 
-    /// API-key gateway with cache diagnostics on, keyed with `key`.
-    pub(crate) async fn with_cache_diagnostics(handler: Handler, key: &[u8]) -> Self {
+    /// API-key gateway with cache diagnostics on, keyed with `key`, with extra
+    /// `[cache_diagnostics]` lines.
+    pub(crate) async fn with_cache_diagnostics(
+        handler: Handler,
+        key: &[u8],
+        diagnostics_extra: &str,
+    ) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
@@ -123,8 +128,10 @@ impl Harness {
             prompt_key: Some(HashKey::new(key).unwrap()),
         };
         let base_url = format!("http://{upstream}");
-        let extra = "api_key_env = \"UNUSED\"\n[cache_diagnostics]\nhash_key_env = \"UNUSED\"";
-        Self::launch(&base_url, "", extra, resources, hits).await
+        let extra = format!(
+            "api_key_env = \"UNUSED\"\n[cache_diagnostics]\nhash_key_env = \"UNUSED\"\n{diagnostics_extra}"
+        );
+        Self::launch(&base_url, "", &extra, resources, hits).await
     }
 
     /// Gateway in front of a TLS mock upstream; `trusted` adds the mock's CA to Wye's roots.
