@@ -215,7 +215,14 @@ Research-backed functionality that fits the constraints: request-local decisions
 - **Fit:** Wye hashes within one request; the comparison across requests happens in the user's backend, never in Wye.
 - **Evidence:** coding-agent traces (TraceLab, CacheWise) show high but imperfect prefix-cache hit rates, with misses concentrated around user-initiated turns and compaction, so misses have explainable causes.
 - **Pairs with** cache-affine routing ([architecture.md](architecture.md#cache-affine-routing)), which keeps a session on one provider account from any replica; prefix-affinity serving research (CacheRoute) shows large hit-rate gains and warns that affinity needs a load bound.
-- **Cost:** requires reading the request body (as model permissions will); hashing must stay within the benchmark gate.
+- **Cost:** requires reading the request body; hashing must stay within the benchmark gate.
+- **Design (proposed):**
+  - *Recorded per request:* a cumulative hash at each `cache_control` breakpoint (everything from the start of `tools` through the marked block, in Anthropic's cache order `tools` → `system` → `messages`) with its position (for example `messages[37]`); the number of tools, messages, and breakpoints; and the reported `cache_read` and `cache_creation` tokens.
+  - *Explaining a miss* happens in the telemetry backend: for consecutive requests of one session (`x-claude-code-session-id`), the first breakpoint whose hash differs while earlier ones match locates the change (tools added or reordered, a changed system prompt, an edited or compacted history).
+  - *No buffering:* a streaming JSON structure scanner, like the usage scanner, tracks nesting depth, strings, and escapes to find the top-level `tools`, `system`, and `messages` elements and `cache_control` keys, feeding raw bytes into a running hash. Constant memory, independent of chunk boundaries; malformed JSON marks the record unknown and never fails the stream.
+  - *Hash:* xxh3 (10–20 GB/s; about 25–50 µs per 1 MB body), because SipHash at 1–2 GB/s would add up to 0.5 ms per request. Keyed with a secret shared by replicas, so hashes stay comparable across them but cannot be matched against guessed prompts, and truncated to 64 bits.
+  - *Verification:* property tests that every chunking yields the same hashes; the upload CPU and allocation gates bound the cost (target: no extra allocations, under 10% extra upload CPU).
+  - *Open decision:* the hash key required whenever diagnostics are enabled (preferred) or optional with an unkeyed fallback.
 
 ### 3. Delegable credentials for agent swarms
 
