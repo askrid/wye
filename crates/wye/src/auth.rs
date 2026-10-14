@@ -120,6 +120,7 @@ mod tests {
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
         Verifier::new(&Auth {
             models: None,
+            max_output_tokens: None,
             issuer: "wye".into(),
             audience: "wye-prod".into(),
             max_credential_ttl: Duration::from_secs(86_400),
@@ -141,6 +142,7 @@ mod tests {
                 iat: NOW,
                 exp,
                 models: None,
+                max_output_tokens: None,
             },
         )
     }

@@ -49,6 +49,7 @@ enum Decision {
 struct Claims {
     subject: String,
     models: Option<Vec<String>>,
+    max_output_tokens: Option<u64>,
 }
 
 /// Runs every case in `dir` at Unix time `now`; returns the report and
@@ -99,6 +100,7 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
             subject: claims.subject.into(),
             key_id: "policy-test".into(),
             expires_at: u64::MAX,
+            max_output_tokens: claims.max_output_tokens,
             models: claims
                 .models
                 .map(|list| {

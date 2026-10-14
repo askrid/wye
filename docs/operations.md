@@ -37,7 +37,7 @@ Implemented: `serve`, `check-config`, `token`, `probe`, and a first `explain`; `
 
 Policy becomes testable in CI: commit sample requests with expected decisions, and run them on every `wye.toml` change. A policy change that silently reroutes traffic or raises a cost bound fails review.
 
-**Implemented: `wye policy-test --config wye.toml <dir>`.** Each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `path`, `session`, and a `[credential]` table (`subject`, `models`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and three cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused), and the test suite runs them.
+**Implemented: `wye policy-test --config wye.toml <dir>`.** Each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and three cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused), and the test suite runs them.
 
 ```text
 policy-tests/
@@ -49,7 +49,7 @@ policy-tests/
 
 With routing and cost ceilings, expectations will also name the route and bound a cost (`route = "codex"`, `max_cost_usd <= "0.05"`).
 
-`token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models.
+`token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models, and `--max-output-tokens <n>` lowers its `max_tokens` ceiling.
 
 ### Client wrapper
 
