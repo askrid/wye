@@ -233,6 +233,29 @@ async fn usage_records_are_exported_as_otlp_logs() {
         .await
         .unwrap()
         .unwrap();
+    // Shutdown exports the cumulative metrics once more.
+    let metrics = collected.recv().await.unwrap();
+    assert_eq!(metrics.uri.path(), "/v1/metrics");
+    let metrics: serde_json::Value = serde_json::from_slice(&metrics.body).unwrap();
+    let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let metric = |name: &str| list.iter().find(|m| m["name"] == name).unwrap().clone();
+    assert_eq!(metric("wye.requests")["sum"]["dataPoints"][0]["asInt"], "1");
+    let tokens = metric("wye.tokens")["sum"]["dataPoints"].clone();
+    assert!(
+        tokens
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["asInt"] == "90"
+                && p["attributes"][0]["value"]["stringValue"] == "cache_read")
+    );
+    assert_eq!(
+        metric("wye.requests.active")["gauge"]["dataPoints"][0]["asInt"],
+        "0"
+    );
     assert_eq!(export.method, Method::POST);
     assert_eq!(export.uri.path(), "/v1/logs");
     assert_eq!(export.headers["content-type"], "application/json");
