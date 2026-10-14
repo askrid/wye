@@ -20,6 +20,7 @@ pub enum StartupError {
     MissingEnv(String),
     InvalidApiKey,
     HashKeyTooShort(String),
+    InvalidOtlpHeaders(String),
     CaFile { path: PathBuf, reason: String },
     Tls(String),
     BodyLimitTooLarge,
@@ -39,6 +40,10 @@ impl fmt::Display for StartupError {
                 f,
                 "environment variable {name} must hold at least {} bytes (for example `openssl rand -hex 32`)",
                 HashKey::MIN_LEN
+            ),
+            Self::InvalidOtlpHeaders(name) => write!(
+                f,
+                "environment variable {name} must hold key=value pairs separated by commas"
             ),
             Self::CaFile { path, reason } => {
                 write!(f, "upstream.ca_file {}: {reason}", path.display())
@@ -61,6 +66,8 @@ pub struct Resources {
     pub extra_roots: Vec<CertificateDer<'static>>,
     /// Keys the prompt hashes in the usage log; present when cache diagnostics are on.
     pub prompt_key: Option<HashKey>,
+    /// Extra headers for OTLP export requests, from `telemetry.otlp_headers_env`.
+    pub otlp_headers: http::HeaderMap,
 }
 
 impl Resources {
@@ -79,6 +86,15 @@ impl Resources {
             }
             None => None,
         };
+        let otlp_headers = match config
+            .telemetry
+            .as_ref()
+            .and_then(|t| t.otlp_headers_env.as_ref())
+        {
+            Some(name) => crate::usage_log::parse_headers(&env(name)?)
+                .ok_or_else(|| StartupError::InvalidOtlpHeaders(name.clone()))?,
+            None => http::HeaderMap::new(),
+        };
         let extra_roots = match &config.upstream.ca_file {
             Some(path) => load_certificates(&config_dir.join(path))?,
             None => Vec::new(),
@@ -87,6 +103,7 @@ impl Resources {
             auth,
             extra_roots,
             prompt_key,
+            otlp_headers,
         })
     }
 }

@@ -28,8 +28,12 @@ use crate::{
     diagnostics::{PromptRecord, PromptSlot},
     gauge::Held,
 };
+
+mod otlp;
+
 use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
+pub(crate) use otlp::{OtlpTarget, parse_headers};
 use serde::Serialize;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
@@ -39,6 +43,8 @@ use tokio::{
 
 /// Records buffered before new ones are dropped.
 const QUEUE_CAPACITY: usize = 4096;
+/// A partly filled OTLP batch is sent after at most this long.
+const OTLP_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
@@ -94,14 +100,25 @@ pub(crate) struct UsageLog {
 
 impl UsageLog {
     /// Starts the writer task. It ends after every handle is dropped and the queue is written.
-    /// `prompt_key` keys the prompt hashes of records that carry them.
-    pub(crate) fn start<W>(out: W, prompt_key: Option<Arc<HashKey>>) -> (Self, JoinHandle<()>)
+    /// `prompt_key` keys the prompt hashes of records that carry them; with
+    /// `otlp`, records are also exported as OTLP log records.
+    pub(crate) fn start<W>(
+        out: W,
+        prompt_key: Option<Arc<HashKey>>,
+        otlp: Option<Arc<OtlpTarget>>,
+    ) -> (Self, JoinHandle<()>)
     where
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let (tx, rx) = mpsc::channel(QUEUE_CAPACITY);
         let dropped = Arc::new(AtomicU64::new(0));
-        let writer = tokio::spawn(write_records(rx, out, Arc::clone(&dropped), prompt_key));
+        let writer = tokio::spawn(write_records(
+            rx,
+            out,
+            Arc::clone(&dropped),
+            prompt_key,
+            otlp,
+        ));
         (Self { tx, dropped }, writer)
     }
 
@@ -139,28 +156,75 @@ async fn write_records<W>(
     mut out: W,
     dropped: Arc<AtomicU64>,
     prompt_key: Option<Arc<HashKey>>,
+    otlp: Option<Arc<OtlpTarget>>,
 ) where
     W: AsyncWrite + Unpin,
 {
     let mut buf = Vec::with_capacity(4096);
     let key = prompt_key.as_deref();
-    while let Some(record) = rx.recv().await {
-        push_line(&mut buf, &record, key);
+    // The exporter task is owned here and finishes its queue after the loop.
+    let (mut batch, exporter) = match otlp {
+        Some(target) => {
+            let (batch, exporter) = otlp::Batch::start(target);
+            (Some(batch), Some(exporter))
+        }
+        None => (None, None),
+    };
+    let mut tick = tokio::time::interval(OTLP_FLUSH_INTERVAL);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        // Cancel safety: `recv` and `tick` lose nothing when the other branch wins.
+        let record = tokio::select! {
+            record = rx.recv() => record,
+            _ = tick.tick(), if batch.is_some() => {
+                if let Some(batch) = batch.as_mut() {
+                    batch.flush();
+                }
+                continue;
+            }
+        };
+        let Some(record) = record else { break };
+        let mut record = Some(record);
         // Batch whatever else is queued into one write.
-        while let Ok(record) = rx.try_recv() {
-            push_line(&mut buf, &record, key);
+        while let Some(r) = record.take().or_else(|| rx.try_recv().ok()) {
+            let line = line(&r, key);
+            push_line(&mut buf, &line);
+            if let Some(batch) = batch.as_mut() {
+                batch.push(&line);
+                if batch.is_full() {
+                    batch.flush();
+                }
+            }
         }
         if out.write_all(&buf).await.is_err() || out.flush().await.is_err() {
             return;
         }
         buf.clear();
     }
+    let mut lost = Vec::new();
+    if let Some(mut batch) = batch {
+        batch.flush();
+        let otlp_dropped = batch.dropped();
+        drop(batch);
+        if let Some(exporter) = exporter {
+            let _ = exporter.await;
+        }
+        if otlp_dropped > 0 {
+            lost.push(format!(
+                "{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n"
+            ));
+        }
+    }
     let count = dropped.load(Ordering::Relaxed);
     if count > 0 {
-        let line = format!("{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n");
-        let _ = out.write_all(line.as_bytes()).await;
-        let _ = out.flush().await;
+        lost.push(format!(
+            "{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n"
+        ));
     }
+    for line in lost {
+        let _ = out.write_all(line.as_bytes()).await;
+    }
+    let _ = out.flush().await;
 }
 
 /// One JSON line, serialized from borrowed fields: no per-record allocation
@@ -194,13 +258,14 @@ struct Line<'a> {
     prompt: Option<PromptRecord>,
 }
 
-fn push_line(buf: &mut Vec<u8>, r: &Record, prompt_key: Option<&HashKey>) {
+/// The record as borrowed fields, written as a JSON line and as OTLP.
+fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
     let usage = r
         .usage
         .as_ref()
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
-    let line = Line {
+    Line {
         event: "request",
         unix_ms: r.unix_ms as u64,
         path: r.info.path,
@@ -225,9 +290,12 @@ fn push_line(buf: &mut Vec<u8>, r: &Record, prompt_key: Option<&HashKey>) {
             .as_ref()
             .zip(prompt_key)
             .map(|(slot, key)| PromptRecord::new(slot, key)),
-    };
+    }
+}
+
+fn push_line(buf: &mut Vec<u8>, line: &Line<'_>) {
     // Serializing plain fields into a Vec cannot fail.
-    let _ = serde_json::to_writer(&mut *buf, &line);
+    let _ = serde_json::to_writer(&mut *buf, line);
     buf.push(b'\n');
 }
 

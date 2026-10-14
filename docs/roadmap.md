@@ -10,7 +10,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, KrakenD and LiteLLM comparisons |
 | M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
 | M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
-| M1 stages 5–6 | Usage scanner done with an interim JSON-lines log; OTLP export, `wye claude`, binaries, and Compose not started |
+| M1 stages 5–6 | Usage scanner and OTLP log export done; OTLP metrics and traces, OCI image, `wye claude`, binaries, and Compose not started |
 | Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
 | M2–M6 | Not started |
 
@@ -47,7 +47,7 @@ The first reviewable implementation stops after stages 1–2. Resource bounds an
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
 | 4 | (**4a done:** Ed25519 JWT credentials, `wye token keygen`/`issue`, `[auth]` lifts the loopback-only restriction, subject in usage log. **4b done:** model permissions from config and the credential's `models` claim, read from the held start of the body.) Remaining in this stage: pinned-issuer IdP JWTs and per-request limits. Ed25519 gateway credentials and pinned-issuer IdP JWTs from `Authorization` or `x-api-key`, `wye token issue`, claim → permission mapping, limit precedence, `max_credential_ttl`, `apiKeyHelper` renewal example | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
-| 5 | Usage observer (`message_start`, `message_delta`; **done**, with an interim JSON-lines log), minimal OTLP telemetry with developer and Claude Code session attribution, OCI image, baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
+| 5 | Usage observer (`message_start`, `message_delta`; **done**), minimal OTLP telemetry (**logs done**: usage records with session and subject attribution; metrics and traces next) with developer and Claude Code session attribution, OCI image, baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
 | 6 | `wye claude`, prebuilt binaries, Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes)) | Wrapper launches Claude Code against Wye and cleans up; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
@@ -59,7 +59,7 @@ Stage 4 is required before any non-loopback deployment.
 - Pricing metadata and the [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
 - [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
 - `wye explain` and committed policy tests in CI.
-- [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry. **Done** (interim usage log; moves to OTLP with stage 5).
+- [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry. **Done** (usage log and OTLP logs).
 - [Agent-aware routing](research.md#1-agent-aware-routing) for Claude models, once its quality impact per request class is measured.
 
 **Exit:** a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.

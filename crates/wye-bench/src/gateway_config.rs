@@ -49,18 +49,27 @@ impl BenchCredentials {
     }
 }
 
-/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it
-/// (and allowing `auth_models`, a TOML list, when given); with
-/// `cache_diagnostics`, prompt hashes keyed from [`BENCH_HASH_KEY_ENV`].
+/// Optional parts of Wye's config.
+#[derive(Default)]
+pub(crate) struct WyeOptions<'a> {
+    /// An `[auth]` section trusting this public key.
+    pub(crate) auth_public_key: Option<&'a str>,
+    /// `[auth] models`, a TOML list.
+    pub(crate) auth_models: Option<&'a str>,
+    /// `[cache_diagnostics]`, keyed from [`BENCH_HASH_KEY_ENV`].
+    pub(crate) cache_diagnostics: bool,
+    /// `[telemetry]` exporting to this OTLP endpoint.
+    pub(crate) otlp_endpoint: Option<&'a str>,
+}
+
+/// Wye's config in front of `upstream_base_url`.
 pub(crate) fn wye_config(
     port: u16,
     upstream_base_url: &str,
     ca_file: Option<&Path>,
-    auth_public_key: Option<&str>,
-    auth_models: Option<&str>,
-    cache_diagnostics: bool,
+    options: &WyeOptions<'_>,
 ) -> String {
-    let credential = match auth_public_key {
+    let credential = match options.auth_public_key {
         Some(_) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
         None => "forward_caller_credential = true".to_owned(),
     };
@@ -76,17 +85,22 @@ pub(crate) fn wye_config(
         config.push_str(&extra);
         config.push('\n');
     }
-    if let Some(key) = auth_public_key {
+    if let Some(key) = options.auth_public_key {
         config.push_str(&format!(
             "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n{}\n\
              [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n",
-            auth_models.map_or(String::new(), |list| format!("models = {list}"))
+            options
+                .auth_models
+                .map_or(String::new(), |list| format!("models = {list}"))
         ));
     }
-    if cache_diagnostics {
+    if options.cache_diagnostics {
         config.push_str(&format!(
             "\n[cache_diagnostics]\nhash_key_env = \"{BENCH_HASH_KEY_ENV}\"\n"
         ));
+    }
+    if let Some(endpoint) = options.otlp_endpoint {
+        config.push_str(&format!("\n[telemetry]\notlp_endpoint = \"{endpoint}\"\n"));
     }
     config
 }

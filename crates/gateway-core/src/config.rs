@@ -42,6 +42,20 @@ pub struct Config {
     pub auth: Option<Auth>,
     /// Prompt hashes in the usage log, to explain prompt-cache misses.
     pub cache_diagnostics: Option<CacheDiagnostics>,
+    /// OTLP export of usage records.
+    pub telemetry: Option<Telemetry>,
+}
+
+/// OTLP export: each usage record is also sent as an OTLP log record.
+#[derive(Debug, Clone)]
+pub struct Telemetry {
+    /// Logs endpoint: the configured base URL with `/v1/logs` appended.
+    pub otlp_logs_uri: Uri,
+    /// Environment variable with extra request headers, in the OpenTelemetry
+    /// format `key1=value1,key2=value2` (for example a backend API key).
+    pub otlp_headers_env: Option<String>,
+    /// `service.name` resource attribute.
+    pub service_name: String,
 }
 
 /// Cache-miss diagnostics (see [`crate::prompt`]).
@@ -128,9 +142,20 @@ pub enum ConfigError {
     InvalidListen(String),
     NonLoopbackListen(SocketAddr),
     Auth(String),
-    InvalidBaseUrl { url: String, reason: &'static str },
+    InvalidBaseUrl {
+        url: String,
+        reason: &'static str,
+    },
+    InvalidUrl {
+        field: &'static str,
+        url: String,
+        reason: &'static str,
+    },
     Credential(&'static str),
-    InvalidEnvName { field: &'static str, name: String },
+    InvalidEnvName {
+        field: &'static str,
+        name: String,
+    },
     EmptyPath(&'static str),
     Zero(&'static str),
     Percent(&'static str),
@@ -151,6 +176,7 @@ impl fmt::Display for ConfigError {
             Self::InvalidBaseUrl { url, reason } => {
                 write!(f, "upstream.base_url {url:?}: {reason}")
             }
+            Self::InvalidUrl { field, url, reason } => write!(f, "{field} {url:?}: {reason}"),
             Self::Credential(msg) => write!(f, "upstream: {msg}"),
             Self::InvalidEnvName { field, name } => {
                 write!(
@@ -174,6 +200,15 @@ struct RawConfig {
     upstream: RawUpstream,
     auth: Option<RawAuth>,
     cache_diagnostics: Option<RawCacheDiagnostics>,
+    telemetry: Option<RawTelemetry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTelemetry {
+    otlp_endpoint: String,
+    otlp_headers_env: Option<String>,
+    service_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -254,11 +289,13 @@ impl Config {
                 })
             })
             .transpose()?;
+        let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
             auth,
             cache_diagnostics,
+            telemetry,
         })
     }
 }
@@ -402,6 +439,48 @@ fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
             "upstream.stream_idle_timeout_secs",
         )?,
+    })
+}
+
+fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
+    let invalid = |reason| ConfigError::InvalidUrl {
+        field: "telemetry.otlp_endpoint",
+        url: raw.otlp_endpoint.clone(),
+        reason,
+    };
+    let uri: Uri = raw
+        .otlp_endpoint
+        .parse()
+        .map_err(|_| invalid("not a valid URL"))?;
+    let parts = uri.into_parts();
+    let scheme = parts.scheme.ok_or_else(|| invalid("missing scheme"))?;
+    if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
+        return Err(invalid("scheme must be http or https"));
+    }
+    let authority = parts.authority.ok_or_else(|| invalid("missing host"))?;
+    let base = match parts.path_and_query {
+        Some(pq) if pq.query().is_some() => return Err(invalid("query strings are not allowed")),
+        Some(pq) => pq.path().trim_end_matches('/').to_owned(),
+        None => String::new(),
+    };
+    let otlp_logs_uri = Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query(format!("{base}/v1/logs"))
+        .build()
+        .map_err(|_| invalid("not a valid URL"))?;
+    Ok(Telemetry {
+        otlp_logs_uri,
+        otlp_headers_env: raw
+            .otlp_headers_env
+            .map(|name| env_name(name, "telemetry.otlp_headers_env"))
+            .transpose()?,
+        service_name: match raw.service_name {
+            Some(name) if name.is_empty() => {
+                return Err(ConfigError::EmptyPath("telemetry.service_name"));
+            }
+            name => name.unwrap_or_else(|| "wye".to_owned()),
+        },
     })
 }
 

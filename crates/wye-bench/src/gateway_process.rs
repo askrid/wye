@@ -8,7 +8,7 @@ use crate::{
     client::Target,
     gateway_config::{
         BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BenchCredentials, LITELLM_API_PREFIX,
-        LITELLM_MASTER_KEY, krakend_config, litellm_config, wye_config,
+        LITELLM_MASTER_KEY, WyeOptions, krakend_config, litellm_config, wye_config,
     },
 };
 
@@ -20,6 +20,8 @@ pub enum Gateway<'a> {
     WyeAuth(&'a str),
     /// Wye with `[cache_diagnostics]`: every request body is scanned and hashed.
     WyeDiag(&'a str),
+    /// Wye with `[telemetry]`: every usage record is also exported as OTLP.
+    WyeOtlp(&'a str),
     /// Wye with `[auth]` and model permissions in config and credential:
     /// every request is held until its `model` is read, and its body checked.
     WyeModels(&'a str),
@@ -33,6 +35,7 @@ impl Gateway<'_> {
             Self::Wye(_) => "wye",
             Self::WyeAuth(_) => "wye-auth",
             Self::WyeDiag(_) => "wye-diag",
+            Self::WyeOtlp(_) => "wye-otlp",
             Self::WyeModels(_) => "wye-models",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
@@ -45,6 +48,7 @@ impl Gateway<'_> {
             Self::Wye(_) => "",
             Self::WyeAuth(_) => "auth_",
             Self::WyeDiag(_) => "diag_",
+            Self::WyeOtlp(_) => "otlp_",
             Self::WyeModels(_) => "models_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
@@ -104,52 +108,32 @@ impl GatewayProcess {
         };
         let addr = format!("127.0.0.1:{port}").parse().unwrap();
         let launch = match gateway {
-            Gateway::Wye(program) => Launch {
-                program: program.into(),
-                args: vec![
-                    "serve".into(),
-                    "--config".into(),
-                    config(
-                        "toml",
-                        wye_config(
-                            port,
-                            upstream_base_url,
-                            ca_file.as_deref(),
-                            None,
-                            None,
-                            false,
-                        ),
-                    ),
-                ],
-                env: Vec::new(),
-                health: "/healthz",
-                target: Target::plain(addr),
-            },
-            Gateway::WyeDiag(program) => Launch {
-                program: program.into(),
-                args: vec![
-                    "serve".into(),
-                    "--config".into(),
-                    config(
-                        "toml",
-                        wye_config(
-                            port,
-                            upstream_base_url,
-                            ca_file.as_deref(),
-                            None,
-                            None,
-                            true,
-                        ),
-                    ),
-                ],
-                env: vec![(BENCH_HASH_KEY_ENV, "b".repeat(64))],
-                health: "/healthz",
-                target: Target::plain(addr),
-            },
-            Gateway::WyeAuth(program) | Gateway::WyeModels(program) => {
-                // The mock's requests name model "bench": allowed by both lists.
+            Gateway::Wye(program)
+            | Gateway::WyeAuth(program)
+            | Gateway::WyeModels(program)
+            | Gateway::WyeDiag(program)
+            | Gateway::WyeOtlp(program) => {
+                let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
-                let credentials = BenchCredentials::generate(models.then_some(&["bench"][..]));
+                // The mock's requests name model "bench": allowed by both lists.
+                let credentials = authenticated
+                    .then(|| BenchCredentials::generate(models.then_some(&["bench"][..])));
+                let options = WyeOptions {
+                    auth_public_key: credentials.as_ref().map(|c| c.public_key.as_str()),
+                    auth_models: models.then_some(r#"["bench*", "claude-*"]"#),
+                    cache_diagnostics: matches!(gateway, Gateway::WyeDiag(_)),
+                    // The mock answers the export POSTs like any request.
+                    otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_))
+                        .then_some(upstream_base_url),
+                };
+                let mut env = Vec::new();
+                if authenticated {
+                    // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
+                    env.push((BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".to_owned()));
+                }
+                if options.cache_diagnostics {
+                    env.push((BENCH_HASH_KEY_ENV, "b".repeat(64)));
+                }
                 Launch {
                     program: program.into(),
                     args: vec![
@@ -157,24 +141,19 @@ impl GatewayProcess {
                         "--config".into(),
                         config(
                             "toml",
-                            wye_config(
-                                port,
-                                upstream_base_url,
-                                ca_file.as_deref(),
-                                Some(&credentials.public_key),
-                                models.then_some(r#"["bench*", "claude-*"]"#),
-                                false,
-                            ),
+                            wye_config(port, upstream_base_url, ca_file.as_deref(), &options),
                         ),
                     ],
-                    // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
-                    env: vec![(BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".into())],
+                    env,
                     health: "/healthz",
-                    target: Target::gateway(
-                        addr,
-                        "",
-                        vec![("authorization", format!("Bearer {}", credentials.token))],
-                    ),
+                    target: match &credentials {
+                        Some(c) => Target::gateway(
+                            addr,
+                            "",
+                            vec![("authorization", format!("Bearer {}", c.token))],
+                        ),
+                        None => Target::plain(addr),
+                    },
                 }
             }
             Gateway::KrakenD(program) => Launch {
