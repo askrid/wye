@@ -12,6 +12,7 @@ How changes are made, verified, and committed. Speed and statelessness are the p
 | `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, competitor runs |
 | `bench/baseline.json` | Gated benchmark baseline for the development machine |
 | `scripts/check.sh`, `scripts/ab.sh` | Commit gate; A/B comparison of two binaries |
+| `Dockerfile`, `scripts/image-smoke.sh` | OCI image; its build-and-run smoke test (needs Docker; not part of the commit gate) |
 
 ## Commit gate
 
