@@ -254,6 +254,15 @@ Research-backed functionality that fits the constraints: request-local decisions
 - **Basis:** tamper-evident logs and transparency-log Merkle batching.
 - **Function:** a signed receipt per request (request hash, usage, cost bound, config version, credential subject) exported through OTLP, optionally Merkle-chained so deletions are detectable. Chargeback and audit that finance can trust, without a billing database.
 - **Fit:** needs only a signing key; storage is the user's telemetry backend.
+- **Design (proposal, not built):**
+  - *What a receipt attests:* "this replica forwarded this request for this credential subject, and the provider reported this usage for it". It does not prove what the provider billed; finance reconciles through the provider's own request id.
+  - *Contents:* receipt version, key id, replica instance id (random per process start) and sequence number, end time, credential subject, Claude Code session id, route, model, status, outcome, the provider-reported token counts and usage status, the provider's `request-id` response header, config version once it exists, and `prev`, the SHA-256 of the previous receipt from the same replica instance.
+  - *Encoding:* a compact JWS (`alg` pinned to `EdDSA`, the same strict format as gateway credentials) over a canonical JSON payload, emitted as the `receipt` field of the usage log line and the `wye.receipt` attribute of the OTLP log record.
+  - *Tamper evidence without shared state:* each replica instance keeps its own hash chain (sequence numbers plus `prev`), so a deleted or altered receipt breaks its chain or leaves a gap. Chains start fresh at each process start and never coordinate across replicas; the chain state is one hash and one counter in the writer task. Periodic chain heads (sequence and hash) can be exported as a small OTLP record for external anchoring.
+  - *Verification:* `wye receipt verify --key <public key> <receipts.jsonl>` checks signatures, chain links, and gaps per instance, offline.
+  - *Configuration:* `[receipts] signing_key_file` (an Ed25519 key from `wye token keygen`, kept apart from credential-issuing keys) and `key_id`; the public key goes to the auditors.
+  - *Not included:* a hash of the request body. Measured on the development laptop: SHA-256 of a 1 MiB body costs 2.16 ms (no SHA extensions on this CPU), more than Wye's whole upload cost of 1.45 ms/MB; the provider's `request-id` ties a receipt to a request instead. A keyed prompt hash from [cache-miss diagnostics](#2-cache-miss-diagnostics) can be included when both are on.
+  - *Cost:* one Ed25519 signature per request, measured at 13.7 µs for a 400-byte payload, plus a SHA-256 of the receipt (about 1 µs), in the writer task, off the request path. At 1,000 requests per second per replica that is about 1.5% of one core.
 
 ### 5. Queryable and provable policy
 
