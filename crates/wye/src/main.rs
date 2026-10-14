@@ -13,6 +13,7 @@ const USAGE: &str = "usage:
   wye serve --config <path>
   wye check-config <path>
   wye probe <http-url>
+  wye policy-test --config <path> <dir>
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
@@ -43,6 +44,17 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             std::process::exit(code);
         }
         ["explain", rest @ ..] => explain(rest),
+        ["policy-test", "--config", path, dir] => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs();
+            let (report, passed) = wye::policy_test(&load(path)?, Path::new(dir), now)?;
+            print!("{report}");
+            if !passed {
+                std::process::exit(3);
+            }
+            Ok(())
+        }
         ["probe", url] => tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
@@ -79,14 +91,11 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let explanation = wye::explain(
-        &config,
-        path,
-        token.as_deref().map(str::trim),
-        session,
-        &body,
-        now,
-    );
+    let credential = match token.as_deref() {
+        Some(token) => wye::Credential::Token(token.trim()),
+        None => wye::Credential::None,
+    };
+    let explanation = wye::explain(&config, path, credential, session, &body, now);
     print!("{}", explanation.report());
     if explanation.refused.is_some() {
         std::process::exit(3);

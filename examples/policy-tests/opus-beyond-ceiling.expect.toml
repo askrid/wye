@@ -1,0 +1,7 @@
+# Opus is outside the configured ceiling, even for a credential that names it.
+decision = "refuse"
+status = 403
+error = "permission_error"
+[credential]
+subject = "team-research"
+models = ["claude-*"]

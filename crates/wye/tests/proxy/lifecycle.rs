@@ -179,3 +179,14 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("wye serve"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// The sample policy tests in examples/ pass against their config.
+#[test]
+fn example_policy_tests_pass() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy-tests");
+    let config =
+        Config::from_toml_str(&std::fs::read_to_string(dir.join("wye.toml")).unwrap()).unwrap();
+    let (report, passed) = wye::policy_test(&config, &dir, 0).unwrap();
+    assert!(passed, "{report}");
+    assert!(report.ends_with("3 passed, 0 failed\n"), "{report}");
+}
