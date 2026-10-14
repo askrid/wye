@@ -97,7 +97,11 @@ pub async fn run(
                     percentile(&direct.latency.unary, p),
                 );
             }
-            let variants = [Gateway::WyeAuth(wye), Gateway::WyeDiag(wye)];
+            let variants = [
+                Gateway::WyeAuth(wye),
+                Gateway::WyeModels(wye),
+                Gateway::WyeDiag(wye),
+            ];
             let variants = if path.variants { &variants[..] } else { &[] };
             for &gateway in gateways.iter().chain(variants) {
                 eprintln!(
@@ -113,8 +117,11 @@ pub async fn run(
                 let scope = Scope {
                     streams_sse: gateway.streams_sse(),
                     paced: path.paced,
-                    per_request_only: matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeDiag(_)),
-                    uploads: matches!(gateway, Gateway::WyeDiag(_)),
+                    per_request_only: matches!(
+                        gateway,
+                        Gateway::WyeAuth(_) | Gateway::WyeModels(_) | Gateway::WyeDiag(_)
+                    ),
+                    uploads: matches!(gateway, Gateway::WyeModels(_) | Gateway::WyeDiag(_)),
                 };
                 measure::measure(&direct, &process, &prefix, scope, &mut metrics).await;
             }

@@ -17,6 +17,10 @@ use http::{
 };
 use serde::Deserialize;
 
+use crate::model::ModelPattern;
+
+/// Request bytes held process-wide while reading `model` for permissions.
+const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
@@ -64,6 +68,9 @@ pub struct Auth {
     pub max_credential_ttl: Duration,
     /// Verification keys, selected by the token's `kid`; several allow rotation.
     pub keys: Vec<PublicKey>,
+    /// Models any credential may use; `None` allows every model. A
+    /// credential's `models` claim narrows this, never widens it.
+    pub models: Option<Vec<ModelPattern>>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +84,9 @@ pub struct Server {
     /// Always a loopback address until gateway credentials are implemented.
     pub listen: SocketAddr,
     pub max_request_body_bytes: u64,
+    /// Request bytes held across all requests while reading `model` for model
+    /// permissions; beyond it, requests are answered with an overload error.
+    pub max_held_request_bytes: u64,
     /// Proxied requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
     pub max_concurrent_requests: usize,
@@ -180,6 +190,7 @@ struct RawAuth {
     audience: String,
     max_credential_ttl_secs: Option<u64>,
     keys: Vec<RawPublicKey>,
+    models: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -194,6 +205,7 @@ struct RawPublicKey {
 struct RawServer {
     listen: String,
     max_request_body_bytes: Option<u64>,
+    max_held_request_bytes: Option<u64>,
     max_concurrent_requests: Option<usize>,
     drain_delay_secs: Option<u64>,
     shutdown_grace_secs: Option<u64>,
@@ -281,8 +293,28 @@ fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
             ed25519_public_key: public,
         });
     }
+    let models = match raw.models {
+        Some(list) if list.is_empty() => {
+            return Err(err(
+                "models must not be empty; omit it to allow every model".into(),
+            ));
+        }
+        Some(list) => Some(
+            list.iter()
+                .map(|p| {
+                    ModelPattern::parse(p).ok_or_else(|| {
+                        err(format!(
+                            "models: {p:?} is not a model name or a prefix ending in *"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        None => None,
+    };
     Ok(Auth {
         issuer: raw.issuer,
+        models,
         audience: raw.audience,
         max_credential_ttl: secs(
             raw.max_credential_ttl_secs
@@ -307,6 +339,11 @@ fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, Config
             raw.max_request_body_bytes
                 .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
             "server.max_request_body_bytes",
+        )?,
+        max_held_request_bytes: nonzero(
+            raw.max_held_request_bytes
+                .unwrap_or(DEFAULT_MAX_HELD_REQUEST_BYTES),
+            "server.max_held_request_bytes",
         )?,
         max_concurrent_requests: match raw.max_concurrent_requests {
             Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
@@ -514,6 +551,38 @@ mod tests {
             with_auth("127.0.0.1:8080", "api_key_env = \"K\"", &twice),
             Err(ConfigError::Auth(_))
         ));
+    }
+
+    #[test]
+    fn auth_models_are_validated_patterns() {
+        let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
+        let with_models = |models: &str| {
+            Config::from_toml_str(&format!(
+                "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+                 api_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n\
+                 [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\""
+            ))
+        };
+        assert!(with_models("").unwrap().auth.unwrap().models.is_none());
+        let models = with_models("models = [\"claude-haiku-*\", \"claude-sonnet-4-5\"]")
+            .unwrap()
+            .auth
+            .unwrap()
+            .models
+            .unwrap();
+        assert!(models[0].matches("claude-haiku-4-5"));
+        for bad in ["models = []", "models = [\"a*b\"]", "models = [\"\"]"] {
+            assert!(
+                matches!(with_models(bad), Err(ConfigError::Auth(_))),
+                "{bad}"
+            );
+        }
+        let held =
+            parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
+                .unwrap()
+                .server
+                .max_held_request_bytes;
+        assert_eq!(held, DEFAULT_MAX_HELD_REQUEST_BYTES);
     }
 
     #[test]

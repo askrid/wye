@@ -13,7 +13,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use ring::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
 use serde::{Deserialize, Serialize};
 
-use crate::config::Auth;
+use crate::{config::Auth, model::ModelPattern};
 
 /// Longer tokens are rejected before any decoding.
 const MAX_TOKEN_BYTES: usize = 8 * 1024;
@@ -26,6 +26,9 @@ pub struct Identity {
     pub subject: Box<str>,
     pub key_id: Box<str>,
     pub expires_at: u64,
+    /// Models this credential may use (`models` claim); `None` leaves the
+    /// configured list in charge.
+    pub models: Option<Box<[ModelPattern]>>,
 }
 
 /// Why a credential was rejected. Deliberately coarse in client responses;
@@ -80,6 +83,7 @@ struct Claims {
     exp: u64,
     iat: u64,
     nbf: Option<u64>,
+    models: Option<Vec<String>>,
 }
 
 /// `aud` may be one string or a list (RFC 7519 §4.1.3).
@@ -173,7 +177,18 @@ impl Verifier {
         if claims.exp.saturating_sub(claims.iat) > self.max_ttl_secs {
             return Err(CredentialError::LifetimeTooLong);
         }
+        // An empty or invalid list is an issuer mistake: fail closed.
+        let models = match claims.models {
+            Some(list) if list.is_empty() => return Err(CredentialError::Malformed),
+            Some(list) => Some(
+                list.iter()
+                    .map(|p| ModelPattern::parse(p).ok_or(CredentialError::Malformed))
+                    .collect::<Result<Box<[_]>, _>>()?,
+            ),
+            None => None,
+        };
         Ok(Identity {
+            models,
             subject: claims.sub.into(),
             key_id: header.kid.into(),
             expires_at: claims.exp,
@@ -193,6 +208,9 @@ pub struct NewCredential<'a> {
     pub aud: &'a str,
     pub iat: u64,
     pub exp: u64,
+    /// Allowed models (names or prefixes ending in `*`); `None` omits the claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<&'a [&'a str]>,
 }
 
 /// Signs `claims` with `key` under key id `kid`.
@@ -235,6 +253,7 @@ mod tests {
 
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
         Verifier::new(&Auth {
+            models: None,
             issuer: "wye".into(),
             audience: "wye-prod".into(),
             max_credential_ttl: Duration::from_secs(86_400),
@@ -252,6 +271,7 @@ mod tests {
             aud: "wye-prod",
             iat: NOW,
             exp: NOW + 3_600,
+            models: None,
         }
     }
 
@@ -263,6 +283,24 @@ mod tests {
         assert_eq!(&*identity.subject, "alice");
         assert_eq!(&*identity.key_id, "k1");
         assert_eq!(identity.expires_at, NOW + 3_600);
+        assert_eq!(identity.models, None);
+    }
+
+    #[test]
+    fn models_claim_becomes_patterns_and_bad_lists_fail_closed() {
+        let key = keypair();
+        let v = verifier(&key);
+        let with_models = |models: &[&str]| {
+            let mut c = claims();
+            c.models = Some(models);
+            v.verify(&issue(&key, "k1", &c), NOW + 10)
+        };
+        let identity = with_models(&["claude-haiku-*", "claude-sonnet-4-5"]).unwrap();
+        let models = identity.models.unwrap();
+        assert!(models[0].matches("claude-haiku-4-5"));
+        assert!(!models[1].matches("claude-sonnet-4-5-20250929"));
+        assert_eq!(with_models(&[]), Err(CredentialError::Malformed));
+        assert_eq!(with_models(&["a*b"]), Err(CredentialError::Malformed));
     }
 
     #[test]

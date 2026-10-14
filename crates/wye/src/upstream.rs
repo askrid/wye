@@ -28,15 +28,17 @@ use hyper_util::{
 };
 use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 
-pub(crate) use body::UpstreamBody;
+pub(crate) use body::{BoxError, UpstreamBody};
 use pool::ClientPool;
 
 use crate::{
     StartupError,
     diagnostics::{PromptBody, PromptSlot},
+    permissions::RequestBody,
 };
 
-type UpstreamClient = Client<HttpsConnector<HttpConnector>, PromptBody<Limited<Incoming>>>;
+type UpstreamClient =
+    Client<HttpsConnector<HttpConnector>, PromptBody<Limited<RequestBody<Incoming>>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
@@ -128,7 +130,7 @@ impl Upstream {
     /// With a `prompt` slot, the request body's prompt hashes land there.
     pub(crate) async fn forward(
         &self,
-        req: Request<Incoming>,
+        req: Request<RequestBody<Incoming>>,
         max_body_bytes: usize,
         prompt: Option<PromptSlot>,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {

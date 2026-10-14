@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 864de0c76d3d18a00d23d04ae4d720a6a8d695034573ebcf71c6644e7f9e047e # shrinks to members = [Model("-"), Other("max_tokens", "")], sizes = [1]

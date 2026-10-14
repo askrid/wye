@@ -12,6 +12,7 @@ use bytes::Bytes;
 use gateway_core::{
     config::Config,
     credential::Verifier,
+    model::{self, ModelPattern},
     prompt::{self, HashKey},
 };
 use http::{
@@ -26,6 +27,7 @@ use crate::{
     auth::{ConnectionAuth, authenticate},
     diagnostics::PromptSlot,
     gauge::Gauge,
+    permissions::{HoldError, RequestBody, hold_until_model},
     upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{Observed, RequestInfo, UsageLog},
 };
@@ -43,6 +45,11 @@ pub struct Gateway {
     /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
     upstream: Upstream,
+    /// Models any credential may use; `None` allows every model.
+    models: Option<Vec<ModelPattern>>,
+    /// Request bytes held while reading `model`, across all requests.
+    held_bytes: Gauge,
+    max_held_request_bytes: usize,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
     prompt_key: Option<Arc<HashKey>>,
     /// Percentage of sessions whose requests are diagnosed.
@@ -60,6 +67,10 @@ impl Gateway {
         Ok(Self {
             verifier: config.auth.as_ref().map(Verifier::new),
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
+            models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
+            held_bytes: Gauge::default(),
+            max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
+                .unwrap_or(usize::MAX),
             prompt_key: resources.prompt_key.map(Arc::new),
             prompt_sample_percent: config
                 .cache_diagnostics
@@ -181,6 +192,41 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
+        let (parts, mut body) = req.into_parts();
+        let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
+        let body = if self.models.is_none() && credential_models.is_none() {
+            RequestBody::new(body)
+        } else {
+            let held = match hold_until_model(
+                &mut body,
+                &self.held_bytes,
+                self.max_held_request_bytes,
+                self.max_request_body_bytes,
+            )
+            .await
+            {
+                Ok(held) => held,
+                Err(e) => {
+                    let res = hold_error(e);
+                    log.gateway_error(info, res.status());
+                    return res;
+                }
+            };
+            let allowed = held
+                .model()
+                .is_some_and(|m| model::permitted(self.models.as_deref(), credential_models, m));
+            if !allowed {
+                let res = error(
+                    StatusCode::FORBIDDEN,
+                    "permission_error",
+                    "this credential may not use the requested model",
+                );
+                log.gateway_error(info, res.status());
+                return res;
+            }
+            RequestBody::after_hold(held, body)
+        };
+        let req = Request::from_parts(parts, body);
         if self.prompt_key.is_some()
             && prompt::session_sampled(
                 info.session_id.as_ref().map(HeaderValue::as_bytes),
@@ -218,6 +264,27 @@ impl Gateway {
                 res
             }
         }
+    }
+}
+
+fn hold_error(e: HoldError) -> Response<ResBody> {
+    match e {
+        HoldError::Model(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", e.as_str()),
+        HoldError::Overloaded => error(
+            StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
+            "overloaded_error",
+            "gateway is holding too many request bytes",
+        ),
+        HoldError::TooLarge => error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "request_too_large",
+            "request body exceeds the gateway limit",
+        ),
+        HoldError::Body => error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "request body could not be read",
+        ),
     }
 }
 
