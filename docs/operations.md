@@ -18,18 +18,20 @@ Distribution, CLI, deployment, telemetry, and failure behavior. The gateway bina
 ```bash
 wye serve --config wye.toml
 wye check-config wye.toml
-wye explain --config wye.toml --credential token.txt request.json
+wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] request.json
 wye token keygen --out issuer.key
 wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --subject team-research --ttl-secs 3600
 wye probe http://127.0.0.1:8080/readyz
 wye doctor
 ```
 
-Implemented: `serve`, `check-config`, `token`, and `probe`; `explain` and `doctor` are planned.
+Implemented: `serve`, `check-config`, `token`, `probe`, and a first `explain`; `doctor` is planned.
 
 `probe` sends one `GET` over plain HTTP and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`).
 
 `doctor` checks local config, resolved environment variables, DNS/TLS/provider connectivity, model availability, and compatibility warnings, without an admin API.
+
+**Implemented today**, `explain` prints each check `serve` would make for the request and the decision, calling the same functions in the same order: endpoint, credential verification (at the current time), body size, the model permission (requested model, the configured and credential lists), the upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it. It exits 0 for "forward" and 3 for a refusal, with the status and error type the server would send. Conditions that exist only at run time (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With routing and cost ceilings (later milestones), `explain` grows to the full design:
 
 `explain` runs the exact admission and routing code used by `serve`, offline, and prints the decision: selected route and candidate, rejected candidates with reasons, rewritten fields, provable cost bound, and the provider credential (by name, never value) that would be used. It makes no network calls. Because routing is a pure function of request, credential, and config, the output is what every replica would do.
 
