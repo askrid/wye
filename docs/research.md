@@ -269,7 +269,7 @@ Planned for M2 ([policy.md](policy.md#provable-cost-ceiling)): a guaranteed uppe
 
 - **Connect-only hedging** (*The Tail at Scale*): race a second connection attempt, never a second request, so tail latency drops without duplicate billing.
 - **Deterministic simulation testing** (FoundationDB style): Wye, mock, and clients in a simulated network (turmoil or madsim) with seeded loss, slow readers, mid-stream drops, and shutdown.
-- **Clean stream endings:** when the upstream stalls, emit an Anthropic `error` event before closing, so Claude Code shows a retryable overload instead of a dropped connection.
+- **Clean stream endings** (**implemented**): when the upstream stalls past the idle timeout or its body fails at an SSE event boundary, Wye sends an Anthropic `error` event (`overloaded_error`) and closes cleanly, so Claude Code sees a retryable overload instead of a dropped connection. Mid-event failures still drop the stream. The per-frame cost is one check of the frame's last bytes.
 - **Proof-of-possession credentials** without a replay cache: bind tokens to a client key; replay inside a short window remains possible.
 
 ### Excluded: needs shared state
