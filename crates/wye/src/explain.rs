@@ -1,7 +1,7 @@
 //! `wye explain`: what `wye serve` would decide for one request, offline.
 //!
 //! The checks call the same functions the server uses (credential
-//! verification, the model scanner, the permission rule, session sampling)
+//! verification, the policy scanner, the permission rule, session sampling)
 //! in the server's order, and make no network calls. Routing is a pure
 //! function of request, credential, and config, so the answer is what every
 //! replica would do.
@@ -9,7 +9,7 @@
 use gateway_core::{
     config::{Config, UpstreamCredential},
     credential::{Identity, Verifier},
-    model::{self, ModelScanner},
+    policy::{self, PolicyScanner},
     prompt,
 };
 
@@ -105,7 +105,7 @@ pub fn explain(
 
     let configured = config.auth.as_ref().and_then(|a| a.models.as_deref());
     let granted = identity.as_ref().and_then(|i| i.models.as_deref());
-    let list = |patterns: Option<&[model::ModelPattern]>| match patterns {
+    let list = |patterns: Option<&[policy::ModelPattern]>| match patterns {
         None => "any".to_owned(),
         Some(p) => p
             .iter()
@@ -116,7 +116,7 @@ pub fn explain(
     if configured.is_none() && granted.is_none() {
         out.step("model permissions: none apply; the body is not read".into());
     } else {
-        let mut scanner = ModelScanner::new();
+        let mut scanner = PolicyScanner::new();
         scanner.feed(body);
         let requested = match scanner.finish() {
             Ok(m) => m.to_owned(),
@@ -127,7 +127,7 @@ pub fn explain(
             list(configured),
             list(granted)
         ));
-        if !model::permitted(configured, granted, &requested) {
+        if !policy::permitted(configured, granted, &requested) {
             return out.refuse(
                 403,
                 "permission_error",

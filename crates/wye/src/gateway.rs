@@ -12,7 +12,7 @@ use bytes::Bytes;
 use gateway_core::{
     config::Config,
     credential::Verifier,
-    model::{self, ModelPattern},
+    policy::{self, ModelPattern},
     prompt::{self, HashKey},
 };
 use http::{
@@ -232,7 +232,7 @@ impl Gateway {
             };
             let allowed = held
                 .model()
-                .is_some_and(|m| model::permitted(self.models.as_deref(), credential_models, m));
+                .is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
             if !allowed {
                 let res = error(
                     StatusCode::FORBIDDEN,

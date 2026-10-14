@@ -13,7 +13,7 @@ use std::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use gateway_core::{
     credential::{self, NewCredential},
-    model::ModelPattern,
+    policy::ModelPattern,
 };
 use ring::{
     rand::SystemRandom,

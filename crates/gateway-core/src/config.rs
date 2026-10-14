@@ -17,7 +17,7 @@ use http::{
 };
 use serde::Deserialize;
 
-use crate::model::ModelPattern;
+use crate::policy::ModelPattern;
 
 /// Request bytes held process-wide while reading `model` for permissions.
 const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;

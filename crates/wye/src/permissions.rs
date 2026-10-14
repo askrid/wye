@@ -16,7 +16,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::model::{ModelError, ModelScanner};
+use gateway_core::policy::{ModelError, PolicyScanner};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Frame, SizeHint};
 
@@ -77,7 +77,7 @@ struct Hold {
     chunks: Chunks,
     /// Bytes of `chunks`, counted against the hold budget.
     budget: Held,
-    scanner: ModelScanner,
+    scanner: PolicyScanner,
     /// The whole body is in `chunks`.
     ended: bool,
 }
@@ -113,7 +113,7 @@ where
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
         budget: budget.hold_none(),
-        scanner: ModelScanner::new(),
+        scanner: PolicyScanner::new(),
         ended: false,
     });
     let mut total = 0usize;

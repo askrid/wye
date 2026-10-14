@@ -1,7 +1,7 @@
 //! Model permissions: which models a request may name, and reading `model`
 //! from a streamed request body.
 //!
-//! [`ModelScanner`] follows the body's structure (strings, escapes, nesting)
+//! [`PolicyScanner`] follows the body's structure (strings, escapes, nesting)
 //! with constant memory and chunk boundaries anywhere. It reports the
 //! top-level `model` string as soon as it has been read, so the caller holds
 //! only the bytes up to it, and keeps checking the rest: JSON allows a
@@ -129,7 +129,7 @@ enum Capture {
 const KEY_CAP: usize = 8;
 
 /// Incremental reader of one request body's top-level `model`.
-pub struct ModelScanner {
+pub struct PolicyScanner {
     error: Option<ModelError>,
     started: bool,
     depth: u32,
@@ -150,13 +150,13 @@ pub struct ModelScanner {
     found: bool,
 }
 
-impl Default for ModelScanner {
+impl Default for PolicyScanner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ModelScanner {
+impl PolicyScanner {
     pub fn new() -> Self {
         Self {
             error: None,

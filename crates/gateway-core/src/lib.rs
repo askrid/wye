@@ -8,6 +8,6 @@
 pub mod config;
 pub mod credential;
 mod json;
-pub mod model;
+pub mod policy;
 pub mod prompt;
 pub mod usage;
