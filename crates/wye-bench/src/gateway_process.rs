@@ -7,8 +7,8 @@ use tokio::process::Child;
 use crate::{
     client::Target,
     gateway_config::{
-        BENCH_PROVIDER_KEY_ENV, BenchCredentials, LITELLM_API_PREFIX, LITELLM_MASTER_KEY,
-        krakend_config, litellm_config, wye_config,
+        BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BenchCredentials, LITELLM_API_PREFIX,
+        LITELLM_MASTER_KEY, krakend_config, litellm_config, wye_config,
     },
 };
 
@@ -18,6 +18,8 @@ pub enum Gateway<'a> {
     Wye(&'a str),
     /// Wye with `[auth]`: every request carries a gateway credential to verify.
     WyeAuth(&'a str),
+    /// Wye with `[cache_diagnostics]`: every request body is scanned and hashed.
+    WyeDiag(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
 }
@@ -27,6 +29,7 @@ impl Gateway<'_> {
         match self {
             Self::Wye(_) => "wye",
             Self::WyeAuth(_) => "wye-auth",
+            Self::WyeDiag(_) => "wye-diag",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
         }
@@ -37,6 +40,7 @@ impl Gateway<'_> {
         match self {
             Self::Wye(_) => "",
             Self::WyeAuth(_) => "auth_",
+            Self::WyeDiag(_) => "diag_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
         }
@@ -102,10 +106,24 @@ impl GatewayProcess {
                     "--config".into(),
                     config(
                         "toml",
-                        wye_config(port, upstream_base_url, ca_file.as_deref(), None),
+                        wye_config(port, upstream_base_url, ca_file.as_deref(), None, false),
                     ),
                 ],
                 env: Vec::new(),
+                health: "/healthz",
+                target: Target::plain(addr),
+            },
+            Gateway::WyeDiag(program) => Launch {
+                program: program.into(),
+                args: vec![
+                    "serve".into(),
+                    "--config".into(),
+                    config(
+                        "toml",
+                        wye_config(port, upstream_base_url, ca_file.as_deref(), None, true),
+                    ),
+                ],
+                env: vec![(BENCH_HASH_KEY_ENV, "b".repeat(64))],
                 health: "/healthz",
                 target: Target::plain(addr),
             },
@@ -123,6 +141,7 @@ impl GatewayProcess {
                                 upstream_base_url,
                                 ca_file.as_deref(),
                                 Some(&credentials.public_key),
+                                false,
                             ),
                         ),
                     ],

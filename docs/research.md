@@ -198,7 +198,7 @@ Each experiment names its status; feature-shaped experiments moved to [feature d
 
 ## Feature directions
 
-Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Together, 1–3 are the intended moat: a gateway that understands agent traffic, with no database. None is implemented yet.
+Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Together, 1–3 are the intended moat: a gateway that understands agent traffic, with no database. Cache-miss diagnostics (2) is implemented; the others are not.
 
 ### 1. Agent-aware routing
 
@@ -215,14 +215,26 @@ Research-backed functionality that fits the constraints: request-local decisions
 - **Fit:** Wye hashes within one request; the comparison across requests happens in the user's backend, never in Wye.
 - **Evidence:** coding-agent traces (TraceLab, CacheWise) show high but imperfect prefix-cache hit rates, with misses concentrated around user-initiated turns and compaction, so misses have explainable causes.
 - **Pairs with** cache-affine routing ([architecture.md](architecture.md#cache-affine-routing)), which keeps a session on one provider account from any replica; prefix-affinity serving research (CacheRoute) shows large hit-rate gains and warns that affinity needs a load bound.
-- **Cost:** requires reading the request body; hashing must stay within the benchmark gate.
-- **Design (proposed):**
-  - *Recorded per request:* a cumulative hash at each `cache_control` breakpoint (everything from the start of `tools` through the marked block, in Anthropic's cache order `tools` → `system` → `messages`) with its position (for example `messages[37]`); the number of tools, messages, and breakpoints; and the reported `cache_read` and `cache_creation` tokens.
-  - *Explaining a miss* happens in the telemetry backend: for consecutive requests of one session (`x-claude-code-session-id`), the first breakpoint whose hash differs while earlier ones match locates the change (tools added or reordered, a changed system prompt, an edited or compacted history).
-  - *No buffering:* a streaming JSON structure scanner, like the usage scanner, tracks nesting depth, strings, and escapes to find the top-level `tools`, `system`, and `messages` elements and `cache_control` keys, feeding raw bytes into a running hash. Constant memory, independent of chunk boundaries; malformed JSON marks the record unknown and never fails the stream.
-  - *Hash:* xxh3 (10–20 GB/s; about 25–50 µs per 1 MB body), because SipHash at 1–2 GB/s would add up to 0.5 ms per request. Keyed with a secret shared by replicas, so hashes stay comparable across them but cannot be matched against guessed prompts, and truncated to 64 bits.
-  - *Verification:* property tests that every chunking yields the same hashes; the upload CPU and allocation gates bound the cost (target: no extra allocations, under 10% extra upload CPU).
-  - *Open decision:* the hash key required whenever diagnostics are enabled (preferred) or optional with an unkeyed fallback.
+- **Implemented** (`gateway-core/src/prompt.rs`, enabled by `[cache_diagnostics]`; fields in [operations.md](operations.md#telemetry)):
+  - *Recorded per request:* keyed hashes of the whole `tools` and `system` sections with their element counts; the number of messages; each `cache_control` breakpoint (the first four with position: section, element, and content block for messages, plus the hash of its section through the marked block; all of them counted); and the hashes of the last eight message prefixes (`messages[0..=i]`).
+  - *One hash per section, not one cumulative hash:* the fields of a body may arrive in any order, so hashing in cache order (`tools` → `system` → `messages`) would need buffering. The backend compares the sections in that order instead, which locates the same change.
+  - *Marker and formatting excluded:* `cache_control` members (with their separating comma) and whitespace outside strings are left out. Claude Code moves the marker to the newest message every turn; hashed, it would make every earlier prefix look changed.
+  - *Explaining a miss* happens in the telemetry backend: for consecutive requests of one session (`x-claude-code-session-id`), compare `tools`, then `system`, then the message prefix at the previous request's last message index (a turn usually appends two messages, so it is among the eight kept). The first mismatch names the cause: tools added or reordered, a changed system prompt, or an edited or compacted history.
+  - *Streaming scanner:* follows strings, escapes, and nesting with constant memory, independent of chunk boundaries. Values whose structure does not matter (tool schemas, tool inputs, marker values) are lexed only for nesting and strings. A body it cannot follow (malformed, truncated, a repeated section, an escaped key where the name matters) is recorded as `unknown` and is forwarded unchanged like any other.
+  - *Hash and key:* xxh3 (64-bit) inside the process; every exported hash is HMAC-SHA256 under a key all replicas share, truncated to 64 bits, so hashes compare across replicas but cannot be matched against guessed prompts. The key is required whenever diagnostics are on (decided: no unkeyed fallback). The log writer task computes the tags, off the request path.
+  - *Not covered:* markers nested deeper than message content blocks, and the top-level automatic-caching marker. Raw bytes are hashed, not a canonical form, so hashes compare between bodies one client serialized.
+  - *Verification:* a property test renders random bodies with random whitespace and markers, feeds them in random chunkings, and compares against xxh3 of the canonical rendering; integration tests cover the log record.
+- **Cost** (i9-9880H, under a load average of 3–7 from other jobs; to be re-measured on a quiet machine):
+
+  | Measurement | Without | With diagnostics |
+  |---|---|---|
+  | Allocations per request (unary) | 20.6 | 22.6 (+2: scanner box and result slot, +1.2 KB) |
+  | CPU per unary request | 107.5 µs | 114.5 µs |
+  | Upload CPU, 1 MiB body of one long string (best case) | 1.79 ms/MB | 1.83 ms/MB |
+  | Upload CPU, 1 MiB Claude Code-shaped body (`agent_upload`) | 1.71 ms/MB | 3.05 ms/MB (single run: 1.64 → 2.60) |
+  | Scanner alone on that body (release, best of 7) | | 0.61–0.69 ms/MB |
+
+  The design target (no extra allocations, under 10% extra upload CPU) is met for long-string bodies but missed on structure-dense ones. There the scanner runs within about 15% of a naive byte-at-a-time lexer that tracks only nesting and strings (0.54 ms/MB on the same body). So the remaining cost is in lexing itself, and the next step is a SIMD structure classifier in the style of simdjson, which needs `unsafe` intrinsics with a proof and tests. End-to-end CPU grows by more than the scanner alone: slower body consumption also makes hyper allocate more read buffers (about +12 allocations per agent-shaped upload). Rejected after A/B: an 8-bytes-at-a-time (SWAR) search for short string ends (no gain over a byte loop); kept: forced inlining of the lexer's hot functions (about 20% faster).
 
 ### 3. Delegable credentials for agent swarms
 

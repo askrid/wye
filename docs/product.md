@@ -141,7 +141,7 @@ Planned differentiators that use what only an agent-aware gateway sees, still re
 | Direction | What it gives |
 |---|---|
 | Agent-aware routing | Claude Code's request-class hints route auxiliary and compaction calls to cheaper Claude models by policy |
-| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss |
+| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss (implemented, opt-in) |
 | Delegable credentials | Agents mint narrower credentials for subagents offline |
 | Signed usage receipts | Tamper-evident chargeback and audit without a billing database |
 | Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI |

@@ -267,6 +267,9 @@ max_credential_ttl_secs = 604800
 [[auth.keys]]
 id = "k1"
 ed25519_public_key = "<from wye token keygen>"
+
+[cache_diagnostics]                    # optional: prompt hashes in the usage log
+hash_key_env = "WYE_CACHE_HASH_KEY"    # required; at least 32 bytes, same on every replica
 ```
 
 ### Target schema (illustrative, not implemented)

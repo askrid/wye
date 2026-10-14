@@ -6,7 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gateway_core::config::{Config, UpstreamCredential};
+use gateway_core::{
+    config::{Config, UpstreamCredential},
+    prompt::HashKey,
+};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 
 use crate::UpstreamAuth;
@@ -16,6 +19,7 @@ use crate::UpstreamAuth;
 pub enum StartupError {
     MissingEnv(String),
     InvalidApiKey,
+    HashKeyTooShort(String),
     CaFile { path: PathBuf, reason: String },
     Tls(String),
     BodyLimitTooLarge,
@@ -31,6 +35,11 @@ impl fmt::Display for StartupError {
             Self::InvalidApiKey => {
                 f.write_str("upstream API key contains characters not allowed in an HTTP header")
             }
+            Self::HashKeyTooShort(name) => write!(
+                f,
+                "environment variable {name} must hold at least {} bytes (for example `openssl rand -hex 32`)",
+                HashKey::MIN_LEN
+            ),
             Self::CaFile { path, reason } => {
                 write!(f, "upstream.ca_file {}: {reason}", path.display())
             }
@@ -50,25 +59,40 @@ pub struct Resources {
     pub auth: UpstreamAuth,
     /// Root certificates trusted for the upstream in addition to the built-in roots.
     pub extra_roots: Vec<CertificateDer<'static>>,
+    /// Keys the prompt hashes in the usage log; present when cache diagnostics are on.
+    pub prompt_key: Option<HashKey>,
 }
 
 impl Resources {
     /// Loads what `config` references. Relative paths resolve against `config_dir`.
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
         let auth = match &config.upstream.credential {
-            UpstreamCredential::ApiKeyEnv(name) => {
-                let key =
-                    std::env::var(name).map_err(|_| StartupError::MissingEnv(name.clone()))?;
-                UpstreamAuth::api_key(&key)?
-            }
+            UpstreamCredential::ApiKeyEnv(name) => UpstreamAuth::api_key(&env(name)?)?,
             UpstreamCredential::ForwardCaller => UpstreamAuth::ForwardCaller,
+        };
+        let prompt_key = match &config.cache_diagnostics {
+            Some(diagnostics) => {
+                let name = &diagnostics.hash_key_env;
+                let key = HashKey::new(env(name)?.as_bytes())
+                    .ok_or_else(|| StartupError::HashKeyTooShort(name.clone()))?;
+                Some(key)
+            }
+            None => None,
         };
         let extra_roots = match &config.upstream.ca_file {
             Some(path) => load_certificates(&config_dir.join(path))?,
             None => Vec::new(),
         };
-        Ok(Self { auth, extra_roots })
+        Ok(Self {
+            auth,
+            extra_roots,
+            prompt_key,
+        })
     }
+}
+
+fn env(name: &str) -> Result<String, StartupError> {
+    std::env::var(name).map_err(|_| StartupError::MissingEnv(name.to_owned()))
 }
 
 fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {

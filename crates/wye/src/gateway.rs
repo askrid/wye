@@ -1,12 +1,15 @@
 //! Request routing, forwarding, and gateway-generated responses.
 
 use std::{
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use bytes::Bytes;
-use gateway_core::{config::Config, credential::Verifier};
+use gateway_core::{config::Config, credential::Verifier, prompt::HashKey};
 use http::{
     HeaderName, Method, Request, Response, StatusCode,
     header::{CONTENT_LENGTH, CONTENT_TYPE},
@@ -17,6 +20,7 @@ use hyper::body::Incoming;
 use crate::{
     Resources, StartupError,
     auth::{ConnectionAuth, authenticate},
+    diagnostics::PromptSlot,
     gauge::Gauge,
     upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{Observed, RequestInfo, UsageLog},
@@ -35,6 +39,8 @@ pub struct Gateway {
     /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
     upstream: Upstream,
+    /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
+    prompt_key: Option<Arc<HashKey>>,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -48,6 +54,7 @@ impl Gateway {
         Ok(Self {
             verifier: config.auth.as_ref().map(Verifier::new),
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
+            prompt_key: resources.prompt_key.map(Arc::new),
             max_request_body_bytes: usize::try_from(config.server.max_request_body_bytes)
                 .map_err(|_| StartupError::BodyLimitTooLarge)?,
             in_flight: Gauge::default(),
@@ -87,6 +94,10 @@ impl Gateway {
         }
     }
 
+    pub(crate) fn prompt_key(&self) -> Option<Arc<HashKey>> {
+        self.prompt_key.clone()
+    }
+
     /// From now on `/readyz` fails; requests are still served.
     ///
     /// `Relaxed`: the flag publishes no other memory, and a readiness probe
@@ -110,6 +121,7 @@ impl Gateway {
             path,
             session_id: req.headers().get(SESSION_ID).cloned(),
             identity: None,
+            prompt: None,
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
@@ -133,7 +145,7 @@ impl Gateway {
     async fn forward(
         &self,
         req: Request<Incoming>,
-        info: RequestInfo,
+        mut info: RequestInfo,
         log: &UsageLog,
     ) -> Response<ResBody> {
         let Some(permit) = self.in_flight.try_hold(self.max_concurrent_requests) else {
@@ -159,9 +171,12 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
+        if self.prompt_key.is_some() {
+            info.prompt = Some(PromptSlot::default());
+        }
         match self
             .upstream
-            .forward(req, self.max_request_body_bytes)
+            .forward(req, self.max_request_body_bytes, info.prompt.clone())
             .await
         {
             Ok(res) => {

@@ -26,8 +26,9 @@ struct UpstreamPath<'a> {
     /// path: over HTTP/1.1 every stream opens its own connections, and
     /// repeated runs exhaust the laptop's ephemeral ports.
     paced: bool,
-    /// Also measures Wye with `[auth]` (per-request scenarios only).
-    auth: bool,
+    /// Also measures the Wye variants with `[auth]` (per-request scenarios)
+    /// and `[cache_diagnostics]` (per-request and upload scenarios).
+    variants: bool,
 }
 
 /// Runs every scenario `repeat` times and writes the per-metric median to `out`.
@@ -59,7 +60,7 @@ pub async fn run(
             base_url: format!("http://{plain}"),
             ca_pem: None,
             paced: false,
-            auth: true,
+            variants: true,
         },
         UpstreamPath {
             prefix: "tls_",
@@ -68,7 +69,7 @@ pub async fn run(
             base_url: format!("https://{tls}"),
             ca_pem: Some(ca.ca_pem()),
             paced: true,
-            auth: false,
+            variants: false,
         },
     ];
 
@@ -96,8 +97,9 @@ pub async fn run(
                     percentile(&direct.latency.unary, p),
                 );
             }
-            let auth_variant = path.auth.then_some(Gateway::WyeAuth(wye));
-            for &gateway in gateways.iter().chain(auth_variant.iter()) {
+            let variants = [Gateway::WyeAuth(wye), Gateway::WyeDiag(wye)];
+            let variants = if path.variants { &variants[..] } else { &[] };
+            for &gateway in gateways.iter().chain(variants) {
                 eprintln!(
                     "run {i}/{repeat}: {} upstream, {}",
                     path.name,
@@ -111,7 +113,8 @@ pub async fn run(
                 let scope = Scope {
                     streams_sse: gateway.streams_sse(),
                     paced: path.paced,
-                    per_request_only: matches!(gateway, Gateway::WyeAuth(_)),
+                    per_request_only: matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeDiag(_)),
+                    uploads: matches!(gateway, Gateway::WyeDiag(_)),
                 };
                 measure::measure(&direct, &process, &prefix, scope, &mut metrics).await;
             }

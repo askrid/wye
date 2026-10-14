@@ -13,6 +13,8 @@ pub(crate) const LITELLM_API_PREFIX: &str = "/pt";
 
 /// Provider key variable for the authenticated Wye variant.
 pub(crate) const BENCH_PROVIDER_KEY_ENV: &str = "WYE_BENCH_PROVIDER_KEY";
+/// Hash key variable for the cache-diagnostics Wye variant.
+pub(crate) const BENCH_HASH_KEY_ENV: &str = "WYE_BENCH_HASH_KEY";
 
 /// A throwaway signing key and one credential it signed.
 pub(crate) struct BenchCredentials {
@@ -45,12 +47,14 @@ impl BenchCredentials {
     }
 }
 
-/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it.
+/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it;
+/// with `cache_diagnostics`, prompt hashes keyed from [`BENCH_HASH_KEY_ENV`].
 pub(crate) fn wye_config(
     port: u16,
     upstream_base_url: &str,
     ca_file: Option<&Path>,
     auth_public_key: Option<&str>,
+    cache_diagnostics: bool,
 ) -> String {
     let credential = match auth_public_key {
         Some(_) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
@@ -72,6 +76,11 @@ pub(crate) fn wye_config(
         config.push_str(&format!(
             "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n\
              [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n"
+        ));
+    }
+    if cache_diagnostics {
+        config.push_str(&format!(
+            "\n[cache_diagnostics]\nhash_key_env = \"{BENCH_HASH_KEY_ENV}\"\n"
         ));
     }
     config

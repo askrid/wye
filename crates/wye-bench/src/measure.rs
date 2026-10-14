@@ -4,10 +4,16 @@ use std::{collections::BTreeMap, time::Duration};
 
 use serde_json::{Value, json};
 
+mod upload;
+
+use upload::{
+    AGENT_UPLOAD_REQUESTS, UPLOAD_BYTES, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, agent_body,
+    measure_uploads, upload, upload_agent, upload_body,
+};
+
 use crate::{
     client::Target,
     gateway_process::GatewayProcess,
-    mock,
     scenarios::{self, Stream},
     stats::{PERCENTILES, percentile, phase, put, sorted},
 };
@@ -23,10 +29,6 @@ const THROUGHPUT_STREAMS: usize = 32;
 const THROUGHPUT_EVENTS: u32 = 2_000;
 const THROUGHPUT_EVENT_BYTES: usize = 4_096;
 const IDLE_STREAMS: usize = 1_000;
-/// Agent-sized request bodies: Claude Code resends its whole context each turn.
-const UPLOAD_BYTES: usize = 1024 * 1024;
-const UPLOAD_CONCURRENCY: usize = 16;
-const UPLOAD_REQUESTS: usize = 256;
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
 const PACED_STREAMS: usize = 2_000;
 const PACED_EVENTS: u32 = 100;
@@ -49,6 +51,7 @@ pub(crate) fn scenario_report() -> Value {
         "idle": {"streams": IDLE_STREAMS},
         "cancel": {"rounds": CANCEL_ROUNDS},
         "upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": UPLOAD_REQUESTS, "body_bytes": UPLOAD_BYTES},
+        "agent_upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": AGENT_UPLOAD_REQUESTS, "body_bytes": agent_body().len()},
         "paced": {"streams": PACED_STREAMS, "events": PACED_EVENTS, "interval_us": PACED_INTERVAL_US, "event_bytes": PACED_EVENT_BYTES, "ramp_ms": PACED_RAMP.as_millis() as u64},
     })
 }
@@ -58,6 +61,9 @@ pub(crate) struct Direct {
     pub(crate) latency: Latency,
     pub(crate) mb_s: f64,
     upload: (Vec<u64>, usize),
+    /// Measured on the path without the paced scenario only, so the extra
+    /// uploads cannot disturb the paced tail latencies.
+    agent_upload: Option<(Vec<u64>, usize)>,
     paced: Option<Paced>,
 }
 
@@ -65,7 +71,12 @@ impl Direct {
     pub(crate) async fn measure(target: &Target, paced: bool) -> Self {
         let latency = Latency::measure(target).await;
         let (mb_s, _) = throughput(target).await;
-        let upload = upload(target).await;
+        let upload = upload(target, upload_body(), UPLOAD_REQUESTS).await;
+        let agent_upload = if paced {
+            None
+        } else {
+            Some(upload_agent(target).await)
+        };
         let paced = if paced {
             Some(Paced::measure(target, || {}).await)
         } else {
@@ -75,6 +86,7 @@ impl Direct {
             latency,
             mb_s,
             upload,
+            agent_upload,
             paced,
         }
     }
@@ -90,6 +102,9 @@ pub(crate) struct Scope {
     /// Only per-request scenarios (latency and CPU per request): for variants
     /// whose cost is per request, such as credential verification.
     pub(crate) per_request_only: bool,
+    /// The upload scenarios even with `per_request_only`: for variants whose
+    /// cost grows with the request body, such as cache diagnostics.
+    pub(crate) uploads: bool,
 }
 
 /// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
@@ -160,6 +175,9 @@ pub(crate) async fn measure(
         );
     }
     if scope.per_request_only {
+        if scope.uploads {
+            measure_uploads(direct, process, prefix, metrics).await;
+        }
         return;
     }
     let cpu_before = process.cpu_secs();
@@ -182,27 +200,7 @@ pub(crate) async fn measure(
         .await;
     }
 
-    let cpu_before = process.cpu_secs();
-    let (via_upload, upload_failed) =
-        phase(format!("{prefix}upload"), upload(process.target())).await;
-    put(
-        metrics,
-        prefix,
-        "upload_failed_requests",
-        upload_failed as f64,
-    );
-    let cpu_after = process.cpu_secs();
-    for (label, p) in PERCENTILES {
-        let added = percentile(&via_upload, p) - percentile(&direct.upload.0, p);
-        put(metrics, prefix, &format!("upload_added_{label}_us"), added);
-    }
-    let uploaded_mb = (UPLOAD_BYTES * UPLOAD_REQUESTS) as f64 / 1e6;
-    put(
-        metrics,
-        prefix,
-        "upload_cpu_ms_per_mb",
-        (cpu_after - cpu_before) * 1_000.0 / uploaded_mb,
-    );
+    measure_uploads(direct, process, prefix, metrics).await;
 
     if let (true, Some(direct_paced)) = (scope.paced, &direct.paced) {
         let rss_before = process.rss_kb();
@@ -325,17 +323,6 @@ impl Latency {
             ),
         }
     }
-}
-
-/// Latency samples of agent-sized uploads.
-/// Sorted latencies of agent-sized uploads, and the number that failed.
-async fn upload(target: &Target) -> (Vec<u64>, usize) {
-    let body = mock::padded_json(
-        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
-        r#""}]}"#,
-        UPLOAD_BYTES,
-    );
-    successes(scenarios::upload(target, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await)
 }
 
 /// Sorted latencies of successful requests, and the number that failed.

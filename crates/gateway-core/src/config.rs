@@ -36,6 +36,17 @@ pub struct Config {
     /// Gateway credentials callers must present. Without it, Wye listens on
     /// loopback only.
     pub auth: Option<Auth>,
+    /// Prompt hashes in the usage log, to explain prompt-cache misses.
+    pub cache_diagnostics: Option<CacheDiagnostics>,
+}
+
+/// Cache-miss diagnostics (see [`crate::prompt`]).
+#[derive(Debug, Clone)]
+pub struct CacheDiagnostics {
+    /// Environment variable holding the secret that keys the exported hashes
+    /// (at least [`crate::prompt::HashKey::MIN_LEN`] bytes). Required: an
+    /// unkeyed hash could be matched against guessed prompts.
+    pub hash_key_env: String,
 }
 
 /// Signed gateway credentials (see [`crate::credential`]).
@@ -106,7 +117,7 @@ pub enum ConfigError {
     Auth(String),
     InvalidBaseUrl { url: String, reason: &'static str },
     Credential(&'static str),
-    InvalidEnvName(String),
+    InvalidEnvName { field: &'static str, name: String },
     EmptyPath(&'static str),
     Zero(&'static str),
 }
@@ -127,10 +138,10 @@ impl fmt::Display for ConfigError {
                 write!(f, "upstream.base_url {url:?}: {reason}")
             }
             Self::Credential(msg) => write!(f, "upstream: {msg}"),
-            Self::InvalidEnvName(name) => {
+            Self::InvalidEnvName { field, name } => {
                 write!(
                     f,
-                    "upstream.api_key_env: {name:?} is not a valid environment variable name"
+                    "{field}: {name:?} is not a valid environment variable name"
                 )
             }
             Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
@@ -147,6 +158,13 @@ struct RawConfig {
     server: RawServer,
     upstream: RawUpstream,
     auth: Option<RawAuth>,
+    cache_diagnostics: Option<RawCacheDiagnostics>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCacheDiagnostics {
+    hash_key_env: String,
 }
 
 #[derive(Deserialize)]
@@ -202,10 +220,18 @@ impl Config {
                     .into(),
             ));
         }
+        let cache_diagnostics = raw
+            .cache_diagnostics
+            .map(|raw| {
+                env_name(raw.hash_key_env, "cache_diagnostics.hash_key_env")
+                    .map(|hash_key_env| CacheDiagnostics { hash_key_env })
+            })
+            .transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
             auth,
+            cache_diagnostics,
         })
     }
 }
@@ -283,10 +309,7 @@ fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, Config
 fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
     let credential = match (raw.api_key_env, raw.forward_caller_credential) {
         (Some(name), false) => {
-            if !is_env_name(&name) {
-                return Err(ConfigError::InvalidEnvName(name));
-            }
-            UpstreamCredential::ApiKeyEnv(name)
+            UpstreamCredential::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
         }
         (None, true) => UpstreamCredential::ForwardCaller,
         (Some(_), true) => {
@@ -363,12 +386,17 @@ fn is_loopback_host(host: &str) -> bool {
         || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
-fn is_env_name(name: &str) -> bool {
+fn env_name(name: String, field: &'static str) -> Result<String, ConfigError> {
     let mut bytes = name.bytes();
-    bytes
+    let valid = bytes
         .next()
         .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if valid {
+        Ok(name)
+    } else {
+        Err(ConfigError::InvalidEnvName { field, name })
+    }
 }
 
 fn nonzero(value: u64, field: &'static str) -> Result<u64, ConfigError> {
@@ -493,7 +521,7 @@ mod tests {
         ));
         assert!(matches!(
             parse("base_url = \"https://api.anthropic.com\"\napi_key_env = \"1BAD\""),
-            Err(ConfigError::InvalidEnvName(_))
+            Err(ConfigError::InvalidEnvName { .. })
         ));
     }
 
@@ -541,6 +569,40 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err, ConfigError::Zero("server.max_concurrent_requests"));
+    }
+
+    #[test]
+    fn cache_diagnostics_require_a_key_variable() {
+        let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n\
+                    base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+        assert!(
+            Config::from_toml_str(base)
+                .unwrap()
+                .cache_diagnostics
+                .is_none()
+        );
+        let config = Config::from_toml_str(&format!(
+            "{base}[cache_diagnostics]\nhash_key_env = \"WYE_CACHE_HASH_KEY\""
+        ))
+        .unwrap();
+        assert_eq!(
+            config.cache_diagnostics.unwrap().hash_key_env,
+            "WYE_CACHE_HASH_KEY"
+        );
+        assert!(matches!(
+            Config::from_toml_str(&format!("{base}[cache_diagnostics]\n")),
+            Err(ConfigError::Parse(_))
+        ));
+        assert_eq!(
+            Config::from_toml_str(&format!(
+                "{base}[cache_diagnostics]\nhash_key_env = \"a-b\""
+            ))
+            .unwrap_err(),
+            ConfigError::InvalidEnvName {
+                field: "cache_diagnostics.hash_key_env",
+                name: "a-b".into()
+            }
+        );
     }
 
     #[test]

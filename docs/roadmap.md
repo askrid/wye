@@ -11,6 +11,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
 | M1 stage 4b: model permissions | Next. Needs the request body buffered to read `model`. |
 | M1 stages 5–6 | Usage scanner done with an interim JSON-lines log; OTLP export, `wye claude`, binaries, and Compose not started |
+| Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log. Costs more CPU than its target on structure-dense bodies; `diag_` metrics are reported, not yet gated |
 | M2–M6 | Not started |
 
 ## Milestones
@@ -58,7 +59,7 @@ Stage 4 is required before any non-loopback deployment.
 - Pricing metadata and the [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
 - [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
 - `wye explain` and committed policy tests in CI.
-- [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry.
+- [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry. **Done** (interim usage log; moves to OTLP with stage 5).
 - [Agent-aware routing](research.md#1-agent-aware-routing) for Claude models, once its quality impact per request class is measured.
 
 **Exit:** a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.
