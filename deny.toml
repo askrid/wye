@@ -1,0 +1,31 @@
+# cargo-deny configuration (`cargo deny check`), a CI gate per AGENTS.md.
+# Prepared from the locked dependency graph's licenses; run it once cargo-deny
+# is installed and keep this list as narrow as the graph allows.
+
+[graph]
+all-features = false
+
+[advisories]
+# Fail on any RustSec advisory, unmaintained or yanked crate.
+yanked = "deny"
+
+[licenses]
+# Every license in the locked graph today (cargo metadata), nothing broader.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-3-Clause",
+    "BSL-1.0",           # xxhash-rust
+    "Unicode-3.0",       # unicode-ident
+    "CDLA-Permissive-2.0", # webpki-roots (Mozilla's root store data)
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
