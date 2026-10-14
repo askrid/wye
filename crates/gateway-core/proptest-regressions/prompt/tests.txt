@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4c9346379841e542112a22d09bfdd2808b4e00af898162c9453fedfc4428913c # shrinks to body = Body { tools: Some([Block { members: [("type", Null), ("type", Null)], marker: None }]), system: None, messages: None, extra: [], rotate: 0 }, spaces = [0], sizes = [1]
+cc 28c836a27d0f34e6e55ac9170e359ddc23bf0ae1166792771b46ee293001ecbf # shrinks to body = Body { tools: Some([]), system: None, messages: Some([Message { role: "user", content: Blocks([Block { members: [("content", Obj([("type", Null)])), ("type", Num(1000000000000000000))], marker: None }, Block { members: [("content", Obj([("q\"k", Null)]))], marker: Some(0) }]) }]), extra: [], rotate: 2 }, spaces = [3, 6, 3, 3, 2, 5, 0], sizes = [18, 2]
+cc 7a5f979e47645d859e3cbf0f46a7212ecfbb2a625af18b75136d3b44aa27efdb # shrinks to body = Body { tools: None, system: None, messages: Some([Message { role: "user", content: Blocks([Block { members: [("type", Null), ("type", Null)], marker: Some(1) }]) }]), extra: [], rotate: 0 }, spaces = [0], sizes = [1]
