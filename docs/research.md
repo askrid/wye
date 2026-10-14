@@ -224,17 +224,18 @@ Research-backed functionality that fits the constraints: request-local decisions
   - *Hash and key:* xxh3 (64-bit) inside the process; every exported hash is HMAC-SHA256 under a key all replicas share, truncated to 64 bits, so hashes compare across replicas but cannot be matched against guessed prompts. The key is required whenever diagnostics are on (decided: no unkeyed fallback). The log writer task computes the tags, off the request path.
   - *Not covered:* markers nested deeper than message content blocks, and the top-level automatic-caching marker. Raw bytes are hashed, not a canonical form, so hashes compare between bodies one client serialized.
   - *Verification:* a property test renders random bodies with random whitespace and markers, feeds them in random chunkings, and compares against xxh3 of the canonical rendering; integration tests cover the log record.
-- **Cost** (i9-9880H, under a load average of 3–7 from other jobs; to be re-measured on a quiet machine):
+- **Cost** (i9-9880H, 3-run medians from the commit gate, load average about 2):
 
   | Measurement | Without | With diagnostics |
   |---|---|---|
-  | Allocations per request (unary) | 20.6 | 22.6 (+2: scanner box and result slot, +1.2 KB) |
-  | CPU per unary request | 107.5 µs | 114.5 µs |
-  | Upload CPU, 1 MiB body of one long string (best case) | 1.79 ms/MB | 1.83 ms/MB |
-  | Upload CPU, 1 MiB Claude Code-shaped body (`agent_upload`) | 1.71 ms/MB | 3.05 ms/MB (single run: 1.64 → 2.60) |
+  | Allocations per unary request | 20.6 (21.6 KB) | 22.6 (22.8 KB): scanner box and result slot |
+  | CPU per unary request | 111.5 µs | 107.5 µs (no difference beyond noise) |
+  | Upload CPU, 1 MiB body of one long string (best case) | 1.79 ms/MB | 1.75 ms/MB |
+  | Upload CPU, 1 MiB Claude Code-shaped body (`agent_upload`) | 1.86 ms/MB | 2.75 ms/MB (+48%) |
   | Scanner alone on that body (release, best of 7) | | 0.61–0.69 ms/MB |
+  | Allocations per agent-shaped upload | 33 (266 KB) | 58 (604 KB) |
 
-  The design target (no extra allocations, under 10% extra upload CPU) is met for long-string bodies but missed on structure-dense ones. There the scanner runs within about 15% of a naive byte-at-a-time lexer that tracks only nesting and strings (0.54 ms/MB on the same body). So the remaining cost is in lexing itself, and the next step is a SIMD structure classifier in the style of simdjson, which needs `unsafe` intrinsics with a proof and tests. End-to-end CPU grows by more than the scanner alone: slower body consumption also makes hyper allocate more read buffers (about +12 allocations per agent-shaped upload). Rejected after A/B: an 8-bytes-at-a-time (SWAR) search for short string ends (no gain over a byte loop); kept: forced inlining of the lexer's hot functions (about 20% faster).
+  Against the design target: two allocations per request instead of none (sharing the result between the request body and the usage record needs one heap slot, and the scanner is boxed so requests without diagnostics stay small); under 10% extra upload CPU holds for long-string bodies but not for structure-dense ones. There the scanner runs within about 15% of a naive byte-at-a-time lexer that tracks only nesting and strings (0.54 ms/MB on the same body). So the remaining cost is in lexing itself, and the next step is a SIMD structure classifier in the style of simdjson, which needs `unsafe` intrinsics with a proof and tests. End-to-end CPU grows by more than the scanner alone: slower body consumption also makes hyper allocate more read buffers (12–24 more allocations per agent-shaped upload across runs, all transient). Rejected after A/B: an 8-bytes-at-a-time (SWAR) search for short string ends (no gain over a byte loop); kept: forced inlining of the lexer's hot functions (about 20% faster).
 
 ### 3. Delegable credentials for agent swarms
 
