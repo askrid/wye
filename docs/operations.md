@@ -161,7 +161,7 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 | No eligible route | Explicit compatibility or policy error |
 | Slow downstream | Bounded flow control |
 | Upstream failure before downstream output | Gateway error; later, bounded fallback where [safe](architecture.md#retries-and-fallback) |
-| Partial stream failure | Terminate the stream; never silently replay output |
+| Partial stream failure | Terminate the stream; never silently replay output. A successful event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error; mid-event failures still drop the stream, since appending would corrupt the event |
 | Client disconnect | Cancel upstream where possible, free resources, record uncertain cost |
 | Telemetry export failure | Inference continues; loss visible in logs/counters |
 | SIGTERM | Stop admissions, drain until deadline, cancel remainder |
