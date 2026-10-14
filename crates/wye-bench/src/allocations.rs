@@ -231,6 +231,23 @@ pub async fn measure(
     );
     drop(auth);
 
+    let models = GatewayProcess::start(
+        Gateway::WyeModels(binary),
+        upstream_base_url,
+        None,
+        dir,
+        "alloc",
+    )
+    .await;
+    let t = models.target();
+    scenarios::unary(t, CONCURRENCY, 2_000).await;
+    let (allocations, _) = delta(t, unary(t)).await;
+    put(
+        "alloc_models_unary_per_request",
+        allocations / UNARY_REQUESTS as f64,
+    );
+    drop(models);
+
     let diag = GatewayProcess::start(
         Gateway::WyeDiag(binary),
         upstream_base_url,

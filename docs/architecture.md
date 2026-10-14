@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2 (credential verification; model permissions are next), 6–8, and 9 as a JSON-lines usage log (OTLP export pending). Steps 3–5 are not built.
+**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions only; per-request limits are not built), 6–8, and 9 as a JSON-lines usage log (OTLP export pending). Steps 3–5 are not built.
 
 ## Repository and workspace
 
@@ -141,7 +141,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 4. Forward upstream status and permitted headers.
 5. Stream the response body as the downstream consumes it.
 
-**Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. Today the request body streams to the upstream unchanged, bounded by `server.max_request_body_bytes` (default 32 MiB, Anthropic's limit). Model permissions (M1 stage 4b) will require buffering it to read `model` and other policy fields; then parse only those fields, never re-serialize the body, and cap total buffered request bytes per process (see [local resource bounds](policy.md#local-resource-bounds)). Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
+**Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. The request body streams to the upstream unchanged, bounded by `server.max_request_body_bytes` (default 32 MiB, Anthropic's limit). With [model permissions](policy.md#gateway-credentials), only the start of the body is held, until its top-level `model` has been read; the held bytes are bounded across the process by `server.max_held_request_bytes`, and the body is never re-serialized. Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
 **Request rewrites.** Wye rewrites only an explicit allowlist of request fields; everything else passes through byte-equivalent in meaning:
 
@@ -248,6 +248,7 @@ Every field except `listen`, `base_url`, and one credential mode is optional; va
 [server]
 listen = "127.0.0.1:8080"              # non-loopback only with [auth]
 max_request_body_bytes = 33554432
+max_held_request_bytes = 67108864       # read for model permissions, all requests together
 max_concurrent_requests = 10000        # beyond: 529 overloaded_error
 drain_delay_secs = 0                   # /readyz fails, still serving
 shutdown_grace_secs = 30               # then remaining requests are cancelled
@@ -267,6 +268,7 @@ max_credential_ttl_secs = 604800
 [[auth.keys]]
 id = "k1"
 ed25519_public_key = "<from wye token keygen>"
+# models = ["claude-sonnet-*", "claude-haiku-*"]  # ceiling; a credential's models claim narrows it
 
 [cache_diagnostics]                    # optional: prompt hashes in the usage log
 hash_key_env = "WYE_CACHE_HASH_KEY"    # required; at least 32 bytes, same on every replica

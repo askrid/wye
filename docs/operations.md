@@ -38,7 +38,7 @@ policy-tests/
 └── image-hard-mode.expect.toml  # reject = "unbounded_cost"
 ```
 
-`token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server.
+`token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models.
 
 ### Client wrapper (proposed)
 
