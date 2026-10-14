@@ -255,7 +255,8 @@ shutdown_grace_secs = 30               # then remaining requests are cancelled
 
 [upstream]
 base_url = "https://api.anthropic.com" # http only for loopback hosts
-api_key_env = "ANTHROPIC_API_KEY"      # or: forward_caller_credential = true (loopback, no [auth])
+api_key_env = "ANTHROPIC_API_KEY"      # or: api_key_file = "/run/secrets/anthropic" (relative to this file)
+                                       # or: forward_caller_credential = true (loopback, no [auth])
 # ca_file = "corporate-ca.pem"         # extra trusted roots, relative to this file
 connect_timeout_secs = 10
 response_header_timeout_secs = 600

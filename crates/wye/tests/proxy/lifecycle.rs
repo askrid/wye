@@ -89,3 +89,23 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
     assert!(ended.is_ok(), "stream still open after shutdown");
     drop(open);
 }
+
+#[tokio::test]
+async fn probe_succeeds_only_for_a_2xx_answer() {
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    wye::probe(&format!("http://{}/healthz", h.gateway))
+        .await
+        .unwrap();
+    let not_found = wye::probe(&format!("http://{}/nope", h.gateway))
+        .await
+        .unwrap_err();
+    assert!(not_found.contains("404"), "{not_found}");
+    let tls = wye::probe("https://example.com/healthz").await.unwrap_err();
+    assert!(tls.contains("plain http"), "{tls}");
+    // Nothing listens on this port.
+    let refused = wye::probe("http://127.0.0.1:9/healthz").await.unwrap_err();
+    assert!(
+        refused.starts_with("http://127.0.0.1:9/healthz:"),
+        "{refused}"
+    );
+}

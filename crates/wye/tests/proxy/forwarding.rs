@@ -192,3 +192,42 @@ async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected
     assert_eq!(res.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), hits);
 }
+
+#[tokio::test]
+async fn api_key_file_is_read_relative_to_the_config_and_trimmed() {
+    let dir = std::env::temp_dir().join(format!("wye-key-test-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("secrets")).unwrap();
+    std::fs::write(dir.join("secrets/provider-key"), "sk-from-file\n").unwrap();
+    let (tx, mut rx) = mpsc::channel::<HeaderMap>(1);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send(seen.headers).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\n[upstream]\nbase_url = \"http://{upstream}\"\n\
+         api_key_file = \"secrets/provider-key\""
+    ))
+    .unwrap();
+    let resources = Resources::resolve(&config, &dir).unwrap();
+    let h = Harness::launch(
+        &format!("http://{upstream}"),
+        "",
+        "api_key_file = \"unused\"",
+        resources,
+        hits,
+    )
+    .await;
+    let res = h.send(messages(), "{}").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(rx.recv().await.unwrap()["x-api-key"], "sk-from-file");
+
+    std::fs::write(dir.join("secrets/provider-key"), " \n").unwrap();
+    let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
+    assert!(err.contains("file is empty"), "{err}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

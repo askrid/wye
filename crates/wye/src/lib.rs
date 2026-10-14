@@ -8,6 +8,7 @@
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
 //! - `diagnostics`: prompt hashes for cache-miss diagnostics
+//! - `probe`: the `wye probe` health check client
 //! - `gauge`: in-flight counters released on drop
 //! - `alloc_stats`: heap allocation counters (feature `alloc-stats`, benchmarks only)
 
@@ -18,12 +19,14 @@ mod diagnostics;
 mod gateway;
 mod gauge;
 mod permissions;
+mod probe;
 mod server;
 mod startup;
 mod upstream;
 mod usage_log;
 
 pub use gateway::Gateway;
+pub use probe::probe;
 pub use server::serve;
 pub use startup::{Resources, StartupError};
 pub use upstream::UpstreamAuth;
