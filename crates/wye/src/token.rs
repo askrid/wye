@@ -11,7 +11,10 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use gateway_core::credential::{self, NewCredential};
+use gateway_core::{
+    credential::{self, NewCredential},
+    model::ModelPattern,
+};
 use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
@@ -43,14 +46,14 @@ pub fn keygen(path: &Path) -> Result<(), Box<dyn Error>> {
 
 /// Prints a credential signed with the key in `--key`.
 pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
+    let optional = |name: &str| {
+        flags.chunks(2).find_map(|pair| match pair {
+            [n, value] if *n == name => Some(*value),
+            _ => None,
+        })
+    };
     let flag = |name: &str| -> Result<&str, Box<dyn Error>> {
-        flags
-            .chunks(2)
-            .find_map(|pair| match pair {
-                [n, value] if *n == name => Some(*value),
-                _ => None,
-            })
-            .ok_or_else(|| format!("missing {name}").into())
+        optional(name).ok_or_else(|| format!("missing {name}").into())
     };
     if !flags.len().is_multiple_of(2) {
         return Err("flags must be --name value pairs".into());
@@ -66,6 +69,14 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
     let ttl: u64 = flag("--ttl-secs")?
         .parse()
         .map_err(|_| "--ttl-secs must be a number of seconds")?;
+    let models: Option<Vec<&str>> = optional("--models").map(|list| list.split(',').collect());
+    if let Some(list) = &models
+        && let Some(bad) = list.iter().find(|p| ModelPattern::parse(p).is_none())
+    {
+        return Err(
+            format!("--models: {bad:?} is not a model name or a prefix ending in *").into(),
+        );
+    }
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let token = credential::issue(
         &key,
@@ -76,6 +87,7 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
             aud: flag("--audience")?,
             iat: now,
             exp: now.checked_add(ttl).ok_or("--ttl-secs too large")?,
+            models: models.as_deref(),
         },
     );
     println!("{token}");

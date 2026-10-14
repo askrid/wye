@@ -4,6 +4,7 @@
 //! - `server`: listener, connections, graceful shutdown
 //! - `auth`: gateway credential checks, cached per connection
 //! - `gateway`: routing and gateway-generated responses
+//! - `permissions`: model permissions, checked before forwarding
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
 //! - `diagnostics`: prompt hashes for cache-miss diagnostics
@@ -16,6 +17,7 @@ mod auth;
 mod diagnostics;
 mod gateway;
 mod gauge;
+mod permissions;
 mod server;
 mod startup;
 mod upstream;

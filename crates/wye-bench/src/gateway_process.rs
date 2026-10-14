@@ -20,6 +20,9 @@ pub enum Gateway<'a> {
     WyeAuth(&'a str),
     /// Wye with `[cache_diagnostics]`: every request body is scanned and hashed.
     WyeDiag(&'a str),
+    /// Wye with `[auth]` and model permissions in config and credential:
+    /// every request is held until its `model` is read, and its body checked.
+    WyeModels(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
 }
@@ -30,6 +33,7 @@ impl Gateway<'_> {
             Self::Wye(_) => "wye",
             Self::WyeAuth(_) => "wye-auth",
             Self::WyeDiag(_) => "wye-diag",
+            Self::WyeModels(_) => "wye-models",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
         }
@@ -41,6 +45,7 @@ impl Gateway<'_> {
             Self::Wye(_) => "",
             Self::WyeAuth(_) => "auth_",
             Self::WyeDiag(_) => "diag_",
+            Self::WyeModels(_) => "models_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
         }
@@ -106,7 +111,14 @@ impl GatewayProcess {
                     "--config".into(),
                     config(
                         "toml",
-                        wye_config(port, upstream_base_url, ca_file.as_deref(), None, false),
+                        wye_config(
+                            port,
+                            upstream_base_url,
+                            ca_file.as_deref(),
+                            None,
+                            None,
+                            false,
+                        ),
                     ),
                 ],
                 env: Vec::new(),
@@ -120,15 +132,24 @@ impl GatewayProcess {
                     "--config".into(),
                     config(
                         "toml",
-                        wye_config(port, upstream_base_url, ca_file.as_deref(), None, true),
+                        wye_config(
+                            port,
+                            upstream_base_url,
+                            ca_file.as_deref(),
+                            None,
+                            None,
+                            true,
+                        ),
                     ),
                 ],
                 env: vec![(BENCH_HASH_KEY_ENV, "b".repeat(64))],
                 health: "/healthz",
                 target: Target::plain(addr),
             },
-            Gateway::WyeAuth(program) => {
-                let credentials = BenchCredentials::generate();
+            Gateway::WyeAuth(program) | Gateway::WyeModels(program) => {
+                // The mock's requests name model "bench": allowed by both lists.
+                let models = matches!(gateway, Gateway::WyeModels(_));
+                let credentials = BenchCredentials::generate(models.then_some(&["bench"][..]));
                 Launch {
                     program: program.into(),
                     args: vec![
@@ -141,6 +162,7 @@ impl GatewayProcess {
                                 upstream_base_url,
                                 ca_file.as_deref(),
                                 Some(&credentials.public_key),
+                                models.then_some(r#"["bench*", "claude-*"]"#),
                                 false,
                             ),
                         ),

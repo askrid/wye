@@ -10,8 +10,10 @@ use serde_json::Value;
 /// between identical runs; in the paced scenario it is dominated by connection
 /// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
 /// the TLS + HTTP/2 path. Also reported but not yet gated: the agent-shaped
-/// upload and the cache-diagnostics variant (`agent_upload_*`, `diag_*`,
-/// `alloc_*agent_upload*`, `alloc_diag_*`; plain path only), until their baseline is reviewed.
+/// upload, the model-permissions variant, and the cache-diagnostics variant
+/// (`agent_upload_*`, `models_*`, `diag_*`, `alloc_*agent_upload*`,
+/// `alloc_models_*`, `alloc_diag_*`; plain path only), until their baseline is
+/// reviewed.
 const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),

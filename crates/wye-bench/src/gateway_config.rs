@@ -23,7 +23,8 @@ pub(crate) struct BenchCredentials {
 }
 
 impl BenchCredentials {
-    pub(crate) fn generate() -> Self {
+    /// With `models`, the credential carries that `models` claim.
+    pub(crate) fn generate(models: Option<&[&str]>) -> Self {
         let key = wye_testkit::ed25519_keypair();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -38,6 +39,7 @@ impl BenchCredentials {
                 aud: "wye-bench",
                 iat: now,
                 exp: now + 3_600,
+                models,
             },
         );
         Self {
@@ -47,13 +49,15 @@ impl BenchCredentials {
     }
 }
 
-/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it;
-/// with `cache_diagnostics`, prompt hashes keyed from [`BENCH_HASH_KEY_ENV`].
+/// Wye's config; with `auth_public_key`, an `[auth]` section trusting it
+/// (and allowing `auth_models`, a TOML list, when given); with
+/// `cache_diagnostics`, prompt hashes keyed from [`BENCH_HASH_KEY_ENV`].
 pub(crate) fn wye_config(
     port: u16,
     upstream_base_url: &str,
     ca_file: Option<&Path>,
     auth_public_key: Option<&str>,
+    auth_models: Option<&str>,
     cache_diagnostics: bool,
 ) -> String {
     let credential = match auth_public_key {
@@ -74,8 +78,9 @@ pub(crate) fn wye_config(
     }
     if let Some(key) = auth_public_key {
         config.push_str(&format!(
-            "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n\
-             [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n"
+            "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n{}\n\
+             [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n",
+            auth_models.map_or(String::new(), |list| format!("models = {list}"))
         ));
     }
     if cache_diagnostics {

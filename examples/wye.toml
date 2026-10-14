@@ -6,6 +6,8 @@
 [server]
 listen = "127.0.0.1:8080"
 # max_request_body_bytes = 33554432
+# Request bytes held while reading `model` for model permissions, all requests together:
+# max_held_request_bytes = 67108864
 # Requests in flight before new ones get an overload (529) error:
 # max_concurrent_requests = 10000
 # Behind a load balancer: keep serving with /readyz failing this long after
@@ -34,6 +36,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # issuer = "wye"
 # audience = "wye-prod"
 # max_credential_ttl_secs = 604800
+# Models any credential may use (exact names or prefixes ending in *); a
+# credential issued with --models narrows this further. Omit to allow all.
+# models = ["claude-sonnet-*", "claude-haiku-*"]
 # [[auth.keys]]
 # id = "k1"
 # ed25519_public_key = "<printed by wye token keygen>"
