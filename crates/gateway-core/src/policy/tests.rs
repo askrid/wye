@@ -5,13 +5,13 @@ use proptest::prelude::*;
 use super::*;
 
 fn scan(body: &[u8]) -> Result<String, ModelError> {
-    let mut scanner = ModelScanner::new();
+    let mut scanner = PolicyScanner::new();
     scanner.feed(body);
     scanner.finish().map(str::to_owned)
 }
 
 fn scan_chunked(body: &[u8], sizes: &[usize]) -> (Result<String, ModelError>, Option<usize>) {
-    let mut scanner = ModelScanner::new();
+    let mut scanner = PolicyScanner::new();
     let mut fed = 0;
     let mut known_after = None;
     let mut rest = body;
@@ -107,7 +107,7 @@ fn rejects_what_it_cannot_check() {
 fn model_is_known_right_after_its_value() {
     let body = br#"{"model":"claude-x","messages":[]}"#;
     let end = body.iter().position(|&b| b == b',').unwrap();
-    let mut scanner = ModelScanner::new();
+    let mut scanner = PolicyScanner::new();
     scanner.feed(&body[..end]);
     assert_eq!(scanner.model(), Some("claude-x"));
 }
