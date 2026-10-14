@@ -264,6 +264,7 @@ fn telemetry_endpoint_gets_the_logs_path() {
         telemetry.otlp_metrics_uri,
         "http://collector:4318/v1/metrics"
     );
+    assert_eq!(telemetry.otlp_traces_uri, "http://collector:4318/v1/traces");
     assert_eq!(telemetry.service_name, "wye");
     assert_eq!(telemetry.otlp_headers_env, None);
     let telemetry = with(

@@ -285,6 +285,7 @@ mod tests {
             headers_ms: None,
             subject: None,
             session_id: None,
+            traceparent: None,
             model,
             usage_status: "complete",
             input_tokens: Some(10),

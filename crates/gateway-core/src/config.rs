@@ -53,6 +53,8 @@ pub struct Telemetry {
     pub otlp_logs_uri: Uri,
     /// Metrics endpoint: the base URL with `/v1/metrics` appended.
     pub otlp_metrics_uri: Uri,
+    /// Traces endpoint: the base URL with `/v1/traces` appended.
+    pub otlp_traces_uri: Uri,
     /// Environment variable with extra request headers, in the OpenTelemetry
     /// format `key1=value1,key2=value2` (for example a backend API key).
     pub otlp_headers_env: Option<String>,
@@ -489,9 +491,11 @@ fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
     };
     let otlp_logs_uri = signal_uri("logs")?;
     let otlp_metrics_uri = signal_uri("metrics")?;
+    let otlp_traces_uri = signal_uri("traces")?;
     Ok(Telemetry {
         otlp_logs_uri,
         otlp_metrics_uri,
+        otlp_traces_uri,
         otlp_headers_env: raw
             .otlp_headers_env
             .map(|name| env_name(name, "telemetry.otlp_headers_env"))

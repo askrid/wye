@@ -71,6 +71,8 @@ impl Outcome {
 pub(crate) struct RequestInfo {
     pub path: &'static str,
     pub session_id: Option<HeaderValue>,
+    /// W3C `traceparent`, the parent of the request's OTLP span.
+    pub traceparent: Option<HeaderValue>,
     /// Verified gateway credential, when credentials are configured.
     pub identity: Option<Arc<Identity>>,
     /// Filled with the request body's prompt hashes when cache diagnostics are on.
@@ -269,6 +271,9 @@ struct Line<'a> {
     subject: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<&'a str>,
+    /// Only for the OTLP span; not part of the JSON line.
+    #[serde(skip)]
+    traceparent: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<&'a str>,
     usage_status: &'static str,
@@ -301,6 +306,7 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
         headers_ms: r.headers_after.map(ms),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         session_id: r.info.session_id.as_ref().and_then(|v| v.to_str().ok()),
+        traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
         model: r.model.as_deref(),
         usage_status: r
             .usage

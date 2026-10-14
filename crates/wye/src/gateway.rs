@@ -35,6 +35,8 @@ use crate::{
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
 const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
+/// W3C trace context: the parent of the request's OTLP span.
+const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
 const OVERLOADED: u16 = 529;
@@ -156,6 +158,7 @@ impl Gateway {
         let mut info = RequestInfo {
             path,
             session_id: req.headers().get(SESSION_ID).cloned(),
+            traceparent: req.headers().get(TRACEPARENT).cloned(),
             identity: None,
             prompt: None,
             started: Instant::now(),
@@ -300,6 +303,7 @@ fn otlp_target(
     Ok(OtlpTarget::new(
         telemetry.otlp_logs_uri.clone(),
         telemetry.otlp_metrics_uri.clone(),
+        telemetry.otlp_traces_uri.clone(),
         headers,
         client,
         &telemetry.service_name,

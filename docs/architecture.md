@@ -95,7 +95,7 @@ Core, runtime, tests, and deployment artifacts change together and need coordina
 | Credentials | `ring` Ed25519, `base64` |
 | Config / JSON | Serde, `toml`, `serde_json` |
 | Buffers | `bytes` and streaming bodies |
-| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs and OTLP metrics (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack); traces planned |
+| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs OTLP metrics, and one OTLP span per request (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack) |
 | Edge | Separate WASM adapter later |
 
 Direct Hyper gives explicit control over request and response bodies. Reconsider Axum if routing and middleware grow enough to justify it.
