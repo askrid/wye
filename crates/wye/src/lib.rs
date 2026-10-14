@@ -9,6 +9,7 @@
 //! - `usage_log`: per-request usage records
 //! - `diagnostics`: prompt hashes for cache-miss diagnostics
 //! - `probe`: the `wye probe` health check client
+//! - `wrapper`: `wye claude`, Claude Code pointed at a gateway
 //! - `gauge`: in-flight counters released on drop
 //! - `alloc_stats`: heap allocation counters (feature `alloc-stats`, benchmarks only)
 
@@ -24,9 +25,11 @@ mod server;
 mod startup;
 mod upstream;
 mod usage_log;
+mod wrapper;
 
 pub use gateway::Gateway;
 pub use probe::probe;
 pub use server::serve;
 pub use startup::{Resources, StartupError};
 pub use upstream::UpstreamAuth;
+pub use wrapper::{ClaudeLaunch, claude};

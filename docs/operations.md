@@ -45,7 +45,9 @@ policy-tests/
 
 `token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models.
 
-### Client wrapper (proposed)
+### Client wrapper
+
+**Implemented: `wye claude`.** `wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]` checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). Profiles, `wye codex`, and `wye run` below are proposals.
 
 ```bash
 wye claude

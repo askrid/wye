@@ -109,3 +109,73 @@ async fn probe_succeeds_only_for_a_2xx_answer() {
         "{refused}"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn wye_claude_runs_claude_against_the_gateway() {
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let dir = std::env::temp_dir().join(format!("wye-claude-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // A stand-in for claude that records what it was given and exits 3.
+    let fake = dir.join("claude");
+    let seen = dir.join("seen");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\nprintf '%s|%s|%s|%s\\n' \"$ANTHROPIC_BASE_URL\" \"$ANTHROPIC_AUTH_TOKEN\" \"${{ANTHROPIC_API_KEY-unset}}\" \"$*\" > {}\nexit 3\n",
+            seen.display()
+        ),
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&fake).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+    std::fs::set_permissions(&fake, permissions).unwrap();
+    let credential = dir.join("credential");
+    std::fs::write(&credential, "gateway-token\n").unwrap();
+
+    let gateway = format!("http://{}", h.gateway);
+    // Run the binary off the runtime, which also serves the gateway.
+    let run = |args: Vec<std::ffi::OsString>| {
+        let fake = fake.clone();
+        tokio::task::spawn_blocking(move || {
+            std::process::Command::new(env!("CARGO_BIN_EXE_wye"))
+                .args(args)
+                .env("WYE_CLAUDE_BIN", fake)
+                .env("ANTHROPIC_API_KEY", "sk-should-be-removed")
+                .output()
+                .unwrap()
+        })
+    };
+    let output = run(vec![
+        "claude".into(),
+        "--gateway".into(),
+        gateway.clone().into(),
+        "--credential-file".into(),
+        credential.clone().into(),
+        "-p".into(),
+        "fix tests".into(),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "claude's exit code passes through"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&seen).unwrap(),
+        format!("{gateway}|gateway-token|unset|-p fix tests\n")
+    );
+
+    // Without a reachable gateway, claude is not started.
+    let output = run(vec![
+        "claude".into(),
+        "--gateway".into(),
+        "http://127.0.0.1:9".into(),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("wye serve"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
