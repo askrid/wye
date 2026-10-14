@@ -21,6 +21,7 @@ use http::{HeaderMap, HeaderValue, Method, Request, Uri, header::CONTENT_TYPE};
 use http_body_util::{BodyExt, Full};
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
+use ring::rand::{SecureRandom, SystemRandom};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use super::Line;
@@ -38,19 +39,23 @@ type ExportClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
 pub(crate) struct OtlpTarget {
     logs_uri: Uri,
     metrics_uri: Uri,
+    traces_uri: Uri,
     /// Extra headers, sensitive values marked as such.
     headers: HeaderMap,
     client: ExportClient,
     /// The `Resource` object shared by both signals.
     pub(super) resource: Box<[u8]>,
     /// The log batch envelope up to the first log record.
-    prefix: Box<[u8]>,
+    logs_prefix: Box<[u8]>,
+    /// The span batch envelope up to the first span.
+    spans_prefix: Box<[u8]>,
 }
 
 impl OtlpTarget {
     pub(crate) fn new(
         logs_uri: Uri,
         metrics_uri: Uri,
+        traces_uri: Uri,
         headers: HeaderMap,
         client: ExportClient,
         service_name: &str,
@@ -64,25 +69,53 @@ impl OtlpTarget {
             Value::Str(env!("CARGO_PKG_VERSION")),
         );
         resource.extend_from_slice(b"]}");
-        let mut prefix = br#"{"resourceLogs":[{"resource":"#.to_vec();
-        prefix.extend_from_slice(&resource);
-        prefix.extend_from_slice(br#","scopeLogs":[{"scope":{"name":"wye"},"logRecords":["#);
+        let envelope = |open: &[u8], scope: &[u8]| {
+            let mut prefix = open.to_vec();
+            prefix.extend_from_slice(&resource);
+            prefix.extend_from_slice(scope);
+            prefix.into_boxed_slice()
+        };
         Self {
+            logs_prefix: envelope(
+                br#"{"resourceLogs":[{"resource":"#,
+                br#","scopeLogs":[{"scope":{"name":"wye"},"logRecords":["#,
+            ),
+            spans_prefix: envelope(
+                br#"{"resourceSpans":[{"resource":"#,
+                br#","scopeSpans":[{"scope":{"name":"wye"},"spans":["#,
+            ),
             logs_uri,
             metrics_uri,
+            traces_uri,
             headers,
             client,
             resource: resource.into(),
-            prefix: prefix.into(),
         }
     }
 }
 
-/// The batch being filled by the writer task.
-pub(super) struct Batch {
-    target: Arc<OtlpTarget>,
+/// The OTLP signal an export carries.
+#[derive(Clone, Copy)]
+enum Signal {
+    Logs,
+    Metrics,
+    Traces,
+}
+
+/// One signal's records waiting to be sent.
+#[derive(Default)]
+struct Buffer {
     buf: Vec<u8>,
     records: usize,
+}
+
+/// The batches being filled by the writer task: each usage record becomes
+/// a log record and a span.
+pub(super) struct Batch {
+    target: Arc<OtlpTarget>,
+    logs: Buffer,
+    spans: Buffer,
+    random: SystemRandom,
     queue: mpsc::Sender<Export>,
     /// Records lost to a full queue or a failed export.
     dropped: Arc<AtomicU64>,
@@ -95,8 +128,9 @@ impl Batch {
         let dropped = Arc::new(AtomicU64::new(0));
         let exporter = tokio::spawn(export(Arc::clone(&target), rx, Arc::clone(&dropped)));
         let batch = Self {
-            buf: Vec::with_capacity(64 * 1024),
-            records: 0,
+            logs: Buffer::default(),
+            spans: Buffer::default(),
+            random: SystemRandom::new(),
             target,
             queue,
             dropped,
@@ -105,36 +139,52 @@ impl Batch {
     }
 
     pub(super) fn is_full(&self) -> bool {
-        self.records >= MAX_BATCH_RECORDS
+        self.logs.records >= MAX_BATCH_RECORDS
     }
 
     pub(super) fn push(&mut self, line: &Line<'_>) {
-        if self.records == 0 {
-            self.buf.extend_from_slice(&self.target.prefix);
-        } else {
-            self.buf.push(b',');
-        }
-        write_log_record(&mut self.buf, line);
-        self.records += 1;
+        append(&mut self.logs, &self.target.logs_prefix, |buf| {
+            write_log_record(buf, line);
+        });
+        let random = &self.random;
+        append(&mut self.spans, &self.target.spans_prefix, |buf| {
+            write_span(buf, line, random);
+        });
     }
 
-    /// Hands the batch to the exporter, or drops it if the queue is full.
+    /// Hands the batches to the exporter, or drops them if the queue is full.
     pub(super) fn flush(&mut self) {
-        if self.records == 0 {
+        self.send(Signal::Logs);
+        self.send(Signal::Traces);
+    }
+
+    fn send(&mut self, signal: Signal) {
+        let buffer = match signal {
+            Signal::Logs => &mut self.logs,
+            Signal::Traces => &mut self.spans,
+            Signal::Metrics => return,
+        };
+        if buffer.records == 0 {
             return;
         }
-        self.buf.extend_from_slice(b"]}]}]}");
-        let body = Bytes::copy_from_slice(&self.buf);
-        let records = std::mem::take(&mut self.records);
-        self.buf.clear();
+        buffer.buf.extend_from_slice(b"]}]}]}");
+        let body = Bytes::copy_from_slice(&buffer.buf);
+        let records = std::mem::take(&mut buffer.records);
+        buffer.buf.clear();
+        // A lost span batch repeats the loss of its log batch; count records once.
+        let counted = if matches!(signal, Signal::Logs) {
+            records
+        } else {
+            0
+        };
         let export = Export {
-            metrics: false,
+            signal,
             body,
-            records,
+            records: counted,
         };
         if self.queue.try_send(export).is_err() {
             // Statistics counter only.
-            self.dropped.fetch_add(records as u64, Ordering::Relaxed);
+            self.dropped.fetch_add(counted as u64, Ordering::Relaxed);
         }
     }
 
@@ -147,7 +197,7 @@ impl Batch {
     /// carries the cumulative totals.
     pub(super) fn send_metrics(&self, body: Vec<u8>) {
         let _ = self.queue.try_send(Export {
-            metrics: true,
+            signal: Signal::Metrics,
             body: body.into(),
             records: 0,
         });
@@ -158,10 +208,20 @@ impl Batch {
     }
 }
 
+/// Appends one record to `buffer`, opening the envelope first.
+fn append(buffer: &mut Buffer, prefix: &[u8], write: impl FnOnce(&mut Vec<u8>)) {
+    if buffer.records == 0 {
+        buffer.buf.extend_from_slice(prefix);
+    } else {
+        buffer.buf.push(b',');
+    }
+    write(&mut buffer.buf);
+    buffer.records += 1;
+}
+
 /// One request for the exporter task.
 struct Export {
-    /// Metrics instead of logs.
-    metrics: bool,
+    signal: Signal,
     body: Bytes,
     /// Log records in `body`, counted as lost if it is not delivered.
     records: usize,
@@ -170,17 +230,17 @@ struct Export {
 /// Sends queued batches one at a time until the writer drops its sender.
 async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped: Arc<AtomicU64>) {
     while let Some(Export {
-        metrics,
+        signal,
         body,
         records,
     }) = rx.recv().await
     {
         let mut req = Request::new(Full::new(body));
         *req.method_mut() = Method::POST;
-        *req.uri_mut() = if metrics {
-            target.metrics_uri.clone()
-        } else {
-            target.logs_uri.clone()
+        *req.uri_mut() = match signal {
+            Signal::Logs => target.logs_uri.clone(),
+            Signal::Metrics => target.metrics_uri.clone(),
+            Signal::Traces => target.traces_uri.clone(),
         };
         let headers = req.headers_mut();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -240,6 +300,12 @@ fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>) {
     buf.extend_from_slice(br#","severityNumber":9,"severityText":"INFO","body":{"stringValue":"#);
     let _ = serde_json::to_writer(&mut *buf, line.event);
     buf.extend_from_slice(br#"},"attributes":["#);
+    write_record_attributes(buf, line);
+    buf.extend_from_slice(b"]}");
+}
+
+/// The attributes a usage record shares between its log record and span.
+fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     let mut first = true;
     let mut attribute = |key: &str, value: Value<'_>| {
         if !std::mem::take(&mut first) {
@@ -290,7 +356,71 @@ fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>) {
         let json = serde_json::to_string(prompt).unwrap_or_default();
         attribute("wye.prompt", Value::Str(&json));
     }
-    buf.extend_from_slice(b"]}");
+}
+
+/// One usage record as an OTLP server `Span`: child of the request's W3C
+/// `traceparent` when it has a valid one, else the root of a new trace.
+fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRandom) {
+    let mut ids = [0u8; 24];
+    // A failed draw leaves zeros, which collectors reject: the span is lost,
+    // never the request.
+    let _ = random.fill(&mut ids);
+    let (trace_id, parent) = match line.traceparent.and_then(parse_traceparent) {
+        Some((trace, parent)) => (trace, Some(parent)),
+        None => (hex(ids.get(..16).unwrap_or_default()), None),
+    };
+    let span_id = hex(ids.get(16..).unwrap_or_default());
+    let end_ns = line.unix_ms.saturating_mul(1_000_000);
+    let start_ns = end_ns.saturating_sub((line.duration_ms * 1_000_000.0) as u64);
+    let _ = write!(buf, r#"{{"traceId":"{trace_id}","spanId":"{span_id}","#);
+    if let Some(parent) = parent {
+        let _ = write!(buf, r#""parentSpanId":"{parent}","#);
+    }
+    let _ = write!(buf, r#""name":"POST "#);
+    let route = serde_json::to_string(line.path).unwrap_or_default();
+    buf.extend_from_slice(route.trim_matches('"').as_bytes());
+    let _ = write!(
+        buf,
+        r#"","kind":2,"startTimeUnixNano":"{start_ns}","endTimeUnixNano":"{end_ns}","attributes":["#
+    );
+    write_record_attributes(buf, line);
+    buf.extend_from_slice(br#"],"events":["#);
+    if let Some(ms) = line.headers_ms {
+        let at = start_ns.saturating_add((ms * 1_000_000.0) as u64);
+        let _ = write!(
+            buf,
+            r#"{{"timeUnixNano":"{at}","name":"response headers"}}"#
+        );
+    }
+    let failed = matches!(line.outcome, "failed" | "gateway_error") || line.status >= 500;
+    // STATUS_CODE_ERROR = 2, STATUS_CODE_UNSET = 0.
+    let _ = write!(
+        buf,
+        r#"],"status":{{"code":{}}}}}"#,
+        if failed { 2 } else { 0 }
+    );
+}
+
+/// The trace id and parent span id of a valid version-00 `traceparent`.
+fn parse_traceparent(value: &str) -> Option<(String, String)> {
+    let mut parts = value.trim().split('-');
+    let (version, trace, parent, flags) =
+        (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    let hex_of = |s: &str, len: usize| {
+        s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    };
+    let valid = version == "00"
+        && parts.next().is_none()
+        && hex_of(trace, 32)
+        && hex_of(parent, 16)
+        && hex_of(flags, 2)
+        && trace.bytes().any(|b| b != b'0')
+        && parent.bytes().any(|b| b != b'0');
+    valid.then(|| (trace.to_owned(), parent.to_owned()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Parses `key1=value1,key2=value2` (the `OTEL_EXPORTER_OTLP_HEADERS` format)
@@ -310,6 +440,28 @@ pub(crate) fn parse_headers(spec: &str) -> Option<HeaderMap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traceparent_parses_only_valid_version_00() {
+        let valid = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        assert_eq!(
+            parse_traceparent(valid),
+            Some((
+                "4bf92f3577b34da6a3ce929d0e0e4736".into(),
+                "00f067aa0ba902b7".into()
+            ))
+        );
+        for bad in [
+            "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "00-00000000000000000000000000000000-00f067aa0ba902b7-01",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01",
+            "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01",
+            "00-4bf92f-00f067aa0ba902b7-01",
+            "garbage",
+        ] {
+            assert_eq!(parse_traceparent(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn headers_parse_and_are_sensitive() {

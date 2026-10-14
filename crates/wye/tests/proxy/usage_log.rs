@@ -178,7 +178,7 @@ async fn cache_diagnostics_sample_whole_sessions() {
 
 #[tokio::test]
 async fn usage_records_are_exported_as_otlp_logs() {
-    let (collected_tx, mut collected) = mpsc::channel::<Seen>(4);
+    let (collected_tx, mut collected) = mpsc::channel::<Seen>(8);
     let collector: Handler = Arc::new(move |seen: Seen| {
         let tx = collected_tx.clone();
         Box::pin(async move {
@@ -220,21 +220,43 @@ async fn usage_records_are_exported_as_otlp_logs() {
         hits,
     )
     .await;
-    let res = h.send(messages(), "{}").await;
+    const PARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    let res = h.send(messages().header("traceparent", PARENT), "{}").await;
     read_body(res).await;
     h.usage_record().await;
-    // A partly filled batch goes out within the one-second flush interval.
-    let export = tokio::time::timeout(WAIT, collected.recv())
-        .await
-        .unwrap()
-        .unwrap();
+    // A partly filled batch goes out within the one-second flush interval;
+    // shutdown exports the cumulative metrics once more.
+    let mut exports = std::collections::HashMap::new();
+    while exports.len() < 2 {
+        let seen = tokio::time::timeout(WAIT, collected.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        exports.insert(seen.uri.path().to_owned(), seen);
+    }
     h.begin_shutdown();
     tokio::time::timeout(WAIT, &mut h.served)
         .await
         .unwrap()
         .unwrap();
-    // Shutdown exports the cumulative metrics once more.
-    let metrics = collected.recv().await.unwrap();
+    while let Ok(seen) = collected.try_recv() {
+        exports.insert(seen.uri.path().to_owned(), seen);
+    }
+    let export = exports.remove("/v1/logs").expect("logs exported");
+    let traces = exports.remove("/v1/traces").expect("traces exported");
+    let metrics = exports.remove("/v1/metrics").expect("metrics exported");
+    let traces: serde_json::Value = serde_json::from_slice(&traces.body).unwrap();
+    let span = &traces["resourceSpans"][0]["scopeSpans"][0]["spans"][0];
+    assert_eq!(span["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+    assert_eq!(span["parentSpanId"], "00f067aa0ba902b7");
+    assert_eq!(span["spanId"].as_str().unwrap().len(), 16);
+    assert_eq!(span["name"], "POST /v1/messages");
+    assert_eq!(span["kind"], 2);
+    assert_eq!(span["status"]["code"], 0);
+    assert_eq!(span["events"][0]["name"], "response headers");
+    let start: u64 = span["startTimeUnixNano"].as_str().unwrap().parse().unwrap();
+    let end: u64 = span["endTimeUnixNano"].as_str().unwrap().parse().unwrap();
+    assert!(start <= end);
     assert_eq!(metrics.uri.path(), "/v1/metrics");
     let metrics: serde_json::Value = serde_json::from_slice(&metrics.body).unwrap();
     let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
