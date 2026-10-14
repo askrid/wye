@@ -42,7 +42,7 @@ pub async fn serve(
     shutdown: impl Future<Output = ()>,
     usage_out: impl AsyncWrite + Send + Unpin + 'static,
 ) {
-    let (log, writer) = UsageLog::start(usage_out, gateway.prompt_key(), gateway.otlp());
+    let (log, writer) = UsageLog::start(usage_out, gateway.sinks());
     let graceful = GracefulShutdown::new();
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new());
