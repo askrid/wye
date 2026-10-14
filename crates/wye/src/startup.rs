@@ -20,6 +20,7 @@ pub enum StartupError {
     MissingEnv(String),
     InvalidApiKey,
     HashKeyTooShort(String),
+    KeyFile { path: PathBuf, reason: String },
     InvalidOtlpHeaders(String),
     CaFile { path: PathBuf, reason: String },
     Tls(String),
@@ -45,6 +46,9 @@ impl fmt::Display for StartupError {
                 f,
                 "environment variable {name} must hold key=value pairs separated by commas"
             ),
+            Self::KeyFile { path, reason } => {
+                write!(f, "upstream.api_key_file {}: {reason}", path.display())
+            }
             Self::CaFile { path, reason } => {
                 write!(f, "upstream.ca_file {}: {reason}", path.display())
             }
@@ -75,6 +79,9 @@ impl Resources {
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
         let auth = match &config.upstream.credential {
             UpstreamCredential::ApiKeyEnv(name) => UpstreamAuth::api_key(&env(name)?)?,
+            UpstreamCredential::ApiKeyFile(path) => {
+                UpstreamAuth::api_key(&read_secret(&config_dir.join(path))?)?
+            }
             UpstreamCredential::ForwardCaller => UpstreamAuth::ForwardCaller,
         };
         let prompt_key = match &config.cache_diagnostics {
@@ -106,6 +113,21 @@ impl Resources {
             otlp_headers,
         })
     }
+}
+
+/// A secret file's contents without surrounding whitespace (mounted secrets
+/// often end in a newline).
+fn read_secret(path: &Path) -> Result<String, StartupError> {
+    let error = |reason: String| StartupError::KeyFile {
+        path: path.to_owned(),
+        reason,
+    };
+    let contents = std::fs::read_to_string(path).map_err(|e| error(e.to_string()))?;
+    let secret = contents.trim();
+    if secret.is_empty() {
+        return Err(error("file is empty".into()));
+    }
+    Ok(secret.to_owned())
 }
 
 fn env(name: &str) -> Result<String, StartupError> {
