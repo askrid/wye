@@ -78,14 +78,14 @@ Run-to-run noise on this machine is about 10–15% for CPU per MB and larger for
 | Metric | Value |
 |---|---|
 | Allocations per streamed SSE event | 0 |
-| Allocations per stream setup | 36 |
-| Allocations / allocated bytes per unary request | 33.5 / 22 KB |
-| Allocations per authenticated request (cached credential) | 37.5 |
+| Allocations per stream setup | 23 |
+| Allocations / allocated bytes per unary request | 20.6 / 21.6 KB |
+| Allocations per authenticated request (cached credential) | 20.6 |
 | Live heap per idle stream | 49 KB plain, 23 KB TLS |
 | Live heap per idle stream after a 512 KB request | 77 KB plain, 48 KB TLS (150 KB TLS before the buffer cap) |
-| 1 MiB upload: allocations / allocated bytes | 39 / 1.38 MB |
+| 1 MiB upload: allocations / allocated bytes | 42 / 0.41 MB (1.38 MB before the buffer cap) |
 
-Findings: the relay path allocates nothing per event. An idle stream holds about 49 KB of live heap while RSS grows only about 28 KB, because large connection buffers are allocated but not fully touched. The dominant production cost was different: after an agent-sized request, hyper's client-connection read buffer stayed grown for the stream's lifetime (150 KB per idle TLS stream after 512 KB); a 32 KiB cap brought it to 48 KB (see the techniques table). A cached credential still costs 4 allocations per request (cloning the identity's strings), avoidable by sharing it behind an `Arc`. Uploads allocate about 1.35× the body as receive buffers grow, relevant once model permissions buffer bodies.
+Findings: the relay path allocates nothing per event. An idle stream holds about 49 KB of live heap while RSS grows only about 28 KB, because large connection buffers are allocated but not fully touched. The dominant production cost was different: after an agent-sized request, hyper's client-connection read buffer stayed grown for the stream's lifetime (150 KB per idle TLS stream after 512 KB); a 32 KiB cap brought it to 48 KB (see the techniques table). Per-request allocations fell from 33.5 to 20.6 by sharing the cached identity behind an `Arc` (an authenticated request now costs the same as an unauthenticated one) and serializing the usage log line from borrowed fields. Uploads allocated about 1.35× the body as receive buffers grew; with the 32 KiB buffer cap it is about 0.4×.
 
 Gateway credentials (`auth_` metrics, plain path, per-request scenarios only): full verification costs about +88 µs of CPU per request (the Ed25519 check alone measured 55–62 µs in isolation); with the per-connection credential cache, authenticated requests on reused connections cost the same CPU as unauthenticated ones. Not covered yet: Linux and multi-machine load.
 
@@ -281,7 +281,7 @@ The workload: few long-lived requests, tiny SSE events at token pace, time to fi
 | HTTP/2 to the provider | Multiplex client streams over few upstream connections | **In effect.** Negotiated by ALPN (verified against `api.anthropic.com`); benchmarked on the TLS path |
 | Spread streams over connections | 64 lanes, least-loaded selection, instead of one shared HTTP/2 connection per host | **Adopted.** Fixed silent queuing beyond the provider's stream limit (a 4-stream mock now serves 10 streams), and avoids the single `h2` connection mutex: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; process RSS after load 10 → 30 MB |
 | Per-connection credential cache | Verify a credential once per connection; later requests with the same bytes compare in constant time and recheck expiry | **Adopted.** Two A/B runs: CPU per authenticated request −38% and −44% (195 → 121, 199 → 112 µs, equal to unauthenticated), added latency p50 −16% and −34%; other metrics unchanged. Memory: one verified token (~0.3 KB) per connection |
-| Shared cached identity | Keep the cached credential's identity behind an `Arc` instead of cloning its strings per request | Candidate: removes 4 allocations per authenticated request (`alloc_auth_unary_per_request` 37.5 → ~33.5) |
+| Shared cached identity | Keep the cached credential's identity behind an `Arc` instead of cloning its strings per request | **Adopted:** with the borrowed log line, allocations per authenticated request 37.5 → 20.6, equal to unauthenticated |
 | Cap the client-connection buffer | `max_buf_size` 32 KiB instead of hyper's ~400 KiB, so a large request body does not leave a grown buffer for the stream's lifetime | **Adopted (approved tradeoff).** Idle stream after a 512 KB request: TLS 150 → 48 KB (−68%), plain 183 → 77 KB; allocated bytes per 1 MiB upload 1.27 MB → 0.43 MB. TLS upload cost unchanged in A/B (CPU −0.7%, p50 −5%); plain-HTTP uploads +7% CPU, +11% p50, and 28 → 44 allocations per upload (smaller reads). 16 KiB saved more memory but cost +50% plain upload CPU. Headers above 32 KiB get 431 |
 | Smaller write buffers | hyper allocates an 8 KiB header write buffer per HTTP/1.1 connection, not configurable | Not possible without changing hyper; part of the 23 KB per idle TLS stream |
 | Fast cancellation as a cost metric | Release the upstream immediately when a client disconnects, even while it is silent | **Measured and gated:** release within ~80 µs p50, under 0.2 ms max. Provider-side effect (does billing stop?) unverified |
