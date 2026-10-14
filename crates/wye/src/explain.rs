@@ -8,10 +8,19 @@
 
 use gateway_core::{
     config::{Config, UpstreamCredential},
-    credential::Verifier,
+    credential::{Identity, Verifier},
     model::{self, ModelScanner},
     prompt,
 };
+
+/// The gateway credential a request carries.
+pub enum Credential<'a> {
+    None,
+    /// A bearer token, verified as the server would.
+    Token(&'a str),
+    /// Claims taken as verified (policy tests; tokens in CI would expire).
+    Trusted(Identity),
+}
 
 /// The decision and the steps that led to it.
 #[derive(Debug)]
@@ -38,12 +47,12 @@ impl Explanation {
     }
 }
 
-/// Explains `POST path` with `body`, `credential` (the bearer token), and the
-/// Claude Code `session` id, at Unix time `now`.
+/// Explains `POST path` with `body`, `credential`, and the Claude Code
+/// `session` id, at Unix time `now`.
 pub fn explain(
     config: &Config,
     path: &str,
-    credential: Option<&str>,
+    credential: Credential<'_>,
     session: Option<&str>,
     body: &[u8],
     now: u64,
@@ -60,11 +69,11 @@ pub fn explain(
     let mut identity = None;
     match &config.auth {
         None => out.step("credential: not required (no [auth])".into()),
-        Some(auth) => {
-            let Some(token) = credential else {
+        Some(auth) => match credential {
+            Credential::None => {
                 return out.refuse(401, "authentication_error", "no gateway credential".into());
-            };
-            match Verifier::new(auth).verify(token, now) {
+            }
+            Credential::Token(token) => match Verifier::new(auth).verify(token, now) {
                 Ok(verified) => {
                     out.step(format!(
                         "credential: valid; subject {}, key {}, expires at {}",
@@ -73,8 +82,15 @@ pub fn explain(
                     identity = Some(verified);
                 }
                 Err(e) => return out.refuse(401, "authentication_error", e.to_string()),
+            },
+            Credential::Trusted(claims) => {
+                out.step(format!(
+                    "credential: taken as verified (signature not checked); subject {}",
+                    claims.subject
+                ));
+                identity = Some(claims);
             }
-        }
+        },
     }
 
     let limit = config.server.max_request_body_bytes;
@@ -196,7 +212,14 @@ mod tests {
         let haiku = br#"{"model":"claude-haiku-4-5","messages":[]}"#;
         let t = token(&key, Some(&["claude-haiku-*"]));
 
-        let ok = explain(&config, "/v1/messages", Some(&t), Some("s-1"), haiku, NOW);
+        let ok = explain(
+            &config,
+            "/v1/messages",
+            Credential::Token(&t),
+            Some("s-1"),
+            haiku,
+            NOW,
+        );
         assert!(ok.refused.is_none(), "{}", ok.report());
         let report = ok.report();
         assert!(report.contains("subject alice"), "{report}");
@@ -213,7 +236,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Some(&t),
+                Credential::Token(&t),
                 None,
                 sonnet,
                 NOW
@@ -221,14 +244,21 @@ mod tests {
             Some((403, "permission_error"))
         );
         assert_eq!(
-            refused(explain(&config, "/v1/messages", None, None, haiku, NOW)),
+            refused(explain(
+                &config,
+                "/v1/messages",
+                Credential::None,
+                None,
+                haiku,
+                NOW
+            )),
             Some((401, "authentication_error"))
         );
         assert_eq!(
             refused(explain(
                 &config,
                 "/v1/messages",
-                Some(&t),
+                Credential::Token(&t),
                 None,
                 haiku,
                 NOW + 601
@@ -239,7 +269,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Some(&t),
+                Credential::Token(&t),
                 None,
                 &[b' '; 201],
                 NOW
@@ -247,11 +277,25 @@ mod tests {
             Some((413, "request_too_large"))
         );
         assert_eq!(
-            refused(explain(&config, "/v1/messages", Some(&t), None, b"{}", NOW)),
+            refused(explain(
+                &config,
+                "/v1/messages",
+                Credential::Token(&t),
+                None,
+                b"{}",
+                NOW
+            )),
             Some((400, "invalid_request_error"))
         );
         assert_eq!(
-            refused(explain(&config, "/v1/other", Some(&t), None, haiku, NOW)),
+            refused(explain(
+                &config,
+                "/v1/other",
+                Credential::Token(&t),
+                None,
+                haiku,
+                NOW
+            )),
             Some((404, "not_found_error"))
         );
     }

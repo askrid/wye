@@ -5,6 +5,7 @@
 //! - `auth`: gateway credential checks, cached per connection
 //! - `gateway`: routing and gateway-generated responses
 //! - `explain`: `wye explain`, the server's decisions for one request, offline
+//! - `policy_test`: `wye policy-test`, sample requests checked against expected decisions
 //! - `permissions`: model permissions, checked before forwarding
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
@@ -22,6 +23,7 @@ mod explain;
 mod gateway;
 mod gauge;
 mod permissions;
+mod policy_test;
 mod probe;
 mod server;
 mod startup;
@@ -29,8 +31,9 @@ mod upstream;
 mod usage_log;
 mod wrapper;
 
-pub use explain::{Explanation, explain};
+pub use explain::{Credential, Explanation, explain};
 pub use gateway::Gateway;
+pub use policy_test::policy_test;
 pub use probe::probe;
 pub use server::serve;
 pub use startup::{Resources, StartupError};
