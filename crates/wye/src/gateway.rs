@@ -9,9 +9,13 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::{config::Config, credential::Verifier, prompt::HashKey};
+use gateway_core::{
+    config::Config,
+    credential::Verifier,
+    prompt::{self, HashKey},
+};
 use http::{
-    HeaderName, Method, Request, Response, StatusCode,
+    HeaderName, HeaderValue, Method, Request, Response, StatusCode,
     header::{CONTENT_LENGTH, CONTENT_TYPE},
 };
 use http_body_util::{Either, Full};
@@ -41,6 +45,8 @@ pub struct Gateway {
     upstream: Upstream,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
     prompt_key: Option<Arc<HashKey>>,
+    /// Percentage of sessions whose requests are diagnosed.
+    prompt_sample_percent: u8,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -55,6 +61,10 @@ impl Gateway {
             verifier: config.auth.as_ref().map(Verifier::new),
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
             prompt_key: resources.prompt_key.map(Arc::new),
+            prompt_sample_percent: config
+                .cache_diagnostics
+                .as_ref()
+                .map_or(100, |d| d.sample_percent),
             max_request_body_bytes: usize::try_from(config.server.max_request_body_bytes)
                 .map_err(|_| StartupError::BodyLimitTooLarge)?,
             in_flight: Gauge::default(),
@@ -171,7 +181,12 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
-        if self.prompt_key.is_some() {
+        if self.prompt_key.is_some()
+            && prompt::session_sampled(
+                info.session_id.as_ref().map(HeaderValue::as_bytes),
+                self.prompt_sample_percent,
+            )
+        {
             info.prompt = Some(PromptSlot::default());
         }
         match self

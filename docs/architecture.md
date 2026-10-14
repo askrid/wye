@@ -270,6 +270,7 @@ ed25519_public_key = "<from wye token keygen>"
 
 [cache_diagnostics]                    # optional: prompt hashes in the usage log
 hash_key_env = "WYE_CACHE_HASH_KEY"    # required; at least 32 bytes, same on every replica
+sample_percent = 100                   # share of Claude Code sessions diagnosed
 ```
 
 ### Target schema (illustrative, not implemented)

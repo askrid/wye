@@ -47,6 +47,9 @@ pub struct CacheDiagnostics {
     /// (at least [`crate::prompt::HashKey::MIN_LEN`] bytes). Required: an
     /// unkeyed hash could be matched against guessed prompts.
     pub hash_key_env: String,
+    /// Percentage of Claude Code sessions diagnosed, 1-100 (see
+    /// [`crate::prompt::session_sampled`]).
+    pub sample_percent: u8,
 }
 
 /// Signed gateway credentials (see [`crate::credential`]).
@@ -120,6 +123,7 @@ pub enum ConfigError {
     InvalidEnvName { field: &'static str, name: String },
     EmptyPath(&'static str),
     Zero(&'static str),
+    Percent(&'static str),
 }
 
 impl fmt::Display for ConfigError {
@@ -146,6 +150,7 @@ impl fmt::Display for ConfigError {
             }
             Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
+            Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
         }
     }
 }
@@ -165,6 +170,7 @@ struct RawConfig {
 #[serde(deny_unknown_fields)]
 struct RawCacheDiagnostics {
     hash_key_env: String,
+    sample_percent: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -223,8 +229,17 @@ impl Config {
         let cache_diagnostics = raw
             .cache_diagnostics
             .map(|raw| {
-                env_name(raw.hash_key_env, "cache_diagnostics.hash_key_env")
-                    .map(|hash_key_env| CacheDiagnostics { hash_key_env })
+                let sample_percent = match raw.sample_percent {
+                    None => 100,
+                    Some(p @ 1..=100) => p,
+                    Some(_) => {
+                        return Err(ConfigError::Percent("cache_diagnostics.sample_percent"));
+                    }
+                };
+                Ok(CacheDiagnostics {
+                    hash_key_env: env_name(raw.hash_key_env, "cache_diagnostics.hash_key_env")?,
+                    sample_percent,
+                })
             })
             .transpose()?;
         Ok(Self {
@@ -585,10 +600,28 @@ mod tests {
             "{base}[cache_diagnostics]\nhash_key_env = \"WYE_CACHE_HASH_KEY\""
         ))
         .unwrap();
+        let diagnostics = config.cache_diagnostics.unwrap();
+        assert_eq!(diagnostics.hash_key_env, "WYE_CACHE_HASH_KEY");
+        assert_eq!(diagnostics.sample_percent, 100);
+        let with_percent = |p: &str| {
+            Config::from_toml_str(&format!(
+                "{base}[cache_diagnostics]\nhash_key_env = \"K\"\nsample_percent = {p}"
+            ))
+        };
         assert_eq!(
-            config.cache_diagnostics.unwrap().hash_key_env,
-            "WYE_CACHE_HASH_KEY"
+            with_percent("10")
+                .unwrap()
+                .cache_diagnostics
+                .unwrap()
+                .sample_percent,
+            10
         );
+        for bad in ["0", "101"] {
+            assert_eq!(
+                with_percent(bad).unwrap_err(),
+                ConfigError::Percent("cache_diagnostics.sample_percent")
+            );
+        }
         assert!(matches!(
             Config::from_toml_str(&format!("{base}[cache_diagnostics]\n")),
             Err(ConfigError::Parse(_))
