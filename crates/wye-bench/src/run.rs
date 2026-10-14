@@ -101,6 +101,7 @@ pub async fn run(
                 Gateway::WyeAuth(wye),
                 Gateway::WyeModels(wye),
                 Gateway::WyeDiag(wye),
+                Gateway::WyeOtlp(wye),
             ];
             let variants = if path.variants { &variants[..] } else { &[] };
             for &gateway in gateways.iter().chain(variants) {
@@ -119,7 +120,10 @@ pub async fn run(
                     paced: path.paced,
                     per_request_only: matches!(
                         gateway,
-                        Gateway::WyeAuth(_) | Gateway::WyeModels(_) | Gateway::WyeDiag(_)
+                        Gateway::WyeAuth(_)
+                            | Gateway::WyeModels(_)
+                            | Gateway::WyeDiag(_)
+                            | Gateway::WyeOtlp(_)
                     ),
                     uploads: matches!(gateway, Gateway::WyeModels(_) | Gateway::WyeDiag(_)),
                 };

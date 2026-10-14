@@ -29,7 +29,7 @@ use crate::{
     gauge::Gauge,
     permissions::{HoldError, RequestBody, hold_until_model},
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{Observed, RequestInfo, UsageLog},
+    usage_log::{Observed, OtlpTarget, RequestInfo, UsageLog},
 };
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
@@ -54,6 +54,8 @@ pub struct Gateway {
     prompt_key: Option<Arc<HashKey>>,
     /// Percentage of sessions whose requests are diagnosed.
     prompt_sample_percent: u8,
+    /// OTLP export of usage records, when `[telemetry]` is configured.
+    otlp: Option<Arc<OtlpTarget>>,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -71,6 +73,14 @@ impl Gateway {
             held_bytes: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
+            otlp: match &config.telemetry {
+                Some(telemetry) => Some(Arc::new(otlp_target(
+                    telemetry,
+                    &resources.extra_roots,
+                    resources.otlp_headers.clone(),
+                )?)),
+                None => None,
+            },
             prompt_key: resources.prompt_key.map(Arc::new),
             prompt_sample_percent: config
                 .cache_diagnostics
@@ -117,6 +127,10 @@ impl Gateway {
 
     pub(crate) fn prompt_key(&self) -> Option<Arc<HashKey>> {
         self.prompt_key.clone()
+    }
+
+    pub(crate) fn otlp(&self) -> Option<Arc<OtlpTarget>> {
+        self.otlp.clone()
     }
 
     /// From now on `/readyz` fails; requests are still served.
@@ -265,6 +279,29 @@ impl Gateway {
             }
         }
     }
+}
+
+/// The OTLP export client trusts the same roots as the upstream connection.
+fn otlp_target(
+    telemetry: &gateway_core::config::Telemetry,
+    extra_roots: &[rustls::pki_types::CertificateDer<'static>],
+    headers: http::HeaderMap,
+) -> Result<OtlpTarget, StartupError> {
+    let mut http = hyper_util::client::legacy::connect::HttpConnector::new();
+    http.enforce_http(false);
+    let https = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(crate::upstream::tls_config(extra_roots)?)
+        .https_or_http()
+        .enable_http1()
+        .build();
+    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build(https);
+    Ok(OtlpTarget::new(
+        telemetry.otlp_logs_uri.clone(),
+        headers,
+        client,
+        &telemetry.service_name,
+    ))
 }
 
 fn hold_error(e: HoldError) -> Response<ResBody> {

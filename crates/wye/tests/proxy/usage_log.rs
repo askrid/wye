@@ -175,3 +175,107 @@ async fn cache_diagnostics_sample_whole_sessions() {
         assert_eq!(record.get("prompt").is_some(), diagnosed, "{id:?}");
     }
 }
+
+#[tokio::test]
+async fn usage_records_are_exported_as_otlp_logs() {
+    let (collected_tx, mut collected) = mpsc::channel::<Seen>(4);
+    let collector: Handler = Arc::new(move |seen: Seen| {
+        let tx = collected_tx.clone();
+        Box::pin(async move {
+            tx.send(seen).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(
+        Arc::new(|_| {
+            Box::pin(async {
+                let mut res = full(StatusCode::OK, USAGE_STREAM);
+                res.headers_mut()
+                    .insert("content-type", "text/event-stream".parse().unwrap());
+                res
+            })
+        }),
+        Arc::clone(&hits),
+        None,
+        None,
+    )
+    .await;
+    let mut otlp_headers = HeaderMap::new();
+    otlp_headers.insert("api-key", "telemetry-secret".parse().unwrap());
+    let resources = Resources {
+        auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+        extra_roots: Vec::new(),
+        prompt_key: None,
+        otlp_headers,
+    };
+    let mut h = Harness::launch(
+        &format!("http://{upstream}"),
+        "",
+        &format!(
+            "api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\"\nservice_name = \"wye-test\""
+        ),
+        resources,
+        hits,
+    )
+    .await;
+    let res = h.send(messages(), "{}").await;
+    read_body(res).await;
+    h.usage_record().await;
+    // A partly filled batch goes out within the one-second flush interval.
+    let export = tokio::time::timeout(WAIT, collected.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    h.begin_shutdown();
+    tokio::time::timeout(WAIT, &mut h.served)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(export.method, Method::POST);
+    assert_eq!(export.uri.path(), "/v1/logs");
+    assert_eq!(export.headers["content-type"], "application/json");
+    assert_eq!(export.headers["api-key"], "telemetry-secret");
+    let body: serde_json::Value = serde_json::from_slice(&export.body).unwrap();
+    let resource = &body["resourceLogs"][0];
+    assert_eq!(
+        resource["resource"]["attributes"][0],
+        serde_json::json!({"key": "service.name", "value": {"stringValue": "wye-test"}})
+    );
+    let record = &resource["scopeLogs"][0]["logRecords"][0];
+    let attribute = |key: &str| {
+        record["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["key"] == key)
+            .map(|a| a["value"].clone())
+    };
+    assert_eq!(
+        attribute("gen_ai.usage.input_tokens").unwrap()["intValue"],
+        "10"
+    );
+    assert_eq!(
+        attribute("gen_ai.usage.output_tokens").unwrap()["intValue"],
+        "7"
+    );
+    assert_eq!(
+        attribute("gen_ai.usage.cache_read.input_tokens").unwrap()["intValue"],
+        "90"
+    );
+    assert_eq!(
+        attribute("gen_ai.response.model").unwrap()["stringValue"],
+        "claude-test"
+    );
+    assert_eq!(attribute("session.id").unwrap()["stringValue"], "s-1");
+    assert_eq!(
+        attribute("http.response.status_code").unwrap()["intValue"],
+        "200"
+    );
+    assert_eq!(
+        attribute("wye.outcome").unwrap()["stringValue"],
+        "completed"
+    );
+    assert!(record["timeUnixNano"].as_str().unwrap().len() >= 19);
+}

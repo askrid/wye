@@ -249,3 +249,39 @@ fn rejects_zero_timeouts() {
         ConfigError::Zero("upstream.stream_idle_timeout_secs")
     );
 }
+
+#[test]
+fn telemetry_endpoint_gets_the_logs_path() {
+    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n\
+                base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+    let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
+    let telemetry = with("otlp_endpoint = \"http://collector:4318\"")
+        .unwrap()
+        .telemetry
+        .unwrap();
+    assert_eq!(telemetry.otlp_logs_uri, "http://collector:4318/v1/logs");
+    assert_eq!(telemetry.service_name, "wye");
+    assert_eq!(telemetry.otlp_headers_env, None);
+    let telemetry = with(
+        "otlp_endpoint = \"https://otlp.example.com/otel/\"\notlp_headers_env = \"OTLP_HEADERS\"\nservice_name = \"gw\"",
+    )
+    .unwrap()
+    .telemetry
+    .unwrap();
+    assert_eq!(
+        telemetry.otlp_logs_uri,
+        "https://otlp.example.com/otel/v1/logs"
+    );
+    assert_eq!(telemetry.otlp_headers_env.as_deref(), Some("OTLP_HEADERS"));
+    for bad in [
+        "otlp_endpoint = \"ftp://c\"",
+        "otlp_endpoint = \"http://c/?x=1\"",
+        "otlp_endpoint = \"/relative\"",
+    ] {
+        assert!(
+            matches!(with(bad), Err(ConfigError::InvalidUrl { .. })),
+            "{bad}"
+        );
+    }
+    assert!(Config::from_toml_str(base).unwrap().telemetry.is_none());
+}
