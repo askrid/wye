@@ -217,7 +217,7 @@ Each experiment names its status; feature-shaped experiments moved to [feature d
 
 ## Feature directions
 
-Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Together, 1–3 are the intended moat: a gateway that understands agent traffic, with no database. Cache-miss diagnostics (2) is implemented; the others are not.
+Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Understanding agent traffic is Wye's chosen direction ([product.md](product.md#agent-native-within-the-constraints)): directions 1 and 2 and the [agent-native directions](#agent-native-directions) below build it. Cache-miss diagnostics (2) is implemented; the others are not.
 
 ### 1. Agent-aware routing
 
@@ -296,9 +296,9 @@ Planned for M2 ([policy.md](policy.md#provable-cost-ceiling)): a guaranteed uppe
 - **Clean stream endings** (**implemented**): when the upstream stalls past the idle timeout or its body fails at an SSE event boundary, Wye sends an Anthropic `error` event (`overloaded_error`) and closes cleanly, so Claude Code sees a retryable overload instead of a dropped connection. Mid-event failures still drop the stream. The per-frame cost is one check of the frame's last bytes.
 - **Proof-of-possession credentials** without a replay cache: bind tokens to a client key; replay inside a short window remains possible.
 
-### Agent-native directions (research, 2026-10-15)
+### Agent-native directions
 
-Proposals, not built. Inputs: Anthropic's gateway documents ([compatibility guide](https://code.claude.com/docs/en/llm-gateway-protocol), [rollout](https://code.claude.com/docs/en/llm-gateway-rollout), [connect](https://code.claude.com/docs/en/llm-gateway-connect)), the prompt-caching study for long agent tasks ([arXiv:2601.06007](https://arxiv.org/abs/2601.06007): 41–80% cost and 13–31% time-to-first-token savings from strategic cache placement; dynamic content mid-prompt breaks caches), and practitioner reports on agent cost runaways and cache-hit regressions (mostly vendor-authored; treated as signals, not data).
+Proposals, not built (researched 2026-10-15; roadmap stage in [roadmap.md](roadmap.md#m1b-agent-aware-visibility)). Inputs: Anthropic's gateway documents ([compatibility guide](https://code.claude.com/docs/en/llm-gateway-protocol), [rollout](https://code.claude.com/docs/en/llm-gateway-rollout), [connect](https://code.claude.com/docs/en/llm-gateway-connect)), the prompt-caching study for long agent tasks ([arXiv:2601.06007](https://arxiv.org/abs/2601.06007): 41–80% cost and 13–31% time-to-first-token savings from strategic cache placement; dynamic content mid-prompt breaks caches), and practitioner reports on agent cost runaways and cache-hit regressions (mostly vendor-authored; treated as signals, not data).
 
 **What a gateway can see without reading bodies.** Every Claude Code request carries `x-claude-code-session-id`, and subagent requests `x-claude-code-agent-id` and `x-claude-code-parent-agent-id`. With `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` (deliverable through managed settings) each request also carries `x-claude-code-request-class` (`main`, `subagent`, `workflow`, `compaction`, `auxiliary`), `x-claude-code-agent-type`, `x-claude-code-compaction` and `x-claude-code-context-compacted` (`auto`, `manual`, `reactive`), `x-claude-code-prompt-id` (shared by every request one user prompt causes, subagents included), and `x-claude-code-prev-tool-durations` (`Bash=742;Read=9`: tool run times between turns). None carries prompt text. Claude Code also queries `GET /v1/models` for its model picker when discovery is enabled, and reads `retry-after` (integer seconds; above 60 it stops retrying) and `anthropic-ratelimit-unified-*` from responses.
 
