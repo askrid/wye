@@ -1,6 +1,8 @@
 # Product
 
-**Primary users:** individual agent developers, engineering teams, and applications serving LLM-backed functionality.
+**Wye is the gateway that understands agent traffic.** Coding agents such as Claude Code send long, cache-heavy, bursty sessions made of a main loop, subagents, background calls, and compactions. Generic gateways see a stream of unrelated requests. Wye reads the signals agents already send to explain, attribute, and constrain that work per request, and stays fast, light, and stateless while doing it.
+
+**Primary users:** engineering teams running coding agents (Claude Code first, Codex next) who need service credentials, reviewed policy, and visibility into what their agents spend and why; individual agent developers; and applications serving LLM-backed functionality.
 
 ## Motivation
 
@@ -17,6 +19,17 @@ Wye does not reproduce a managed AI platform. Its intended advantages:
 5. **Portability:** inference policy is independent of the deployment platform, from a local subprocess to a container or a compatible edge runtime.
 
 **Performance is a hypothesis, not a claimed advantage.** Go and mature proxies are already efficient, and when inference takes seconds, saving a few proxy milliseconds rarely matters. The relevant measures are memory per active stream, CPU per streamed byte, added time to first token (TTFT), cancellation, and infrastructure cost. Measured so far on one laptop against a mock upstream: Wye adds about 0.2–0.3 ms per request and streams events as they arrive, where KrakenD CE buffers whole responses and LiteLLM adds tens of milliseconds ([research.md](research.md#against-krakend)). These are lab results, not production claims.
+
+### Agent-native, within the constraints
+
+Agent traffic is where gateway value now lies: agents resend their whole context every turn, depend on prompt caching for cost, fan out into subagents, and fail expensively when a loop runs away or a cache silently breaks ([research.md](research.md#agent-native-directions)). Claude Code tells a gateway a lot about each request without exposing prompt text: session, agent, and parent-agent ids on every request and, with gateway hint headers enabled, the request class (main, subagent, workflow, compaction, auxiliary), agent type, compaction trigger, a prompt id shared by every request one user prompt causes, and the run times of the tools between turns. Wye builds on these signals instead of on stored history.
+
+Every agent feature obeys the settled non-functional requirements; a feature that cannot is not built:
+
+- **Request-local.** A decision uses only the request, its credential, and the immutable config. Correlation across requests (sessions, prompts, subagents) happens in the user's telemetry backend through ids every replica derives alike, never in Wye.
+- **Fast.** Header reads on the request path; hashing, encoding, and aggregation in the telemetry writer task, off the request path. The streaming path stays at zero allocations per event. Every feature passes the commit gate, and a body scan is opt-in and sampled per session unless it fits the gate on its own.
+- **Light.** No database, cache, or queue; telemetry queues and metric series have fixed bounds and drop and count on overflow.
+- **Transparent.** Bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract): no prompt rewriting, no blocking a session for content it already sent. Telemetry carries ids, counts, and keyed hashes, never prompt text, by default.
 
 ### One process, one responsibility
 
@@ -95,7 +108,7 @@ Developer B ─┼──> HTTPS endpoint / internal service ──> Wye ──> 
 CI / agents ─┘                                       └──> OTLP backend
 ```
 
-Provider credentials stay in the team's deployment environment; applications receive only gateway credentials. Routing policy is reviewed in Git. Usage is recorded by Wye from verified credentials, so it is trustworthy attribution that a developer cannot switch off or alter the way client-side telemetry can. OTLP events attribute usage by application, project, or key identity without collecting prompts by default. Wye does not provide hard team budgets; use application or infrastructure enforcement if required.
+Provider credentials stay in the team's deployment environment; applications receive only gateway credentials. Routing policy is reviewed in Git. Usage is recorded by Wye from verified credentials, so it is trustworthy attribution that a developer cannot switch off or alter the way client-side telemetry can. OTLP events attribute usage by application, project, or key identity without collecting prompts by default, and, as the [agent-native directions](research.md#agent-native-directions) land, by session, subagent, and work type (main loop, subagents, compactions, background calls). Wye does not provide hard team budgets; use application or infrastructure enforcement if required.
 
 ### Public internet-facing LLM app
 
@@ -119,7 +132,7 @@ Users are untrusted. Never issue a reusable provider key to the browser. The app
 | LiteLLM | Broad provider coverage, virtual keys, budgets, management | No database to run; about 10× less CPU per streamed event and far less memory in the same benchmark ([research.md](research.md#against-litellm)) |
 | OmniRoute | Multi-account routing, quotas, compression, management | Deterministic GitOps policy, lean serving path, protocol-focused scope |
 | Vercel AI Gateway | Managed, convenient within Vercel | Self-hosted, cross-platform, customer-controlled path |
-| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
+| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests, and (planned) session structure and cost by work type from the gateway hint headers. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
 
 Stateless deployment and single-binary distribution are not unique. Wye must win by combining correct LLM compatibility, predictable configuration, portability, and measured resource efficiency.
 
@@ -136,16 +149,21 @@ Each follows from statelessness rather than working around it:
 | Test-generated support matrix | Every claimed endpoint × provider × feature is backed by a passing test | [roadmap.md](roadmap.md#release-acceptance-checklist) |
 | Performance gated on every commit | Added latency, CPU, and memory measured against a baseline before each commit; published, reproducible comparisons | [development.md](development.md#commit-gate) |
 
-Planned differentiators that use what only an agent-aware gateway sees, still request-local and stateless (detail in [research.md](research.md#feature-directions)):
+Agent-native differentiators: what only an agent-aware gateway sees, still request-local and stateless (detail and ranking in [research.md](research.md#agent-native-directions)):
 
 | Direction | What it gives |
 |---|---|
-| Agent-aware routing | Claude Code's request-class hints route auxiliary and compaction calls to cheaper Claude models by policy |
 | Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss (implemented, opt-in) |
+| Session traces | A whole Claude Code session as one trace: prompts, subagents, model time versus tool time, compactions; ids derived alike on every replica |
+| Spend by work type | Tokens and cost by request class and agent type: what compactions, subagents, and background calls cost |
+| Expected versus unexpected cache misses | A miss after a compaction is normal; a miss on an ordinary turn is a regression worth an alert |
+| Model picker from policy | `GET /v1/models` lists exactly the models the caller's credential may use |
+| `wye report` | Per-session and per-developer cost, cache, and tool-time report from the usage log, with no backend |
+| Agent-aware routing | Request-class hints route auxiliary and compaction calls to cheaper Claude models by policy, once quality is measured |
 | Delegable credentials | Agents mint narrower credentials for subagents offline |
 | Signed usage receipts | Tamper-evident chargeback and audit without a billing database |
 | Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI |
 
 ### Moat
 
-Speed and statelessness are necessary but copyable. What compounds: correctness for agent traffic, proven per client release by contract tests; performance enforced on every commit and published reproducibly; policy as code with provable properties and no database; and the agent-aware directions above. The target niche is teams running several coding agents who need service credentials and reviewed policy, which neither a single-vendor gateway nor a stateful platform serves well.
+Speed and statelessness are necessary but copyable. What compounds: understanding of agent traffic (sessions, subagents, compactions, caching) turned into attribution and explanations no generic gateway produces; correctness for agent traffic, proven per client release by contract tests; performance enforced on every commit and published reproducibly; and policy as code with provable properties and no database. The target niche is teams running several coding agents who need service credentials, reviewed policy, and an answer to "what are our agents doing, and what does it cost?", which neither a single-vendor gateway nor a stateful platform serves well.
