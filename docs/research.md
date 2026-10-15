@@ -101,31 +101,35 @@ Goal: beat KrakenD on the benchmark. `wye-bench run ... --krakend <path>` runs e
 
 **KrakenD CE cannot stream SSE.** In `no-op` mode it buffers the whole response: an event sent at 0 s arrived when the stream ended, 3 s later. `"sse"` encoding is Enterprise-only; CE answers it with 500. For Claude Code that means no tokens appear until the reply is complete. The idle-memory and cancel scenarios, which wait for the first event of a silent stream, therefore run only for Wye.
 
-Median of 3 on the development laptop, all 16 cores:
+Single run on the development laptop, all 16 cores, Wye at `35a0584` (2026-10-15; the first comparison, a median of 3 at an earlier commit, showed the same picture):
 
 | Metric | Wye | KrakenD |
 |---|---|---|
-| Added unary latency p50 / p99, plain | 224 / 106 µs | 456 / 1,421 µs |
-| Added unary latency p50 / p99, TLS | 243 / 373 µs | 365 / 1,509 µs |
-| Added delay per SSE event p50, TLS | 0.22 ms | 33.8 ms (buffered) |
-| Added time to first byte p50, TLS | 0.33 ms | 69 ms (buffered) |
-| RSS after load, TLS | 29 MB | 106 MB |
-| CPU per streamed MB, TLS | 4.0 ms | 1.6 ms |
-| Bulk throughput, TLS | 1.1 GB/s | 2.2 GB/s |
+| Added unary latency p50 / p99, plain | 213 / 184 µs | 445 / 1,314 µs |
+| Added unary latency p50 / p99, TLS | 260 / 629 µs | 371 / 2,301 µs |
+| CPU per request, TLS | 161 µs | 252 µs |
+| Added delay per SSE event p50, TLS | 0.15 ms | 34.4 ms (buffered) |
+| Added time to first byte p50, TLS | 0.45 ms | 72 ms (buffered) |
+| RSS after load, TLS | 53 MB | 302 MB |
+| CPU per streamed MB, TLS | 4.4 ms | 1.5 ms |
+| Bulk throughput, TLS | 1.0 GB/s | 2.3 GB/s |
 
 With equal CPU budgets (`TOKIO_WORKER_THREADS` / `GOMAXPROCS`), Wye still wins streaming and memory, and unary latency at 2 threads (TLS p50 828 vs 1,224 µs); at 4 threads TLS unary is a tie (715 vs 679 µs). KrakenD keeps a 1.5–2× lead on bulk CPU per MB (4 threads: 1.43 vs 2.29 ms plain, 3.16 ms TLS; 2 threads: 1.02 vs 2.1 ms).
 
 **Relevance.** Bulk throughput, the one area KrakenD leads, matters least for LLM traffic: streams are token-paced (KB/s), and Wye's added 0.2–0.3 ms is under 0.1% of a typical model response. What matters to users is streaming without buffering, concurrency without queuing, memory per idle stream, cancellation, and p99 under load; the [realistic-workload benchmark](roadmap.md#realistic-workload-benchmark) measures those workloads.
 
-**Realistic workloads** (`upload_*`, `tls_paced_*`; single comparison run, so numbers differ slightly from the gated baseline above):
+**Realistic workloads** (`upload_*`, `agent_upload_*`, `tls_paced_*`; the same single run, so numbers differ slightly from the gated baseline above):
 
 | Workload | Metric | Wye | KrakenD |
 |---|---|---|---|
-| 1 MiB uploads, concurrency 16, TLS | added latency p50 / p99 | 3.0 / 3.7 ms | 4.0 / 9.8 ms |
-| | CPU per uploaded MB | 2.5 ms | 2.5 ms |
-| 2,000 streams × 50 events/s × 100 B, TLS | added delay per event p50 / p99 | 2.1 / 3.8 ms | 296 / 569 ms (buffered) |
-| | CPU per event | 37 µs | 86 µs |
-| | memory per active stream | 5.9 KB | 74 KB |
+| 1 MiB uploads, concurrency 16, TLS | added latency p50 / p99 | 3.7 / 7.6 ms | 1.9 / 2.5 ms |
+| | CPU per uploaded MB | 3.1 ms | 2.0 ms |
+| 1 MiB Claude Code-shaped uploads, plain | added latency p50, CPU per MB | 2.8 ms, 1.49 ms | 3.7 ms, 1.79 ms |
+| 2,000 streams × 50 events/s × 100 B, TLS | added delay per event p50 / p99 | 1.5 / 5.4 ms | 295 / 572 ms (buffered) |
+| | CPU per event | 35 µs | 55 µs |
+| | memory per active stream | 7.9 KB | 95 KB |
+
+Change since the first comparison: KrakenD now leads TLS uploads (2.0 vs 3.1 ms CPU per MB, 1.9 vs 3.7 ms added p50), where the first run tied; on plain HTTP uploads the two are level (1.45 vs 1.49 ms/MB) and Wye leads the Claude Code-shaped body. Part of the gap is the 32 KiB client-connection buffer cap adopted since (smaller reads per upload, a recorded memory tradeoff); Wye's gated TLS upload cost is 2.6–2.9 ms/MB.
 
 The paced scenario loads the whole laptop (about 100k events/s, with mock, load client, and gateway sharing 16 threads), so its latencies include machine saturation; CPU per event and memory per stream are the precise signals. Stream starts are ramped over 2 s because macOS caps the listen backlog at 128; it runs only on the TLS + HTTP/2 path because over HTTP/1.1 every stream opens its own connections and repeated runs exhaust ephemeral ports. Unmeasured so far: Linux, multi-machine load, and a streaming-capable competitor.
 
@@ -133,20 +137,22 @@ The paced scenario loads the whole laptop (about 100k events/s, with mock, load 
 
 `wye-bench run ... --litellm <path>` runs every scenario through LiteLLM 1.105 (Python 3.14), in its leanest proxy configuration: the byte-level pass-through endpoint (`pass_through_endpoints`, `forward_headers`, mounted at `/pt/v1/messages` because LiteLLM's own `/v1/messages` parses and translates requests), no database and therefore no spend logging, one worker per core (16), upstream CA through `SSL_VERIFY`. It streams SSE, so every scenario runs. Its CPU and memory are summed over the whole process tree.
 
-Single run on the development laptop; zero failed requests or streams on either gateway:
+Single run on the development laptop, Wye at `35a0584` (2026-10-15); zero failed requests or streams on either gateway:
 
 | Metric | Path | Wye | LiteLLM |
 |---|---|---|---|
-| Added unary latency p50 / p99 | TLS | 0.26 / 0.67 ms | 48 / 174 ms |
-| Added time to first byte p50 | TLS | 0.46 ms | 32 ms |
-| Added delay per SSE event p50 / p99 | TLS | 0.19 / 0.34 ms | 2.0 / 42 ms |
-| 2,000 paced streams: delay per event p50 / p99 | TLS | 1.1 / 3.2 ms | 68 ms / 1.26 s |
-| 2,000 paced streams: CPU per event | TLS | 31 µs | 319 µs |
-| 1 MiB upload: added latency p50 | TLS | 5.2 ms | 61 ms |
-| 1 MiB upload: CPU per MB | TLS | 2.9 ms | 59 ms |
-| Memory per idle stream | TLS | 5.2 KB | 125 KB |
-| Process memory at idle | TLS | 27 MB | 8.6 GB |
-| Bulk throughput | TLS | 1.06 GB/s | 0.33 GB/s |
+| Added unary latency p50 / p99 | TLS | 0.26 / 0.63 ms | 44 / 141 ms |
+| CPU per request | TLS | 161 µs | 19.8 ms |
+| Added time to first byte p50 | TLS | 0.45 ms | 14 ms |
+| Added delay per SSE event p50 / p99 | TLS | 0.15 / 0.30 ms | 0.43 / 18 ms |
+| 2,000 paced streams: delay per event p50 / p99 | TLS | 1.5 / 5.4 ms | 34 ms / 0.61 s |
+| 2,000 paced streams: CPU per event | TLS | 35 µs | 312 µs |
+| 1 MiB upload: added latency p50 | TLS | 3.7 ms | 54 ms |
+| 1 MiB upload: CPU per MB | TLS | 3.1 ms | 52 ms |
+| 1 MiB Claude Code-shaped upload: CPU per MB | plain | 1.49 ms | 190 ms |
+| Memory per idle stream | TLS | 6.8 KB | 41 KB |
+| Process memory at idle | TLS | 27 MB | 8.7 GB |
+| Bulk throughput | TLS | 1.02 GB/s | 0.26 GB/s |
 
 Caveats: all processes share one 16-thread laptop, which penalizes LiteLLM's 16 workers under the load generator's competition; LiteLLM's regular API path (request parsing, translation, logging) would cost more than this pass-through. Plain-path memory per idle stream was negative for LiteLLM (noise on an 8.6 GB total) and is not a result.
 
