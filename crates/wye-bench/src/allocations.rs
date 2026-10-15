@@ -39,6 +39,20 @@ struct Counters {
     live_bytes: f64,
 }
 
+/// Live heap bytes of an alloc-stats build, or `None` for other builds.
+pub(crate) async fn live_bytes(target: &Target) -> Option<f64> {
+    let res = target
+        .client()
+        .request(target.get("/debug/alloc"))
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let body = res.into_body().collect().await.ok()?.to_bytes();
+    serde_json::from_slice::<Value>(&body).ok()?["live_bytes"].as_f64()
+}
+
 async fn counters(target: &Target) -> Counters {
     let res = target
         .client()

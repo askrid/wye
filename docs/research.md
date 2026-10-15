@@ -93,6 +93,8 @@ Model permissions (`models_` metrics: `[auth] models` plus a `models` claim, per
 
 OTLP log export (`otlp_` metrics, exporting to the mock; per-request scenarios, reported, not gated): CPU per request 116.5 vs 113 µs without export (within noise), added unary latency and SSE tails at low load in line with the other variants (event p99 151–158 µs). One run under a load average of 6 showed a 44 ms event p99 that two quiet reruns did not reproduce.
 
+**Soak** (`wye-bench load --wye <alloc-stats build> --scenario paced --seconds 150`; TLS + HTTP/2, batches of 2,000 token-paced streams at 50 events/s, 34 batches, 6.8M events, zero failed streams, 34 µs CPU per event): live heap after each batch rose about 600 KB over the first ~20 batches (connection lanes and buffers warming) and then held at 49,363 KB through the end; resident memory levelled off near 56 MB (the allocator keeping freed pages). No growth per stream served. A multi-hour soak remains to be run.
+
 **Profiles.** On the plain path, Wye's CPU is almost all system calls (`writev` and `recvfrom` per frame, connection setup); its own code is a small share. On the TLS path, profiles were first dominated by lock contention in `h2`, which guards all streams of one connection with one mutex; spreading streams over connections ([architecture.md](architecture.md#upstream-connections)) cut CPU per MB from 12.3 to 4.1 ms and unary added latency from 1.5 to 0.3 ms. Remaining CPU gaps come from relaying each frame as it arrives and from handing each chunk between the upstream and downstream connection tasks.
 
 ### Against KrakenD
