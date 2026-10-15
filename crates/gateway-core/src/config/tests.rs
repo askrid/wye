@@ -325,3 +325,23 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
         ConfigError::EmptyPath("upstream.api_key_file")
     );
 }
+
+#[test]
+fn http_version_is_auto_unless_pinned_to_1_1() {
+    let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+    assert_eq!(
+        parse(ok).unwrap().upstream.http_version,
+        UpstreamHttpVersion::Auto
+    );
+    assert_eq!(
+        parse(&format!("{ok}http_version = \"1.1\""))
+            .unwrap()
+            .upstream
+            .http_version,
+        UpstreamHttpVersion::Http1
+    );
+    assert!(matches!(
+        parse(&format!("{ok}http_version = \"2\"")),
+        Err(ConfigError::Invalid(_))
+    ));
+}

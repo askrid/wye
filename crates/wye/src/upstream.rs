@@ -122,13 +122,15 @@ impl Upstream {
         http.enforce_http(false);
         http.set_connect_timeout(Some(config.connect_timeout));
         http.set_nodelay(true);
-        let https = HttpsConnectorBuilder::new()
+        // Plain http is accepted by config validation only for loopback hosts.
+        let protocols = HttpsConnectorBuilder::new()
             .with_tls_config(tls_config(extra_roots)?)
-            // Plain http is accepted by config validation only for loopback hosts.
             .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http);
+            .enable_http1();
+        let https = match config.http_version {
+            config::UpstreamHttpVersion::Auto => protocols.enable_http2().wrap_connector(http),
+            config::UpstreamHttpVersion::Http1 => protocols.wrap_connector(http),
+        };
         Ok(Self {
             clients: ClientPool::new(|| Client::builder(TokioExecutor::new()).build(https.clone())),
             scheme: config.scheme.clone(),

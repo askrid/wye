@@ -131,6 +131,18 @@ pub struct Upstream {
     pub connect_timeout: Duration,
     pub response_header_timeout: Duration,
     pub stream_idle_timeout: Duration,
+    /// Protocols offered to a TLS upstream.
+    pub http_version: UpstreamHttpVersion,
+}
+
+/// Protocols Wye offers a TLS upstream through ALPN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamHttpVersion {
+    /// HTTP/2 when the upstream offers it, else HTTP/1.1 (the default).
+    Auto,
+    /// HTTP/1.1 only: no HTTP/2 flow control on uploads, one connection
+    /// per concurrent request.
+    Http1,
 }
 
 /// How Wye authenticates to the upstream.
@@ -168,6 +180,7 @@ pub enum ConfigError {
     EmptyPath(&'static str),
     Zero(&'static str),
     Percent(&'static str),
+    Invalid(&'static str),
 }
 
 impl fmt::Display for ConfigError {
@@ -196,6 +209,7 @@ impl fmt::Display for ConfigError {
             Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
+            Self::Invalid(message) => f.write_str(message),
         }
     }
 }

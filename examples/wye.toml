@@ -26,6 +26,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # connect_timeout_secs = 10
 # response_header_timeout_secs = 600
 # stream_idle_timeout_secs = 120
+# "auto" negotiates HTTP/2 when the upstream offers it; "1.1" avoids HTTP/2
+# flow control on large uploads at the cost of one connection per request:
+# http_version = "auto"
 # PEM file of extra trusted root certificates (e.g. a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
