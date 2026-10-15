@@ -15,6 +15,7 @@
 //!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
 //!   wye-bench compare <baseline.json> <results.json>
 //!   wye-bench adopt-new <baseline.json> <results.json>
+//!   wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload> --seconds N
 
 // Development tool, not on the request path: panics abort a benchmark run.
 #![allow(
@@ -29,6 +30,7 @@ mod client;
 mod gate;
 mod gateway_config;
 mod gateway_process;
+mod load;
 mod measure;
 mod mock;
 mod run;
@@ -78,6 +80,31 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        [
+            "load",
+            kind,
+            binary,
+            "--scenario",
+            scenario,
+            "--seconds",
+            seconds,
+        ] => {
+            let gateway = match *kind {
+                "--wye" => gateway_process::Gateway::Wye(binary),
+                "--krakend" => gateway_process::Gateway::KrakenD(binary),
+                _ => return usage(),
+            };
+            let Ok(seconds) = seconds.parse() else {
+                return usage();
+            };
+            mock::init_clock();
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(load::load(gateway, scenario, seconds));
+            ExitCode::SUCCESS
+        }
         ["adopt-new", baseline, current] => {
             gate::adopt_new(baseline, current);
             ExitCode::SUCCESS
@@ -90,7 +117,8 @@ fn usage() -> ExitCode {
     eprintln!(
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
-         wye-bench adopt-new <baseline.json> <results.json>"
+         wye-bench adopt-new <baseline.json> <results.json>\n  \
+         wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload> --seconds N"
     );
     ExitCode::from(2)
 }

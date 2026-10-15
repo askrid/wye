@@ -237,6 +237,10 @@ impl GatewayProcess {
         panic!("{} did not become healthy", launch.program);
     }
 
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
     pub fn target(&self) -> &Target {
         &self.target
     }
