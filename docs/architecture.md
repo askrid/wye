@@ -261,6 +261,7 @@ api_key_env = "ANTHROPIC_API_KEY"      # or: api_key_file = "/run/secrets/anthro
 connect_timeout_secs = 10
 response_header_timeout_secs = 600
 stream_idle_timeout_secs = 120
+http_version = "auto"                  # HTTP/2 via ALPN when offered; "1.1": no HTTP/2 flow control on uploads
 
 [auth]                                 # optional
 issuer = "wye"
