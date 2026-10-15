@@ -126,6 +126,8 @@ For container platforms, `upstream.api_key_file` reads the provider key from a m
 
 From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) costs Wye about 10 ms of CPU per second, about 1% of a core, and under 100 KB of memory. A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
 
+**Token rate.** Wye does not lower a stream's tokens per second: it relays each SSE event as it arrives, adding a roughly constant delay per event (about 0.15 ms p50 at light load, about 1.5 ms p50 with 2,000 streams at 100k events/s on the laptop) that does not accumulate along the stream. At 50–100 tokens/s the provider's 10–20 ms between tokens dominates; the first token arrives about 0.45 ms later. Capacity follows from CPU per event: about 35 µs on the TLS path, so one core relays about 28,000 events/s, roughly 570 concurrent streams at 50 events/s (an Anthropic delta often carries more than one token). Model permissions and cache diagnostics add cost per request and per uploaded MB, not per streamed event ([research.md](research.md#current-harness-and-baseline)).
+
 ## Telemetry
 
 Wye emits OTLP. External systems collect, store, alert, and visualize. A collector is optional if the backend accepts OTLP directly. No separate Prometheus `/metrics` endpoint.
