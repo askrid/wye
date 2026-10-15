@@ -85,3 +85,25 @@ async fn concurrent_streams_beyond_one_connection_limit_are_not_queued() {
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), STREAMS);
     drop(open);
 }
+
+#[tokio::test]
+async fn http_version_pins_the_upstream_protocol() {
+    for (extra, expected) in [
+        ("", Version::HTTP_2),
+        ("http_version = \"1.1\"", Version::HTTP_11),
+    ] {
+        let ca = TestCa::generate();
+        let (tx, mut rx) = mpsc::channel::<Version>(1);
+        let handler: Handler = Arc::new(move |seen: Seen| {
+            let tx = tx.clone();
+            Box::pin(async move {
+                tx.send(seen.version).await.unwrap();
+                full(StatusCode::OK, "{}")
+            })
+        });
+        let h = Harness::start_tls_with(handler, &ca, true, None, extra).await;
+        let res = h.send(messages(), "{}").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(rx.recv().await.unwrap(), expected, "{extra:?}");
+    }
+}

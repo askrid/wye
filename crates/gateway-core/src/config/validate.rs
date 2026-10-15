@@ -76,6 +76,7 @@ pub(super) struct RawUpstream {
     pub(super) connect_timeout_secs: Option<u64>,
     pub(super) response_header_timeout_secs: Option<u64>,
     pub(super) stream_idle_timeout_secs: Option<u64>,
+    pub(super) http_version: Option<String>,
 }
 
 /// Default `max_credential_ttl_secs`: one week.
@@ -226,6 +227,15 @@ pub(super) fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigErro
                 .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
             "upstream.response_header_timeout_secs",
         )?,
+        http_version: match raw.http_version.as_deref() {
+            None | Some("auto") => UpstreamHttpVersion::Auto,
+            Some("1.1") => UpstreamHttpVersion::Http1,
+            Some(_) => {
+                return Err(ConfigError::Invalid(
+                    "upstream.http_version must be \"auto\" or \"1.1\"",
+                ));
+            }
+        },
         stream_idle_timeout: secs(
             raw.stream_idle_timeout_secs
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
