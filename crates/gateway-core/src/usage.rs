@@ -2,8 +2,9 @@
 //!
 //! [`SseUsageScanner`] reads the forwarded bytes without changing, delaying, or
 //! copying them. It keeps at most one partial line, parses JSON only for the two
-//! events that carry usage (`message_start` and `message_delta`), and skips
-//! every other event after reading its line prefix. HTTP chunk boundaries are
+//! events that carry usage (`message_start` and `message_delta`) and for
+//! `content_block_start` (once per content block, to count `tool_use` blocks by
+//! tool name), and skips every other event after reading its line prefix. HTTP chunk boundaries are
 //! not SSE boundaries: lines may be split anywhere, including inside UTF-8.
 
 use serde::Deserialize;
@@ -13,6 +14,13 @@ use serde::Deserialize;
 pub const MAX_USAGE_LINE_BYTES: usize = 64 * 1024;
 /// Bytes kept from lines of other events: enough to recognize `event:` lines.
 const CLASSIFY_PREFIX_BYTES: usize = 32;
+/// Longest `content_block_start` data line read; a `tool_use` start carries
+/// an empty `input`, so longer lines are other block types and are skipped.
+const MAX_BLOCK_START_LINE_BYTES: usize = 4 * 1024;
+/// Distinct tool names counted per response; further ones count as overflow.
+pub const MAX_TOOL_NAMES: usize = 8;
+/// Longest tool name counted by name.
+pub const MAX_TOOL_NAME_BYTES: usize = 64;
 
 /// Token counts reported by the provider. `None` when the stream did not report the field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -49,6 +57,69 @@ enum Event {
     Other,
     MessageStart,
     MessageDelta,
+    ContentBlockStart,
+}
+
+/// `tool_use` blocks of one response, by tool name. Fixed size, so counting
+/// never allocates after the first tool call boxes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCalls {
+    names: [([u8; MAX_TOOL_NAME_BYTES], u8, u32); MAX_TOOL_NAMES],
+    len: usize,
+    /// Calls whose name was too long, not a plain token, or beyond
+    /// [`MAX_TOOL_NAMES`] distinct names.
+    other: u32,
+}
+
+impl ToolCalls {
+    fn new() -> Self {
+        Self {
+            names: [([0; MAX_TOOL_NAME_BYTES], 0, 0); MAX_TOOL_NAMES],
+            len: 0,
+            other: 0,
+        }
+    }
+
+    fn count(&mut self, name: &str) {
+        if crate::agent::token(name.as_bytes()).is_none() || name.len() > MAX_TOOL_NAME_BYTES {
+            self.other = self.other.saturating_add(1);
+            return;
+        }
+        let used = self.names.get_mut(..self.len).unwrap_or_default();
+        if let Some(entry) = used
+            .iter_mut()
+            .find(|(bytes, len, _)| bytes.get(..usize::from(*len)) == Some(name.as_bytes()))
+        {
+            entry.2 = entry.2.saturating_add(1);
+        } else if let Some(entry) = self.names.get_mut(self.len) {
+            if let Some(dst) = entry.0.get_mut(..name.len()) {
+                dst.copy_from_slice(name.as_bytes());
+            }
+            // The token check above bounds the length to 64.
+            entry.1 = name.len() as u8;
+            entry.2 = 1;
+            self.len += 1;
+        } else {
+            self.other = self.other.saturating_add(1);
+        }
+    }
+
+    /// Tool names and call counts, in first-call order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, u32)> {
+        self.names
+            .get(..self.len)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|(bytes, len, count)| {
+                let name = std::str::from_utf8(bytes.get(..usize::from(*len))?).ok()?;
+                Some((name, *count))
+            })
+    }
+
+    /// Calls not counted by name.
+    pub fn other(&self) -> u32 {
+        self.other
+    }
 }
 
 /// Incremental usage scanner for one response stream.
@@ -61,6 +132,9 @@ pub struct SseUsageScanner {
     event: Event,
     usage: Usage,
     model: Option<Box<str>>,
+    /// Boxed on the first `tool_use` block: responses without tool calls
+    /// stay small.
+    tools: Option<Box<ToolCalls>>,
     saw_start: bool,
     saw_delta: bool,
     /// A usage event could not be read; the counts are not trustworthy.
@@ -81,6 +155,7 @@ impl SseUsageScanner {
             event: Event::Other,
             usage: Usage::default(),
             model: None,
+            tools: None,
             saw_start: false,
             saw_delta: false,
             corrupt: false,
@@ -116,6 +191,7 @@ impl SseUsageScanner {
         let limit = match self.event {
             Event::Other => CLASSIFY_PREFIX_BYTES,
             Event::MessageStart | Event::MessageDelta => MAX_USAGE_LINE_BYTES,
+            Event::ContentBlockStart => MAX_BLOCK_START_LINE_BYTES,
         };
         let room = limit.saturating_sub(self.line.len());
         if bytes.len() > room {
@@ -133,6 +209,7 @@ impl SseUsageScanner {
             self.event = match name.trim_ascii() {
                 b"message_start" => Event::MessageStart,
                 b"message_delta" => Event::MessageDelta,
+                b"content_block_start" => Event::ContentBlockStart,
                 _ => Event::Other,
             };
         } else if let Some(data) = line.strip_prefix(b"data:") {
@@ -140,7 +217,8 @@ impl SseUsageScanner {
                 return;
             }
             if truncated {
-                self.corrupt = true;
+                // An oversized block start is not a tool call; usage is not affected.
+                self.corrupt |= self.event != Event::ContentBlockStart;
                 return;
             }
             self.read_data(data.trim_ascii());
@@ -168,8 +246,30 @@ impl SseUsageScanner {
                 }
                 Err(_) => self.corrupt = true,
             },
+            // Borrowed parse: no allocation. A name with escapes fails to
+            // borrow and is skipped, like any malformed block start.
+            Event::ContentBlockStart => {
+                if let Ok(start) = serde_json::from_slice::<BlockStartData<'_>>(data)
+                    && start.content_block.kind == "tool_use"
+                {
+                    self.tools
+                        .get_or_insert_with(|| Box::new(ToolCalls::new()))
+                        .count(start.content_block.name.unwrap_or_default());
+                }
+            }
             Event::Other => {}
         }
+    }
+
+    /// `tool_use` blocks the response started, by tool name; `None` when
+    /// it requested no tool calls.
+    pub fn tool_calls(&self) -> Option<&ToolCalls> {
+        self.tools.as_deref()
+    }
+
+    /// Moves the tool calls out, keeping their allocation.
+    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
+        self.tools.take()
     }
 
     pub fn usage(&self) -> Usage {
@@ -199,6 +299,19 @@ struct StartData {
 struct StartMessage {
     model: Option<String>,
     usage: Option<RawUsage>,
+}
+
+#[derive(Deserialize)]
+struct BlockStartData<'a> {
+    #[serde(borrow)]
+    content_block: ContentBlock<'a>,
+}
+
+#[derive(Deserialize)]
+struct ContentBlock<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    name: Option<&'a str>,
 }
 
 #[derive(Deserialize)]

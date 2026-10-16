@@ -109,6 +109,10 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
             attribute(key, Value::Int(count));
         }
     }
+    if let Some(tools) = &line.tool_calls {
+        let json = serde_json::to_string(tools).unwrap_or_default();
+        attribute("wye.tool_calls", Value::Str(&json));
+    }
     if let Some(miss) = line.cache_miss {
         attribute("wye.cache_miss", Value::Str(miss));
     }
@@ -280,6 +284,7 @@ mod tests {
             compaction: None,
             context_compacted: None,
             tool_durations: tools.map(crate::usage_log::agent::ToolDurations),
+            tool_calls: None,
             model: None,
             usage_status: "not_observed",
             input_tokens: None,

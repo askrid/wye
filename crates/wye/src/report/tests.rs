@@ -3,7 +3,7 @@
 use super::*;
 
 const LOG: &str = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":1500.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"main","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":100,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
-{"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}]}
+{"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}],"tool_calls":{"Bash":2,"Grep":1}}
 {"event":"request","unix_ms":5000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":900.0,"session_id":"session-aaaa-1","request_class":"compaction","compaction":"auto","usage_status":"complete","input_tokens":20,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":6000}
 {"event":"request","unix_ms":2000,"path":"/v1/messages","status":529,"outcome":"gateway_error","duration_ms":0.1,"session_id":"session-bbbb-2","usage_status":"not_observed"}
 not json
@@ -35,7 +35,8 @@ fn summarizes_sessions_classes_and_cache_misses() {
     assert_eq!(row("all")[6], "50.7%");
     assert_eq!(row("compaction")[1], "1");
     assert_eq!(row("(no")[2], "1", "the request without hints");
-    assert_eq!(row("Bash")[1..], ["1", "calls", "0.7s"]);
+    assert_eq!(row("Bash")[1..], ["2", "1", "0.7s"]);
+    assert_eq!(row("Grep")[1..], ["1", "0", "0.0s"]);
     let session = row("session-");
     assert_eq!(session[1], "(alice)");
     assert!(out.contains("1 compactions"), "{out}");
