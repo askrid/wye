@@ -95,6 +95,19 @@ OTLP log export (`otlp_` metrics, exporting to the mock; per-request scenarios, 
 
 **Soak** (`wye-bench load --wye <alloc-stats build> --scenario paced --seconds 150`; TLS + HTTP/2, batches of 2,000 token-paced streams at 50 events/s, 34 batches, 6.8M events, zero failed streams, 34 µs CPU per event): live heap after each batch rose about 600 KB over the first ~20 batches (connection lanes and buffers warming) and then held at 49,363 KB through the end; resident memory levelled off near 56 MB (the allocator keeping freed pages). No growth per stream served. A multi-hour soak remains to be run.
 
+**Capacity per core** (2026-10-16, `wye-bench load --wye <release> --scenario capacity`; Wye with `TOKIO_WORKER_THREADS=1`, TLS + HTTP/2, batches of token-paced streams at 50 events/s of 100 bytes, each run first directly against the mock and then through Wye; two runs, load average about 2):
+
+| Streams | Events/s | Wye cores | CPU µs/event | Direct p99 | Added p99 |
+|---|---|---|---|---|---|
+| 500 | 11,900 | 0.24 | 20 | 0.9–1.1 ms | 4.1–4.4 ms |
+| 1,000 | 23,900 | 0.37–0.39 | 16 | 1.5–2.2 ms | 6.0–6.4 ms |
+| 1,500 | 35,800–35,900 | 0.46–0.48 | 13 | 2.6–3.0 ms | 8.3–8.9 ms |
+| 2,000 | 47,900 | 0.57–0.58 | 12 | 3.2–3.3 ms | 12.1–13.0 ms |
+| 3,000 | 70,500–71,300 | 0.71–0.73 | 10 | 4.1–4.3 ms | 67–79 ms |
+| 4,000 | 88,400–91,000 | 0.74–0.76 | 8 | 5.2–5.3 ms | 219–258 ms |
+
+Sustainable (added p99 at most 10 ms, no failures): 1,500 streams, about 36,000 events/s on one worker thread. The limit is queueing on the single thread, not CPU: average utilization is below one core because each batch includes ramp-up and tail, while the peak saturates. CPU per event falls with load (events batch into fewer wakeups and writes) and is about a third of the 35 µs measured with the default multi-thread runtime at 2,000 streams, which spends the difference on cross-thread wakeups; whether fewer worker threads serve more streams per core in production needs a multi-core capacity run (research, not a default change).
+
 **Profiles.** On the plain path, Wye's CPU is almost all system calls (`writev` and `recvfrom` per frame, connection setup); its own code is a small share. On the TLS path, profiles were first dominated by lock contention in `h2`, which guards all streams of one connection with one mutex; spreading streams over connections ([architecture.md](architecture.md#upstream-connections)) cut CPU per MB from 12.3 to 4.1 ms and unary added latency from 1.5 to 0.3 ms. Remaining CPU gaps come from relaying each frame as it arrives and from handing each chunk between the upstream and downstream connection tasks.
 
 ### Against KrakenD
