@@ -28,24 +28,20 @@ use crate::{
     diagnostics::PromptSlot,
     discovery::ModelCatalog,
     gauge::Gauge,
-    permissions::{HoldError, OverTokenLimit, RequestBody, hold_until_model},
-    upstream::{ForwardError, PolicyRefusal, Upstream, UpstreamBody},
+    permissions::{OverTokenLimit, RequestBody, hold_until_model},
+    upstream::{Upstream, UpstreamBody},
     usage_log::{Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
 };
+
+mod responses;
+
+use responses::{empty, error, forward_error, hold_error, overloaded};
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
 const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
 /// W3C trace context: the parent of the request's OTLP span.
 const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
-
-/// Anthropic's status for an overloaded API; clients back off and retry.
-const OVERLOADED: u16 = 529;
-/// Seconds a client waits before retrying an overload Wye generated. Integer
-/// seconds at most 60: Claude Code stops retrying above that.
-const OVERLOAD_RETRY_AFTER: HeaderValue = HeaderValue::from_static("1");
-const RETRY_AFTER: HeaderName = HeaderName::from_static("retry-after");
-const SHOULD_RETRY: HeaderName = HeaderName::from_static("x-should-retry");
 
 /// Per-process gateway state shared by every connection. Immutable after
 /// startup except the in-flight counter and the draining flag.
@@ -371,74 +367,4 @@ fn otlp_target(
         client,
         &telemetry.service_name,
     ))
-}
-
-fn hold_error(e: HoldError) -> Response<ResBody> {
-    match e {
-        HoldError::Model(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", e.as_str()),
-        HoldError::Overloaded => overloaded("gateway is holding too many request bytes"),
-        HoldError::TooLarge => error(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request_too_large",
-            "request body exceeds the gateway limit",
-        ),
-        HoldError::Body => error(
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            "request body could not be read",
-        ),
-    }
-}
-
-fn forward_error(e: ForwardError) -> Response<ResBody> {
-    match e {
-        ForwardError::HeaderTimeout => error(
-            StatusCode::GATEWAY_TIMEOUT,
-            "api_error",
-            "upstream did not respond in time",
-        ),
-        ForwardError::Upstream => error(
-            StatusCode::BAD_GATEWAY,
-            "api_error",
-            "upstream request failed",
-        ),
-        ForwardError::Policy(PolicyRefusal::Invalid(e)) => {
-            error(StatusCode::BAD_REQUEST, "invalid_request_error", e.as_str())
-        }
-        ForwardError::Policy(PolicyRefusal::OverTokenLimit(message)) => {
-            error(StatusCode::FORBIDDEN, "permission_error", &message)
-        }
-    }
-}
-
-/// An overload Wye generated before contacting the provider: always safe to
-/// retry, after a short wait.
-fn overloaded(message: &str) -> Response<ResBody> {
-    let mut res = error(
-        StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
-        "overloaded_error",
-        message,
-    );
-    let headers = res.headers_mut();
-    headers.insert(RETRY_AFTER, OVERLOAD_RETRY_AFTER);
-    headers.insert(SHOULD_RETRY, HeaderValue::from_static("true"));
-    res
-}
-
-fn empty(status: StatusCode) -> Response<ResBody> {
-    let mut res = Response::new(Either::Left(Full::new(Bytes::new())));
-    *res.status_mut() = status;
-    res
-}
-
-/// Gateway-generated errors use Anthropic's error shape so clients handle them like upstream errors.
-fn error(status: StatusCode, kind: &'static str, message: &str) -> Response<ResBody> {
-    let body = format!(r#"{{"type":"error","error":{{"type":"{kind}","message":"{message}"}}}}"#);
-    let mut res = Response::new(Either::Left(Full::new(Bytes::from(body))));
-    *res.status_mut() = status;
-    res.headers_mut().insert(
-        CONTENT_TYPE,
-        http::HeaderValue::from_static("application/json"),
-    );
-    res
 }
