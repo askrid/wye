@@ -38,9 +38,12 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     let base_url = format!("{}://{upstream}", if tls { "https" } else { "http" });
     let dir = std::env::temp_dir().join(format!("wye-bench-load-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    // Capacity is measured per core: one Tokio worker thread for the gateway.
+    // Capacity is measured per worker thread: one by default, or
+    // `WYE_BENCH_GATEWAY_THREADS` for a multi-core run.
+    let threads = std::env::var("WYE_BENCH_GATEWAY_THREADS").unwrap_or_else(|_| "1".into());
+    let capacity_env = [("TOKIO_WORKER_THREADS", threads.as_str())];
     let env: &[(&str, &str)] = if scenario == "capacity" {
-        &[("TOKIO_WORKER_THREADS", "1")]
+        &capacity_env
     } else {
         &[]
     };
@@ -55,7 +58,10 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     .await;
     if scenario == "capacity" {
         let direct = crate::client::Target::tls(upstream, ca.ca_cert());
-        crate::capacity::run(&direct, &process).await;
+        let threads = threads
+            .parse()
+            .expect("WYE_BENCH_GATEWAY_THREADS must be a number");
+        crate::capacity::run(&direct, &process, threads).await;
         drop(process);
         let _ = std::fs::remove_dir_all(dir);
         return;
