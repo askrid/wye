@@ -157,7 +157,7 @@ fn tool_calls_are_summed_by_name() {
     let mut metrics = Metrics::new(0);
     for _ in 0..2 {
         metrics.record(&Line {
-            tool_calls: Some(crate::usage_log::ToolCallsField(&calls)),
+            tool_calls: Some(crate::usage_log::line::ToolCallsField(&calls)),
             ..line("/v1/messages", 200, 1.0, None)
         });
     }
