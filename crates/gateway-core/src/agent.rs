@@ -6,6 +6,8 @@
 //! tokens before they become attributes, so a client cannot grow metric
 //! series or inject unbounded text.
 
+use std::borrow::Cow;
+
 /// Longest identifier or agent type kept; longer values are dropped.
 pub const MAX_TOKEN_BYTES: usize = 128;
 
@@ -104,6 +106,48 @@ pub fn token(value: &[u8]) -> Option<&str> {
     }
 }
 
+/// Most tool entries read from `x-claude-code-prev-tool-durations`; Claude
+/// Code sends at most 32.
+pub const MAX_TOOL_ENTRIES: usize = 32;
+
+/// The tool calls whose results a request carries, from
+/// `x-claude-code-prev-tool-durations` (`Bash=742;Read=9`): tool name and run
+/// time in milliseconds, in the order Claude Code collected the results.
+/// Names are percent-decoded and kept only when they are a [`token`];
+/// malformed entries are skipped, and at most [`MAX_TOOL_ENTRIES`] are read.
+pub fn tool_durations(value: &[u8]) -> impl Iterator<Item = (Cow<'_, str>, u64)> {
+    value
+        .split(|&b| b == b';')
+        .take(MAX_TOOL_ENTRIES)
+        .filter_map(|entry| {
+            let eq = entry.iter().position(|&b| b == b'=')?;
+            let (name, ms) = (entry.get(..eq)?, entry.get(eq + 1..)?);
+            let ms = std::str::from_utf8(ms).ok()?.parse::<u64>().ok()?;
+            let name = percent_decode(name)?;
+            token(name.as_bytes())?;
+            Some((name, ms))
+        })
+}
+
+/// `None` for a malformed escape or a result that is not UTF-8.
+fn percent_decode(raw: &[u8]) -> Option<Cow<'_, str>> {
+    if !raw.contains(&b'%') {
+        return std::str::from_utf8(raw).ok().map(Cow::Borrowed);
+    }
+    let mut out = Vec::with_capacity(raw.len());
+    let mut bytes = raw.iter();
+    while let Some(&b) = bytes.next() {
+        if b == b'%' {
+            let hex = [*bytes.next()?, *bytes.next()?];
+            let hex = std::str::from_utf8(&hex).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+        } else {
+            out.push(b);
+        }
+    }
+    String::from_utf8(out).ok().map(Cow::Owned)
+}
+
 /// Why a request read nothing from the prompt cache although it wrote to it,
 /// as far as one request can tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +228,39 @@ mod tests {
         assert_eq!(token(b"team:reviewer"), Some("team:reviewer"));
         for bad in [&b""[..], b"a b", b"a\"b", b"\xc3\xa9", &[b'a'; 129]] {
             assert_eq!(token(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn tool_durations_parse_bounded_valid_entries() {
+        let parsed: Vec<_> =
+            tool_durations(b"Bash=742;Read=9;mcp__gh__issue=12;bad;Web%20Fetch=3;Edit=x;T%3Ax=4")
+                .collect();
+        assert_eq!(
+            parsed,
+            [
+                (Cow::from("Bash"), 742),
+                (Cow::from("Read"), 9),
+                (Cow::from("mcp__gh__issue"), 12),
+                (Cow::from("T:x"), 4),
+            ],
+            "the decoded space fails the token check; malformed entries are skipped"
+        );
+        let many = "A=1;".repeat(40);
+        assert_eq!(tool_durations(many.as_bytes()).count(), MAX_TOOL_ENTRIES);
+        assert_eq!(tool_durations(b"A%2=1;B%zz=1;=5").count(), 0);
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn tool_durations_never_yield_unbounded_or_unsafe_names(
+            raw in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..512),
+        ) {
+            let parsed: Vec<_> = tool_durations(&raw).collect();
+            proptest::prop_assert!(parsed.len() <= MAX_TOOL_ENTRIES);
+            for (name, _) in parsed {
+                proptest::prop_assert!(token(name.as_bytes()).is_some());
+            }
         }
     }
 

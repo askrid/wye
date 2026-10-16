@@ -68,7 +68,11 @@ async fn usage_records_carry_claude_code_agent_headers() {
             "x-claude-code-prompt-id",
             "5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a",
         )
-        .header("x-claude-code-context-compacted", "manual");
+        .header("x-claude-code-context-compacted", "manual")
+        .header(
+            "x-claude-code-prev-tool-durations",
+            "Bash=742;Web%20Fetch=3;Read=9",
+        );
     read_body(h.send(req, "{}").await).await;
 
     let record = h.usage_record().await;
@@ -83,6 +87,11 @@ async fn usage_records_carry_claude_code_agent_headers() {
     assert_eq!(record["context_compacted"], "manual");
     assert!(record.get("compaction").is_none());
     assert_eq!(record["cache_miss"], "after_compaction");
+    assert_eq!(
+        record["tool_durations"],
+        serde_json::json!([{"name": "Bash", "ms": 742}, {"name": "Read", "ms": 9}]),
+        "a decoded name outside the token alphabet is dropped"
+    );
 
     // Without the headers, none of the fields appear.
     read_body(h.send(messages(), "{}").await).await;
