@@ -3,6 +3,7 @@
 //! - `startup`: secrets and files referenced by the config
 //! - `server`: listener, connections, graceful shutdown
 //! - `auth`: gateway credential checks, cached per connection
+//! - `discovery`: `GET /v1/models`, the model catalog filtered by permissions
 //! - `gateway`: routing and gateway-generated responses
 //! - `explain`: `wye explain`, the server's decisions for one request, offline
 //! - `policy_test`: `wye policy-test`, sample requests checked against expected decisions
@@ -19,6 +20,7 @@
 pub mod alloc_stats;
 mod auth;
 mod diagnostics;
+mod discovery;
 mod explain;
 mod gateway;
 mod gauge;

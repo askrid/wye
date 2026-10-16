@@ -26,6 +26,7 @@ use crate::{
     Resources, StartupError,
     auth::{ConnectionAuth, authenticate},
     diagnostics::PromptSlot,
+    discovery::ModelCatalog,
     gauge::Gauge,
     permissions::{HoldError, OverTokenLimit, RequestBody, hold_until_model},
     upstream::{ForwardError, PolicyRefusal, Upstream, UpstreamBody},
@@ -40,6 +41,11 @@ const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
 const OVERLOADED: u16 = 529;
+/// Seconds a client waits before retrying an overload Wye generated. Integer
+/// seconds at most 60: Claude Code stops retrying above that.
+const OVERLOAD_RETRY_AFTER: HeaderValue = HeaderValue::from_static("1");
+const RETRY_AFTER: HeaderName = HeaderName::from_static("retry-after");
+const SHOULD_RETRY: HeaderName = HeaderName::from_static("x-should-retry");
 
 /// Per-process gateway state shared by every connection. Immutable after
 /// startup except the in-flight counter and the draining flag.
@@ -51,6 +57,8 @@ pub struct Gateway {
     models: Option<Vec<ModelPattern>>,
     /// Largest `max_tokens` any credential may request.
     max_output_tokens: Option<u64>,
+    /// `GET /v1/models`, when `[discovery]` is configured.
+    catalog: Option<ModelCatalog>,
     /// Request bytes held while reading `model`, across all requests.
     held_bytes: Gauge,
     max_held_request_bytes: usize,
@@ -75,6 +83,12 @@ impl Gateway {
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
             max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),
+            catalog: config.discovery.as_ref().map(|discovery| {
+                ModelCatalog::new(
+                    discovery,
+                    config.auth.as_ref().and_then(|auth| auth.models.as_deref()),
+                )
+            }),
             held_bytes: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
@@ -156,6 +170,9 @@ impl Gateway {
         let path = match (req.method(), req.uri().path()) {
             (&Method::POST, "/v1/messages") => "/v1/messages",
             (&Method::POST, "/v1/messages/count_tokens") => "/v1/messages/count_tokens",
+            (&Method::GET, "/v1/models") if self.catalog.is_some() => {
+                return self.models(&req, connection);
+            }
             (method, path) => return self.local(method, path),
         };
         let mut info = RequestInfo {
@@ -184,6 +201,34 @@ impl Gateway {
         self.forward(req, info, log).await
     }
 
+    /// The catalog this caller's credential may use. Authenticated like a
+    /// proxied request when `[auth]` is set, since the answer reveals the
+    /// credential's permissions. Not a usage record: nothing reaches the
+    /// provider.
+    fn models(&self, req: &Request<Incoming>, connection: &ConnectionAuth) -> Response<ResBody> {
+        let Some(catalog) = &self.catalog else {
+            return self.local(req.method(), req.uri().path());
+        };
+        let identity = match &self.verifier {
+            None => None,
+            Some(verifier) => match authenticate(verifier, req.headers(), connection) {
+                Ok(identity) => Some(identity),
+                Err(_) => {
+                    return error(
+                        StatusCode::UNAUTHORIZED,
+                        "authentication_error",
+                        "invalid or missing gateway credential",
+                    );
+                }
+            },
+        };
+        let body = catalog.list(identity.as_ref().and_then(|i| i.models.as_deref()));
+        let mut res = Response::new(Either::Left(Full::new(body)));
+        res.headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        res
+    }
+
     async fn forward(
         &self,
         req: Request<Incoming>,
@@ -191,11 +236,7 @@ impl Gateway {
         log: &UsageLog,
     ) -> Response<ResBody> {
         let Some(permit) = self.in_flight.try_hold(self.max_concurrent_requests) else {
-            let res = error(
-                StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
-                "overloaded_error",
-                "gateway is at its concurrent request limit",
-            );
+            let res = overloaded("gateway is at its concurrent request limit");
             log.gateway_error(info, res.status());
             return res;
         };
@@ -335,11 +376,7 @@ fn otlp_target(
 fn hold_error(e: HoldError) -> Response<ResBody> {
     match e {
         HoldError::Model(e) => error(StatusCode::BAD_REQUEST, "invalid_request_error", e.as_str()),
-        HoldError::Overloaded => error(
-            StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
-            "overloaded_error",
-            "gateway is holding too many request bytes",
-        ),
+        HoldError::Overloaded => overloaded("gateway is holding too many request bytes"),
         HoldError::TooLarge => error(
             StatusCode::PAYLOAD_TOO_LARGE,
             "request_too_large",
@@ -372,6 +409,20 @@ fn forward_error(e: ForwardError) -> Response<ResBody> {
             error(StatusCode::FORBIDDEN, "permission_error", &message)
         }
     }
+}
+
+/// An overload Wye generated before contacting the provider: always safe to
+/// retry, after a short wait.
+fn overloaded(message: &str) -> Response<ResBody> {
+    let mut res = error(
+        StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
+        "overloaded_error",
+        message,
+    );
+    let headers = res.headers_mut();
+    headers.insert(RETRY_AFTER, OVERLOAD_RETRY_AFTER);
+    headers.insert(SHOULD_RETRY, HeaderValue::from_static("true"));
+    res
 }
 
 fn empty(status: StatusCode) -> Response<ResBody> {

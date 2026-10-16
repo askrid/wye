@@ -345,3 +345,34 @@ fn http_version_is_auto_unless_pinned_to_1_1() {
         Err(ConfigError::Invalid(_))
     ));
 }
+
+#[test]
+fn discovery_lists_unique_model_names() {
+    let with = |models: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+             [discovery]\nmodels = [{models}]"
+        ))
+    };
+    let config = with(
+        r#"{ id = "claude-sonnet-4-6", display_name = "Claude Sonnet 4.6", description = "Daily driver" }, { id = "claude-haiku-4-5" }"#,
+    )
+    .unwrap();
+    let models = config.discovery.unwrap().models;
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0].display_name.as_deref(), Some("Claude Sonnet 4.6"));
+    assert_eq!(models[1].description, None);
+
+    for bad in [
+        "",
+        r#"{ id = "" }"#,
+        r#"{ id = "claude-*" }"#,
+        r#"{ id = "a" }, { id = "a" }"#,
+        r#"{ id = "a", extra = 1 }"#,
+    ] {
+        assert!(with(bad).is_err(), "{bad}");
+    }
+    let long = "x".repeat(1025);
+    assert!(with(&format!(r#"{{ id = "a", description = "{long}" }}"#)).is_err());
+}
