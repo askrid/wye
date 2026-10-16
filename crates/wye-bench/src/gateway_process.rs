@@ -90,6 +90,19 @@ impl GatewayProcess {
         dir: &Path,
         name: &str,
     ) -> Self {
+        Self::start_with_env(gateway, upstream_base_url, ca_pem, dir, name, &[]).await
+    }
+
+    /// [`Self::start`] with extra environment variables for the gateway
+    /// process only (for example `TOKIO_WORKER_THREADS`).
+    pub async fn start_with_env(
+        gateway: Gateway<'_>,
+        upstream_base_url: &str,
+        ca_pem: Option<&str>,
+        dir: &Path,
+        name: &str,
+        extra_env: &[(&'static str, &str)],
+    ) -> Self {
         let port = {
             let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             probe.local_addr().unwrap().port()
@@ -214,6 +227,7 @@ impl GatewayProcess {
             .process_group(0)
             .args(&launch.args)
             .envs(launch.env)
+            .envs(extra_env.iter().copied())
             .stdout(stdout)
             .stderr(stderr)
             .kill_on_drop(true)
