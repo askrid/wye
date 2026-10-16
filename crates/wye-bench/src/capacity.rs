@@ -2,7 +2,8 @@
 //! gateway core relays before its added delay grows.
 //!
 //! The gateway runs with one Tokio worker thread (`TOKIO_WORKER_THREADS=1`,
-//! set for the child only), on the TLS + HTTP/2 path. Each step runs a batch
+//! set for the child only; `WYE_BENCH_GATEWAY_THREADS` changes the count),
+//! on the TLS + HTTP/2 path. Each step runs a batch
 //! of streams at 50 events/s of 100 bytes, first directly against the mock
 //! and then through the gateway, and reports the events per second relayed,
 //! the gateway's CPU in cores, and the p99 event delay the gateway adds over
@@ -16,7 +17,9 @@ use std::time::{Duration, Instant};
 use crate::{client::Target, gateway_process::GatewayProcess, scenarios, stats};
 
 /// Stream counts tried, in order.
-const STEPS: [usize; 8] = [500, 1_000, 1_500, 2_000, 3_000, 4_000, 6_000, 8_000];
+const STEPS: [usize; 10] = [
+    500, 1_000, 1_500, 2_000, 3_000, 4_000, 6_000, 8_000, 12_000, 16_000,
+];
 const EVENTS: u32 = 100;
 const SIZE: usize = 100;
 const INTERVAL_US: u64 = 20_000;
@@ -24,8 +27,8 @@ const RAMP: Duration = Duration::from_millis(2_000);
 /// Added p99 event delay accepted at a sustainable load: well under a
 /// typical inter-token gap of 20 ms.
 pub const MAX_ADDED_P99_US: f64 = 10_000.0;
-/// Gateway CPU, in cores, treated as saturated for one worker thread.
-const SATURATED_CORES: f64 = 0.95;
+/// Share of the worker threads' cores treated as saturated.
+const SATURATED_SHARE: f64 = 0.95;
 
 struct Step {
     streams: usize,
@@ -51,11 +54,11 @@ async fn batch(target: &Target, streams: usize) -> (Vec<u64>, usize, usize, f64)
 }
 
 /// Runs the steps and prints one row per step and the sustainable maximum.
-pub async fn run(direct: &Target, gateway: &GatewayProcess) {
+pub async fn run(direct: &Target, gateway: &GatewayProcess, threads: usize) {
     // Warm up both paths' connection pools.
     batch(direct, STEPS[0]).await;
     batch(gateway.target(), STEPS[0]).await;
-    eprintln!("gateway pid {} (one worker thread)", gateway.pid());
+    eprintln!("gateway pid {} ({threads} worker threads)", gateway.pid());
     println!(
         "{:>7} {:>10} {:>7} {:>9} {:>11} {:>11} {:>7}",
         "streams", "events/s", "cores", "us/event", "direct p99", "added p99", "failed"
@@ -86,7 +89,7 @@ pub async fn run(direct: &Target, gateway: &GatewayProcess) {
             step.added_p99_us / 1e3,
             step.failed
         );
-        let healthy = step.failed == 0 && step.cores < SATURATED_CORES;
+        let healthy = step.failed == 0 && step.cores < SATURATED_SHARE * threads as f64;
         if !healthy || step.added_p99_us > 10.0 * MAX_ADDED_P99_US {
             break;
         }
@@ -96,7 +99,8 @@ pub async fn run(direct: &Target, gateway: &GatewayProcess) {
     }
     match best {
         Some(step) => println!(
-            "sustainable on one core: {} streams, {:.0} events/s (added p99 at most {:.0} ms)",
+            "sustainable with {threads} worker threads: {} streams, {:.0} events/s \
+             (added p99 at most {:.0} ms)",
             step.streams,
             step.events_per_sec,
             MAX_ADDED_P99_US / 1e3
