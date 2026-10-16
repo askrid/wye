@@ -28,6 +28,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         output_tokens: Some(5),
         cache_creation_input_tokens: None,
         cache_read_input_tokens: Some(0),
+        tool_calls: None,
         cache_miss: None,
         prompt: None,
     }
@@ -139,4 +140,28 @@ fn cache_misses_are_counted_by_reason() {
             ("unexplained".into(), "2".into())
         ]
     );
+}
+
+#[test]
+fn tool_calls_are_summed_by_name() {
+    let mut scanner = gateway_core::usage::SseUsageScanner::new();
+    for name in ["Bash", "Read", "Bash"] {
+        scanner.feed(
+            format!(
+                "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"content_block\":{{\"type\":\"tool_use\",\"name\":\"{name}\",\"input\":{{}}}}}}\n\n"
+            )
+            .as_bytes(),
+        );
+    }
+    let calls = scanner.take_tool_calls().unwrap();
+    let mut metrics = Metrics::new(0);
+    for _ in 0..2 {
+        metrics.record(&Line {
+            tool_calls: Some(crate::usage_log::ToolCallsField(&calls)),
+            ..line("/v1/messages", 200, 1.0, None)
+        });
+    }
+    assert_eq!(&*metrics.tool_calls[0].0, "Bash");
+    assert_eq!(metrics.tool_calls[0].1, 4);
+    assert_eq!(metrics.tool_calls[1].1, 2);
 }

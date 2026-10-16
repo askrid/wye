@@ -12,7 +12,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
 | M1 stages 5–6 | Usage scanner, OTLP logs, metrics, and traces, `upstream.api_key_file`, `wye probe`, and `wye claude` done, and an OCI image with a smoke test; published images and binaries, and Compose not started |
 | Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
-| M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4 in progress (`wye report` done; tool names from responses next); A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
+| M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4 done (`wye report`, tool calls from responses); A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
 | M2–M6 | Not started |
 
 ## Milestones
@@ -64,7 +64,7 @@ Turns the signals Claude Code sends gateways into attribution and explanations (
 | A1 (**done**) | Retry hygiene: Wye's own 529s carry `retry-after` (integer seconds, at most 60) and `x-should-retry: true`. Model picker: `GET /v1/models` lists the models the caller's credential may use, in the shape Claude Code's discovery expects | Integration tests for both; Claude Code's picker shows only permitted models |
 | A2 (**done**) | Spend by work type: request class, agent type, compaction trigger, agent and prompt ids in the usage log, OTLP logs, and `wye.tokens`. Expected versus unexpected cache misses from `x-claude-code-context-compacted` | Header values bounded and validated before they become attributes; metric series stay within their limit; gate unchanged |
 | A3 (**done**) | Session traces: trace id derived from the session id; tool durations as tool spans; prompt and agent structure as attributes (no synthetic parent spans) | One Claude Code session appears as one trace in a reference backend (Jaeger) across two replicas |
-| A4 | `wye report` over the usage log; tool names and counts from `tool_use` events in the response scanner | `alloc_sse_per_event` stays at zero; report output tested on recorded logs |
+| A4 (**done**) | `wye report` over the usage log; tool names and counts from `tool_use` events in the response scanner | `alloc_sse_per_event` stays at zero; report output tested on recorded logs |
 | A5 | Report-only secret detection, sampled per session | Measured cost per MB recorded; dependency justified; values never leave the process |
 
 **Exit:** a team sees, in its own OTel backend or with `wye report`, each Claude Code session as a structure (prompts, subagents, compactions, tools) with cost by work type and every unexpected cache miss flagged, with no gateway state and no gated metric worse.

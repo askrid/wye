@@ -133,3 +133,68 @@ fn long_lines_of_other_events_are_not_kept() {
     assert_eq!(s.usage(), EXPECTED);
     assert_eq!(s.status(), UsageStatus::Complete);
 }
+
+fn tool_block(index: usize, name: &str) -> String {
+    format!(
+        "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":{index},\"content_block\":{{\"type\":\"tool_use\",\"id\":\"toolu_{index}\",\"name\":\"{name}\",\"input\":{{}}}}}}\n\n\
+         event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":{index},\"delta\":{{\"type\":\"input_json_delta\",\"partial_json\":\"{{\\\"command\\\": \\\"ls\\\"}}\"}}}}\n\n\
+         event: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":{index}}}\n\n"
+    )
+}
+
+#[test]
+fn counts_tool_use_blocks_by_name_across_any_split() {
+    let stream = [
+        STREAM
+            .split("event: message_delta")
+            .next()
+            .unwrap()
+            .to_owned(),
+        tool_block(1, "Bash"),
+        tool_block(2, "Read"),
+        tool_block(3, "Bash"),
+        format!(
+            "event: message_delta{}",
+            STREAM.split("event: message_delta").nth(1).unwrap()
+        ),
+    ]
+    .concat();
+    let bytes = stream.as_bytes();
+    for at in 0..=bytes.len() {
+        let (a, b) = bytes.split_at(at);
+        let s = scan(&[a, b]);
+        let tools: Vec<_> = s.tool_calls().unwrap().iter().collect();
+        assert_eq!(tools, [("Bash", 2), ("Read", 1)], "split at {at}");
+        assert_eq!(s.status(), UsageStatus::Complete, "split at {at}");
+        assert_eq!(s.usage(), EXPECTED, "split at {at}");
+    }
+    assert!(
+        scan(&[STREAM.as_bytes()]).tool_calls().is_none(),
+        "text only"
+    );
+}
+
+#[test]
+fn tool_names_are_bounded() {
+    let long = "x".repeat(MAX_TOOL_NAME_BYTES + 1);
+    let mut stream: String = (0..MAX_TOOL_NAMES + 2)
+        .map(|i| tool_block(i, &format!("t{i}")))
+        .collect();
+    stream.push_str(&tool_block(20, &long));
+    stream.push_str(&tool_block(21, "has space"));
+    let s = scan(&[stream.as_bytes()]);
+    let tools = s.tool_calls().unwrap();
+    assert_eq!(tools.iter().count(), MAX_TOOL_NAMES);
+    assert_eq!(
+        tools.other(),
+        4,
+        "two beyond the table, one too long, one not a token"
+    );
+    // An oversized block start is skipped without marking usage unknown.
+    let big = format!(
+        "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"content_block\":{{\"type\":\"text\",\"text\":\"{}\"}}}}\n\n",
+        "y".repeat(10_000)
+    );
+    let s = scan(&[STREAM.as_bytes(), big.as_bytes()]);
+    assert_eq!(s.status(), UsageStatus::Complete);
+}

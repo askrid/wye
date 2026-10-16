@@ -51,6 +51,8 @@ pub(super) struct Metrics {
     requests: Vec<RequestSeries>,
     durations: Vec<DurationSeries>,
     tokens: Vec<TokenSeries>,
+    /// Tool calls responses requested, by tool name.
+    tool_calls: Vec<(Box<str>, u64)>,
     /// Requests that wrote the prompt cache without reading it, by reason.
     cache_misses: [u64; CACHE_MISS_REASONS.len()],
     overflow: u64,
@@ -63,6 +65,7 @@ impl Metrics {
             requests: Vec::new(),
             durations: Vec::new(),
             tokens: Vec::new(),
+            tool_calls: Vec::new(),
             cache_misses: [0; CACHE_MISS_REASONS.len()],
             overflow: 0,
         }
@@ -124,6 +127,16 @@ impl Metrics {
             .and_then(|i| self.cache_misses.get_mut(i))
         {
             *count += 1;
+        }
+        for (name, count) in line.tool_calls.into_iter().flat_map(|t| t.iter()) {
+            let count = u64::from(count);
+            if let Some(series) = self.tool_calls.iter_mut().find(|(n, _)| &**n == name) {
+                series.1 = series.1.saturating_add(count);
+            } else if self.tool_calls.len() < MAX_SERIES {
+                self.tool_calls.push((name.into(), count));
+            } else {
+                self.overflow += 1;
+            }
         }
         let Some(model) = line.model else { return };
         for (kind, count) in [
@@ -233,6 +246,18 @@ impl Metrics {
                 ),
                 None => attributes(&mut buf, &[kind, model]),
             }
+        }
+        buf.extend_from_slice(b"]}},");
+
+        sum_header(
+            &mut buf,
+            "wye.tool.calls",
+            "{call}",
+            "Tool calls responses requested, by tool name",
+        );
+        for (i, (name, count)) in self.tool_calls.iter().enumerate() {
+            point_start(&mut buf, i, &times, *count);
+            attributes(&mut buf, &[("claude_code.tool.name", Value::Str(name))]);
         }
         buf.extend_from_slice(b"]}},");
 

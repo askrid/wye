@@ -34,6 +34,8 @@ struct Record {
     cache_read_input_tokens: Option<u64>,
     #[serde(default)]
     tool_durations: Vec<Tool>,
+    #[serde(default)]
+    tool_calls: HashMap<String, u64>,
 }
 
 #[derive(Deserialize)]
@@ -107,7 +109,9 @@ struct Summary {
     classes: HashMap<String, Group>,
     sessions: HashMap<String, Session>,
     prompts: HashMap<String, Group>,
-    tools: HashMap<String, (u64, u64)>,
+    /// Per tool: calls with a reported duration, their total ms, and calls
+    /// responses requested.
+    tools: HashMap<String, (u64, u64, u64)>,
     misses: HashMap<String, u64>,
 }
 
@@ -127,6 +131,9 @@ impl Summary {
             let entry = self.tools.entry(tool.name.clone()).or_default();
             entry.0 += 1;
             entry.1 += tool.ms;
+        }
+        for (name, count) in &r.tool_calls {
+            self.tools.entry(name.clone()).or_default().2 += count;
         }
         if let Some(prompt) = &r.prompt_id {
             self.prompts.entry(prompt.clone()).or_default().add(&r);
@@ -210,13 +217,25 @@ fn render(s: &Summary) -> String {
     );
 
     if !s.tools.is_empty() {
-        let _ = writeln!(out, "\nTool time (from Claude Code's tool durations)");
+        let _ = writeln!(
+            out,
+            "\nTools: calls the model requested; calls timed by Claude Code, and their time"
+        );
+        let _ = writeln!(
+            out,
+            "  {:<28} {:>9} {:>7} {:>10}",
+            "tool", "requested", "timed", "time"
+        );
         let mut tools: Vec<_> = s.tools.iter().collect();
-        tools.sort_by(|a, b| (b.1).1.cmp(&(a.1).1).then(a.0.cmp(b.0)));
-        for (name, (calls, ms)) in tools.iter().take(TOP) {
+        tools.sort_by(|a, b| {
+            ((b.1).1, (b.1).2)
+                .cmp(&((a.1).1, (a.1).2))
+                .then(a.0.cmp(b.0))
+        });
+        for (name, (timed, ms, requested)) in tools.iter().take(TOP) {
             let _ = writeln!(
                 out,
-                "  {name:<28} {calls:>7} calls {:>12}",
+                "  {name:<28} {requested:>9} {timed:>7} {:>10}",
                 seconds(*ms as f64)
             );
         }
