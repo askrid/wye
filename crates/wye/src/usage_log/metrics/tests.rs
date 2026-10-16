@@ -1,0 +1,141 @@
+#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+
+use super::*;
+
+fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -> Line<'static> {
+    Line {
+        event: "request",
+        unix_ms: 0,
+        path,
+        status,
+        outcome: "completed",
+        duration_ms: ms,
+        headers_ms: None,
+        subject: None,
+        session_id: None,
+        traceparent: None,
+        request_class: Some("main"),
+        agent_type: None,
+        agent_id: None,
+        parent_agent_id: None,
+        prompt_id: None,
+        compaction: None,
+        context_compacted: None,
+        model,
+        usage_status: "complete",
+        input_tokens: Some(10),
+        output_tokens: Some(5),
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: Some(0),
+        cache_miss: None,
+        prompt: None,
+    }
+}
+
+#[test]
+fn totals_are_cumulative_and_encode_as_otlp_json() {
+    let mut metrics = Metrics::new(1);
+    metrics.record(&line("/v1/messages", 200, 3.0, Some("m")));
+    metrics.record(&line("/v1/messages", 200, 700.0, Some("m")));
+    metrics.record(&line("/v1/messages", 529, 1.0, None));
+    let json: serde_json::Value =
+        serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 9, 4, 2)).unwrap();
+    let list = json["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let metric = |name: &str| list.iter().find(|m| m["name"] == name).unwrap().clone();
+
+    let requests = metric("wye.requests")["sum"]["dataPoints"].clone();
+    assert_eq!(requests.as_array().unwrap().len(), 2);
+    assert_eq!(requests[0]["asInt"], "2");
+    assert_eq!(requests[0]["startTimeUnixNano"], "1");
+    assert_eq!(requests[1]["attributes"][1]["value"]["intValue"], "529");
+
+    let duration = metric("wye.request.duration")["histogram"]["dataPoints"][0].clone();
+    assert_eq!(duration["count"], "3");
+    assert_eq!(duration["sum"], 704.0);
+    assert_eq!(
+        duration["bucketCounts"][0], "2",
+        "1 and 3 ms fall in the first bucket"
+    );
+    assert_eq!(
+        duration["bucketCounts"][7], "1",
+        "700 ms falls in the 1 s bucket"
+    );
+
+    let tokens = metric("wye.tokens")["sum"]["dataPoints"].clone();
+    // Zero counts are skipped: input and output only.
+    assert_eq!(tokens.as_array().unwrap().len(), 2);
+    assert_eq!(tokens[0]["asInt"], "20");
+    assert_eq!(tokens[0]["attributes"][2]["value"]["stringValue"], "main");
+
+    assert_eq!(
+        metric("wye.telemetry.lost")["sum"]["dataPoints"][0]["asInt"],
+        "2"
+    );
+    assert_eq!(
+        metric("wye.requests.active")["gauge"]["dataPoints"][0]["asInt"],
+        "4"
+    );
+}
+
+#[test]
+fn series_beyond_the_limit_are_counted_not_kept() {
+    let mut metrics = Metrics::new(0);
+    let routes: Vec<&'static str> = (0..MAX_SERIES + 5)
+        .map(|i| &*Box::leak(format!("/r{i}").into_boxed_str()))
+        .collect();
+    for route in &routes {
+        metrics.record(&line(route, 200, 1.0, None));
+    }
+    assert_eq!(metrics.requests.len(), MAX_SERIES);
+    assert_eq!(metrics.overflow, 10, "5 request and 5 duration series");
+}
+
+#[test]
+fn cache_misses_are_counted_by_reason() {
+    let mut metrics = Metrics::new(0);
+    for miss in [
+        Some("unexplained"),
+        Some("after_compaction"),
+        Some("unexplained"),
+        None,
+    ] {
+        metrics.record(&Line {
+            cache_miss: miss,
+            ..line("/v1/messages", 200, 1.0, None)
+        });
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 1, 0, 0)).unwrap();
+    let misses = json["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "wye.cache.misses")
+        .unwrap()["sum"]["dataPoints"]
+        .clone();
+    let counts: Vec<_> = misses
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p["attributes"][0]["value"]["stringValue"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                p["asInt"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        counts,
+        [
+            ("compaction".into(), "0".into()),
+            ("after_compaction".into(), "1".into()),
+            ("unexplained".into(), "2".into())
+        ]
+    );
+}
