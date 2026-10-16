@@ -119,8 +119,15 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     }
 }
 
-/// One usage record as an OTLP server `Span`: child of the request's W3C
-/// `traceparent` when it has a valid one, else the root of a new trace.
+/// One usage record as an OTLP server `Span`, followed by one internal span
+/// per tool call it reports in `x-claude-code-prev-tool-durations`.
+///
+/// The trace: the caller's, when the request has a valid W3C `traceparent`
+/// (the span is its child); else the Claude Code session's, a hash of the
+/// session id that every replica computes alike, so a backend shows a whole
+/// session as one trace with no coordination; else a new random trace.
+/// Tool spans are siblings of the request span: they ran before it, ending
+/// at the latest when it started.
 pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRandom) {
     let mut ids = [0u8; 24];
     // A failed draw leaves zeros, which collectors reject: the span is lost,
@@ -128,15 +135,21 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
     let _ = random.fill(&mut ids);
     let (trace_id, parent) = match line.traceparent.and_then(parse_traceparent) {
         Some((trace, parent)) => (trace, Some(parent)),
-        None => (hex(ids.get(..16).unwrap_or_default()), None),
+        None => match line.session_id {
+            Some(session) => (session_trace_id(session), None),
+            None => (hex(ids.get(..16).unwrap_or_default()), None),
+        },
     };
     let span_id = hex(ids.get(16..).unwrap_or_default());
     let end_ns = line.unix_ms.saturating_mul(1_000_000);
     let start_ns = end_ns.saturating_sub((line.duration_ms * 1_000_000.0) as u64);
-    let _ = write!(buf, r#"{{"traceId":"{trace_id}","spanId":"{span_id}","#);
-    if let Some(parent) = parent {
-        let _ = write!(buf, r#""parentSpanId":"{parent}","#);
-    }
+    let open_span = |buf: &mut Vec<u8>, span_id: &str| {
+        let _ = write!(buf, r#"{{"traceId":"{trace_id}","spanId":"{span_id}","#);
+        if let Some(parent) = &parent {
+            let _ = write!(buf, r#""parentSpanId":"{parent}","#);
+        }
+    };
+    open_span(buf, &span_id);
     let _ = write!(buf, r#""name":"POST "#);
     let route = serde_json::to_string(line.path).unwrap_or_default();
     buf.extend_from_slice(route.trim_matches('"').as_bytes());
@@ -160,6 +173,43 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         r#"],"status":{{"code":{}}}}}"#,
         if failed { 2 } else { 0 }
     );
+    for (name, ms) in line.tool_durations.into_iter().flat_map(|t| t.iter()) {
+        let mut id = [0u8; 8];
+        let _ = random.fill(&mut id);
+        buf.push(b',');
+        open_span(buf, &hex(&id));
+        let tool_start = start_ns.saturating_sub(ms.saturating_mul(1_000_000));
+        // SPAN_KIND_INTERNAL = 1.
+        buf.extend_from_slice(br#""name":"#);
+        let _ = serde_json::to_writer(&mut *buf, &format!("tool {name}"));
+        let _ = write!(
+            buf,
+            r#","kind":1,"startTimeUnixNano":"{tool_start}","endTimeUnixNano":"{start_ns}","attributes":["#
+        );
+        write_attribute(buf, "claude_code.tool.name", Value::Str(&name));
+        buf.push(b',');
+        write_attribute(buf, "claude_code.tool.duration_ms", Value::Int(ms));
+        for (key, value) in [
+            ("session.id", line.session_id),
+            ("claude_code.agent_id", line.agent_id),
+            ("claude_code.prompt_id", line.prompt_id),
+        ] {
+            if let Some(value) = value {
+                buf.push(b',');
+                write_attribute(buf, key, Value::Str(value));
+            }
+        }
+        buf.extend_from_slice(br#"],"status":{"code":0}}"#);
+    }
+}
+
+/// The trace id of a Claude Code session: the first 16 bytes of
+/// SHA-256(`wye.session` NUL session id), so every replica derives the same id.
+fn session_trace_id(session: &str) -> String {
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    ctx.update(b"wye.session\0");
+    ctx.update(session.as_bytes());
+    hex(ctx.finish().as_ref().get(..16).unwrap_or_default())
 }
 
 /// The trace id and parent span id of a valid version-00 `traceparent`.
@@ -208,6 +258,81 @@ mod tests {
         ] {
             assert_eq!(parse_traceparent(bad), None, "{bad}");
         }
+    }
+
+    fn line<'a>(session: Option<&'a str>, tools: Option<&'a [u8]>) -> Line<'a> {
+        Line {
+            event: "request",
+            unix_ms: 10_000,
+            path: "/v1/messages",
+            status: 200,
+            outcome: "completed",
+            duration_ms: 2_000.0,
+            headers_ms: None,
+            subject: None,
+            session_id: session,
+            traceparent: None,
+            request_class: None,
+            agent_type: None,
+            agent_id: Some("a-1"),
+            parent_agent_id: None,
+            prompt_id: None,
+            compaction: None,
+            context_compacted: None,
+            tool_durations: tools.map(crate::usage_log::agent::ToolDurations),
+            model: None,
+            usage_status: "not_observed",
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+            cache_miss: None,
+            prompt: None,
+        }
+    }
+
+    fn spans(line: &Line<'_>) -> Vec<serde_json::Value> {
+        let mut buf = vec![b'['];
+        write_span(&mut buf, line, &SystemRandom::new());
+        buf.push(b']');
+        serde_json::from_slice::<serde_json::Value>(&buf)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn a_session_is_one_trace_with_tool_spans_before_each_call() {
+        let first = spans(&line(Some("s-1"), None));
+        let second = spans(&line(Some("s-1"), Some(b"Bash=500;Read=9")));
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 3, "the request span and two tool spans");
+        let trace = first[0]["traceId"].as_str().unwrap();
+        assert_eq!(trace, session_trace_id("s-1"));
+        assert!(second.iter().all(|s| s["traceId"] == trace));
+        assert_ne!(first[0]["spanId"], second[0]["spanId"]);
+
+        let bash = &second[1];
+        assert_eq!(bash["name"], "tool Bash");
+        assert_eq!(bash["kind"], 1);
+        assert!(bash.get("parentSpanId").is_none(), "a sibling of the call");
+        // The call ran from 8 s to 10 s; Bash ended by 8 s after 500 ms.
+        assert_eq!(bash["startTimeUnixNano"], "7500000000");
+        assert_eq!(bash["endTimeUnixNano"], "8000000000");
+        assert_eq!(bash["attributes"][1]["value"]["intValue"], "500");
+        assert_eq!(bash["attributes"][3]["value"]["stringValue"], "a-1");
+
+        let random = spans(&line(None, None));
+        assert_ne!(random[0]["traceId"], trace);
+    }
+
+    #[test]
+    fn session_trace_ids_are_stable_and_distinct() {
+        let a = session_trace_id("s-1");
+        assert_eq!(a.len(), 32);
+        assert_eq!(a, session_trace_id("s-1"));
+        assert_ne!(a, session_trace_id("s-2"));
     }
 
     #[test]
