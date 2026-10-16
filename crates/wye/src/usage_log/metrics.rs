@@ -37,8 +37,13 @@ struct DurationSeries {
 struct TokenSeries {
     kind: &'static str,
     model: Box<str>,
+    /// Claude Code's request class, when hint headers are on.
+    request_class: Option<&'static str>,
     count: u64,
 }
+
+/// Cache-miss reasons, in [`CACHE_MISS_REASONS`] order.
+const CACHE_MISS_REASONS: [&str; 3] = ["compaction", "after_compaction", "unexplained"];
 
 /// Cumulative totals since `start_ns`.
 pub(super) struct Metrics {
@@ -46,6 +51,8 @@ pub(super) struct Metrics {
     requests: Vec<RequestSeries>,
     durations: Vec<DurationSeries>,
     tokens: Vec<TokenSeries>,
+    /// Requests that wrote the prompt cache without reading it, by reason.
+    cache_misses: [u64; CACHE_MISS_REASONS.len()],
     overflow: u64,
 }
 
@@ -56,6 +63,7 @@ impl Metrics {
             requests: Vec::new(),
             durations: Vec::new(),
             tokens: Vec::new(),
+            cache_misses: [0; CACHE_MISS_REASONS.len()],
             overflow: 0,
         }
     }
@@ -110,6 +118,13 @@ impl Metrics {
             }
             None => self.overflow += 1,
         }
+        if let Some(count) = line
+            .cache_miss
+            .and_then(|miss| CACHE_MISS_REASONS.iter().position(|&r| r == miss))
+            .and_then(|i| self.cache_misses.get_mut(i))
+        {
+            *count += 1;
+        }
         let Some(model) = line.model else { return };
         for (kind, count) in [
             ("input", line.input_tokens),
@@ -120,16 +135,16 @@ impl Metrics {
             let Some(count) = count.filter(|&c| c > 0) else {
                 continue;
             };
-            let found = self
-                .tokens
-                .iter()
-                .position(|s| s.kind == kind && &*s.model == model);
+            let found = self.tokens.iter().position(|s| {
+                s.kind == kind && &*s.model == model && s.request_class == line.request_class
+            });
             if let Some(series) = found.and_then(|i| self.tokens.get_mut(i)) {
                 series.count = series.count.saturating_add(count);
             } else if self.tokens.len() < MAX_SERIES {
                 self.tokens.push(TokenSeries {
                     kind,
                     model: model.into(),
+                    request_class: line.request_class,
                     count,
                 });
             } else {
@@ -201,17 +216,35 @@ impl Metrics {
             &mut buf,
             "wye.tokens",
             "{token}",
-            "Tokens the provider reported, by kind and model",
+            "Tokens the provider reported, by kind, model, and Claude Code request class",
         );
         for (i, s) in self.tokens.iter().enumerate() {
             point_start(&mut buf, i, &times, s.count);
-            attributes(
-                &mut buf,
-                &[
-                    ("gen_ai.token.type", Value::Str(s.kind)),
-                    ("gen_ai.response.model", Value::Str(&s.model)),
-                ],
-            );
+            let kind = ("gen_ai.token.type", Value::Str(s.kind));
+            let model = ("gen_ai.response.model", Value::Str(&s.model));
+            match s.request_class {
+                Some(class) => attributes(
+                    &mut buf,
+                    &[
+                        kind,
+                        model,
+                        ("claude_code.request_class", Value::Str(class)),
+                    ],
+                ),
+                None => attributes(&mut buf, &[kind, model]),
+            }
+        }
+        buf.extend_from_slice(b"]}},");
+
+        sum_header(
+            &mut buf,
+            "wye.cache.misses",
+            "{request}",
+            "Requests that wrote the prompt cache without reading it, by reason",
+        );
+        for (i, (reason, count)) in CACHE_MISS_REASONS.iter().zip(self.cache_misses).enumerate() {
+            point_start(&mut buf, i, &times, count);
+            attributes(&mut buf, &[("wye.cache_miss", Value::Str(reason))]);
         }
         buf.extend_from_slice(b"]}},");
 
@@ -286,12 +319,20 @@ mod tests {
             subject: None,
             session_id: None,
             traceparent: None,
+            request_class: Some("main"),
+            agent_type: None,
+            agent_id: None,
+            parent_agent_id: None,
+            prompt_id: None,
+            compaction: None,
+            context_compacted: None,
             model,
             usage_status: "complete",
             input_tokens: Some(10),
             output_tokens: Some(5),
             cache_creation_input_tokens: None,
             cache_read_input_tokens: Some(0),
+            cache_miss: None,
             prompt: None,
         }
     }
@@ -332,6 +373,8 @@ mod tests {
         // Zero counts are skipped: input and output only.
         assert_eq!(tokens.as_array().unwrap().len(), 2);
         assert_eq!(tokens[0]["asInt"], "20");
+        assert_eq!(tokens[0]["attributes"][2]["value"]["stringValue"], "main");
+
         assert_eq!(
             metric("wye.telemetry.lost")["sum"]["dataPoints"][0]["asInt"],
             "2"
@@ -353,5 +396,52 @@ mod tests {
         }
         assert_eq!(metrics.requests.len(), MAX_SERIES);
         assert_eq!(metrics.overflow, 10, "5 request and 5 duration series");
+    }
+
+    #[test]
+    fn cache_misses_are_counted_by_reason() {
+        let mut metrics = Metrics::new(0);
+        for miss in [
+            Some("unexplained"),
+            Some("after_compaction"),
+            Some("unexplained"),
+            None,
+        ] {
+            metrics.record(&Line {
+                cache_miss: miss,
+                ..line("/v1/messages", 200, 1.0, None)
+            });
+        }
+        let json: serde_json::Value =
+            serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 1, 0, 0)).unwrap();
+        let misses = json["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == "wye.cache.misses")
+            .unwrap()["sum"]["dataPoints"]
+            .clone();
+        let counts: Vec<_> = misses
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                (
+                    p["attributes"][0]["value"]["stringValue"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    p["asInt"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("compaction".into(), "0".into()),
+                ("after_compaction".into(), "1".into()),
+                ("unexplained".into(), "2".into())
+            ]
+        );
     }
 }
