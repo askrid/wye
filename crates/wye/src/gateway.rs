@@ -30,7 +30,7 @@ use crate::{
     gauge::Gauge,
     permissions::{OverTokenLimit, RequestBody, hold_until_model},
     upstream::{Upstream, UpstreamBody},
-    usage_log::{Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
+    usage_log::{AgentHeaders, Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
 };
 
 mod responses;
@@ -175,6 +175,7 @@ impl Gateway {
             path,
             session_id: req.headers().get(SESSION_ID).cloned(),
             traceparent: req.headers().get(TRACEPARENT).cloned(),
+            agent: AgentHeaders::from_headers(req.headers()),
             identity: None,
             prompt: None,
             started: Instant::now(),

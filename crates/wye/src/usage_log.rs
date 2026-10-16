@@ -8,6 +8,7 @@
 //! with `[telemetry]`, exports them as OTLP logs; when the channel is full the
 //! record is dropped and counted, so a slow sink never slows a stream.
 
+mod agent;
 mod metrics;
 mod observed;
 mod otlp;
@@ -20,7 +21,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use gateway_core::{credential::Identity, prompt::HashKey, usage::Usage};
+use gateway_core::{agent::CacheMiss, credential::Identity, prompt::HashKey, usage::Usage};
 use http::{HeaderValue, StatusCode};
 use serde::Serialize;
 use tokio::{
@@ -34,6 +35,7 @@ use crate::{
     gauge::Gauge,
 };
 
+pub(crate) use agent::AgentHeaders;
 pub(crate) use observed::Observed;
 pub(crate) use otlp::{OtlpTarget, parse_headers};
 
@@ -73,6 +75,8 @@ pub(crate) struct RequestInfo {
     pub session_id: Option<HeaderValue>,
     /// W3C `traceparent`, the parent of the request's OTLP span.
     pub traceparent: Option<HeaderValue>,
+    /// Claude Code's agent structure and gateway hint headers.
+    pub agent: AgentHeaders,
     /// Verified gateway credential, when credentials are configured.
     pub identity: Option<Arc<Identity>>,
     /// Filled with the request body's prompt hashes when cache diagnostics are on.
@@ -275,6 +279,20 @@ struct Line<'a> {
     #[serde(skip)]
     traceparent: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    request_class: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_type: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_agent_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compaction: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_compacted: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<&'a str>,
     usage_status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,6 +303,9 @@ struct Line<'a> {
     cache_creation_input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_read_input_tokens: Option<u64>,
+    /// Why the request wrote the prompt cache without reading it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_miss: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prompt: Option<PromptRecord>,
 }
@@ -296,6 +317,7 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
         .as_ref()
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
+    let agent = r.info.agent.fields();
     Line {
         event: "request",
         unix_ms: r.unix_ms as u64,
@@ -307,6 +329,13 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         session_id: r.info.session_id.as_ref().and_then(|v| v.to_str().ok()),
         traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
+        request_class: agent.request_class,
+        agent_type: agent.agent_type,
+        agent_id: agent.agent_id,
+        parent_agent_id: agent.parent_agent_id,
+        prompt_id: agent.prompt_id,
+        compaction: agent.compaction.map(|c| c.as_str()),
+        context_compacted: agent.context_compacted.map(|c| c.as_str()),
         model: r.model.as_deref(),
         usage_status: r
             .usage
@@ -316,6 +345,13 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_miss: CacheMiss::classify(
+            usage.cache_read_input_tokens,
+            usage.cache_creation_input_tokens,
+            agent.compaction,
+            agent.context_compacted,
+        )
+        .map(CacheMiss::as_str),
         prompt: r
             .info
             .prompt

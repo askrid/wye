@@ -42,6 +42,63 @@ async fn completed_stream_logs_usage_without_changing_bytes() {
 }
 
 #[tokio::test]
+async fn usage_records_carry_claude_code_agent_headers() {
+    // A cache write with no read: a miss, explained by the compaction.
+    const MISS: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-test\",\"usage\":{\"input_tokens\":5,\"cache_creation_input_tokens\":900,\"cache_read_input_tokens\":0,\"output_tokens\":1}}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n",
+    );
+    let h = Harness::api_key(Arc::new(|_| {
+        Box::pin(async {
+            let mut res = full(StatusCode::OK, MISS);
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    }))
+    .await;
+    let req = messages()
+        .header("x-claude-code-request-class", "subagent")
+        .header("x-claude-code-agent-type", "Explore")
+        .header("x-claude-code-agent-id", "a-1")
+        .header("x-claude-code-parent-agent-id", "has space")
+        .header(
+            "x-claude-code-prompt-id",
+            "5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a",
+        )
+        .header("x-claude-code-context-compacted", "manual");
+    read_body(h.send(req, "{}").await).await;
+
+    let record = h.usage_record().await;
+    assert_eq!(record["request_class"], "subagent");
+    assert_eq!(record["agent_type"], "Explore");
+    assert_eq!(record["agent_id"], "a-1");
+    assert!(
+        record.get("parent_agent_id").is_none(),
+        "values outside the token alphabet are dropped"
+    );
+    assert_eq!(record["prompt_id"], "5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a");
+    assert_eq!(record["context_compacted"], "manual");
+    assert!(record.get("compaction").is_none());
+    assert_eq!(record["cache_miss"], "after_compaction");
+
+    // Without the headers, none of the fields appear.
+    read_body(h.send(messages(), "{}").await).await;
+    let record = h.usage_record().await;
+    for field in [
+        "request_class",
+        "agent_id",
+        "prompt_id",
+        "context_compacted",
+    ] {
+        assert!(record.get(field).is_none(), "{field}");
+    }
+    assert_eq!(record["cache_miss"], "unexplained");
+}
+
+#[tokio::test]
 async fn cancelled_stream_logs_partial_usage() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
     let body = std::sync::Mutex::new(Some(chunks_rx));
