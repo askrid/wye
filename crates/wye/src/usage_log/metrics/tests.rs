@@ -21,6 +21,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         prompt_id: None,
         compaction: None,
         context_compacted: None,
+        tool_durations: None,
         model,
         usage_status: "complete",
         input_tokens: Some(10),
