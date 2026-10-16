@@ -118,12 +118,13 @@ where
 impl<B> Drop for Observed<B> {
     fn drop(&mut self) {
         let Some(info) = self.info.take() else { return };
-        let (model, usage) = match self.scanner.take() {
-            Some(scanner) => (
+        let (model, usage, tool_calls) = match self.scanner.take() {
+            Some(mut scanner) => (
                 scanner.model().map(Box::from),
                 Some((scanner.usage(), scanner.status().as_str())),
+                scanner.take_tool_calls(),
             ),
-            None => (None, None),
+            None => (None, None, None),
         };
         let duration = info.started.elapsed();
         self.log.send(Record {
@@ -134,6 +135,7 @@ impl<B> Drop for Observed<B> {
             outcome: self.outcome,
             model,
             usage,
+            tool_calls,
             unix_ms: unix_ms(),
         });
     }

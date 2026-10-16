@@ -21,7 +21,12 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use gateway_core::{agent::CacheMiss, credential::Identity, prompt::HashKey, usage::Usage};
+use gateway_core::{
+    agent::CacheMiss,
+    credential::Identity,
+    prompt::HashKey,
+    usage::{ToolCalls, Usage},
+};
 use http::{HeaderValue, StatusCode};
 use serde::Serialize;
 use tokio::{
@@ -93,6 +98,8 @@ pub(crate) struct Record {
     outcome: Outcome,
     model: Option<Box<str>>,
     usage: Option<(Usage, &'static str)>,
+    /// `tool_use` blocks the response started.
+    tool_calls: Option<Box<ToolCalls>>,
     unix_ms: u128,
 }
 
@@ -143,6 +150,7 @@ impl UsageLog {
             outcome: Outcome::GatewayError,
             model: None,
             usage: None,
+            tool_calls: None,
             unix_ms: unix_ms(),
         });
     }
@@ -307,6 +315,9 @@ struct Line<'a> {
     cache_creation_input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_read_input_tokens: Option<u64>,
+    /// Tool calls the response requested, by tool name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<ToolCallsField<'a>>,
     /// Why the request wrote the prompt cache without reading it.
     #[serde(skip_serializing_if = "Option::is_none")]
     cache_miss: Option<&'static str>,
@@ -350,6 +361,7 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens,
+        tool_calls: r.tool_calls.as_deref().map(ToolCallsField),
         cache_miss: CacheMiss::classify(
             usage.cache_read_input_tokens,
             usage.cache_creation_input_tokens,
@@ -363,6 +375,27 @@ fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
             .as_ref()
             .zip(prompt_key)
             .map(|(slot, key)| PromptRecord::new(slot, key)),
+    }
+}
+
+/// Name of the count of tool calls not recorded by name; parentheses are
+/// outside the tool-name alphabet, so it never collides with a tool.
+const OTHER_TOOLS: &str = "(other)";
+
+/// Tool calls as a JSON object of name to count.
+#[derive(Clone, Copy)]
+pub(super) struct ToolCallsField<'a>(pub(super) &'a ToolCalls);
+
+impl<'a> ToolCallsField<'a> {
+    fn iter(self) -> impl Iterator<Item = (&'a str, u32)> {
+        let other = (self.0.other() > 0).then(|| (OTHER_TOOLS, self.0.other()));
+        self.0.iter().chain(other)
+    }
+}
+
+impl Serialize for ToolCallsField<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.iter())
     }
 }
 

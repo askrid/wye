@@ -47,6 +47,8 @@ async fn usage_records_carry_claude_code_agent_headers() {
     const MISS: &str = concat!(
         "event: message_start\n",
         "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-test\",\"usage\":{\"input_tokens\":5,\"cache_creation_input_tokens\":900,\"cache_read_input_tokens\":0,\"output_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Bash\",\"input\":{}}}\n\n",
         "event: message_stop\n",
         "data: {\"type\":\"message_stop\"}\n\n",
     );
@@ -87,6 +89,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
     assert_eq!(record["context_compacted"], "manual");
     assert!(record.get("compaction").is_none());
     assert_eq!(record["cache_miss"], "after_compaction");
+    assert_eq!(record["tool_calls"], serde_json::json!({"Bash": 1}));
     assert_eq!(
         record["tool_durations"],
         serde_json::json!([{"name": "Bash", "ms": 742}, {"name": "Read", "ms": 9}]),
