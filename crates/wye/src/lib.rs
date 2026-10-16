@@ -7,6 +7,7 @@
 //! - `gateway`: routing and gateway-generated responses
 //! - `explain`: `wye explain`, the server's decisions for one request, offline
 //! - `policy_test`: `wye policy-test`, sample requests checked against expected decisions
+//! - `report`: `wye report`, a usage-log summary per session, class, and prompt
 //! - `permissions`: model permissions, checked before forwarding
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
@@ -27,6 +28,7 @@ mod gauge;
 mod permissions;
 mod policy_test;
 mod probe;
+mod report;
 mod server;
 mod startup;
 mod upstream;
@@ -37,6 +39,7 @@ pub use explain::{Credential, Explanation, explain};
 pub use gateway::Gateway;
 pub use policy_test::policy_test;
 pub use probe::probe;
+pub use report::report;
 pub use server::serve;
 pub use startup::{Resources, StartupError};
 pub use upstream::UpstreamAuth;

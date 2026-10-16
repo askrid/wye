@@ -12,7 +12,7 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
 | M1 stages 5–6 | Usage scanner, OTLP logs, metrics, and traces, `upstream.api_key_file`, `wye probe`, and `wye claude` done, and an OCI image with a smoke test; published images and binaries, and Compose not started |
 | Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
-| M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4–A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
+| M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4 in progress (`wye report` done; tool names from responses next); A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
 | M2–M6 | Not started |
 
 ## Milestones
