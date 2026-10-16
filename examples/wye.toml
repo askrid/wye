@@ -68,3 +68,13 @@ api_key_env = "ANTHROPIC_API_KEY"
 # otlp_endpoint = "http://localhost:4318"
 # otlp_headers_env = "OTLP_HEADERS"   # e.g. "api-key=..." for a hosted backend
 # service_name = "wye"
+
+# Model catalog for GET /v1/models: Claude Code's /model picker lists these
+# when developers set CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1. Each caller
+# sees only the models its credential may use. Claude Code keeps ids that
+# contain "claude" or "anthropic".
+# [discovery]
+# models = [
+#   { id = "claude-sonnet-4-6", display_name = "Claude Sonnet 4.6", description = "Everyday coding" },
+#   { id = "claude-haiku-4-5" },
+# ]

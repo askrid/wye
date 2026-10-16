@@ -18,6 +18,21 @@ pub(super) struct RawConfig {
     pub(super) auth: Option<RawAuth>,
     pub(super) cache_diagnostics: Option<RawCacheDiagnostics>,
     pub(super) telemetry: Option<RawTelemetry>,
+    pub(super) discovery: Option<RawDiscovery>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawDiscovery {
+    pub(super) models: Vec<RawDiscoveredModel>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawDiscoveredModel {
+    pub(super) id: String,
+    pub(super) display_name: Option<String>,
+    pub(super) description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -291,6 +306,47 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
             name => name.unwrap_or_else(|| "wye".to_owned()),
         },
     })
+}
+
+pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigError> {
+    if raw.models.is_empty() {
+        return Err(ConfigError::Invalid(
+            "discovery.models must not be empty; omit [discovery] to disable GET /v1/models",
+        ));
+    }
+    if raw.models.len() > MAX_DISCOVERY_MODELS {
+        return Err(ConfigError::Invalid(
+            "discovery.models: at most 1000 models",
+        ));
+    }
+    let mut models: Vec<DiscoveredModel> = Vec::with_capacity(raw.models.len());
+    for model in raw.models {
+        // A listed id is a name clients send, so it must be one a model
+        // permission can match exactly.
+        if model.id.contains('*') || ModelPattern::parse(&model.id).is_none() {
+            return Err(ConfigError::Invalid(
+                "discovery.models: id must be a model name of 1-256 bytes without *",
+            ));
+        }
+        if models.iter().any(|m| m.id == model.id) {
+            return Err(ConfigError::Invalid("discovery.models: duplicate id"));
+        }
+        let too_long = |text: &Option<String>| {
+            text.as_ref()
+                .is_some_and(|t| t.len() > MAX_DISCOVERY_TEXT_BYTES)
+        };
+        if too_long(&model.display_name) || too_long(&model.description) {
+            return Err(ConfigError::Invalid(
+                "discovery.models: display_name and description are at most 1024 bytes",
+            ));
+        }
+        models.push(DiscoveredModel {
+            id: model.id,
+            display_name: model.display_name,
+            description: model.description,
+        });
+    }
+    Ok(Discovery { models })
 }
 
 fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError> {

@@ -319,3 +319,54 @@ async fn a_late_max_tokens_above_the_limit_aborts_the_upstream_request() {
         "the upstream received a complete body"
     );
 }
+
+#[tokio::test]
+async fn model_discovery_lists_only_permitted_models() {
+    let key = keypair();
+    let (h, _bodies) = body_harness(
+        &key,
+        "models = [\"claude-*\"]\n\
+         [discovery]\nmodels = [{ id = \"claude-sonnet-4-6\", display_name = \"Sonnet\" }, \
+         { id = \"claude-haiku-4-5\" }, { id = \"gpt-5\" }]",
+    )
+    .await;
+    let list = |t: Option<String>| {
+        let mut req = Request::get("/v1/models?limit=1000");
+        if let Some(t) = t {
+            req = req.header("x-api-key", t);
+        }
+        h.send(req, "")
+    };
+    let ids = |body: Bytes| -> Vec<String> {
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    let res = list(Some(token(&key, now(), now() + 600))).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "application/json");
+    assert_eq!(
+        ids(read_body(res).await),
+        ["claude-sonnet-4-6", "claude-haiku-4-5"],
+        "the configured ceiling drops gpt-5"
+    );
+
+    let res = list(Some(token_with_models(&key, &["claude-haiku-*"]))).await;
+    assert_eq!(ids(read_body(res).await), ["claude-haiku-4-5"]);
+
+    assert_eq!(list(None).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn model_discovery_is_absent_without_a_catalog() {
+    let key = keypair();
+    let (h, _bodies) = body_harness(&key, "").await;
+    let req = Request::get("/v1/models").header("x-api-key", token(&key, now(), now() + 600));
+    assert_eq!(h.send(req, "").await.status(), StatusCode::NOT_FOUND);
+}

@@ -109,7 +109,8 @@ Upstream connections come from one pool of lanes ([upstream connections](#upstre
 - `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough to Anthropic (P0, Claude Code).
 - `POST /v1/chat/completions`: Chat Completions with streaming and client-managed tool calls.
 - `POST /v1/responses`: Responses, initially only where backed by the native OpenAI Responses API.
-- `GET /healthz`, `GET /readyz`: operational probes. `GET /v1/models` only when a client integration requires it (Claude Code model discovery is opt-in).
+- `GET /healthz`, `GET /readyz`: operational probes.
+- `GET /v1/models`: with `[discovery]`, the configured catalog narrowed to the models the caller may use (the `[auth] models` ceiling, then the credential's `models` claim), so Claude Code's model picker shows only permitted models. Authenticated when `[auth]` is set; one page (`has_more: false`); no upstream contact and no usage record. Claude Code queries it only with `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, with a 3-second timeout, and keeps ids containing `claude` or `anthropic`.
 
 An `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` override works only when the client respects it **and** uses an implemented endpoint. Base-URL compatibility is not compatibility with proprietary SDK extensions.
 
@@ -125,7 +126,7 @@ Claude Code documents what a gateway must do ([gateway compatibility guide](http
 - Consume, never require, `x-claude-code-session-id`, `x-claude-code-agent-id`, `x-claude-code-parent-agent-id`, and the gateway hint headers (`x-claude-code-request-class`, `-agent-type`, `-compaction`, `-context-compacted`, `-prompt-id`, `-prev-tool-durations`) for telemetry attribution, [agent-native visibility](research.md#agent-native-directions), and, later, [agent-aware routing](research.md#1-agent-aware-routing). A custom base URL receives hint headers only when developers set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`. Values are client-supplied: bound and validate them before they become telemetry attributes, and never let them authorize anything.
 - Answer the best-effort `HEAD /api/hello` warm-up probe with an empty `200` before authentication; it carries no data and reaches no upstream.
 - `/v1/messages/count_tokens` is unbilled: it requires authentication and model permission but skips cost admission.
-- Gateway-generated errors use Anthropic's error JSON shape and status codes, so Claude Code's retry and recovery logic reads them as it reads upstream errors.
+- Gateway-generated errors use Anthropic's error JSON shape and status codes, so Claude Code's retry and recovery logic reads them as it reads upstream errors. Wye's own `529 overloaded_error` (concurrency or held-bytes limit, always before any upstream contact) carries `retry-after: 1` and `x-should-retry: true`: integer seconds at most 60, or Claude Code stops retrying.
 - Gateway sessions are not eligible for Claude Code's HIPAA configuration; regulated teams must know before adopting Wye.
 - Claude Code sends background requests to a second, smaller model unless one is pinned; model permissions must cover it or those requests fail.
 
@@ -281,6 +282,12 @@ service_name = "wye"
 [cache_diagnostics]                    # optional: prompt hashes in the usage log
 hash_key_env = "WYE_CACHE_HASH_KEY"    # required; at least 32 bytes, same on every replica
 sample_percent = 100                   # share of Claude Code sessions diagnosed
+
+[discovery]                            # optional: GET /v1/models; absent without it
+models = [                             # up to 1000; listed per caller after model permissions
+  { id = "claude-sonnet-4-6", display_name = "Claude Sonnet 4.6", description = "Everyday coding" },
+  { id = "claude-haiku-4-5" },         # display_name and description optional
+]
 ```
 
 ### Target schema (illustrative, not implemented)
@@ -383,7 +390,7 @@ log_prompt_content = false
 | Caller-credential passthrough | Explicit, loopback only; no gateway auth or cost ceiling in that mode ([policy.md](policy.md#caller-credential-passthrough)) |
 | Price estimates | Versioned table plus conservative estimation; define guarantee tiers |
 | Configuration reload | Startup snapshot first; hot reload only on demand and without disrupting streams |
-| `/v1/models` | Optional; implement if a client integration requires it |
+| `/v1/models` | Implemented: the `[discovery]` catalog, filtered per caller by model permissions; absent without it |
 | Responses cross-provider translation | Not part of the initial multi-provider promise |
 | Provider-hosted tools/MCP | Explicit adapter feature, not generic passthrough |
 | Per-node adaptive concurrency | Violates strict statelessness; research only |
