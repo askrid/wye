@@ -9,6 +9,7 @@
 //! record is dropped and counted, so a slow sink never slows a stream.
 
 mod agent;
+mod line;
 mod metrics;
 mod observed;
 mod otlp;
@@ -22,26 +23,21 @@ use std::{
 };
 
 use gateway_core::{
-    agent::CacheMiss,
     credential::Identity,
     prompt::HashKey,
     usage::{ToolCalls, Usage},
 };
 use http::{HeaderValue, StatusCode};
-use serde::Serialize;
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     sync::mpsc,
     task::JoinHandle,
 };
 
-use crate::{
-    diagnostics::{PromptRecord, PromptSlot},
-    gauge::Gauge,
-};
+use crate::{diagnostics::PromptSlot, gauge::Gauge};
 
 pub(crate) use agent::AgentHeaders;
-use agent::ToolDurations;
+use line::{Line, line, push_line};
 pub(crate) use observed::Observed;
 pub(crate) use otlp::{OtlpTarget, parse_headers};
 
@@ -266,146 +262,4 @@ fn unix_nanos() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
-}
-
-/// One JSON line, serialized from borrowed fields: no per-record allocation
-/// beyond growing the writer's reused buffer.
-#[derive(Serialize)]
-struct Line<'a> {
-    event: &'static str,
-    unix_ms: u64,
-    path: &'a str,
-    status: u16,
-    outcome: &'static str,
-    duration_ms: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    headers_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    subject: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<&'a str>,
-    /// Only for the OTLP span; not part of the JSON line.
-    #[serde(skip)]
-    traceparent: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    request_class: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    agent_type: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    agent_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_agent_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prompt_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compaction: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context_compacted: Option<&'static str>,
-    /// Tool calls that ran since the agent's previous request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_durations: Option<ToolDurations<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<&'a str>,
-    usage_status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    output_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_creation_input_tokens: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_read_input_tokens: Option<u64>,
-    /// Tool calls the response requested, by tool name.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<ToolCallsField<'a>>,
-    /// Why the request wrote the prompt cache without reading it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_miss: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prompt: Option<PromptRecord>,
-}
-
-/// The record as borrowed fields, written as a JSON line and as OTLP.
-fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
-    let usage = r
-        .usage
-        .as_ref()
-        .map(|(usage, _)| *usage)
-        .unwrap_or_default();
-    let agent = r.info.agent.fields();
-    Line {
-        event: "request",
-        unix_ms: r.unix_ms as u64,
-        path: r.info.path,
-        status: r.status.as_u16(),
-        outcome: r.outcome.as_str(),
-        duration_ms: ms(r.duration),
-        headers_ms: r.headers_after.map(ms),
-        subject: r.info.identity.as_ref().map(|i| &*i.subject),
-        session_id: r.info.session_id.as_ref().and_then(|v| v.to_str().ok()),
-        traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
-        request_class: agent.request_class,
-        agent_type: agent.agent_type,
-        agent_id: agent.agent_id,
-        parent_agent_id: agent.parent_agent_id,
-        prompt_id: agent.prompt_id,
-        compaction: agent.compaction.map(|c| c.as_str()),
-        context_compacted: agent.context_compacted.map(|c| c.as_str()),
-        tool_durations: agent.tool_durations,
-        model: r.model.as_deref(),
-        usage_status: r
-            .usage
-            .as_ref()
-            .map_or("not_observed", |(_, status)| status),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_creation_input_tokens: usage.cache_creation_input_tokens,
-        cache_read_input_tokens: usage.cache_read_input_tokens,
-        tool_calls: r.tool_calls.as_deref().map(ToolCallsField),
-        cache_miss: CacheMiss::classify(
-            usage.cache_read_input_tokens,
-            usage.cache_creation_input_tokens,
-            agent.compaction,
-            agent.context_compacted,
-        )
-        .map(CacheMiss::as_str),
-        prompt: r
-            .info
-            .prompt
-            .as_ref()
-            .zip(prompt_key)
-            .map(|(slot, key)| PromptRecord::new(slot, key)),
-    }
-}
-
-/// Name of the count of tool calls not recorded by name; parentheses are
-/// outside the tool-name alphabet, so it never collides with a tool.
-const OTHER_TOOLS: &str = "(other)";
-
-/// Tool calls as a JSON object of name to count.
-#[derive(Clone, Copy)]
-pub(super) struct ToolCallsField<'a>(pub(super) &'a ToolCalls);
-
-impl<'a> ToolCallsField<'a> {
-    fn iter(self) -> impl Iterator<Item = (&'a str, u32)> {
-        let other = (self.0.other() > 0).then(|| (OTHER_TOOLS, self.0.other()));
-        self.0.iter().chain(other)
-    }
-}
-
-impl Serialize for ToolCallsField<'_> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_map(self.iter())
-    }
-}
-
-fn push_line(buf: &mut Vec<u8>, line: &Line<'_>) {
-    // Serializing plain fields into a Vec cannot fail.
-    let _ = serde_json::to_writer(&mut *buf, line);
-    buf.push(b'\n');
-}
-
-/// Milliseconds rounded to two decimals.
-fn ms(d: Duration) -> f64 {
-    (d.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
