@@ -14,6 +14,7 @@ const USAGE: &str = "usage:
   wye check-config <path>
   wye probe <http-url>
   wye policy-test --config <path> <dir>
+  wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
@@ -60,6 +61,15 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             .build()?
             .block_on(wye::probe(url))
             .map_err(Into::into),
+        ["report"] => {
+            print!("{}", wye::report(std::io::stdin().lock())?);
+            Ok(())
+        }
+        ["report", path] => {
+            let file = std::fs::File::open(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+            print!("{}", wye::report(std::io::BufReader::new(file))?);
+            Ok(())
+        }
         ["check-config", path] => {
             load(path)?;
             println!("{path}: ok");

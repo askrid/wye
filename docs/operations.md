@@ -39,6 +39,8 @@ Policy becomes testable in CI: commit sample requests with expected decisions, a
 
 **Implemented: `wye policy-test --config wye.toml <dir>`.** Each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and three cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused), and the test suite runs them.
 
+**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls and time by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
+
 ```text
 policy-tests/
 ├── background-haiku.json          # request
