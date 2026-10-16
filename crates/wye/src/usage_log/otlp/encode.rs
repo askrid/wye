@@ -75,6 +75,19 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     if let Some(session) = line.session_id {
         attribute("session.id", Value::Str(session));
     }
+    for (key, value) in [
+        ("claude_code.request_class", line.request_class),
+        ("claude_code.agent_type", line.agent_type),
+        ("claude_code.agent_id", line.agent_id),
+        ("claude_code.parent_agent_id", line.parent_agent_id),
+        ("claude_code.prompt_id", line.prompt_id),
+        ("claude_code.compaction", line.compaction),
+        ("claude_code.context_compacted", line.context_compacted),
+    ] {
+        if let Some(value) = value {
+            attribute(key, Value::Str(value));
+        }
+    }
     if let Some(model) = line.model {
         attribute("gen_ai.response.model", Value::Str(model));
     }
@@ -95,6 +108,9 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         if let Some(count) = count {
             attribute(key, Value::Int(count));
         }
+    }
+    if let Some(miss) = line.cache_miss {
+        attribute("wye.cache_miss", Value::Str(miss));
     }
     if let Some(prompt) = &line.prompt {
         // Nested and variable-length: one JSON string the backend can parse.

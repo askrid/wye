@@ -5,6 +5,7 @@
 //! later back a WASM adapter.
 #![forbid(unsafe_code)]
 
+pub mod agent;
 pub mod config;
 pub mod credential;
 mod json;
