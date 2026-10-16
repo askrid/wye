@@ -15,7 +15,8 @@ mod validate;
 
 use crate::policy::ModelPattern;
 use validate::{
-    RawConfig, env_name, validate_auth, validate_server, validate_telemetry, validate_upstream,
+    RawConfig, env_name, validate_auth, validate_discovery, validate_server, validate_telemetry,
+    validate_upstream,
 };
 
 /// Request bytes held process-wide while reading `model` for permissions.
@@ -43,6 +44,31 @@ pub struct Config {
     pub cache_diagnostics: Option<CacheDiagnostics>,
     /// OTLP export of usage records.
     pub telemetry: Option<Telemetry>,
+    /// Models listed at `GET /v1/models`; without it the endpoint is absent.
+    pub discovery: Option<Discovery>,
+}
+
+/// Most catalog entries: Claude Code asks for `limit=1000`, and Wye serves
+/// one page.
+pub const MAX_DISCOVERY_MODELS: usize = 1000;
+/// Longest `display_name` or `description`.
+pub const MAX_DISCOVERY_TEXT_BYTES: usize = 1024;
+
+/// The model catalog served at `GET /v1/models`, filtered per caller by
+/// model permissions.
+#[derive(Debug, Clone)]
+pub struct Discovery {
+    /// In listing order; ids are unique.
+    pub models: Vec<DiscoveredModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredModel {
+    /// The model name clients send; Claude Code keeps only ids containing
+    /// `claude` or `anthropic`.
+    pub id: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
 }
 
 /// OTLP export: each usage record is also sent as an OTLP log record.
@@ -247,12 +273,14 @@ impl Config {
             })
             .transpose()?;
         let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
+        let discovery = raw.discovery.map(validate_discovery).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
             auth,
             cache_diagnostics,
             telemetry,
+            discovery,
         })
     }
 }

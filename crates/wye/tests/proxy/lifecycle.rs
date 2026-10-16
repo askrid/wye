@@ -26,6 +26,9 @@ async fn requests_beyond_the_concurrency_limit_get_overloaded_error() {
 
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status().as_u16(), 529);
+    // Claude Code waits `retry-after` seconds and retries; above 60 it gives up.
+    assert_eq!(res.headers()["retry-after"], "1");
+    assert_eq!(res.headers()["x-should-retry"], "true");
     assert!(
         read_body(res)
             .await
