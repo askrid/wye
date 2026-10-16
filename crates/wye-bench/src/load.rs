@@ -1,6 +1,7 @@
 //! `wye-bench load`: one scenario, sustained, so a gateway can be profiled
 //! (`sample <pid>` on macOS, `perf record -p <pid>` on Linux) or soaked
-//! (`paced`: memory should stay flat across batches of streams).
+//! (`paced`: memory should stay flat across batches of streams), or stepped
+//! up to one core's capacity (`capacity`, see [`crate::capacity`]).
 
 use std::time::{Duration, Instant};
 
@@ -28,23 +29,37 @@ const PACED_RAMP: Duration = Duration::from_millis(2_000);
 /// pid at the start and its cost at the end.
 pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     let tls = match scenario {
-        "tls-upload" | "paced" => true,
+        "tls-upload" | "paced" | "capacity" => true,
         "upload" => false,
-        _ => panic!("scenario must be upload, tls-upload, or paced"),
+        _ => panic!("scenario must be upload, tls-upload, paced, or capacity"),
     };
     let ca = TestCa::generate();
     let upstream = mock::spawn(tls.then_some(&ca)).await;
     let base_url = format!("{}://{upstream}", if tls { "https" } else { "http" });
     let dir = std::env::temp_dir().join(format!("wye-bench-load-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let process = GatewayProcess::start(
+    // Capacity is measured per core: one Tokio worker thread for the gateway.
+    let env: &[(&str, &str)] = if scenario == "capacity" {
+        &[("TOKIO_WORKER_THREADS", "1")]
+    } else {
+        &[]
+    };
+    let process = GatewayProcess::start_with_env(
         gateway,
         &base_url,
         tls.then_some(ca.ca_pem()),
         &dir,
         scenario,
+        env,
     )
     .await;
+    if scenario == "capacity" {
+        let direct = crate::client::Target::tls(upstream, ca.ca_cert());
+        crate::capacity::run(&direct, &process).await;
+        drop(process);
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
     if scenario == "paced" {
         soak_paced(&process, seconds).await;
         drop(process);

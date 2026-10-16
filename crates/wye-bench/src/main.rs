@@ -15,7 +15,7 @@
 //!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
 //!   wye-bench compare <baseline.json> <results.json>
 //!   wye-bench adopt-new <baseline.json> <results.json>
-//!   wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced> --seconds N
+//!   wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N
 
 // Development tool, not on the request path: panics abort a benchmark run.
 #![allow(
@@ -26,6 +26,7 @@
 )]
 
 mod allocations;
+mod capacity;
 mod client;
 mod gate;
 mod gateway_config;
@@ -118,7 +119,7 @@ fn usage() -> ExitCode {
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
          wye-bench adopt-new <baseline.json> <results.json>\n  \
-         wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced> --seconds N"
+         wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N"
     );
     ExitCode::from(2)
 }
