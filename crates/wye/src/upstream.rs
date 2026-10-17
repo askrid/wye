@@ -14,8 +14,8 @@ use gateway_core::config;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Request, Response, Uri, Version,
     header::{
-        AUTHORIZATION, CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TE, TRAILER,
-        TRANSFER_ENCODING, UPGRADE,
+        ACCEPT_ENCODING, AUTHORIZATION, CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION,
+        TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
     },
     uri::{Authority, PathAndQuery, Scheme},
 };
@@ -43,6 +43,12 @@ type UpstreamClient =
     Client<HttpsConnector<HttpConnector>, PromptBody<Limited<RequestBody<Incoming>>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
+/// Asked of the upstream instead of the caller's `accept-encoding`: Wye
+/// reads usage, models, and tool calls from the response bytes it relays,
+/// and Anthropic compresses responses (Brotli) when Claude Code asks for it.
+/// Decompressing a copy would cost CPU per event and decoders for untrusted
+/// input; an uncompressed response costs only bytes, and responses are small.
+const IDENTITY: HeaderValue = HeaderValue::from_static("identity");
 
 /// Headers that apply to a single connection and are never forwarded (RFC 9110 §7.6.1).
 const HOP_BY_HOP: [HeaderName; 9] = [
@@ -159,6 +165,7 @@ impl Upstream {
         parts.extensions.clear();
         strip_hop_by_hop(&mut parts.headers);
         parts.headers.remove(HOST);
+        parts.headers.insert(ACCEPT_ENCODING, IDENTITY);
         if let UpstreamAuth::ApiKey(key) = &self.auth {
             parts.headers.remove(AUTHORIZATION);
             parts.headers.insert(X_API_KEY, key.clone());

@@ -27,7 +27,8 @@ async fn forwards_request_unchanged_and_replaces_credential() {
                 .header("authorization", "Bearer caller-token")
                 .header("x-api-key", "caller-key")
                 .header("connection", "x-hop")
-                .header("x-hop", "1"),
+                .header("x-hop", "1")
+                .header("accept-encoding", "gzip, deflate, br, zstd"),
             r#"{"model":"claude-x","unknown_field":{"kept":true}}"#,
         )
         .await;
@@ -56,6 +57,8 @@ async fn forwards_request_unchanged_and_replaces_credential() {
     assert_eq!(seen.headers["anthropic-version"], "2023-06-01");
     assert_eq!(seen.headers["x-claude-code-session-id"], "s-1");
     assert!(seen.headers.get("x-hop").is_none());
+    // Usage is read from the response bytes, so they must not be compressed.
+    assert_eq!(seen.headers["accept-encoding"], "identity");
 }
 
 #[tokio::test]
