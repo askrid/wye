@@ -1,0 +1,35 @@
+# Wye for one developer on a claude.ai subscription (Pro or Max), on this
+# machine only. Wye forwards your own Claude Code login to Anthropic instead of
+# an API key, so usage counts against your plan, not API billing.
+#
+#   wye serve --config examples/subscription.toml 2>>~/.wye/usage.jsonl
+#   wye claude                  # in another terminal
+#   wye report ~/.wye/usage.jsonl
+#
+# Unset ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN in the terminal that runs
+# Claude Code: either one replaces your login, and requests would bill to the
+# API instead of your plan.
+#
+# What you get: per-request usage records (tokens, cache hits and misses,
+# Claude Code session, subagent, request class, tool calls and time), `wye
+# report`, and OTLP export if you add [telemetry]. What you do not get in this
+# mode: gateway credentials, model permissions, or token ceilings, which all
+# need [auth], and [auth] cannot be combined with forwarding your login.
+
+[server]
+# Required: forwarding your login is refused on any non-loopback address.
+listen = "127.0.0.1:8080"
+
+[upstream]
+base_url = "https://api.anthropic.com"
+forward_caller_credential = true
+
+# Keyed prompt hashes in each usage record, to explain prompt-cache misses.
+# export WYE_CACHE_HASH_KEY="$(openssl rand -hex 32)"
+# [cache_diagnostics]
+# hash_key_env = "WYE_CACHE_HASH_KEY"
+
+# Usage, metrics, and per-session traces to a local collector or Jaeger
+# (docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:1.62.0).
+# [telemetry]
+# otlp_endpoint = "http://127.0.0.1:4318"

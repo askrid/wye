@@ -1,7 +1,8 @@
-# Minimal Wye configuration for Claude Code.
+# Wye configuration for Claude Code with an Anthropic API key, with every
+# option shown. On a claude.ai subscription, use examples/subscription.toml.
 #
 #   ANTHROPIC_API_KEY=... wye serve --config examples/wye.toml
-#   ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
+#   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 
 [server]
 listen = "127.0.0.1:8080"
@@ -21,7 +22,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Or read the key from a mounted secret file (Docker/Kubernetes secrets,
 # systemd credentials), relative to this file:
 # api_key_file = "/run/secrets/anthropic_api_key"
-# For a claude.ai subscription login, use this instead of api_key_env:
+# For a claude.ai subscription login, use this instead of api_key_env
+# (examples/subscription.toml is a complete config):
 # forward_caller_credential = true
 # connect_timeout_secs = 10
 # response_header_timeout_secs = 600

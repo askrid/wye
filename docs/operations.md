@@ -55,7 +55,23 @@ With routing and cost ceilings, expectations will also name the route and bound 
 
 ### Client wrapper
 
-**Implemented: `wye claude`.** `wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]` checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). Profiles, `wye codex`, and `wye run` below are proposals.
+**Implemented: `wye claude`.** `wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]` checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program), and arguments after `--` go to Claude Code unchanged. Profiles, `wye codex`, and `wye run` below are proposals.
+
+**Local setup (macOS or Linux, from source).** Install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; rerun after pulling changes). Then run the gateway in one terminal and Claude Code in another:
+
+```bash
+mkdir -p ~/.wye
+wye serve --config examples/subscription.toml 2>>~/.wye/usage.jsonl   # claude.ai subscription
+# or: ANTHROPIC_API_KEY=... wye serve --config examples/wye.toml       # API key
+
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
+export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1      # request class, prompt id, tool durations
+wye claude                                     # wye claude -- --resume, etc.
+
+wye report ~/.wye/usage.jsonl                  # afterwards, or at any time
+```
+
+The usage log goes to the gateway's stderr, so redirecting it keeps it; `wye report` skips the startup lines. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
 ```bash
 wye claude
