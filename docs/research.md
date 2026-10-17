@@ -95,6 +95,8 @@ OTLP log export (`otlp_` metrics, exporting to the mock; per-request scenarios, 
 
 **Soak** (`wye-bench load --wye <alloc-stats build> --scenario paced --seconds 150`; TLS + HTTP/2, batches of 2,000 token-paced streams at 50 events/s, 34 batches, 6.8M events, zero failed streams, 34 µs CPU per event): live heap after each batch rose about 600 KB over the first ~20 batches (connection lanes and buffers warming) and then held at 49,363 KB through the end; resident memory levelled off near 56 MB (the allocator keeping freed pages). No growth per stream served. A multi-hour soak remains to be run.
 
+**Compressed responses** (2026-10-17, first real Claude Code session through Wye, subscription passthrough): every streamed response was recorded with `usage_status: unknown` and zero tokens, while streaming, session, request-class, and tool-duration fields were correct. Claude Code sends `accept-encoding: gzip, deflate, br, zstd` (captured with a local header-logging server), and `api.anthropic.com` answers with `content-encoding: br` when asked (checked with an unauthenticated request); Wye forwarded the header, so its scanner saw Brotli bytes. The mock never compresses, so no test caught it. Fix: Wye asks the upstream for `identity` ([architecture.md](architecture.md#forwarding-contract)); after it, a real request recorded the model, `complete` usage, and its cache write.
+
 **Capacity per core** (2026-10-16, `wye-bench load --wye <release> --scenario capacity`; Wye with `TOKIO_WORKER_THREADS=1`, TLS + HTTP/2, batches of token-paced streams at 50 events/s of 100 bytes, each run first directly against the mock and then through Wye; two runs, load average about 2):
 
 | Streams | Events/s | Wye cores | CPU µs/event | Direct p99 | Added p99 |
