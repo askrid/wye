@@ -50,8 +50,8 @@ A developer on a claude.ai subscription authenticates with their own login, not 
 
 - Loopback bind only; startup fails when it is combined with a non-loopback listener.
 - No gateway credential, so no identity, model permissions, or provider-held budgets; usage bills to the caller's subscription.
-- Per-request token bounds still apply. The cost ceiling does not, because subscription usage is not billed per token.
-- Telemetry still works, attributed by `x-claude-code-session-id`.
+- No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which this mode excludes, and the cost ceiling would not apply anyway, because subscription usage is not billed per token.
+- Telemetry still works, attributed by `x-claude-code-session-id` and the agent headers. [`examples/subscription.toml`](../examples/subscription.toml) is a complete config.
 
 ## Per-request ceilings
 
