@@ -97,6 +97,18 @@ OTLP log export (`otlp_` metrics, exporting to the mock; per-request scenarios, 
 
 **Compressed responses** (2026-10-17, first real Claude Code session through Wye, subscription passthrough): every streamed response was recorded with `usage_status: unknown` and zero tokens, while streaming, session, request-class, and tool-duration fields were correct. Claude Code sends `accept-encoding: gzip, deflate, br, zstd` (captured with a local header-logging server), and `api.anthropic.com` answers with `content-encoding: br` when asked (checked with an unauthenticated request); Wye forwarded the header, so its scanner saw Brotli bytes. The mock never compresses, so no test caught it. Fix: Wye asks the upstream for `identity` ([architecture.md](architecture.md#forwarding-contract)); after it, a real request recorded the model, `complete` usage, and its cache write.
 
+**Cost of uncompressed responses** (same day, offline, no provider calls): 353 real assistant responses (a 1-in-10 sample of local Claude Code transcripts: text, thinking, and tool-use blocks with their recorded usage) rebuilt as Anthropic SSE streams, with deltas of 8, 16, or 32 bytes of content, because the real delta size was not captured. Compression is flushed after every event, as a streaming server must; Anthropic's level and flush behavior are unknown, so the rows bracket them. Scratch tool, not in the repository (flate2, brotli, and zstd crates; i9-9880H, release build).
+
+| Delta size | Identity per response | Per event | gzip -6 | Brotli q4 / q11 | zstd -3 | Brotli whole body (not streamable) |
+|---|---|---|---|---|---|---|
+| 8 B | 35.9 KB | 151 B | 4.0× | 5.7× / 5.8× | 5.8× | 12.0× |
+| 16 B | 21.5 KB | 173 B | 3.5× | 4.5× / 4.6× | 4.6× | 7.7× |
+| 32 B | 14.3 KB | 211 B | 3.1× | 3.6× / 3.7× | 3.7× | 5.4× |
+
+Identity costs 3.5–6× the bytes from Anthropic to Wye, about 120–150 B more per event, or 10–30 KB per response. Little of that shows up as time. A response streams at the model's pace, about 20 events/s at 80 tokens/s, which needs about 3.5 KB/s (28 kbit/s) uncompressed. Sending 150 B more per event on a 10 Mbit/s link takes 0.12 ms, against a typical inter-token gap of 20 ms. In total, a 300-response session moves about 6 MB instead of 1.5 MB. The difference matters only on metered links. Request bodies, which are far larger in agent sessions, are unaffected. With Wye on loopback the client side costs nothing; on a network, Wye already sends uncompressed responses to the client, as before.
+
+The rejected alternative, decompressing a copy in Wye, decoded Brotli q4 one frame per event at 6–11 µs per event. That adds 20–90% to Wye's whole relay cost of 12–35 µs per event (capacity and soak runs above). It would also need a decoder per stream whose window, up to several MB for Brotli and zstd, is attacker-controlled, and it would end the zero allocations per event on the streaming path. Asking for `identity` remains the choice.
+
 **Capacity per core** (2026-10-16, `wye-bench load --wye <release> --scenario capacity`; Wye with `TOKIO_WORKER_THREADS=1`, TLS + HTTP/2, batches of token-paced streams at 50 events/s of 100 bytes, each run first directly against the mock and then through Wye; two runs, load average about 2):
 
 | Streams | Events/s | Wye cores | CPU µs/event | Direct p99 | Added p99 |
