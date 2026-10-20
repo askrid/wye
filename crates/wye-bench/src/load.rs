@@ -129,7 +129,8 @@ async fn soak_paced(process: &GatewayProcess, seconds: u64) {
     };
     run().await;
     eprintln!("gateway pid {} under paced for {seconds}s", process.pid());
-    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(seconds);
     let cpu_before = process.cpu_secs();
     let (mut events, mut failed, mut batches) = (0usize, 0usize, 0usize);
     let mut rss = Vec::new();
@@ -145,9 +146,18 @@ async fn soak_paced(process: &GatewayProcess, seconds: u64) {
         // Idle between batches: what the gateway keeps once streams end.
         tokio::time::sleep(Duration::from_millis(200)).await;
         rss.push(process.rss_kb());
-        if let Some(bytes) = allocations::live_bytes(process.target()).await {
-            live.push(bytes / 1024.0);
-        }
+        let live_kb = allocations::live_bytes(process.target())
+            .await
+            .map(|bytes| bytes / 1024.0);
+        live.extend(live_kb);
+        // One line per batch as it ends, so an interrupted multi-hour run
+        // still leaves its series.
+        eprintln!(
+            "batch {batches} at {:.0}s: {failed} failed streams so far, idle RSS {:.0} KB, live heap {} KB",
+            started.elapsed().as_secs_f64(),
+            rss.last().copied().unwrap_or_default(),
+            live_kb.map_or_else(|| "-".to_owned(), |kb| format!("{kb:.0}")),
+        );
     }
     let cpu = process.cpu_secs() - cpu_before;
     let first = rss.first().copied().unwrap_or_default();
