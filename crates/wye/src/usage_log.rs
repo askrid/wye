@@ -5,8 +5,9 @@
 //! without changing or delaying them and emits one [`Record`] when the body is
 //! dropped: after completion, error, or client disconnect. Records go through
 //! a bounded channel to one writer task, which writes them as JSON lines and,
-//! with `[telemetry]`, exports them as OTLP logs; when the channel is full the
-//! record is dropped and counted, so a slow sink never slows a stream.
+//! with `[telemetry]`, exports them as OTLP logs, metrics, and spans; when the
+//! channel is full the record is dropped and counted, so a slow sink never
+//! slows a stream.
 
 mod agent;
 mod line;
@@ -103,7 +104,7 @@ pub(crate) struct Record {
 pub(crate) struct Sinks {
     /// Keys the prompt hashes of records that carry them.
     pub(crate) prompt_key: Option<Arc<HashKey>>,
-    /// Exports records as OTLP logs and aggregates them into OTLP metrics.
+    /// Exports records as OTLP logs and spans and aggregates them into OTLP metrics.
     pub(crate) otlp: Option<Arc<OtlpTarget>>,
     /// Requests in flight, reported as `wye.requests.active`.
     pub(crate) active: Gauge,

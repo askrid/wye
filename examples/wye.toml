@@ -64,8 +64,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # hash_key_env = "WYE_CACHE_HASH_KEY"
 # sample_percent = 100
 
-# Usage records as OTLP log records (OTLP/HTTP, JSON) to a collector or a
-# backend that accepts OTLP directly. Records also stay in the stderr log.
+# Usage records as OTLP logs, aggregated metrics, and per-session traces
+# (OTLP/HTTP, JSON) to a collector or a backend that accepts OTLP directly.
+# Records also stay in the stderr log.
 # [telemetry]
 # otlp_endpoint = "http://localhost:4318"
 # otlp_headers_env = "OTLP_HEADERS"   # e.g. "api-key=..." for a hosted backend

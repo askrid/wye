@@ -1,13 +1,15 @@
-//! Model permissions: the request's `model` is checked before anything is
-//! sent upstream.
+//! Model permissions and output-token ceilings: the request's `model` (and
+//! `max_tokens`, when it arrives in time) is checked before anything is sent
+//! upstream.
 //!
 //! [`hold_until_model`] reads the request body only until its top-level
 //! `model` value has been read. Claude Code sends `model` first, so usually
 //! only the first chunk waits. The held bytes count against a process-wide
 //! budget (`server.max_held_request_bytes`). When the model is allowed,
 //! [`RequestBody`] replays the held chunks and streams the rest, and keeps
-//! checking it: a second top-level `model` key fails the body, which aborts
-//! the upstream request instead of letting the provider read the other model.
+//! checking it: a second top-level `model` key, or a `max_tokens` above the
+//! ceiling that arrives after the hold, fails the body, which aborts the
+//! upstream request before the provider sees a complete request.
 
 use std::{
     collections::VecDeque,

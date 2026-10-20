@@ -4,8 +4,9 @@
 //! copying them. It keeps at most one partial line, parses JSON only for the two
 //! events that carry usage (`message_start` and `message_delta`) and for
 //! `content_block_start` (once per content block, to count `tool_use` blocks by
-//! tool name), and skips every other event after reading its line prefix. HTTP chunk boundaries are
-//! not SSE boundaries: lines may be split anywhere, including inside UTF-8.
+//! tool name), and skips every other event after reading its line prefix.
+//! HTTP chunk boundaries are not SSE boundaries: lines may be split anywhere,
+//! including inside UTF-8.
 
 use serde::Deserialize;
 

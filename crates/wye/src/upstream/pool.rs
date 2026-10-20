@@ -9,8 +9,8 @@
 //!
 //! Spreading rather than packing is deliberate: `h2` guards all streams of one
 //! connection with a single mutex, and packing streams onto one connection made
-//! that lock the dominant cost (benchmark: 1.4 ms added unary latency and 12 ms
-//! CPU per MB at 100 streams per connection, against 0.26 ms and 3.9 ms spread).
+//! that lock the dominant cost (A/B on the TLS path: 1.5 ms added unary latency
+//! and 12.3 ms CPU per MB packed, against 0.3 ms and 4.1 ms spread).
 
 use super::UpstreamClient;
 use crate::gauge::{Gauge, Held};

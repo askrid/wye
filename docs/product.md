@@ -108,7 +108,7 @@ Developer B ─┼──> HTTPS endpoint / internal service ──> Wye ──> 
 CI / agents ─┘                                       └──> OTLP backend
 ```
 
-Provider credentials stay in the team's deployment environment; applications receive only gateway credentials. Routing policy is reviewed in Git. Usage is recorded by Wye from verified credentials, so it is trustworthy attribution that a developer cannot switch off or alter the way client-side telemetry can. OTLP events attribute usage by application, project, or key identity without collecting prompts by default, and, as the [agent-native directions](research.md#agent-native-directions) land, by session, subagent, and work type (main loop, subagents, compactions, background calls). Wye does not provide hard team budgets; use application or infrastructure enforcement if required.
+Provider credentials stay in the team's deployment environment; applications receive only gateway credentials. Routing policy is reviewed in Git. Usage is recorded by Wye from verified credentials, so it is trustworthy attribution that a developer cannot switch off or alter the way client-side telemetry can. OTLP events attribute usage by credential subject without collecting prompts, and, through the [agent-native directions](research.md#agent-native-directions), by session, subagent, and work type (main loop, subagents, compactions, background calls). Wye does not provide hard team budgets; use application or infrastructure enforcement if required.
 
 ### Public internet-facing LLM app
 
@@ -132,7 +132,7 @@ Users are untrusted. Never issue a reusable provider key to the browser. The app
 | LiteLLM | Broad provider coverage, virtual keys, budgets, management | No database to run; about 10× less CPU per streamed event and far less memory in the same benchmark ([research.md](research.md#against-litellm)) |
 | OmniRoute | Multi-account routing, quotas, compression, management | Deterministic GitOps policy, lean serving path, protocol-focused scope |
 | Vercel AI Gateway | Managed, convenient within Vercel | Self-hosted, cross-platform, customer-controlled path |
-| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests, and (planned) session structure and cost by work type from the gateway hint headers. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
+| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests, and session structure and token spend by work type from the gateway hint headers. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
 
 Stateless deployment and single-binary distribution are not unique. Wye must win by combining correct LLM compatibility, predictable configuration, portability, and measured resource efficiency.
 
@@ -151,18 +151,18 @@ Each follows from statelessness rather than working around it:
 
 Agent-native differentiators: what only an agent-aware gateway sees, still request-local and stateless (detail and ranking in [research.md](research.md#agent-native-directions)):
 
-| Direction | What it gives |
-|---|---|
-| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss (implemented, opt-in) |
-| Session traces | A whole Claude Code session as one trace: prompts, subagents, model time versus tool time, compactions; ids derived alike on every replica |
-| Spend by work type | Tokens and cost by request class and agent type: what compactions, subagents, and background calls cost |
-| Expected versus unexpected cache misses | A miss after a compaction is normal; a miss on an ordinary turn is a regression worth an alert |
-| Model picker from policy | `GET /v1/models` lists exactly the models the caller's credential may use |
-| `wye report` | Per-session and per-developer cost, cache, and tool-time report from the usage log, with no backend |
-| Agent-aware routing | Request-class hints route auxiliary and compaction calls to cheaper Claude models by policy, once quality is measured |
-| Delegable credentials | Agents mint narrower credentials for subagents offline |
-| Signed usage receipts | Tamper-evident chargeback and audit without a billing database |
-| Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI |
+| Direction | What it gives | Status |
+|---|---|---|
+| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss | Implemented, opt-in |
+| Session traces | A whole Claude Code session as one trace: requests and tool calls, with prompt and agent ids as attributes; ids derived alike on every replica | Implemented |
+| Spend by work type | Tokens by request class and agent type: what compactions, subagents, and background calls consume | Implemented (tokens; cost with M2 pricing) |
+| Expected versus unexpected cache misses | A miss after a compaction is normal; a miss on an ordinary turn is a regression worth an alert | Implemented |
+| Model picker from policy | `GET /v1/models` lists exactly the models the caller's credential may use | Implemented |
+| `wye report` | Tokens, cache hits and misses, and tool time per session, request class, and prompt, from the usage log, with no backend | Implemented |
+| Agent-aware routing | Request-class hints route auxiliary and compaction calls to cheaper Claude models by policy, once quality is measured | Planned (M2) |
+| Delegable credentials | Agents mint narrower credentials for subagents offline | Research (M6) |
+| Signed usage receipts | Tamper-evident chargeback and audit without a billing database | Proposal (M6) |
+| Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI | Research (M6) |
 
 ### Moat
 

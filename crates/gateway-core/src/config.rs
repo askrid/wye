@@ -71,7 +71,8 @@ pub struct DiscoveredModel {
     pub description: Option<String>,
 }
 
-/// OTLP export: each usage record is also sent as an OTLP log record.
+/// OTLP export: each usage record is also sent as an OTLP log record and a
+/// span, and aggregated into OTLP metrics.
 #[derive(Debug, Clone)]
 pub struct Telemetry {
     /// Logs endpoint: the configured base URL with `/v1/logs` appended.

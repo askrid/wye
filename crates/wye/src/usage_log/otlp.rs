@@ -1,8 +1,10 @@
-//! OTLP export of usage records: OTLP/HTTP with JSON encoding, logs signal.
+//! OTLP export of usage records: OTLP/HTTP with JSON encoding, for the logs,
+//! traces, and metrics signals.
 //!
-//! The writer task appends each record to a batch as an OTLP log record and
-//! hands full (or one-second-old) batches to an exporter task through a
-//! bounded queue. A full queue or a failed export drops the batch and counts
+//! The writer task appends each record to a log batch as an OTLP log record
+//! and to a span batch as a span, and hands full (or one-second-old) batches,
+//! and the periodic metrics export, to an exporter task through one bounded
+//! queue. A full queue or a failed export drops the batch and counts
 //! its records; nothing here can slow a request. Attribute names follow the
 //! OpenTelemetry semantic conventions where one exists (`gen_ai.*`,
 //! `http.*`, `session.id`, `enduser.id`), and use a `wye.` prefix otherwise.
@@ -46,7 +48,7 @@ pub(crate) struct OtlpTarget {
     /// Extra headers, sensitive values marked as such.
     headers: HeaderMap,
     client: ExportClient,
-    /// The `Resource` object shared by both signals.
+    /// The `Resource` object shared by every signal.
     pub(super) resource: Box<[u8]>,
     /// The log batch envelope up to the first log record.
     logs_prefix: Box<[u8]>,
