@@ -1,169 +1,105 @@
 # Product
 
-**Wye is the gateway that understands agent traffic.** Coding agents such as Claude Code send long, cache-heavy, bursty sessions made of a main loop, subagents, background calls, and compactions. Generic gateways see a stream of unrelated requests. Wye reads the signals agents already send to explain, attribute, and constrain that work per request, and stays fast, light, and stateless while doing it.
+**Wye is the gateway that understands agent traffic.** Coding agents such as Claude Code send long, cache-heavy, bursty sessions made of a main loop, subagents, background calls, and compactions. Generic gateways see a stream of unrelated requests. Wye reads the signals agents already send to attribute, explain, and constrain that work per request, and stays fast, light, and stateless while doing it: one binary, one Git-managed TOML file, no database.
 
-**Primary users:** engineering teams running coding agents (Claude Code first, Codex next) who need service credentials, reviewed policy, and visibility into what their agents spend and why; individual agent developers; and applications serving LLM-backed functionality.
+**Primary users:** engineering teams running coding agents (Claude Code first, Codex next) who need service credentials, reviewed policy, and visibility into what their agents spend and why. Secondary: individual agent developers, and applications serving LLM-backed features.
 
 ## Motivation
 
-An engineering team used an AI gateway and then stopped because model API spending became difficult to justify or control, shifting toward reimbursement. The team still benefits from centralized credentials, a consistent model interface, and usage attribution. Wye should provide those benefits with little infrastructure and operational work.
+An engineering team used an AI gateway and then stopped because model spending became hard to justify or control. It still wanted centralized credentials, one interface to models, and usage attribution, with little infrastructure to run. Wye provides those without a ledger of its own: per-request ceilings bound each request, and cumulative spend is capped where it is billed, at the provider ([policy.md](policy.md#provider-held-budgets)).
 
-Wye answers that problem without a ledger of its own: a **provable per-request cost ceiling** bounds each request, and **provider-held budgets** cap cumulative spend at the provider, which already keeps the authoritative ledger ([policy.md](policy.md#provable-cost-ceiling)).
+**Performance is a requirement, not the pitch.** When inference takes seconds, saving proxy milliseconds rarely matters; what matters is that the gateway is never the bottleneck: streaming without buffering, memory per idle stream, CPU per event, cancellation. Every commit is gated on these ([development.md](development.md#commit-gate)). Results so far come from one laptop against a mock upstream and are lab results, not production claims ([research.md](research.md#current-harness-and-baseline)).
 
-Wye does not reproduce a managed AI platform. Its intended advantages:
+## Principles
 
-1. **Low operational burden:** one process per instance, one Git-managed config, no Redis, SQL database, dashboard, or management service.
-2. **Easy adoption:** applications redirect their SDK `base_url`; coding agents launch through a CLI wrapper.
-3. **Inference-specific efficiency:** streaming is the normal path; runtime work and buffering stay small.
-4. **Transparent cost decisions:** routing, per-request constraints, versioned pricing, and usage attribution are explicit and testable.
-5. **Portability:** inference policy is independent of the deployment platform, from a local subprocess to a container or a compatible edge runtime.
-
-**Performance is a hypothesis, not a claimed advantage.** Go and mature proxies are already efficient, and when inference takes seconds, saving a few proxy milliseconds rarely matters. The relevant measures are memory per active stream, CPU per streamed byte, added time to first token (TTFT), cancellation, and infrastructure cost. Measured so far on one laptop against a mock upstream: Wye adds about 0.2–0.3 ms per request and streams events as they arrive, where KrakenD CE buffers whole responses and LiteLLM adds tens of milliseconds ([research.md](research.md#against-krakend)). These are lab results, not production claims.
-
-### Agent-native, within the constraints
-
-Agent traffic is where gateway value now lies: agents resend their whole context every turn, depend on prompt caching for cost, fan out into subagents, and fail expensively when a loop runs away or a cache silently breaks ([research.md](research.md#agent-native-directions)). Claude Code tells a gateway a lot about each request without exposing prompt text: session, agent, and parent-agent ids on every request and, with gateway hint headers enabled, the request class (main, subagent, workflow, compaction, auxiliary), agent type, compaction trigger, a prompt id shared by every request one user prompt causes, and the run times of the tools between turns. Wye builds on these signals instead of on stored history.
-
-Every agent feature obeys the settled non-functional requirements; a feature that cannot is not built:
+Every feature obeys these; a feature that cannot is not built.
 
 - **Request-local.** A decision uses only the request, its credential, and the immutable config. Correlation across requests (sessions, prompts, subagents) happens in the user's telemetry backend through ids every replica derives alike, never in Wye.
-- **Fast.** Header reads on the request path; hashing, encoding, and aggregation in the telemetry writer task, off the request path. The streaming path stays at zero allocations per event. Every feature passes the commit gate, and a body scan is opt-in and sampled per session unless it fits the gate on its own.
-- **Light.** No database, cache, or queue; telemetry queues and metric series have fixed bounds and drop and count on overflow.
-- **Transparent.** Bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract): no prompt rewriting, no blocking a session for content it already sent. Telemetry carries ids, counts, and keyed hashes, never prompt text, by default.
-
-### One process, one responsibility
-
-The gateway service handles LLM inference traffic only. It does not run an agent loop, execute tools, host a dashboard, provision infrastructure, or store global usage history. A CLI wrapper may launch another tool such as Codex; that is a client-side convenience and does not make the gateway a multi-process control plane.
-
-### Stateless means no authoritative cross-request state
-
-A running process has sockets, request-scoped futures, connection pools, buffers, immutable config, and bounded telemetry queues. None of these is authoritative user or quota state, and none needs to move to another replica. Wye must not depend on the history of prior requests to authorize or route a new one. Consequences are in [policy.md](policy.md#state-boundary).
+- **Stateless.** No authoritative cross-request state: sockets, pools, buffers, the config snapshot, and bounded telemetry queues only. Nothing needs to move between replicas ([policy.md](policy.md#state-boundary)).
+- **Fast and light.** Header reads on the request path; hashing, encoding, and aggregation in the telemetry writer task. Zero allocations per streamed event. Every queue and metric series has a fixed bound and drops and counts on overflow. Body scans are opt-in and sampled per session unless they fit the gate on their own.
+- **Transparent.** Bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract). Telemetry carries ids, counts, and keyed hashes, never prompt text.
+- **One responsibility.** Inference traffic only: no agent loop, tool execution, dashboard, or stored usage history. `wye claude` launching a client is a client-side convenience.
 
 ## Scope
 
-### Core functionality
+### Built
 
-- OpenAI-compatible `POST /v1/chat/completions` and `POST /v1/responses`, in the phased combinations below.
-- Model aliases and static, declarative routing between eligible provider/model targets.
-- SSE streaming with cancellation propagation, bounded buffers, and backpressure.
-- Transparent client-managed tool calls; no tool execution.
-- Signed gateway credentials with expiry, audience, identity, and model permissions.
-- Per-request input/output limits and conservative cost admission when billable cost can be bounded.
-- Provider-native prompt caching where supported; no gateway response cache.
-- Usage, latency, and cost telemetry, traces, and structured errors via OTLP.
-- Native binary, OCI image, local CLI, then Helm and deployment examples; edge adapters later.
+For Claude Code on the Anthropic Messages API, passthrough to Anthropic ([roadmap.md](roadmap.md#status) has the detail):
 
-### Provider and endpoint phases
+- **Streaming proxy** honoring Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract): SSE relayed as it arrives, backpressure, cancellation, timeouts, graceful two-phase shutdown, concurrency and memory bounds.
+- **Credentials:** Wye's own Ed25519 tokens (`wye token`), or identity-provider tokens directly (CI workload identity such as GitHub Actions, or the team's IdP through Claude Code's `apiKeyHelper`), with model permissions and output-token ceilings checked before the provider is contacted.
+- **Subscription passthrough** for a single developer on a claude.ai plan, loopback only.
+- **Agent-aware telemetry:** usage records with session, subagent, request class, prompt, compaction, and tool calls; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
+- **Offline tools:** `wye report` (usage log summary, no backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye probe`, `GET /v1/models` from policy.
+- **Deployment:** native binary from source, OCI image (built locally, not published).
 
-Two independent dimensions: the **client-facing endpoint** (Chat Completions or Responses) and the **upstream provider**. Support is declared and tested per endpoint × provider × feature. There is no universal interchangeability layer.
+### Next (M2: cost)
 
-| Phase | Client-facing API | Upstream | Streaming | Client-managed tool calls | Notes |
-|---|---|---|---|---|---|
-| P0 | Anthropic Messages | Anthropic | Yes | Preserve and test | Claude Code-focused; native passthrough |
-| P1 | Chat Completions | OpenAI | Yes | Preserve and test | Native passthrough |
-| P2 | Responses | OpenAI | Yes | Preserve and test | Codex-focused; native event fidelity |
-| P3 | Chat Completions | Anthropic | Yes | Translate supported forms | Reject unsupported semantics explicitly. First multi-provider release |
-| P4 | Chat Completions | Gemini | Yes | Translate supported forms | Feature-by-feature test matrix |
-| Later | Anthropic Messages | Claude on Bedrock / Vertex | TBD | TBD | Claude models only: Anthropic does not support Claude Code on non-Claude models |
-| Later | Responses | Anthropic / Gemini | TBD | TBD | Separate capability; no promise until adapters are correct |
-| Later | Other provider-native APIs | Matching provider | TBD | TBD | Optional fidelity-oriented path |
+Pricing metadata, so usage becomes dollars in records, metrics, and `wye report`; a provable per-request cost bound as a runaway guard; provider-held budgets (identity → provider workspace key). This is the gap between "what our agents used" and "what they cost".
 
-A route is supported only when request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, cancellation, and unsupported-field handling are tested. **Fail explicitly rather than silently drop semantics.**
+### Later
 
-Claude Code requires the Messages route and its [gateway contract](architecture.md#claude-code-gateway-contract). Chat Completions support alone is never sufficient Codex compatibility; Codex requires the Responses route. Milestones are in [roadmap.md](roadmap.md).
+Codex through the OpenAI Responses API (M3), then multi-provider routing with Chat Completions adapters (M4), published binaries and images, Helm and Compose, an edge adapter. Phases per endpoint and provider:
+
+| Phase | Client-facing API | Upstream | Status | Notes |
+|---|---|---|---|---|
+| P0 | Anthropic Messages | Anthropic | **Built** | Claude Code; native passthrough |
+| P1 | Chat Completions | OpenAI | Planned | Native passthrough |
+| P2 | Responses | OpenAI | Planned | Codex; native event fidelity |
+| P3 | Chat Completions | Anthropic | Planned | Translation; reject unsupported semantics explicitly |
+| P4 | Chat Completions | Gemini | Planned | Feature-by-feature test matrix |
+| Later | Anthropic Messages | Claude on Bedrock / Vertex | Research | Claude models only |
+
+A route is supported only when request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, cancellation, and unsupported-field handling are tested. **Fail explicitly rather than silently drop semantics.** Chat Completions support alone is never Codex compatibility; Codex needs the Responses route.
+
+**Open question:** P3 and P4 (translating between providers) are the largest planned work and the area where LiteLLM's breadth is strongest. They serve applications more than coding agents. Whether they stay in scope, or Wye stays a passthrough gateway for agents (Claude Code, Codex) and leaves translation to others, is undecided.
 
 ### Non-goals
 
 - No dashboard, mutable admin API, authentication database, or migrations.
-- No Redis, PostgreSQL, SQLite, distributed actor system, leader election, peer discovery, or quota ownership.
-- No exact global RPM/TPM, global concurrency cap, cumulative or monthly budget, or single-use token redemption.
-- No MCP discovery, MCP transport proxy, managed tool execution, or agent orchestration.
-- No built-in prompt compression or request rewriting beyond the [allowlist](architecture.md#forwarding-contract).
-- No generic API aggregation or KrakenD replacement for non-LLM APIs.
-- No assumed semantic equivalence across models or providers.
+- No Redis, PostgreSQL, SQLite, distributed actors, leader election, peer discovery, or quota ownership.
+- No exact global RPM/TPM, global concurrency cap, cumulative or monthly budget in Wye, or single-use token redemption.
+- No MCP proxying, tool execution, or agent orchestration.
+- No prompt compression or request rewriting beyond the [allowlist](architecture.md#forwarding-contract).
+- No generic API gateway for non-LLM APIs; no assumed equivalence across models or providers.
 - No required cloud platform or observability vendor.
 
 ## Use cases
 
-### Single developer and coding agents
+**Single developer.** `wye serve` locally and `wye claude`; no server or backend needed, and `wye report` reads the usage log. On a claude.ai subscription, [caller-credential passthrough](policy.md#caller-credential-passthrough) keeps the developer's own login. Honest value here is modest: Claude Code already exports its own usage, and passthrough adds no authentication or cost bound. The case is the same setup the developer later uses with a team.
 
-```text
-Claude Code / Agent ──> Wye (localhost) ──> LLM provider
-```
+**Engineering team.** Developers and CI reach a shared Wye behind HTTPS; provider keys stay in the deployment, callers hold gateway or IdP credentials, policy is reviewed in Git, and usage arrives in the team's OTel backend attributed by subject, session, subagent, and work type. Wye records usage from verified credentials, so attribution cannot be switched off client-side. Hard team budgets belong to the provider or the infrastructure.
 
-```bash
-wye claude
-wye --profile personal claude
-```
-
-No server, orchestrator, state store, or telemetry backend is mandatory. Provider secrets stay in the developer's environment or OS credential store. A developer on a claude.ai subscription can keep it: in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough) Wye forwards the developer's own login instead of a provider key. The gateway starts and stops with the tool. Loopback-only development authentication must be explicitly opted into and must never extend silently to a public bind address.
-
-Value for a solo developer alone is modest: Claude Code already exports its own usage and cost through OpenTelemetry, and in subscription passthrough Wye adds neither authentication nor a cost bound. The honest pitch is the same local setup the developer will use with their team, plus one config across clients, and a runaway guard on API-key traffic. This user usually needs spending awareness, not hard monthly stops.
-
-### Engineering team
-
-```text
-Developer A ─┐
-Developer B ─┼──> HTTPS endpoint / internal service ──> Wye ──> providers
-CI / agents ─┘                                       └──> OTLP backend
-```
-
-Provider credentials stay in the team's deployment environment; applications receive only gateway credentials. Routing policy is reviewed in Git. Usage is recorded by Wye from verified credentials, so it is trustworthy attribution that a developer cannot switch off or alter the way client-side telemetry can. OTLP events attribute usage by credential subject without collecting prompts, and, through the [agent-native directions](research.md#agent-native-directions), by session, subagent, and work type (main loop, subagents, compactions, background calls). Wye does not provide hard team budgets; use application or infrastructure enforcement if required.
-
-### Public internet-facing LLM app
-
-```text
-Browser ──> App backend (auth / abuse controls / user quotas)
-                          │
-                          v
-                   Wye (internal/sidecar)
-                          │
-                          v
-                      Provider
-```
-
-Users are untrusted. Never issue a reusable provider key to the browser. The application backend authenticates users and owns per-user quotas, fraud controls, and admission; Wye authenticates the application and applies inference policy. **Stateless Wye alone is not sufficient cost-abuse protection for a public paid API.** Topology options are in [operations.md](operations.md#deployment-modes).
+**Public LLM app.** Wye sits behind the app backend, which authenticates users and owns per-user quotas and abuse controls; Wye authenticates the app and applies inference policy. **Stateless Wye alone is not abuse protection for a public paid API.** Topologies: [operations.md](operations.md#deployment-modes).
 
 ## Positioning
 
-| Product | General position | Why Wye might be selected |
+| Product | Position | Where Wye differs |
 |---|---|---|
-| KrakenD | Mature general API gateway; AI features vary by edition | Streams SSE as it arrives; KrakenD CE buffers whole responses (measured), streaming is Enterprise-only |
-| LiteLLM | Broad provider coverage, virtual keys, budgets, management | No database to run; about 10× less CPU per streamed event and far less memory in the same benchmark ([research.md](research.md#against-litellm)) |
-| OmniRoute | Multi-account routing, quotas, compression, management | Deterministic GitOps policy, lean serving path, protocol-focused scope |
-| Vercel AI Gateway | Managed, convenient within Vercel | Self-hosted, cross-platform, customer-controlled path |
-| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped in the `claude` binary and released with it: SSO sign-in, model access by IdP group, OTLP | CI and service credentials (it has only a browser sign-in), clients beyond Claude Code (SDK apps, Codex), per-request runaway guards, GitOps policy tests, and session structure and token spend by work type from the gateway hint headers. **For a team that uses only Claude Code and already has SSO, prefer it:** it tracks every Claude Code release by construction, while Wye must re-run its contract tests for each one |
+| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped with the `claude` binary: SSO sign-in, model access by IdP group, OTLP | Service and CI credentials, clients beyond Claude Code (SDK apps, Codex planned), per-request guards, policy tests, session traces and work-type attribution. **For a team that uses only Claude Code and has SSO, prefer it:** it tracks every Claude Code release by construction |
+| LiteLLM | Broad provider coverage, virtual keys, budgets, admin UI; needs a database for spend | No database; about 10× less CPU per streamed event in the same benchmark ([research.md](research.md#against-litellm)); far narrower provider coverage |
+| KrakenD | Mature general API gateway | CE buffers whole responses (measured); SSE streaming is Enterprise-only |
+| OmniRoute, Vercel AI Gateway | Multi-account routing and quotas; managed convenience | Self-hosted, GitOps policy, protocol-focused scope |
 
-Stateless deployment and single-binary distribution are not unique. Wye must win by combining correct LLM compatibility, predictable configuration, portability, and measured resource efficiency.
+## Strengths and weaknesses
 
-### Differentiators
+**Strengths**
 
-Each follows from statelessness rather than working around it:
+- **Agent-aware attribution no generic gateway has:** sessions, subagents, work types, tool time, and explained cache misses, request-local and consistent across replicas.
+- **Operationally trivial:** one stateless binary and one TOML file; any platform that runs N identical processes behind a load balancer ([operations.md](operations.md#without-kubernetes)).
+- **Identity without a token service:** CI and IdP tokens verified directly, with keys pinned in config.
+- **Policy as code:** `explain` and `policy-test` show and check every decision offline; credentials can only narrow config.
+- **Measured efficiency, gated on every commit:** about 0.2–0.3 ms added per request, zero allocations per event, about 1,500 token-paced streams within 10 ms added p99 on one core (laptop, mock upstream).
 
-| Differentiator | What it gives | Where |
-|---|---|---|
-| Provable cost ceiling | A guaranteed per-request dollar bound with no tokenizer, instead of an estimate | [policy.md](policy.md#provable-cost-ceiling) |
-| Provider-held budgets | Hard cumulative spend limits with zero gateway state | [policy.md](policy.md#provider-held-budgets) |
-| Cache-affine routing | Keeps provider prompt-cache discounts across replicas without shared state | [architecture.md](architecture.md#cache-affine-routing) |
-| Policy as testable code | `wye explain` and CI policy tests: routing and cost decisions reviewed like code | [operations.md](operations.md#server) |
-| Test-generated support matrix | Every claimed endpoint × provider × feature is backed by a passing test | [roadmap.md](roadmap.md#release-acceptance-checklist) |
-| Performance gated on every commit | Added latency, CPU, and memory measured against a baseline before each commit; published, reproducible comparisons | [development.md](development.md#commit-gate) |
+**Weaknesses**
 
-Agent-native differentiators: what only an agent-aware gateway sees, still request-local and stateless (detail and ranking in [research.md](research.md#agent-native-directions)):
+- **One endpoint, one provider.** Only Anthropic Messages to one Anthropic upstream; no aliases, routing, OpenAI, or Gemini yet.
+- **Tokens, not dollars.** No pricing yet, so no cost in reports and no cost ceiling (M2).
+- **No cumulative limits by design:** budgets need the provider ([provider-held budgets](policy.md#provider-held-budgets), not built yet) and rate limits need infrastructure. Revocation waits for expiry.
+- **Thin real-world validation.** One partial real Claude Code session; no production deployment; numbers from one laptop against a mock, none on Linux or across machines.
+- **Not packaged.** Build from source; no published binaries or images, no Helm or Compose.
+- **Contract upkeep.** Claude Code's gateway contract changes with its releases, and Wye must re-test each one, which Anthropic's own gateway does not.
 
-| Direction | What it gives | Status |
-|---|---|---|
-| Cache-miss diagnostics | Per-block prompt hashes let the telemetry backend explain every prompt-cache miss | Implemented, opt-in |
-| Session traces | A whole Claude Code session as one trace: requests and tool calls, with prompt and agent ids as attributes; ids derived alike on every replica | Implemented |
-| Spend by work type | Tokens by request class and agent type: what compactions, subagents, and background calls consume | Implemented (tokens; cost with M2 pricing) |
-| Expected versus unexpected cache misses | A miss after a compaction is normal; a miss on an ordinary turn is a regression worth an alert | Implemented |
-| Model picker from policy | `GET /v1/models` lists exactly the models the caller's credential may use | Implemented |
-| `wye report` | Tokens, cache hits and misses, and tool time per session, request class, and prompt, from the usage log, with no backend | Implemented |
-| Agent-aware routing | Request-class hints route auxiliary and compaction calls to cheaper Claude models by policy, once quality is measured | Planned (M2) |
-| Delegable credentials | Agents mint narrower credentials for subagents offline | Research (M6) |
-| Signed usage receipts | Tamper-evident chargeback and audit without a billing database | Proposal (M6) |
-| Queryable policy | "Who can reach which model, at what cost?" answered from config, checked in CI | Research (M6) |
+## Moat
 
-### Moat
-
-Speed and statelessness are necessary but copyable. What compounds: understanding of agent traffic (sessions, subagents, compactions, caching) turned into attribution and explanations no generic gateway produces; correctness for agent traffic, proven per client release by contract tests; performance enforced on every commit and published reproducibly; and policy as code with provable properties and no database. The target niche is teams running several coding agents who need service credentials, reviewed policy, and an answer to "what are our agents doing, and what does it cost?", which neither a single-vendor gateway nor a stateful platform serves well.
+Speed, statelessness, and single-binary distribution are necessary but copyable. What compounds is understanding of agent traffic (sessions, subagents, compactions, caching) turned into attribution and explanations, correctness proven per client release, and policy as code with provable properties and no database. The risk is plain: Anthropic's gateway can add the same analytics for Claude Code. Wye's defensible ground is what a single-vendor gateway does not serve: several agents and SDK apps behind one policy, CI and service identities, and telemetry in the team's own backend.

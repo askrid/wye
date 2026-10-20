@@ -1,8 +1,8 @@
 # Wye design docs
 
-**Status:** M0 (Claude Code streaming proxy), most of M1 (credentials, model permissions, token ceilings, OTLP telemetry, `wye claude`, OCI image), and most of M1b (agent-aware visibility: session traces, spend by work type, cache-miss reasons, `wye report`) are implemented; see [roadmap.md](roadmap.md#status). Sections marked as proposal or target describe design that is not built yet.
+Wye is the gateway that understands agent traffic: a stateless Rust inference gateway for coding agents such as Claude Code. One binary and one Git-managed TOML file; no database, no control plane. It authenticates and constrains requests, streams them, reads the signals agents send (session, subagent, request class, compaction, tool time) to attribute and explain their work, and exports it through OpenTelemetry. Scope, strengths, and weaknesses: [product.md](product.md).
 
-Wye is the gateway that understands agent traffic: a single-purpose, stateless Rust inference gateway for coding agents such as Claude Code. It authenticates, constrains, routes, and streams LLM requests using one declarative configuration file, reads the signals agents send (session, subagent, request class, compaction) to attribute and explain their work, and exports it through OpenTelemetry. It stays fast, light, and stateless: no gateway-specific datastore, no administrative control plane, and every feature measured against the commit gate ([product.md](product.md#agent-native-within-the-constraints)).
+**Status (2026-10-20):** built for Claude Code on the Anthropic Messages API: the streaming proxy (M0), credentials including identity-provider tokens, model permissions and token ceilings, OTLP telemetry, `wye claude`, and a local OCI image (M1), and agent-aware visibility (M1b; secret detection open). Next: cost (M2). Not started: OpenAI and Codex (M3), multi-provider routing (M4), published packages. Detail: [roadmap.md](roadmap.md#status).
 
 ## Documents
 
@@ -10,7 +10,7 @@ Each document owns one concern. Other documents link to it instead of restating 
 
 | Document | Answers |
 | --- | --- |
-| [product.md](product.md) | Why Wye exists, who uses it, scope, provider/endpoint matrix, non-goals, positioning |
+| [product.md](product.md) | Why Wye exists, who uses it, scope (built, next, later), non-goals, positioning, strengths and weaknesses, moat |
 | [architecture.md](architecture.md) | How a request flows: components, runtime, forwarding, adapters, streaming, configuration, invariants, open design decisions |
 | [policy.md](policy.md) | What Wye authorizes and enforces, what it cannot enforce without shared state, security requirements |
 | [operations.md](operations.md) | Distribution, CLI, deployment topologies, telemetry, health, shutdown, failure behavior |

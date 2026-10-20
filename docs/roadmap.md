@@ -1,20 +1,17 @@
 # Roadmap
 
-Each stage leaves a runnable system with focused tests. Provider phases (P0–P4) are defined in [product.md](product.md#provider-and-endpoint-phases).
+Each stage leaves a runnable system with focused tests. Provider phases (P0–P4) are defined in [product.md](product.md#later).
 
 ## Status
 
 | Milestone | State |
 |---|---|
-| M0: Claude Code stream proxy | Implemented and gated. Exit check partly run: a real session through subscription passthrough (2026-10-17) streamed correctly and exposed compressed responses, since fixed ([research.md](research.md#current-harness-and-baseline)); the full check with an API key is open. |
-| Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, KrakenD and LiteLLM comparisons |
-| M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
-| M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
-| M1 stage 4c: identity-provider tokens | Done: `[[auth.issuers]]` with pinned algorithm and JWKS file, subject claim, and claim → model grants; `apiKeyHelper` renewal examples ([operations.md](operations.md#credential-renewal)) |
-| M1 stages 5–6 | Usage scanner, OTLP logs, metrics, and traces, `upstream.api_key_file`, `wye probe`, and `wye claude` done, and an OCI image with a smoke test; published images and binaries, and Compose not started |
-| Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
-| M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4 done (`wye report`, tool calls from responses); A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
-| M2–M6 | Not started |
+| M0: Claude Code stream proxy | Done and gated. Exit check partly run: one real session through subscription passthrough (2026-10-17) streamed correctly and exposed compressed responses, since fixed; the full check with an API key is open |
+| Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, KrakenD and LiteLLM comparisons |
+| M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5–6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Open: published binaries and images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
+| M1b: agent-aware visibility | A1–A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
+| M2: cost policy | Cache-miss diagnostics done early (opt-in, sampled per session). Pricing, cost bound, provider-held budgets, `wye explain` cost output not started |
+| M3–M6 | Not started |
 
 ## Milestones
 
@@ -58,7 +55,7 @@ Stage 4 is required before any non-loopback deployment.
 
 ### M1b: agent-aware visibility
 
-Turns the signals Claude Code sends gateways into attribution and explanations ([product.md](product.md#agent-native-within-the-constraints)). Each item is request-local, adds only header reads to the request path, and passes the commit gate. Order follows the ranking in [research.md](research.md#agent-native-directions):
+Turns the signals Claude Code sends gateways into attribution and explanations ([product.md](product.md#principles)). Each item is request-local, adds only header reads to the request path, and passes the commit gate. Background in [research.md](research.md#agent-native-directions):
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
