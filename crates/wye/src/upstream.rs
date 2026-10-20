@@ -1,9 +1,10 @@
 //! Forwarding to the configured upstream.
 //!
 //! Request and response bodies stream through without buffering or changes;
-//! the request body is read in passing only when cache diagnostics are on.
-//! Only the URI, hop-by-hop headers, and (in API-key mode) the credential
-//! headers are changed.
+//! the request body is read in passing for model permissions and token
+//! ceilings and for cache diagnostics, when those are on. Only the URI,
+//! hop-by-hop headers, `accept-encoding` (always `identity`), and (in API-key
+//! mode) the credential headers are changed.
 
 mod body;
 mod pool;

@@ -6,16 +6,21 @@
 //! with HTTP/2, like the real provider (`tls_` prefix). With `--krakend`, the
 //! same scenarios also run through KrakenD (`krakend_` prefix); with `--litellm`,
 //! through LiteLLM's pass-through endpoint (`litellm_` prefix).
+//! Wye also runs on the plain path with `[auth]` (`auth_`), model permissions
+//! (`models_`), cache diagnostics (`diag_`), and OTLP export (`otlp_`).
 //! With `--wye-alloc`, a `--features alloc-stats` build of Wye adds heap allocation
 //! metrics (`alloc_` prefix).
 //! `WYE_BENCH_UPSTREAM` appends lines to Wye's `[upstream]` config, for tuning experiments.
 //! `WYE_BENCH_GATEWAY_LOG=1` writes each gateway's output to a log next to its config.
 //!
 //! Usage:
-//!   wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
-//!   wye-bench compare <baseline.json> <results.json>
-//!   wye-bench adopt-new <baseline.json> <results.json>
-//!   wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N
+//!
+//! ```text
+//! wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
+//! wye-bench compare <baseline.json> <results.json>
+//! wye-bench adopt-new <baseline.json> <results.json>
+//! wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N
+//! ```
 
 // Development tool, not on the request path: panics abort a benchmark run.
 #![allow(

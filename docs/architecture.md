@@ -57,29 +57,41 @@ wye/
 │   ├── gateway-core/src/        portable policy, no I/O
 │   │   ├── config.rs            wye.toml parsing and validation
 │   │   ├── credential.rs        gateway credential verification and issuance
-│   │   └── usage.rs             SSE usage scanner
+│   │   ├── policy.rs            model permissions, output-token ceilings, request-body scanner
+│   │   ├── prompt.rs            prompt hashes for cache-miss diagnostics
+│   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
+│   │   ├── json.rs              byte-level JSON lexing shared by the scanners
+│   │   └── usage.rs             SSE usage and tool-call scanner
 │   ├── wye/src/                 the binary
 │   │   ├── main.rs, token.rs    CLI, `wye token`
 │   │   ├── startup.rs           secrets and files the config references
 │   │   ├── server.rs            listener, connections, two-phase shutdown
 │   │   ├── gateway.rs           routing, admission, gateway errors
 │   │   ├── auth.rs              credential checks, cached per connection
+│   │   ├── permissions.rs       model permissions and token ceilings on the request body
+│   │   ├── discovery.rs         GET /v1/models
+│   │   ├── diagnostics.rs       prompt hashes of forwarded request bodies
 │   │   ├── upstream.rs          forwarding, TLS client
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── usage_log.rs         per-request records, bounded writer
+│   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
+│   │   ├── explain.rs, policy_test.rs  `wye explain`, `wye policy-test`
+│   │   ├── report.rs            `wye report`
+│   │   ├── wrapper.rs, probe.rs `wye claude`, `wye probe`
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA and mock upstream
-│   └── wye-bench/               benchmark, regression gate, competitor runs
+│   └── wye-bench/               benchmark, regression gate, load and capacity runs, competitor runs
 ├── bench/baseline.json
-├── scripts/                     check.sh (commit gate), ab.sh
-└── examples/wye.toml
+├── scripts/                     check.sh (commit gate), ab.sh, image-smoke.sh, upload-latency.sh
+├── Dockerfile
+└── examples/                    wye.toml, subscription.toml, policy-tests/
 ```
 
 Create modules only when their behavior is implemented.
 
-- `gateway-core` owns configuration types, validation, credential policy, and usage parsing, and later routing. No Tokio, socket, filesystem, or environment dependencies, so it can later back a WASM adapter.
+- `gateway-core` owns configuration types, validation, credential and request policy, the request and response scanners, and later routing. No Tokio, socket, filesystem, or environment dependencies, so it can later back a WASM adapter.
 - `wye` owns the CLI, configuration loading, secret resolution, HTTP server and client, telemetry, and shutdown.
 - `wye-testkit` and `wye-bench` are development-only; see [development.md](development.md).
 
@@ -93,9 +105,10 @@ Core, runtime, tests, and deployment artifacts change together and need coordina
 | HTTP | Hyper 1.x, `hyper-util`, `http-body-util` |
 | TLS | Rustls (`ring` provider) upstream, built-in web PKI roots plus `upstream.ca_file`; deployment terminates inbound TLS |
 | Credentials | `ring` Ed25519, `base64` |
-| Config / JSON | Serde, `toml`, `serde_json` |
+| Hashing | `xxhash-rust` xxh3 (prompt hashes), `ring` HMAC-SHA256 (their exported tags) and SHA-256 (session trace ids) |
+| Config / JSON | Serde, `toml`, `serde_json`; hand-written streaming scanners for request bodies and SSE (`memchr`) |
 | Buffers | `bytes` and streaming bodies |
-| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs OTLP metrics, and one OTLP span per request (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack) |
+| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs, OTLP metrics, and OTLP spans (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack) |
 | Edge | Separate WASM adapter later |
 
 Direct Hyper gives explicit control over request and response bodies. Reconsider Axum if routing and middleware grow enough to justify it.
@@ -158,7 +171,7 @@ Each rewrite is per-route configuration, covered by tests, and reported by `wye 
 
 Telemetry and cost accounting need usage, which arrives in the final response object or the last stream events. Wye relays the original bytes unchanged and feeds the same bytes to a bounded, read-only observer that recognizes only usage-bearing events. The observer never delays, buffers, or modifies forwarded bytes. It caps the size of an event it will inspect; an oversized or malformed event marks usage `unknown` rather than failing the stream.
 
-Implemented for Anthropic Messages streams (`gateway-core/src/usage.rs`): the scanner keeps at most one partial line (32 bytes for ordinary events, 64 KiB for usage events), finds line ends with SIMD `memchr`, and parses JSON only for `message_start` and `message_delta`. A body wrapper emits one record per request when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; completion is also detected through `is_end_stream`, because hyper stops polling a known-length body without seeing its end. Non-streaming responses are recorded with `usage_status = not_observed` until a bounded JSON reader is added.
+Implemented for Anthropic Messages streams (`gateway-core/src/usage.rs`): the scanner keeps at most one partial line (32 bytes for ordinary events, 64 KiB for usage events), finds line ends with SIMD `memchr`, and parses JSON only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names of `tool_use` blocks, borrowed, once per content block). A body wrapper emits one record per request when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; completion is also detected through `is_end_stream`, because hyper stops polling a known-length body without seeing its end. Non-streaming responses are recorded with `usage_status = not_observed` until a bounded JSON reader is added.
 
 Anthropic Messages streams always carry usage (`message_start` for input and cache tokens, `message_delta` for output), so P0 needs no rewrite. For OpenAI Chat Completions, enabling `include_usage` makes OpenAI send an extra final chunk with an empty `choices` array. Most SDKs accept it, but a client that indexes `choices[0]` unconditionally breaks. If the caller already set `include_usage`, Wye leaves it as is. Otherwise the route decides: inject it (`accounting_status = confirmed`), or don't (`accounting_status = estimated`, from the [cost ceiling](policy.md#provable-cost-ceiling) bound). Disconnected streams record usage as `unknown` with the known bound.
 
@@ -239,7 +252,7 @@ One TOML file, loaded at startup, is the source of truth for aliases, providers,
 
 The runtime resolves environment variables; the core validates configuration without resolving secrets. Reject unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and missing price metadata at startup. Never print secrets or log request bodies by default.
 
-No hot reload initially; changes require restart (or rolling deploy). A config snapshot stays consistent within a request. Include the config version in logs and traces to diagnose rollout skew.
+No hot reload; changes require a restart (or rolling deploy). A config snapshot stays consistent within a request. Planned: include the config version in logs and traces to diagnose rollout skew.
 
 ### Current schema (implemented)
 
@@ -268,14 +281,14 @@ http_version = "auto"                  # HTTP/2 via ALPN when offered; "1.1": no
 issuer = "wye"
 audience = "wye-prod"
 max_credential_ttl_secs = 604800
-[[auth.keys]]
-id = "k1"
-ed25519_public_key = "<from wye token keygen>"
 # models = ["claude-sonnet-*", "claude-haiku-*"]  # ceiling; a credential's models claim narrows it
 # max_output_tokens = 32000            # max_tokens ceiling; a credential's claim can only lower it
+[[auth.keys]]                          # after the [auth] fields: TOML assigns what follows to the key
+id = "k1"
+ed25519_public_key = "<from wye token keygen>"
 
-[telemetry]                            # optional: usage records as OTLP logs
-otlp_endpoint = "http://collector:4318" # POST {otlp_endpoint}/v1/logs, OTLP/HTTP JSON
+[telemetry]                            # optional: OTLP logs, metrics, and traces
+otlp_endpoint = "http://collector:4318" # POST {otlp_endpoint}/v1/{logs,metrics,traces}, OTLP/HTTP JSON
 # otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2"
 service_name = "wye"
 
@@ -292,11 +305,9 @@ models = [                             # up to 1000; listed per caller after mod
 
 ### Target schema (illustrative, not implemented)
 
-```toml
-[server]
-listen = "0.0.0.0:4000"
-shutdown_grace_seconds = 120
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their current fields.
 
+```toml
 [providers.openai]
 kind = "openai"
 api_key_env = "OPENAI_API_KEY"
@@ -343,22 +354,9 @@ candidates = ["openai_responses"]
 required_capabilities = ["responses_stream", "tool_calls"]
 on_no_eligible_candidate = "reject"
 
-[auth]
-issuer = "wye"
-audience = "wye-prod"
-[[auth.keys]]
-id = "k1"
-ed25519_public_key = "<base64url Ed25519 public key>"
-
 [policy]
-max_output_tokens = 4096
 max_request_cost_usd = "0.05"
 unknown_cost_behavior = "reject"
-
-[telemetry]
-protocol = "otlp"
-endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
-log_prompt_content = false
 ```
 
 `claude_code` is a Messages route backed only by Anthropic, `codex` is a Responses route backed only by OpenAI, and `fast` is a Chat Completions route; none is interchangeable with another. The implementation should pick a schema where aliases declare or infer their endpoint unambiguously.
