@@ -103,8 +103,9 @@ async fn probe_succeeds_only_for_a_2xx_answer() {
         .await
         .unwrap_err();
     assert!(not_found.contains("404"), "{not_found}");
-    let tls = wye::probe("https://example.com/healthz").await.unwrap_err();
-    assert!(tls.contains("plain http"), "{tls}");
+    // https is accepted (a remote gateway for `wye claude`); other schemes are not.
+    let ftp = wye::probe("ftp://127.0.0.1/healthz").await.unwrap_err();
+    assert!(ftp.contains("http:// or https://"), "{ftp}");
     // Nothing listens on this port.
     let refused = wye::probe("http://127.0.0.1:9/healthz").await.unwrap_err();
     assert!(

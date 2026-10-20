@@ -12,7 +12,7 @@ use wye::{Gateway, Resources};
 const USAGE: &str = "usage:
   wye serve --config <path>
   wye check-config <path>
-  wye probe <http-url>
+  wye probe <url>
   wye policy-test --config <path> <dir>
   wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] <request.json>

@@ -82,7 +82,12 @@ pub(super) fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> 
         duration_ms: ms(r.duration),
         headers_ms: r.headers_after.map(ms),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
-        session_id: r.info.session_id.as_ref().and_then(|v| v.to_str().ok()),
+        // Client-supplied, like the agent ids: kept only as a bounded token.
+        session_id: r
+            .info
+            .session_id
+            .as_ref()
+            .and_then(|v| gateway_core::agent::token(v.as_bytes())),
         traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
         request_class: agent.request_class,
         agent_type: agent.agent_type,
