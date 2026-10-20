@@ -1,6 +1,6 @@
 # Wye design docs
 
-**Status:** M0 (Claude Code streaming proxy) and most of M1 (credentials, model permissions, token ceilings, OTLP telemetry, `wye claude`, OCI image) are implemented; see [roadmap.md](roadmap.md#status). Sections marked as proposal or target describe design that is not built yet.
+**Status:** M0 (Claude Code streaming proxy), most of M1 (credentials, model permissions, token ceilings, OTLP telemetry, `wye claude`, OCI image), and most of M1b (agent-aware visibility: session traces, spend by work type, cache-miss reasons, `wye report`) are implemented; see [roadmap.md](roadmap.md#status). Sections marked as proposal or target describe design that is not built yet.
 
 Wye is the gateway that understands agent traffic: a single-purpose, stateless Rust inference gateway for coding agents such as Claude Code. It authenticates, constrains, routes, and streams LLM requests using one declarative configuration file, reads the signals agents send (session, subagent, request class, compaction) to attribute and explain their work, and exports it through OpenTelemetry. It stays fast, light, and stateless: no gateway-specific datastore, no administrative control plane, and every feature measured against the commit gate ([product.md](product.md#agent-native-within-the-constraints)).
 

@@ -6,10 +6,11 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 
 | Milestone | State |
 |---|---|
-| M0: Claude Code stream proxy | Implemented and gated. Open: the exit check against a real Claude Code session has not been run. |
+| M0: Claude Code stream proxy | Implemented and gated. Exit check partly run: a real session through subscription passthrough (2026-10-17) streamed correctly and exposed compressed responses, since fixed ([research.md](research.md#current-harness-and-baseline)); the full check with an API key is open. |
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, KrakenD and LiteLLM comparisons |
 | M1 stage 4a: gateway credentials | Done: Ed25519 JWT credentials, `wye token`, network listen with `[auth]` |
 | M1 stage 4b: model permissions | Done: `[auth] models` ceiling narrowed by a credential's `models` claim, checked before upstream contact |
+| M1 stage 4 remainder | Pinned-issuer IdP JWTs and an `apiKeyHelper` renewal example not started |
 | M1 stages 5–6 | Usage scanner, OTLP logs, metrics, and traces, `upstream.api_key_file`, `wye probe`, and `wye claude` done, and an OCI image with a smoke test; published images and binaries, and Compose not started |
 | Cache-miss diagnostics (from M2) | Done, opt-in: keyed prompt hashes in the usage log, with per-session sampling to bound CPU (structure-dense bodies cost more than the target per diagnosed request); `diag_` metrics gated |
 | M1b: agent-aware visibility | A1 done (retry headers on Wye's 529s, `GET /v1/models` from policy); A2 done (agent headers in usage records and OTLP, tokens by request class, cache misses by reason); A3 done (session traces and tool spans, checked in Jaeger across two replicas); A4 done (`wye report`, tool calls from responses); A5 not started. Directions ranked in [research.md](research.md#agent-native-directions) |
@@ -41,14 +42,14 @@ The first reviewable implementation stops after stages 1–2. Resource bounds an
 
 **Exit:** a real Claude Code session, with an API key and with a claude.ai login through passthrough, works through Wye with streaming, tool use, prompt caching, extended thinking, and token counting. Loopback only. No multi-provider claim.
 
-**Status:** stages 1–3 are implemented and covered by integration tests against a mock upstream; the real-session exit check is still open.
+**Status:** stages 1–3 are implemented and covered by integration tests against a mock upstream; the real-session exit check is partly run (see [status](#status)).
 
 ### M1: team-ready Claude Code
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| 4 | (**4a done:** Ed25519 JWT credentials, `wye token keygen`/`issue`, `[auth]` lifts the loopback-only restriction, subject in usage log. **4b done:** model permissions from config and the credential's `models` claim, read from the held start of the body; output-token ceilings from config and the `max_output_tokens` claim, the stricter applying.) Remaining in this stage: pinned-issuer IdP JWTs. Ed25519 gateway credentials and pinned-issuer IdP JWTs from `Authorization` or `x-api-key`, `wye token issue`, claim → permission mapping, limit precedence, `max_credential_ttl`, `apiKeyHelper` renewal example | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
-| 5 | Usage observer (`message_start`, `message_delta`; **done**), minimal OTLP telemetry (**done**: usage records as logs with session and subject attribution, cumulative request, duration, token, and active-request metrics, and one span per request joined to the caller's `traceparent`) with developer and Claude Code session attribution, OCI image (**done** locally with a smoke test; publishing open), baseline benchmark | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
+| 4 | **4a done:** Ed25519 JWT credentials from `Authorization` or `x-api-key`, `wye token keygen`/`issue`, `max_credential_ttl_secs`, `[auth]` lifts the loopback-only restriction, subject in the usage log. **4b done:** model permissions from config and the credential's `models` claim, read from the held start of the body; output-token ceilings from config and the `max_output_tokens` claim, the stricter applying. **Remaining:** pinned-issuer IdP JWTs with claim → permission mapping, and an `apiKeyHelper` renewal example | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
+| 5 | Usage observer (`message_start`, `message_delta`; **done**), minimal OTLP telemetry with developer and Claude Code session attribution (**done**: usage records as logs with session and subject attribution, cumulative request, duration, token, and active-request metrics, and one span per request joined to the caller's `traceparent`), OCI image (**done** locally with a smoke test; publishing open), baseline benchmark (**done**) | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
 | 6 | `wye claude`, prebuilt binaries, Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes); **both done**, as is a first `wye claude`) | Wrapper launches Claude Code against Wye and cleans up; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
@@ -125,7 +126,7 @@ Deterministic integration tests use a local mock upstream. Normal CI never makes
 - Reject oversized requests; exercise timeout and upstream failure paths.
 - Drain or cancel active streams according to the shutdown deadline.
 
-Core unit tests cover configuration validation and, when implemented, credential and routing policy. A small opt-in real-provider smoke test checks SDK compatibility; it does not replace deterministic protocol tests.
+Core unit tests and property tests cover configuration validation, credential verification, model permissions and token ceilings, and the request and SSE scanners; routing policy joins them when it is built. A small opt-in real-provider smoke test checks SDK compatibility; it does not replace deterministic protocol tests.
 
 ## Release acceptance checklist
 

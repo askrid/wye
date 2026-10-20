@@ -6,12 +6,13 @@ How changes are made, verified, and committed. Speed and statelessness are the p
 
 | Path | Contents |
 |---|---|
-| `crates/gateway-core` | Portable policy: config validation, credential verification, usage scanning. No I/O, no Tokio. |
-| `crates/wye` | The binary: CLI (`main.rs`, `token.rs`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), forwarding (`upstream/`), usage log |
+| `crates/gateway-core` | Portable policy: config validation, credential verification, model permissions and token ceilings, request-body and SSE scanners, prompt hashes, agent headers. No I/O, no Tokio. |
+| `crates/wye` | The binary: CLI (`main.rs`, `token.rs`, `explain.rs`, `policy_test.rs`, `report.rs`, `wrapper.rs`, `probe.rs`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), credentials and permissions, forwarding (`upstream/`), usage log and OTLP export (`usage_log/`). Module map in [architecture.md](architecture.md#repository-and-workspace) |
 | `crates/wye-testkit` | Test support: throwaway CA, test signing keys, mock upstream (plain, or TLS with HTTP/2) |
-| `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, competitor runs |
+| `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, soak and capacity runs, competitor runs |
 | `bench/baseline.json` | Gated benchmark baseline for the development machine |
 | `scripts/check.sh`, `scripts/ab.sh` | Commit gate; A/B comparison of two binaries |
+| `scripts/upload-latency.sh` | Upload latency over HTTP/1.1 and HTTP/2 against the real API (needs an API key; not part of the gate) |
 | `Dockerfile`, `scripts/image-smoke.sh` | OCI image; its build-and-run smoke test (needs Docker; not part of the commit gate) |
 
 ## Commit gate
@@ -31,7 +32,7 @@ A check takes about 100 seconds after an ordinary code change: tests 11 s, incre
 
 ## Benchmark
 
-`wye-bench run --wye <path> --out <results.json>` measures each scenario directly against the mock and through the gateway, on a plain HTTP/1.1 upstream and on TLS + HTTP/2 (`tls_` metrics), plus Wye with `[auth]` on the plain path (`auth_` metrics, per-request scenarios only) Wye with model permissions there (`models_` metrics, per-request and upload scenarios), Wye with `[cache_diagnostics]` there (`diag_` metrics, per-request and upload scenarios), and Wye exporting OTLP logs to the mock (`otlp_` metrics, per-request scenarios), and reports what the gateway adds: latency (unary, time to first byte, per SSE event), CPU per request, per MB, and per event, memory per idle and active stream, upstream release after a disconnect, uploads (one long string, and on the plain path `agent_upload`: the same size shaped like a Claude Code request, which costs the diagnostics scanner more), 2,000 token-paced streams, and failed requests (gated at zero). `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways and print a comparison table.
+`wye-bench run --wye <path> --out <results.json>` measures each scenario directly against the mock and through the gateway, on a plain HTTP/1.1 upstream and on TLS + HTTP/2 (`tls_` metrics), plus, on the plain path, Wye with `[auth]` (`auth_` metrics, per-request scenarios only), Wye with model permissions (`models_` metrics, per-request and upload scenarios), Wye with `[cache_diagnostics]` (`diag_` metrics, per-request and upload scenarios), and Wye exporting OTLP to the mock (`otlp_` metrics, per-request scenarios; reported, not gated). It reports what the gateway adds: latency (unary, time to first byte, per SSE event), CPU per request, per MB, and per event, memory per idle and active stream, upstream release after a disconnect, uploads (one long string, and on the plain path `agent_upload`: the same size shaped like a Claude Code request, which costs the diagnostics scanner more), 2,000 token-paced streams, and failed requests (gated at zero). `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways and print a comparison table.
 
 `--wye-alloc <path>` takes a Wye build with `--features alloc-stats`, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (that build only; never ship it). It adds `alloc_` metrics: allocations and bytes per request, allocations per streamed event and per stream setup, live heap per idle stream (also after a 512 KB request, and on the TLS upstream), and allocations per 1 MiB upload (also for the agent-shaped body, with and without cache diagnostics). Counts are nearly deterministic (under 1% spread, uploads about 5%), so the gate catches a single extra allocation per request, stream, or event that CPU timing would never resolve.
 

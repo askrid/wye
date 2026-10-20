@@ -3,7 +3,7 @@
 //! Totals are cumulative since process start, so a lost export loses nothing:
 //! the next one carries the totals forward. Each metric keeps at most
 //! [`MAX_SERIES`] attribute sets; records beyond that are counted in
-//! `wye.metrics.overflow` instead of growing memory. Per-process telemetry is
+//! `wye.telemetry.lost` instead of growing memory. Per-process telemetry is
 //! not shared state: replicas never compare or merge these numbers.
 
 use std::io::Write;
