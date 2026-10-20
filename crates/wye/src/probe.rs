@@ -1,25 +1,35 @@
 //! `wye probe <url>`: a one-shot health check for container images without
-//! `curl` (for example a Docker `HEALTHCHECK` against `/readyz`).
+//! `curl` (for example a Docker `HEALTHCHECK` against `/readyz`), and the
+//! check `wye claude` makes before launching Claude Code against a local or
+//! remote gateway.
 
 use std::time::Duration;
 
 use bytes::Bytes;
-use http::{Request, Uri, uri::Scheme};
+use http::{Request, Uri};
 use http_body_util::{BodyExt, Empty};
+use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 
 /// The whole probe, including the connection, must finish within this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// `GET url` over plain HTTP; `Ok` for a 2xx response within the timeout.
+/// `GET url` over HTTP or HTTPS (built-in web PKI roots); `Ok` for a 2xx
+/// response within the timeout.
 pub async fn probe(url: &str) -> Result<(), String> {
     let uri: Uri = url.parse().map_err(|_| format!("{url}: not a valid URL"))?;
-    if uri.scheme() != Some(&Scheme::HTTP) {
+    if !matches!(uri.scheme_str(), Some("http" | "https")) {
         return Err(format!(
-            "{url}: probes use plain http (Wye serves http inside its container)"
+            "{url}: the URL must start with http:// or https://"
         ));
     }
-    let client = Client::builder(TokioExecutor::new()).build_http::<Empty<Bytes>>();
+    let tls = crate::upstream::tls_config(&[]).map_err(|e| e.to_string())?;
+    let https = HttpsConnectorBuilder::new()
+        .with_tls_config(tls)
+        .https_or_http()
+        .enable_http1()
+        .build();
+    let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
     let request = Request::get(uri)
         .body(Empty::new())
         .map_err(|e| format!("{url}: {e}"))?;
