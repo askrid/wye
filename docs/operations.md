@@ -106,6 +106,53 @@ export ANTHROPIC_BASE_URL=https://gateway.example.com
 export ANTHROPIC_AUTH_TOKEN=gateway-credential   # or apiKeyHelper for automatic renewal
 ```
 
+### Credential renewal
+
+Short-lived credentials need a command that fetches a fresh one, so nobody pastes tokens. Claude Code's [`apiKeyHelper`](https://code.claude.com/docs/en/llm-gateway-connect) setting runs a shell command that prints the credential, sends its output as both `Authorization: Bearer` and `x-api-key`, caches it for five minutes (`CLAUDE_CODE_API_KEY_HELPER_TTL_MS` changes that), and re-runs it after the cache lifetime. `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over the helper, so leave both unset (and run `wye claude` without `--credential-file`). The helper can be distributed through managed settings. Wye only verifies: each new credential costs one full verification per connection, then the [per-connection cache](policy.md#gateway-credentials) applies.
+
+**GitHub Actions**, with no secret in the repository: the job's OIDC token is the gateway credential. Wye trusts the issuer ([`[[auth.issuers]]`](policy.md#gateway-credentials)):
+
+```toml
+[[auth.issuers]]
+issuer = "https://token.actions.githubusercontent.com"
+audience = "wye-prod"
+algorithm = "RS256"
+jwks_file = "github.jwks"          # https://token.actions.githubusercontent.com/.well-known/jwks
+subject_claim = "repository"       # usage per repository
+[[auth.issuers.grants]]
+claim = "repository_owner"
+value = "acme"
+models = ["claude-sonnet-*", "claude-haiku-*"]
+```
+
+The job asks GitHub for a token with Wye's audience on every helper run:
+
+```sh
+#!/bin/sh
+# scripts/wye-credential.sh: prints a fresh GitHub Actions OIDC token for Wye.
+curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+  "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=wye-prod" | jq -r .value
+```
+
+```yaml
+permissions:
+  id-token: write                  # lets the job request OIDC tokens
+  contents: read
+steps:
+  - uses: actions/checkout@v4
+  - run: |
+      mkdir -p .claude
+      echo '{"apiKeyHelper": "sh scripts/wye-credential.sh"}' > .claude/settings.local.json
+      claude -p "fix the failing tests"
+    env:
+      ANTHROPIC_BASE_URL: https://wye.internal.example.com
+      CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "240000"   # refresh within the token's lifetime
+```
+
+GitHub does not document the token lifetime (its example token is valid for five minutes), so keep the helper's cache lifetime below it; Wye rejects an expired token with `401`, and `max_credential_ttl_secs` bounds what it accepts.
+
+**Developers** use the same setting with a helper that prints a token from an issuer Wye trusts: the team's IdP (an `[[auth.issuers]]` entry), or an internal service that authenticates the developer by SSO and mints a short-lived Wye credential with `wye token issue` (the signing key stays in that service). Offboarding then happens at the IdP: the next renewal fails, and the last token expires on its own ([revocation](policy.md#revocation)).
+
 ## Deployment modes
 
 | User | Topology | Integration |
