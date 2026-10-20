@@ -35,7 +35,7 @@ use crate::{
 
 mod responses;
 
-use responses::{empty, error, forward_error, hold_error, overloaded};
+use responses::{empty, error, forward_error, hold_error, overloaded, unauthorized};
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
@@ -184,12 +184,7 @@ impl Gateway {
             match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => info.identity = Some(identity),
                 Err(_) => {
-                    // One message for every failure: the reason is not the caller's business.
-                    let res = error(
-                        StatusCode::UNAUTHORIZED,
-                        "authentication_error",
-                        "invalid or missing gateway credential",
-                    );
+                    let res = unauthorized();
                     log.gateway_error(info, res.status());
                     return res;
                 }
@@ -210,13 +205,7 @@ impl Gateway {
             None => None,
             Some(verifier) => match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => Some(identity),
-                Err(_) => {
-                    return error(
-                        StatusCode::UNAUTHORIZED,
-                        "authentication_error",
-                        "invalid or missing gateway credential",
-                    );
-                }
+                Err(_) => return unauthorized(),
             },
         };
         let body = catalog.list(identity.as_ref().and_then(|i| i.models.as_deref()));

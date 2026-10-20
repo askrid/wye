@@ -76,9 +76,20 @@ pub(super) fn empty(status: StatusCode) -> Response<ResBody> {
     res
 }
 
+/// A missing or invalid gateway credential. One message for every failure:
+/// the reason is not the caller's business.
+pub(super) fn unauthorized() -> Response<ResBody> {
+    error(
+        StatusCode::UNAUTHORIZED,
+        "authentication_error",
+        "invalid or missing gateway credential",
+    )
+}
+
 /// Gateway-generated errors use Anthropic's error shape so clients handle them like upstream errors.
 pub(super) fn error(status: StatusCode, kind: &'static str, message: &str) -> Response<ResBody> {
-    let body = format!(r#"{{"type":"error","error":{{"type":"{kind}","message":"{message}"}}}}"#);
+    let message = serde_json::to_string(message).unwrap_or_default();
+    let body = format!(r#"{{"type":"error","error":{{"type":"{kind}","message":{message}}}}}"#);
     let mut res = Response::new(Either::Left(Full::new(Bytes::from(body))));
     *res.status_mut() = status;
     res.headers_mut().insert(

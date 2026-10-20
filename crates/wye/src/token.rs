@@ -36,13 +36,24 @@ pub fn keygen(path: &Path) -> Result<(), Box<dyn Error>> {
     writeln!(file, "{}", B64.encode(pkcs8.as_ref()))?;
     println!(
         "signing key written to {} (keep it secret, outside the server)\n\n\
-         add to wye.toml:\n[[auth.keys]]\nid = \"<choose an id>\"\n\
-         ed25519_public_key = \"{}\"",
+         add to wye.toml:\n[auth]\nissuer = \"wye\"\naudience = \"<your audience>\"\n\
+         [[auth.keys]]\nid = \"<choose an id>\"\ned25519_public_key = \"{}\"",
         path.display(),
         credential::encode_public_key(key.public_key().as_ref()),
     );
     Ok(())
 }
+
+const ISSUE_FLAGS: [&str; 8] = [
+    "--key",
+    "--kid",
+    "--issuer",
+    "--audience",
+    "--subject",
+    "--ttl-secs",
+    "--models",
+    "--max-output-tokens",
+];
 
 /// Prints a credential signed with the key in `--key`.
 pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
@@ -57,6 +68,15 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
     };
     if !flags.len().is_multiple_of(2) {
         return Err("flags must be --name value pairs".into());
+    }
+    // A mistyped optional flag (`--model`) would otherwise issue a credential
+    // without the restriction it was meant to carry.
+    if let Some(unknown) = flags
+        .iter()
+        .step_by(2)
+        .find(|name| !ISSUE_FLAGS.contains(name))
+    {
+        return Err(format!("unknown flag {unknown}").into());
     }
     let key_path = flag("--key")?;
     let encoded =
@@ -99,4 +119,13 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
     );
     println!("{token}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn unknown_flags_are_refused_before_anything_is_signed() {
+        let error = super::issue(&["--key", "k", "--model", "claude-haiku-*"]).unwrap_err();
+        assert_eq!(error.to_string(), "unknown flag --model");
+    }
 }

@@ -2,4 +2,4 @@ target
 .git
 WORKLOG.md
 AGENTS.md
-RESEARCH.md
+*.jsonl
