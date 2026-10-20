@@ -75,7 +75,7 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(config: &Config, resources: Resources) -> Result<Self, StartupError> {
         Ok(Self {
-            verifier: config.auth.as_ref().map(Verifier::new),
+            verifier: resources.verifier,
             upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
             max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),

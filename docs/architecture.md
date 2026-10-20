@@ -56,7 +56,8 @@ wye/
 ├── crates/
 │   ├── gateway-core/src/        portable policy, no I/O
 │   │   ├── config.rs            wye.toml parsing and validation
-│   │   ├── credential.rs        gateway credential verification and issuance
+│   │   ├── credential.rs        gateway credential verification (own and identity-provider) and issuance
+│   │   ├── credential/keys.rs   Ed25519, ES256, RS256 keys; JWKS parsing
 │   │   ├── policy.rs            model permissions, output-token ceilings, request-body scanner
 │   │   ├── prompt.rs            prompt hashes for cache-miss diagnostics
 │   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
@@ -104,7 +105,7 @@ Core, runtime, tests, and deployment artifacts change together and need coordina
 | Async execution | Tokio |
 | HTTP | Hyper 1.x, `hyper-util`, `http-body-util` |
 | TLS | Rustls (`ring` provider) upstream, built-in web PKI roots plus `upstream.ca_file`; deployment terminates inbound TLS |
-| Credentials | `ring` Ed25519, `base64` |
+| Credentials | `ring` Ed25519, ECDSA P-256, and RSA verification, `base64` |
 | Hashing | `xxhash-rust` xxh3 (prompt hashes), `ring` HMAC-SHA256 (their exported tags) and SHA-256 (session trace ids) |
 | Config / JSON | Serde, `toml`, `serde_json`; hand-written streaming scanners for request bodies and SSE (`memchr`) |
 | Buffers | `bytes` and streaming bodies |
@@ -286,6 +287,16 @@ max_credential_ttl_secs = 604800
 [[auth.keys]]                          # after the [auth] fields: TOML assigns what follows to the key
 id = "k1"
 ed25519_public_key = "<from wye token keygen>"
+[[auth.issuers]]                       # optional: an identity provider; issuer, audience, keys above become optional
+issuer = "https://token.actions.githubusercontent.com"
+audience = "wye-prod"
+algorithm = "RS256"                    # or ES256, EdDSA; pinned, never read from the token
+jwks_file = "github.jwks"              # the provider's JWKS, relative to this file, read at startup
+subject_claim = "sub"                  # names the usage-log subject
+[[auth.issuers.grants]]                # optional: models by claim value; none matching = no model
+claim = "repository_owner"
+value = "acme"
+models = ["claude-haiku-*"]
 
 [telemetry]                            # optional: OTLP logs, metrics, and traces
 otlp_endpoint = "http://collector:4318" # POST {otlp_endpoint}/v1/{logs,metrics,traces}, OTLP/HTTP JSON
@@ -382,7 +393,7 @@ unknown_cost_behavior = "reject"
 |---|---|
 | HTTP framework | Simplest correct Hyper implementation; Axum if routing grows |
 | Workspace layout | Four crates above; split further only as responsibilities stabilize |
-| Token format | Decided: compact JWT with `alg` pinned to `EdDSA` ([policy.md](policy.md#gateway-credentials)); Macaroons/Biscuit only if delegation is needed |
+| Token format | Decided: compact JWT with `alg` pinned to `EdDSA` for Wye's own tokens, and pinned per issuer for identity providers ([policy.md](policy.md#gateway-credentials)); Macaroons/Biscuit only if delegation is needed |
 | Token issuance | Implemented: `wye token issue` offline; external issuers producing the same format work too; the server holds verification keys only |
 | `include_usage` injection | Per-route; default undecided until client compatibility is tested |
 | Caller-credential passthrough | Explicit, loopback only; no gateway auth or cost ceiling in that mode ([policy.md](policy.md#caller-credential-passthrough)) |
