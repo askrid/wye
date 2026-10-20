@@ -4,6 +4,7 @@ pub(crate) use std::{
     convert::Infallible,
     future::Future,
     net::SocketAddr,
+    path::Path,
     pin::Pin,
     sync::{
         Arc,
@@ -80,6 +81,7 @@ impl Harness {
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
             auth,
+            verifier: None,
             extra_roots: Vec::new(),
             prompt_key: None,
             otlp_headers: HeaderMap::new(),
@@ -100,6 +102,7 @@ impl Harness {
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            verifier: None,
             extra_roots: Vec::new(),
             prompt_key: None,
             otlp_headers: HeaderMap::new(),
@@ -126,6 +129,7 @@ impl Harness {
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            verifier: None,
             extra_roots: Vec::new(),
             prompt_key: Some(HashKey::new(key).unwrap()),
             otlp_headers: HeaderMap::new(),
@@ -154,6 +158,7 @@ impl Harness {
         let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca), mock_max_streams).await;
         let resources = Resources {
             auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            verifier: None,
             extra_roots: if trusted {
                 vec![ca.ca_cert()]
             } else {
@@ -179,6 +184,11 @@ impl Harness {
              [upstream]\nbase_url = \"{base_url}\"\n{upstream_extra}"
         ))
         .unwrap();
+        // Key files in test configs are absolute paths.
+        let resources = Resources {
+            verifier: wye::verifier(&config, Path::new("/")).unwrap(),
+            ..resources
+        };
         let gateway = Arc::new(Gateway::new(&config, resources).unwrap());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

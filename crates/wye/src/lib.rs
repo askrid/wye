@@ -41,6 +41,6 @@ pub use policy_test::policy_test;
 pub use probe::probe;
 pub use report::report;
 pub use server::serve;
-pub use startup::{Resources, StartupError};
+pub use startup::{Resources, StartupError, verifier};
 pub use upstream::UpstreamAuth;
 pub use wrapper::{ClaudeLaunch, claude};

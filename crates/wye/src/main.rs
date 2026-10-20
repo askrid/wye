@@ -71,7 +71,8 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         ["check-config", path] => {
-            load(path)?;
+            // Key sets are files too; secrets in the environment are not checked.
+            wye::verifier(&load(path)?, config_dir(path))?;
             println!("{path}: ok");
             Ok(())
         }
@@ -93,7 +94,9 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
             _ => return Err(USAGE.into()),
         }
     };
-    let config = load(config.ok_or(USAGE)?)?;
+    let config_path = config.ok_or(USAGE)?;
+    let config = load(config_path)?;
+    let verifier = wye::verifier(&config, config_dir(config_path))?;
     let token = credential
         .map(|file| std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}")))
         .transpose()?;
@@ -101,9 +104,9 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_secs();
-    let credential = match token.as_deref() {
-        Some(token) => wye::Credential::Token(token.trim()),
-        None => wye::Credential::None,
+    let credential = match (token.as_deref(), &verifier) {
+        (Some(token), Some(verifier)) => wye::Credential::Token(token.trim(), verifier),
+        _ => wye::Credential::None,
     };
     let explanation = wye::explain(&config, path, credential, session, &body, now);
     print!("{}", explanation.report());

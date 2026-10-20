@@ -3,24 +3,31 @@ use std::time::Duration;
 use ring::signature::KeyPair;
 
 use super::*;
-use crate::config::PublicKey;
+use crate::config::{OwnIssuer, PublicKey};
 
 const NOW: u64 = 1_800_000_000;
 
 use wye_testkit::ed25519_keypair as keypair;
 
 fn verifier(key: &Ed25519KeyPair) -> Verifier {
-    Verifier::new(&Auth {
-        models: None,
-        max_output_tokens: None,
-        issuer: "wye".into(),
-        audience: "wye-prod".into(),
-        max_credential_ttl: Duration::from_secs(86_400),
-        keys: vec![PublicKey {
-            id: "k1".into(),
-            ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
-        }],
-    })
+    Verifier::new(
+        &Auth {
+            models: None,
+            max_output_tokens: None,
+            own: Some(OwnIssuer {
+                issuer: "wye".into(),
+                audience: "wye-prod".into(),
+                keys: vec![PublicKey {
+                    id: "k1".into(),
+                    ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
+                }],
+            }),
+            issuers: Vec::new(),
+            max_credential_ttl: Duration::from_secs(86_400),
+        },
+        Vec::new(),
+    )
+    .unwrap()
 }
 
 fn claims<'a>() -> NewCredential<'a> {
@@ -193,3 +200,5 @@ fn public_key_round_trips() {
     );
     assert!(decode_public_key("short").is_none());
 }
+
+mod provider;

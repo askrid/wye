@@ -1,11 +1,11 @@
 //! Gateway credential checks, with the last verified credential cached per connection.
 //!
 //! Clients such as Claude Code keep a connection open and send the same
-//! credential on every request, so a full Ed25519 verification (about 90 µs of
-//! CPU per request) repeats identical work. Each connection remembers the last
+//! credential on every request, so a full signature verification (about 90 µs
+//! of CPU per request for Ed25519) repeats identical work. Each connection remembers the last
 //! credential it verified; a request carrying the same bytes skips signature
 //! verification and only rechecks expiry. Answers equal a fresh verification:
-//! the keys, issuer, and audience are fixed for the process lifetime.
+//! keys, issuers, and audiences are fixed for the process lifetime.
 //!
 //! The cache belongs to one connection and dies with it: nothing is shared
 //! between connections or replicas. It holds one credential, and only one that
@@ -106,7 +106,7 @@ mod tests {
     use std::time::Duration;
 
     use gateway_core::{
-        config::{Auth, PublicKey},
+        config::{Auth, OwnIssuer, PublicKey},
         credential::{self, NewCredential},
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
@@ -118,17 +118,21 @@ mod tests {
     use wye_testkit::ed25519_keypair as keypair;
 
     fn verifier(key: &Ed25519KeyPair) -> Verifier {
-        Verifier::new(&Auth {
+        let auth = Auth {
             models: None,
             max_output_tokens: None,
-            issuer: "wye".into(),
-            audience: "wye-prod".into(),
+            own: Some(OwnIssuer {
+                issuer: "wye".into(),
+                audience: "wye-prod".into(),
+                keys: vec![PublicKey {
+                    id: "k1".into(),
+                    ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
+                }],
+            }),
+            issuers: Vec::new(),
             max_credential_ttl: Duration::from_secs(86_400),
-            keys: vec![PublicKey {
-                id: "k1".into(),
-                ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
-            }],
-        })
+        };
+        Verifier::new(&auth, Vec::new()).unwrap()
     }
 
     fn token(key: &Ed25519KeyPair, sub: &str, exp: u64) -> String {
