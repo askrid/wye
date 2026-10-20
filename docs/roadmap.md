@@ -69,32 +69,33 @@ Turns the signals Claude Code sends gateways into attribution and explanations (
 
 ### M2: cost policy for Claude
 
-- Pricing metadata and the [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
+- Pricing in config ([format](policy.md#pricing-metadata)): cost, cost status, and pricing version in every usage record, `wye.cost` in OTLP, dollars in `wye report`. Needs the usage scanner to read the cache-write TTL breakdown.
+- The [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
 - [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
-- `wye explain` and committed policy tests in CI.
+- `wye explain` and policy tests report the cost decision.
 - [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry. **Done** (usage log and OTLP logs).
-- [Agent-aware routing](research.md#1-agent-aware-routing) for Claude models, once its quality impact per request class is measured.
 
 **Exit:** a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.
 
-### M3: OpenAI APIs and Codex (P1, P2)
+### M3: Codex (P1, P2)
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| 7 | Chat Completions forwarding to OpenAI through the same transport path; `include_usage` policy | The OpenAI SDK uses Wye with equivalent unary and streaming behavior |
-| 8 | Responses forwarding, tool-related event fixtures, `wye codex` | Endpoint-specific fixtures pass, including tool payloads |
-| 9 | Upstream-held state pinning for `previous_response_id` | Requests referencing stored responses reach the owning account or are rejected |
+| 7 | Responses forwarding to OpenAI through the same transport path, tool-related event fixtures, usage extraction, `wye codex` | A real Codex workflow streams and calls tools through Wye; endpoint fixtures pass |
+| 8 | Upstream-held state pinning for `previous_response_id` | Requests referencing stored responses reach the owning account or are rejected |
+| 9 | Chat Completions passthrough to OpenAI for OpenAI-compatible agents and SDKs; `include_usage` policy | The OpenAI SDK uses Wye with equivalent unary and streaming behavior |
 
-**Exit:** a real Codex workflow uses Wye's OpenAI-backed Responses route, including supported streaming and tool behavior. No claims about Anthropic Responses.
+Agent-aware telemetry for Codex uses whatever signals Codex sends; the usage record, metrics, and `wye report` stay one model across agents.
 
-### M4: multi-provider routing (P3, P4)
+**Exit:** a team runs Claude Code and Codex through one Wye, under one policy, and sees both in one telemetry model.
 
-- Anthropic and Gemini Chat Completions adapters with tested streaming and tool calls.
-- Alias routing, hard capability filtering, and `cache_affine` selection.
-- Provider-native prompt-cache handling where supported.
+### M4: routing within a provider
+
+- Several accounts or workspaces per provider: `cache_affine` selection with a stateless load bound ([architecture.md](architecture.md#cache-affine-routing)), and provider-held budgets per team.
+- [Agent-aware routing](research.md#1-agent-aware-routing): request-class policy (for example auxiliary calls to a smaller model of the same provider), once its quality impact is measured.
 - Helm chart, minimal GitOps example, `wye doctor`.
 
-**Exit:** one Chat Completions client uses eligible OpenAI, Anthropic, or Gemini backends without rewriting application logic; incompatible features fail explicitly. A small team deploys Wye into an existing Kubernetes cluster and monitors usage in its existing OTel backend. Messages stays Anthropic-backed; Responses stays OpenAI-backed.
+**Exit:** a small team deploys Wye into an existing cluster, spreads agents across provider accounts without losing prompt-cache discounts, and monitors usage in its existing OTel backend. No request is translated between provider APIs.
 
 ### M5: benchmarks and optimization
 
@@ -132,9 +133,8 @@ Core unit tests and property tests cover configuration validation, credential ve
 - [ ] Every supported endpoint × provider × feature combination has passing conformance and integration tests.
 - [ ] The published support matrix is generated from those test results, not written by hand.
 - [ ] P0 Anthropic Messages passes the Claude Code gateway contract tests for the target Claude Code version.
-- [ ] P1 Chat Completions unary and streaming work with OpenAI.
-- [ ] P2 native OpenAI Responses streaming works with the target Codex version.
-- [ ] Anthropic and Gemini adapters preserve supported tool-call IDs, deltas, usage, finish reasons, and errors.
+- [ ] P1 native OpenAI Responses streaming works with the target Codex version.
+- [ ] P2 Chat Completions unary and streaming work with OpenAI.
 - [ ] Unsupported provider/endpoint combinations reject explicitly.
 - [ ] No unbounded buffering on SSE with a slow downstream.
 - [ ] Cancellation frees gateway resources and does not claim to cancel already billed usage.
