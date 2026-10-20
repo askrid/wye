@@ -93,7 +93,51 @@ The bound is deliberately loose. It is a guarantee, not an estimate. Telemetry r
 
 ### Pricing metadata
 
-Pricing is declarative and versioned. Estimates carry a pricing-version identifier and distinguish cached-input pricing where supported. Unknown pricing never defaults to $0. Routing may use static prices and request features but must not infer task quality from per-token price alone.
+**Planned format (M2).** Prices are declarative, versioned, and live in `wye.toml` next to the policy that uses them, so a price change is a reviewed commit like any other. Wye ships no built-in price table: one would be stale the day a provider changes prices, silently.
+
+```toml
+[pricing]
+version = "anthropic-2026-10-06"     # required; recorded with every cost
+
+# USD per million tokens, as decimal strings. The first entry whose
+# pattern matches the model the provider reported wins.
+[[pricing.models]]
+models = ["claude-opus-5-5"]         # same patterns as [auth] models
+input = "4.00"
+output = "20.00"
+cache_read = "0.20"
+cache_write_5m = "5.00"              # 1.25 x input
+cache_write_1h = "8.00"              # 2 x input
+
+[[pricing.models]]
+models = ["claude-sonnet-5-5", "claude-sonnet-5"]
+input = "2.00"
+output = "10.00"
+cache_read = "0.20"
+cache_write_5m = "2.50"
+cache_write_1h = "4.00"
+
+[[pricing.models]]
+models = ["claude-haiku-5-5"]
+input = "0.10"
+output = "0.50"
+# cache_read, cache_write_5m, cache_write_1h: copy from the provider's
+# pricing page; until set, requests that use the cache cost "partial".
+[[pricing.models.tiers]]             # prompt-length tier
+above_prompt_tokens = 100000         # the whole request is priced at this tier
+input = "0.50"
+output = "2.50"
+```
+
+Rules:
+
+- **Fields.** `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config. A tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
+- **Matching.** By the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
+- **Money is never floating point.** Each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error. A request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`. Floating point appears only where a number is displayed.
+- **Cache writes by TTL.** Anthropic reports `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; the usage scanner reads both. When only the total `cache_creation_input_tokens` is reported, writes are priced at `cache_write_1h` when it is set, the higher price, so the reported cost does not undercount, and the cost is `partial`.
+- **What it does not price.** Fast mode, priority or other service tiers, regional inference premiums, and server tools billed per use (web search) are reported in `usage` but not in the table; a request that used any of them is `partial`, with the token cost still recorded. Batch requests do not pass through the gateway.
+
+Every usage record then carries `cost_usd` (a decimal string), `cost_status` (`complete` | `partial` | `unknown`), and `pricing_version`; OTLP gains `wye.cost` by model and request class, and `wye report` prints dollars next to tokens. The same table feeds the [provable cost ceiling](#provable-cost-ceiling), which additionally needs each model's context window and verified bounds.
 
 ## State boundary
 

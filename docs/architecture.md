@@ -1,6 +1,6 @@
 # Architecture
 
-Start with one process and an Anthropic Messages streaming proxy for Claude Code. Preserve protocol behavior before adding routing or provider translation.
+One process per replica, passing each agent's native API through to its own provider: Anthropic Messages for Claude Code today, OpenAI Responses for Codex next. Wye never translates between provider APIs ([product.md](product.md#non-goals)).
 
 ## System view
 
@@ -38,14 +38,14 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 1. Validate endpoint, framing, and request size.
 2. Verify the signed gateway credential against a configured verification key.
 3. Enforce static model permissions and per-request limits ([policy.md](policy.md)).
-4. Resolve the model alias; check endpoint/feature/provider compatibility.
-5. Select an eligible route by static policy and estimated cost.
-6. Forward upstream, translating protocol only where necessary.
+4. Select the upstream that serves this endpoint natively, and among its accounts the one policy picks (`cache_affine`).
+5. Apply allowlisted rewrites (agent-aware model routing within the provider).
+6. Forward upstream unchanged beyond the allowlist.
 7. Stream incrementally with downstream backpressure; preserve tool calls and event semantics.
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, and steps 4–5 (aliases and routing; one upstream today).
+**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, and steps 4–5 (one upstream and one account today).
 
 ## Repository and workspace
 
@@ -162,7 +162,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 | Field | When | Why |
 |---|---|---|
-| `model` | Alias resolution (M4+) | Replace the alias with the selected upstream model |
+| `model` | Agent-aware routing (M4) | Replace the requested model with a model of the same provider that policy selects for the request class |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)) |
 
@@ -198,21 +198,9 @@ The initial proxy does not retry or fall back: an ambiguous failure may already 
 
 Keep request IDs and trace linkage. Do not claim exactly-once execution.
 
-## Providers and adapters
+## Providers
 
-Start with a concrete Anthropic upstream module, not a trait with one implementation. When a second provider lands, use an explicit provider enum and provider-specific modules; extract shared interfaces only around demonstrated shared behavior.
-
-**Routing** chooses provider and model before sending. **Protocol adaptation** translates requests, responses, errors, usage, and streaming events. Keep them separate.
-
-Each adapter declares exactly which endpoint and features it supports:
-
-- Roles, messages, and multimodal content forms.
-- Tool schemas, `tool_choice`, tool call IDs, streamed arguments and results.
-- Structured output options and refusal semantics.
-- Streaming event transformation and finish reasons.
-- Usage accounting and provider caching fields.
-- Authentication, API versions, deadlines, error classification.
-- Provider-hosted tools, including hosted MCP, only when implemented and tested.
+Each provider is a concrete module serving its own native API: Anthropic for `/v1/messages` today, OpenAI for `/v1/responses` and `/v1/chat/completions` with Codex. A closed `Provider` enum selects it when the second one lands; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: the credential header, the usage events (for the usage observer and cost), the agent's attribution headers, and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted.
 
 ### Upstream connections
 
@@ -233,7 +221,7 @@ When a route has several eligible candidates, Wye can choose deterministically b
 
 Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
-Prefer passthrough where native compatibility is safe; translate only for heterogeneous providers. If semantics cannot be preserved, reject with a documented incompatibility. Responses semantics are treated separately from Chat Completions. Passing provider-native options through does not mean Wye interprets or enforces them.
+Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Tools and MCP
 
@@ -244,7 +232,7 @@ Agent ──executes tool / uses MCP server independently
 Agent ──tool results─> Wye ──> model
 ```
 
-This pattern needs no MCP gateway. Provider-hosted MCP/tools require explicit passthrough or translation support.
+This pattern needs no MCP gateway. Provider-hosted tools pass through like any other field; Wye neither runs nor rewrites them.
 
 
 ## Configuration
@@ -316,61 +304,33 @@ models = [                             # up to 1000; listed per caller after mod
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their current fields.
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
 
 ```toml
-[providers.openai]
-kind = "openai"
+# One entry per provider; each serves only its native API.
+[upstreams.anthropic]
+provider = "anthropic"                 # /v1/messages, /v1/messages/count_tokens
+base_url = "https://api.anthropic.com"
+select = "cache_affine"                # among accounts; stateless, same choice on every replica
+accounts = [
+  { id = "team-a", api_key_env = "ANTHROPIC_KEY_TEAM_A" },
+  { id = "team-b", api_key_env = "ANTHROPIC_KEY_TEAM_B", weight = 2 },
+]
+
+[upstreams.openai]
+provider = "openai"                    # /v1/responses, /v1/chat/completions (Codex)
+base_url = "https://api.openai.com"
 api_key_env = "OPENAI_API_KEY"
 
-[providers.anthropic]
-kind = "anthropic"
-api_key_env = "ANTHROPIC_API_KEY"
-
-[models.claude_messages]
-provider = "anthropic"
-upstream_model = "REPLACE_WITH_SUPPORTED_ANTHROPIC_MODEL"
-capabilities = ["messages", "messages_stream", "tool_calls"]
-
-[models.openai_chat]
-provider = "openai"
-upstream_model = "REPLACE_WITH_SUPPORTED_OPENAI_MODEL"
-capabilities = ["chat", "chat_stream", "tool_calls"]
-
-[models.openai_responses]
-provider = "openai"
-upstream_model = "REPLACE_WITH_RESPONSES_MODEL"
-capabilities = ["responses", "responses_stream", "tool_calls"]
-
-[models.anthropic_chat]
-provider = "anthropic"
-upstream_model = "REPLACE_WITH_SUPPORTED_ANTHROPIC_MODEL"
-capabilities = ["chat", "chat_stream", "tool_calls"]
-
-[routes.claude_code]
-strategy = "first_eligible"
-candidates = ["claude_messages"]
-required_capabilities = ["messages_stream", "tool_calls"]
-on_no_eligible_candidate = "reject"
-
-[routes.fast]
-strategy = "cache_affine"
-candidates = ["openai_chat", "anthropic_chat"]
-required_capabilities = ["chat_stream"]
-on_no_eligible_candidate = "reject"
-
-[routes.codex]
-strategy = "first_eligible"
-candidates = ["openai_responses"]
-required_capabilities = ["responses_stream", "tool_calls"]
-on_no_eligible_candidate = "reject"
+# Agent-aware model routing within a provider: the allowlisted `model` rewrite.
+[[routing.rules]]
+request_class = "auxiliary"            # x-claude-code-request-class
+model = "claude-haiku-5-5"
 
 [policy]
-max_request_cost_usd = "0.05"
+max_request_cost_usd = "0.05"          # provable bound; needs [pricing]
 unknown_cost_behavior = "reject"
 ```
-
-`claude_code` is a Messages route backed only by Anthropic, `codex` is a Responses route backed only by OpenAI, and `fast` is a Chat Completions route; none is interchangeable with another. The implementation should pick a schema where aliases declare or infer their endpoint unambiguously.
 
 ## Invariants
 
@@ -397,10 +357,10 @@ unknown_cost_behavior = "reject"
 | Token issuance | Implemented: `wye token issue` offline; external issuers producing the same format work too; the server holds verification keys only |
 | `include_usage` injection | Per-route; default undecided until client compatibility is tested |
 | Caller-credential passthrough | Explicit, loopback only; no gateway auth or cost ceiling in that mode ([policy.md](policy.md#caller-credential-passthrough)) |
-| Price estimates | Versioned table plus conservative estimation; define guarantee tiers |
+| Pricing | Planned format: a versioned per-model table in `wye.toml`, integer money internally ([policy.md](policy.md#pricing-metadata)) |
 | Configuration reload | Startup snapshot first; hot reload only on demand and without disrupting streams |
 | `/v1/models` | Implemented: the `[discovery]` catalog, filtered per caller by model permissions; absent without it |
-| Responses cross-provider translation | Not part of the initial multi-provider promise |
+| Cross-provider translation | Out of scope: each agent's native API goes to its own provider |
 | Provider-hosted tools/MCP | Explicit adapter feature, not generic passthrough |
 | Per-node adaptive concurrency | Violates strict statelessness; research only |
 | Dynamic provider health routing | Excluded unless expressed as static policy |

@@ -1,8 +1,10 @@
 # Product
 
-**Wye is the gateway that understands agent traffic.** Coding agents such as Claude Code send long, cache-heavy, bursty sessions made of a main loop, subagents, background calls, and compactions. Generic gateways see a stream of unrelated requests. Wye reads the signals agents already send to attribute, explain, and constrain that work per request, and stays fast, light, and stateless while doing it: one binary, one Git-managed TOML file, no database.
+**Wye is an efficient, easy-to-use gateway for AI agents.** Coding agents such as Claude Code send long, cache-heavy, bursty sessions made of a main loop, subagents, background calls, and compactions. Generic gateways see a stream of unrelated requests. Wye reads the signals agents already send to attribute, explain, and constrain that work per request, and stays fast, light, and stateless while doing it: one binary, one Git-managed TOML file, no database, one command to put an agent behind it.
 
-**Primary users:** engineering teams running coding agents (Claude Code first, Codex next) who need service credentials, reviewed policy, and visibility into what their agents spend and why. Secondary: individual agent developers, and applications serving LLM-backed features.
+**Scope in one line:** Claude Code first; then other agents (Codex next), each through its own native API to its own provider. Wye does not translate between provider APIs.
+
+**Primary users:** engineering teams running coding agents who need service credentials, reviewed policy, and visibility into what their agents spend and why. Secondary: individual agent developers. Applications that call model APIs directly can use Wye where they speak an API it passes through, but are not the design target.
 
 ## Motivation
 
@@ -18,6 +20,7 @@ Every feature obeys these; a feature that cannot is not built.
 - **Stateless.** No authoritative cross-request state: sockets, pools, buffers, the config snapshot, and bounded telemetry queues only. Nothing needs to move between replicas ([policy.md](policy.md#state-boundary)).
 - **Fast and light.** Header reads on the request path; hashing, encoding, and aggregation in the telemetry writer task. Zero allocations per streamed event. Every queue and metric series has a fixed bound and drops and counts on overflow. Body scans are opt-in and sampled per session unless they fit the gate on their own.
 - **Transparent.** Bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract). Telemetry carries ids, counts, and keyed hashes, never prompt text.
+- **Easy to use.** Working defaults, so a local gateway needs a few config lines; one command per agent (`wye claude`, later `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
 - **One responsibility.** Inference traffic only: no agent loop, tool execution, dashboard, or stored usage history. `wye claude` launching a client is a client-side convenience.
 
 ## Scope
@@ -39,20 +42,17 @@ Pricing metadata, so usage becomes dollars in records, metrics, and `wye report`
 
 ### Later
 
-Codex through the OpenAI Responses API (M3), then multi-provider routing with Chat Completions adapters (M4), published binaries and images, Helm and Compose, an edge adapter. Phases per endpoint and provider:
+More agents, each on its native API: Codex through the OpenAI Responses API (M3), then other agents whose API and provider Wye can pass through unchanged. Within a provider, routing between accounts and models by policy: cache-affine account selection, agent-aware model routing (for example background calls to a smaller model), provider-held budgets per team. Also published binaries and images, Helm and Compose.
 
-| Phase | Client-facing API | Upstream | Status | Notes |
+| Phase | Agent | Client-facing API | Upstream | Status |
 |---|---|---|---|---|
-| P0 | Anthropic Messages | Anthropic | **Built** | Claude Code; native passthrough |
-| P1 | Chat Completions | OpenAI | Planned | Native passthrough |
-| P2 | Responses | OpenAI | Planned | Codex; native event fidelity |
-| P3 | Chat Completions | Anthropic | Planned | Translation; reject unsupported semantics explicitly |
-| P4 | Chat Completions | Gemini | Planned | Feature-by-feature test matrix |
-| Later | Anthropic Messages | Claude on Bedrock / Vertex | Research | Claude models only |
+| P0 | Claude Code | Anthropic Messages | Anthropic | **Built** |
+| P1 | Codex | OpenAI Responses | OpenAI | Planned (M3) |
+| P2 | OpenAI-compatible agents and SDKs | OpenAI Chat Completions | OpenAI | Planned |
+| Later | Claude Code on cloud platforms | Anthropic Messages | Claude on Bedrock / Vertex | Research |
+| Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |
 
-A route is supported only when request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, cancellation, and unsupported-field handling are tested. **Fail explicitly rather than silently drop semantics.** Chat Completions support alone is never Codex compatibility; Codex needs the Responses route.
-
-**Open question:** P3 and P4 (translating between providers) are the largest planned work and the area where LiteLLM's breadth is strongest. They serve applications more than coding agents. Whether they stay in scope, or Wye stays a passthrough gateway for agents (Claude Code, Codex) and leaves translation to others, is undecided.
+A route is supported only when its request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, and cancellation are tested against that agent's releases. **Fail explicitly rather than silently drop semantics.**
 
 ### Non-goals
 
@@ -60,6 +60,7 @@ A route is supported only when request fields, tool-call identifiers and argumen
 - No Redis, PostgreSQL, SQLite, distributed actors, leader election, peer discovery, or quota ownership.
 - No exact global RPM/TPM, global concurrency cap, cumulative or monthly budget in Wye, or single-use token redemption.
 - No MCP proxying, tool execution, or agent orchestration.
+- No translation between provider APIs (for example Chat Completions to Anthropic or Gemini): each agent's native API passes through to its own provider. Broad cross-provider coverage is LiteLLM's ground.
 - No prompt compression or request rewriting beyond the [allowlist](architecture.md#forwarding-contract).
 - No generic API gateway for non-LLM APIs; no assumed equivalence across models or providers.
 - No required cloud platform or observability vendor.
@@ -70,14 +71,14 @@ A route is supported only when request fields, tool-call identifiers and argumen
 
 **Engineering team.** Developers and CI reach a shared Wye behind HTTPS; provider keys stay in the deployment, callers hold gateway or IdP credentials, policy is reviewed in Git, and usage arrives in the team's OTel backend attributed by subject, session, subagent, and work type. Wye records usage from verified credentials, so attribution cannot be switched off client-side. Hard team budgets belong to the provider or the infrastructure.
 
-**Public LLM app.** Wye sits behind the app backend, which authenticates users and owns per-user quotas and abuse controls; Wye authenticates the app and applies inference policy. **Stateless Wye alone is not abuse protection for a public paid API.** Topologies: [operations.md](operations.md#deployment-modes).
+**Public LLM app** (not the design target). Wye can sit behind the app backend, which authenticates users and owns per-user quotas and abuse controls; Wye authenticates the app and applies inference policy. **Stateless Wye alone is not abuse protection for a public paid API.** Topologies: [operations.md](operations.md#deployment-modes).
 
 ## Positioning
 
 | Product | Position | Where Wye differs |
 |---|---|---|
-| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped with the `claude` binary: SSO sign-in, model access by IdP group, OTLP | Service and CI credentials, clients beyond Claude Code (SDK apps, Codex planned), per-request guards, policy tests, session traces and work-type attribution. **For a team that uses only Claude Code and has SSO, prefer it:** it tracks every Claude Code release by construction |
-| LiteLLM | Broad provider coverage, virtual keys, budgets, admin UI; needs a database for spend | No database; about 10× less CPU per streamed event in the same benchmark ([research.md](research.md#against-litellm)); far narrower provider coverage |
+| Claude apps gateway | Anthropic's self-hosted Claude Code gateway, shipped with the `claude` binary: SSO sign-in, model access by IdP group, OTLP | Service and CI credentials, agents beyond Claude Code (Codex planned), per-request guards, policy tests, session traces and work-type attribution. **For a team that uses only Claude Code and has SSO, prefer it:** it tracks every Claude Code release by construction |
+| LiteLLM | Broad provider coverage, virtual keys, budgets, admin UI; needs a database for spend | No database; about 10× less CPU per streamed event in the same benchmark ([research.md](research.md#against-litellm)). Wye does not try to match its provider breadth: no cross-provider translation |
 | KrakenD | Mature general API gateway | CE buffers whole responses (measured); SSE streaming is Enterprise-only |
 | OmniRoute, Vercel AI Gateway | Multi-account routing and quotas; managed convenience | Self-hosted, GitOps policy, protocol-focused scope |
 
@@ -93,13 +94,13 @@ A route is supported only when request fields, tool-call identifiers and argumen
 
 **Weaknesses**
 
-- **One endpoint, one provider.** Only Anthropic Messages to one Anthropic upstream; no aliases, routing, OpenAI, or Gemini yet.
+- **One agent so far.** Only Claude Code (Anthropic Messages to one Anthropic upstream); no Codex, no routing between accounts or models yet.
 - **Tokens, not dollars.** No pricing yet, so no cost in reports and no cost ceiling (M2).
 - **No cumulative limits by design:** budgets need the provider ([provider-held budgets](policy.md#provider-held-budgets), not built yet) and rate limits need infrastructure. Revocation waits for expiry.
 - **Thin real-world validation.** One partial real Claude Code session; no production deployment; numbers from one laptop against a mock, none on Linux or across machines.
-- **Not packaged.** Build from source; no published binaries or images, no Helm or Compose.
+- **Not packaged.** Build from source; no published binaries or images, no Helm or Compose. This works against "easy to use" more than any missing feature.
 - **Contract upkeep.** Claude Code's gateway contract changes with its releases, and Wye must re-test each one, which Anthropic's own gateway does not.
 
 ## Moat
 
-Speed, statelessness, and single-binary distribution are necessary but copyable. What compounds is understanding of agent traffic (sessions, subagents, compactions, caching) turned into attribution and explanations, correctness proven per client release, and policy as code with provable properties and no database. The risk is plain: Anthropic's gateway can add the same analytics for Claude Code. Wye's defensible ground is what a single-vendor gateway does not serve: several agents and SDK apps behind one policy, CI and service identities, and telemetry in the team's own backend.
+Speed, statelessness, and single-binary distribution are necessary but copyable. What compounds is understanding of agent traffic (sessions, subagents, compactions, caching) turned into attribution and explanations, correctness proven per client release, and policy as code with provable properties and no database. The risk is plain: Anthropic's gateway can add the same analytics for Claude Code. Wye's defensible ground is what a single-vendor gateway does not serve: several agents behind one policy and one telemetry model, CI and service identities, and data in the team's own backend; that ground only exists once a second agent (Codex) works.
