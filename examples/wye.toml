@@ -53,6 +53,26 @@ api_key_env = "ANTHROPIC_API_KEY"
 # [[auth.keys]]
 # id = "k1"
 # ed25519_public_key = "<printed by wye token keygen>"
+#
+# Identity-provider tokens, verified directly: CI workload identity or the
+# team's IdP (through Claude Code's apiKeyHelper). Commit the provider's JWKS
+# next to this file (for GitHub Actions:
+# https://token.actions.githubusercontent.com/.well-known/jwks) and update it
+# when the provider rotates keys; Wye never fetches it. With issuers, the
+# issuer/audience/[[auth.keys]] above are optional.
+# [[auth.issuers]]
+# issuer = "https://token.actions.githubusercontent.com"
+# audience = "wye-prod"
+# algorithm = "RS256"                 # or ES256, EdDSA
+# jwks_file = "github.jwks"
+# subject_claim = "repository"        # default "sub"
+# Models by claim value (a string claim equal to value, or a list containing
+# it). Tokens matching no grant may use no model; omit grants to leave the
+# [auth] models ceiling in charge.
+# [[auth.issuers.grants]]
+# claim = "repository_owner"
+# value = "acme"
+# models = ["claude-haiku-*"]
 
 # Cache-miss diagnostics: keyed hashes of the prompt sections in each usage
 # record, so a telemetry backend can tell why a prompt-cache read missed

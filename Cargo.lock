@@ -1146,6 +1146,7 @@ dependencies = [
 name = "wye-testkit"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "bytes",
  "http",
  "hyper",

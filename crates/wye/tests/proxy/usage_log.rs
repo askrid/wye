@@ -275,6 +275,7 @@ async fn usage_records_are_exported_as_otlp_logs() {
     otlp_headers.insert("api-key", "telemetry-secret".parse().unwrap());
     let resources = Resources {
         auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+        verifier: None,
         extra_roots: Vec::new(),
         prompt_key: None,
         otlp_headers,

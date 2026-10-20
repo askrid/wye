@@ -2,12 +2,15 @@
 //!
 //! - [`TestCa`]: a throwaway CA and a server certificate for `127.0.0.1`.
 //! - [`ed25519_keypair`]: a fresh signing key for gateway credentials.
+//! - [`jwt`]: identity-provider signing keys, JWKS documents, and tokens.
 //! - [`spawn_upstream`]: a mock upstream over plain HTTP/1.1, or over TLS with
 //!   HTTP/2 or HTTP/1.1 negotiated by ALPN, like a real provider.
 //!
 //! Not for production use: keys are generated per process and never protected.
 // Test support: setup failures abort the test or benchmark that called them.
 #![allow(clippy::expect_used)]
+
+pub mod jwt;
 
 use std::{convert::Infallible, error::Error, future::Future, net::SocketAddr, sync::Arc};
 

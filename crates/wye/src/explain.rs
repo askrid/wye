@@ -16,8 +16,8 @@ use gateway_core::{
 /// The gateway credential a request carries.
 pub enum Credential<'a> {
     None,
-    /// A bearer token, verified as the server would.
-    Token(&'a str),
+    /// A bearer token, verified as the server would, with the server's verifier.
+    Token(&'a str, &'a Verifier),
     /// Claims taken as verified (policy tests; tokens in CI would expire).
     Trusted(Identity),
 }
@@ -69,11 +69,11 @@ pub fn explain(
     let mut identity = None;
     match &config.auth {
         None => out.step("credential: not required (no [auth])".into()),
-        Some(auth) => match credential {
+        Some(_) => match credential {
             Credential::None => {
                 return out.refuse(401, "authentication_error", "no gateway credential".into());
             }
-            Credential::Token(token) => match Verifier::new(auth).verify(token, now) {
+            Credential::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
                     out.step(format!(
                         "credential: valid; subject {}, key {}, expires at {}",
@@ -107,6 +107,8 @@ pub fn explain(
     let granted = identity.as_ref().and_then(|i| i.models.as_deref());
     let list = |patterns: Option<&[policy::ModelPattern]>| match patterns {
         None => "any".to_owned(),
+        // An identity provider's token that matched no grant.
+        Some([]) => "none".to_owned(),
         Some(p) => p
             .iter()
             .map(ToString::to_string)
@@ -219,6 +221,10 @@ mod tests {
         .unwrap()
     }
 
+    fn verifier(config: &Config) -> Verifier {
+        Verifier::new(config.auth.as_ref().unwrap(), Vec::new()).unwrap()
+    }
+
     fn token(key: &ring::signature::Ed25519KeyPair, models: Option<&[&str]>) -> String {
         credential::issue(
             key,
@@ -245,7 +251,7 @@ mod tests {
         let ok = explain(
             &config,
             "/v1/messages",
-            Credential::Token(&t),
+            Credential::Token(&t, &verifier(&config)),
             Some("s-1"),
             haiku,
             NOW,
@@ -266,7 +272,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 sonnet,
                 NOW
@@ -288,7 +294,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 haiku,
                 NOW + 601
@@ -299,7 +305,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 &[b' '; 201],
                 NOW
@@ -310,7 +316,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/messages",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 b"{}",
                 NOW
@@ -321,7 +327,7 @@ mod tests {
             refused(explain(
                 &config,
                 "/v1/other",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 haiku,
                 NOW
@@ -335,7 +341,7 @@ mod tests {
             refused(explain(
                 &limited,
                 "/v1/messages",
-                Credential::Token(&t),
+                Credential::Token(&t, &verifier(&config)),
                 None,
                 over,
                 NOW
@@ -345,7 +351,7 @@ mod tests {
         let report = explain(
             &limited,
             "/v1/messages",
-            Credential::Token(&t),
+            Credential::Token(&t, &verifier(&config)),
             None,
             br#"{"model":"claude-haiku-4-5","max_tokens":100}"#,
             NOW,

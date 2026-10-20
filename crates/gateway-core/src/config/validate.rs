@@ -10,6 +10,10 @@ use serde::Deserialize;
 
 use super::*;
 
+mod auth;
+
+pub(super) use auth::{RawAuth, validate_auth};
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawConfig {
@@ -52,24 +56,6 @@ pub(super) struct RawCacheDiagnostics {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawAuth {
-    pub(super) issuer: String,
-    pub(super) audience: String,
-    pub(super) max_credential_ttl_secs: Option<u64>,
-    pub(super) keys: Vec<RawPublicKey>,
-    pub(super) models: Option<Vec<String>>,
-    pub(super) max_output_tokens: Option<u64>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawPublicKey {
-    pub(super) id: String,
-    pub(super) ed25519_public_key: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(super) struct RawServer {
     pub(super) listen: String,
     pub(super) max_request_body_bytes: Option<u64>,
@@ -92,72 +78,6 @@ pub(super) struct RawUpstream {
     pub(super) response_header_timeout_secs: Option<u64>,
     pub(super) stream_idle_timeout_secs: Option<u64>,
     pub(super) http_version: Option<String>,
-}
-
-/// Default `max_credential_ttl_secs`: one week.
-const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
-
-pub(super) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
-    let err = |msg: String| ConfigError::Auth(msg);
-    if raw.issuer.is_empty() || raw.audience.is_empty() {
-        return Err(err("issuer and audience must not be empty".into()));
-    }
-    if raw.keys.is_empty() {
-        return Err(err("at least one key is required".into()));
-    }
-    let mut keys = Vec::with_capacity(raw.keys.len());
-    for key in raw.keys {
-        if key.id.is_empty() {
-            return Err(err("key id must not be empty".into()));
-        }
-        if keys.iter().any(|k: &PublicKey| k.id == key.id) {
-            return Err(err(format!("duplicate key id {:?}", key.id)));
-        }
-        let Some(public) = crate::credential::decode_public_key(&key.ed25519_public_key) else {
-            return Err(err(format!(
-                "key {:?}: ed25519_public_key must be 32 bytes in unpadded base64url",
-                key.id
-            )));
-        };
-        keys.push(PublicKey {
-            id: key.id,
-            ed25519_public_key: public,
-        });
-    }
-    let models = match raw.models {
-        Some(list) if list.is_empty() => {
-            return Err(err(
-                "models must not be empty; omit it to allow every model".into(),
-            ));
-        }
-        Some(list) => Some(
-            list.iter()
-                .map(|p| {
-                    ModelPattern::parse(p).ok_or_else(|| {
-                        err(format!(
-                            "models: {p:?} is not a model name or a prefix ending in *"
-                        ))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        None => None,
-    };
-    Ok(Auth {
-        issuer: raw.issuer,
-        models,
-        max_output_tokens: raw
-            .max_output_tokens
-            .map(|n| nonzero(n, "auth.max_output_tokens"))
-            .transpose()?,
-        audience: raw.audience,
-        max_credential_ttl: secs(
-            raw.max_credential_ttl_secs
-                .unwrap_or(DEFAULT_MAX_CREDENTIAL_TTL_SECS),
-            "auth.max_credential_ttl_secs",
-        )?,
-        keys,
-    })
 }
 
 pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {

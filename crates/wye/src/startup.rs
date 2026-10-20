@@ -8,6 +8,7 @@ use std::{
 
 use gateway_core::{
     config::{Config, UpstreamCredential},
+    credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
 };
 use rustls::pki_types::{CertificateDer, pem::PemObject};
@@ -23,6 +24,8 @@ pub enum StartupError {
     KeyFile { path: PathBuf, reason: String },
     InvalidOtlpHeaders(String),
     CaFile { path: PathBuf, reason: String },
+    JwksFile { path: PathBuf, reason: String },
+    KeySet(KeySetError),
     Tls(String),
     BodyLimitTooLarge,
 }
@@ -52,6 +55,10 @@ impl fmt::Display for StartupError {
             Self::CaFile { path, reason } => {
                 write!(f, "upstream.ca_file {}: {reason}", path.display())
             }
+            Self::JwksFile { path, reason } => {
+                write!(f, "auth.issuers jwks_file {}: {reason}", path.display())
+            }
+            Self::KeySet(e) => write!(f, "auth: {e}"),
             Self::Tls(msg) => write!(f, "TLS setup failed: {msg}"),
             Self::BodyLimitTooLarge => {
                 f.write_str("server.max_request_body_bytes exceeds this platform's address space")
@@ -66,6 +73,8 @@ impl std::error::Error for StartupError {}
 #[derive(Debug)]
 pub struct Resources {
     pub auth: UpstreamAuth,
+    /// Gateway credential checks, when `[auth]` is configured.
+    pub verifier: Option<Verifier>,
     /// Root certificates trusted for the upstream in addition to the built-in roots.
     pub extra_roots: Vec<CertificateDer<'static>>,
     /// Keys the prompt hashes in the usage log; present when cache diagnostics are on.
@@ -108,11 +117,34 @@ impl Resources {
         };
         Ok(Self {
             auth,
+            verifier: verifier(config, config_dir)?,
             extra_roots,
             prompt_key,
             otlp_headers,
         })
     }
+}
+
+/// The credential verifier for `[auth]`, with each identity provider's key
+/// set read from its `jwks_file` (relative to `config_dir`). `wye explain`
+/// uses it too, so it needs no secrets.
+pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, StartupError> {
+    let Some(auth) = &config.auth else {
+        return Ok(None);
+    };
+    let mut sets = Vec::with_capacity(auth.issuers.len());
+    for issuer in &auth.issuers {
+        let path = config_dir.join(&issuer.jwks_file);
+        let error = |reason: String| StartupError::JwksFile {
+            path: path.clone(),
+            reason,
+        };
+        let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
+        sets.push(ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))?);
+    }
+    Verifier::new(auth, sets)
+        .map(Some)
+        .map_err(StartupError::KeySet)
 }
 
 /// A secret file's contents without surrounding whitespace (mounted secrets

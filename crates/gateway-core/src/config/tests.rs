@@ -62,7 +62,7 @@ fn auth_allows_network_listen_and_validates_keys() {
     let keys = format!("[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\"");
     let config = with_auth("0.0.0.0:8080", "api_key_env = \"K\"", &keys).unwrap();
     let auth = config.auth.unwrap();
-    assert_eq!(auth.keys.len(), 1);
+    assert_eq!(auth.own.unwrap().keys.len(), 1);
     assert_eq!(auth.max_credential_ttl, Duration::from_secs(7 * 24 * 3600));
 
     assert!(matches!(
@@ -375,4 +375,61 @@ fn discovery_lists_unique_model_names() {
     }
     let long = "x".repeat(1025);
     assert!(with(&format!(r#"{{ id = "a", description = "{long}" }}"#)).is_err());
+}
+
+#[test]
+fn identity_provider_issuers_are_validated() {
+    let parse_auth = |auth: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"0.0.0.0:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+             api_key_env = \"K\"\n[auth]\n{auth}"
+        ))
+    };
+    let idp = "[[auth.issuers]]\nissuer = \"https://token.actions.githubusercontent.com\"\n\
+               audience = \"wye-prod\"\nalgorithm = \"RS256\"\njwks_file = \"github.jwks\"\n";
+    // Issuers alone are enough: Wye's own keys are optional.
+    let auth = parse_auth(idp).unwrap().auth.unwrap();
+    assert!(auth.own.is_none());
+    let issuer = &auth.issuers[0];
+    assert_eq!(issuer.algorithm, Algorithm::Rs256);
+    assert_eq!(issuer.subject_claim, "sub");
+    assert!(issuer.grants.is_empty());
+
+    let grants = format!(
+        "{idp}subject_claim = \"repository\"\n[[auth.issuers.grants]]\nclaim = \"repository_owner\"\n\
+         value = \"acme\"\nmodels = [\"claude-haiku-*\"]\n"
+    );
+    let auth = parse_auth(&grants).unwrap().auth.unwrap();
+    assert_eq!(auth.issuers[0].subject_claim, "repository");
+    assert_eq!(
+        auth.issuers[0].grants[0].models[0].to_string(),
+        "claude-haiku-*"
+    );
+
+    let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
+    let own = format!(
+        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\"\n"
+    );
+    let auth = parse_auth(&format!("{own}{idp}")).unwrap().auth.unwrap();
+    assert!(auth.own.is_some() && auth.issuers.len() == 1);
+
+    for bad in [
+        String::new(),                   // neither own keys nor issuers
+        "issuer = \"wye\"\n".to_owned(), // own issuer without keys or audience
+        idp.replace("RS256", "HS256"),   // HMAC is never accepted
+        idp.replace("RS256", "none"),
+        idp.replace("github.jwks", ""),
+        format!("{idp}{idp}"), // duplicate issuer
+        format!(
+            "{own}{}",
+            idp.replace("https://token.actions.githubusercontent.com", "wye")
+        ),
+        format!("{idp}subject_claim = \"\"\n"),
+        format!("{idp}[[auth.issuers.grants]]\nclaim = \"groups\"\nvalue = \"x\"\nmodels = []\n"),
+        format!("{idp}[[auth.issuers.grants]]\nclaim = \"\"\nvalue = \"x\"\nmodels = [\"a\"]\n"),
+        format!("{idp}[[auth.issuers.grants]]\nclaim = \"g\"\nvalue = \"x\"\nmodels = [\"a*b\"]\n"),
+        format!("{idp}jwks_url = \"https://example.com\"\n"), // no runtime fetching
+    ] {
+        assert!(parse_auth(&bad).is_err(), "accepted:\n{bad}");
+    }
 }

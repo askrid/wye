@@ -9,6 +9,7 @@
 mod credentials;
 mod forwarding;
 mod harness;
+mod identity_providers;
 mod lifecycle;
 mod streaming;
 mod tls;
