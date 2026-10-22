@@ -42,6 +42,9 @@ Design decisions that depend on provider facts not yet checked. Each must be con
 | Anthropic tool-use system-prompt overhead and prompt-length price tiers per model | Provable cost ceiling | Anthropic pricing and tool-use docs; compare reported input tokens with and without `tools` |
 | Current Codex transport and configuration for Responses (HTTP SSE vs. other transports; custom base URL support) | M3 | Codex source and docs for the target version |
 | Share of `auxiliary`, `compaction`, and `subagent` requests in real Claude Code sessions, and quality impact of routing each to a smaller Claude model | [Agent-aware routing](#1-agent-aware-routing) | Opt-in telemetry with gateway hint headers enabled; task-level evaluation |
+| Whether Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with an unsigned payload hash (`UNSIGNED-PAYLOAD`) | Signing streamed bodies without buffering them ([architecture.md](architecture.md#claude-across-providers-planned-m4)) | AWS service docs; a signed request with an unsigned payload against each endpoint |
+| Vertex's streaming URL (`:streamRawPredict`) and that its stream is Anthropic SSE; `count_tokens` paths on Bedrock, Vertex, and Claude Platform on AWS; where each puts `anthropic-beta` | Claude across providers | Platform docs; one recorded stream and request per provider |
+| Whether `429`/`529` from each Claude provider always means the request was not processed (safe to fail over) | Failover without duplicate billing | Provider docs on rate limits and overload; billing records for refused requests |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` injection default | SDK conformance tests in Python, TypeScript, Go, and common agent frameworks |
 
 ## Benchmarks
