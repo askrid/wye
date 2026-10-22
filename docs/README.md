@@ -2,7 +2,7 @@
 
 Wye is the gateway that understands agent traffic: a stateless Rust inference gateway for coding agents such as Claude Code. One binary and one Git-managed TOML file; no database, no control plane. It authenticates and constrains requests, streams them, reads the signals agents send (session, subagent, request class, compaction, tool time) to attribute and explain their work, and exports it through OpenTelemetry. Scope, strengths, and weaknesses: [product.md](product.md).
 
-**Status (2026-10-20):** built for Claude Code on the Anthropic Messages API: the streaming proxy (M0), credentials including identity-provider tokens, model permissions and token ceilings, OTLP telemetry, `wye claude`, and a local OCI image (M1), and agent-aware visibility (M1b; secret detection open). Next: cost (M2). Not started: OpenAI and Codex (M3), routing within a provider (M4), published packages. Detail: [roadmap.md](roadmap.md#status).
+**Status (2026-10-22):** built for Claude Code on the Anthropic Messages API: the streaming proxy (M0), credentials including identity-provider tokens, model permissions and token ceilings, OTLP telemetry, `wye claude`, and a local OCI image (M1), and agent-aware visibility (M1b; secret detection open). Next: cost (M2). Not started: Codex (M3), Claude across providers and accounts (M4, designed), published packages. Detail: [roadmap.md](roadmap.md#status).
 
 ## Documents
 

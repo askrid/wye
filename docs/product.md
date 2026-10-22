@@ -42,14 +42,14 @@ Pricing metadata, so usage becomes dollars in records, metrics, and `wye report`
 
 ### Later
 
-More agents, each on its native API: Codex through the OpenAI Responses API (M3), then other agents whose API and provider Wye can pass through unchanged. Within a provider, routing between accounts and models by policy: cache-affine account selection, agent-aware model routing (for example background calls to a smaller model), provider-held budgets per team. Also published binaries and images, Helm and Compose.
+More agents, each on its native API: Codex through the OpenAI Responses API (M3), then other agents whose API Wye can pass through unchanged. **Claude across providers (M4):** one Claude Code fleet served from Anthropic, Claude Platform on AWS, Amazon Bedrock, and Google Vertex AI, and from several accounts, chosen per request with cache affinity and failed over on overload before any output, without shared state. All four speak the Messages API, so this is muxing, not translation. Also agent-aware model routing (for example background calls to a smaller Claude model) and provider-held budgets per team. Also published binaries and images, Helm and Compose.
 
 | Phase | Agent | Client-facing API | Upstream | Status |
 |---|---|---|---|---|
 | P0 | Claude Code | Anthropic Messages | Anthropic | **Built** |
 | P1 | Codex | OpenAI Responses | OpenAI | Planned (M3) |
 | P2 | OpenAI-compatible agents and SDKs | OpenAI Chat Completions | OpenAI | Planned |
-| Later | Claude Code on cloud platforms | Anthropic Messages | Claude on Bedrock / Vertex | Research |
+| P3 | Claude Code across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Planned (M4) |
 | Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |
 
 A route is supported only when its request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, and cancellation are tested against that agent's releases. **Fail explicitly rather than silently drop semantics.**
@@ -94,7 +94,7 @@ A route is supported only when its request fields, tool-call identifiers and arg
 
 **Weaknesses**
 
-- **One agent so far.** Only Claude Code (Anthropic Messages to one Anthropic upstream); no Codex, no routing between accounts or models yet.
+- **One agent, one upstream so far.** Only Claude Code to one Anthropic account; no Codex, no multi-provider Claude, no failover yet.
 - **Tokens, not dollars.** No pricing yet, so no cost in reports and no cost ceiling (M2).
 - **No cumulative limits by design:** budgets need the provider ([provider-held budgets](policy.md#provider-held-budgets), not built yet) and rate limits need infrastructure. Revocation waits for expiry.
 - **Thin real-world validation.** One partial real Claude Code session; no production deployment; numbers from one laptop against a mock, none on Linux or across machines.

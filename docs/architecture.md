@@ -162,7 +162,8 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 | Field | When | Why |
 |---|---|---|
-| `model` | Agent-aware routing (M4) | Replace the requested model with a model of the same provider that policy selects for the request class |
+| `model` | Agent-aware routing (M4); a Claude provider's model id (M4) | Replace the requested model with one policy selects for the request class; write the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
+| `model` → URL, `anthropic_version` | Vertex AI (M4) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)) |
 
@@ -186,7 +187,7 @@ Anthropic Messages streams always carry usage (`message_start` for input and cac
 
 ## Retries and fallback
 
-The initial proxy does not retry or fall back: an ambiguous failure may already have incurred charges, and switching providers after output starts cannot preserve the response. On `/v1/messages`, Wye never retries: Claude Code retries on its own, guided by the `x-should-retry` and `retry-after` headers Wye forwards, and gateway retries would multiply attempts and risk duplicate billing. When retries are added for other routes, they follow this policy:
+The initial proxy does not retry or fall back: an ambiguous failure may already have incurred charges, and switching providers after output starts cannot preserve the response. On `/v1/messages`, Wye does not retry the same provider: Claude Code retries on its own, guided by the `x-should-retry` and `retry-after` headers Wye forwards, and gateway retries would multiply attempts and risk duplicate billing. The one planned exception is [failover to another Claude provider](#claude-across-providers-planned-m4) after a refusal that proves the request was not processed (`429`, `529`, connection refused), before any response byte was sent. When retries are added for other routes, they follow this policy:
 
 | Failure stage | Policy |
 |---|---|
@@ -222,6 +223,27 @@ When a route has several eligible candidates, Wye can choose deterministically b
 Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
 Passing provider-native options through does not mean Wye interprets or enforces them.
+
+### Claude across providers (planned, M4)
+
+The same Claude models are sold by four providers. Wye can serve one Claude Code fleet from several of them, choosing per request and failing over, because all four speak the Anthropic Messages API with small, known differences. This is muxing, not translation: no request goes to another model family.
+
+| Provider | Endpoint | Request | Stream | Auth | Model id |
+|---|---|---|---|---|---|
+| Anthropic | `api.anthropic.com/v1/messages` | Messages | SSE | `x-api-key` | `claude-opus-5-5` |
+| Claude Platform on AWS (Anthropic-operated) | `aws-external-anthropic.{region}.api.aws/v1/messages` | Messages, same-day parity | SSE | SigV4 (`aws-external-anthropic`) or short-term API key; workspace id required | `claude-opus-5-5` |
+| Amazon Bedrock, Messages endpoint (Opus 4.7 and later) | `bedrock-mantle.{region}.api.aws/anthropic/v1/messages` | Messages | SSE | SigV4 (`bedrock-mantle`) or a Bedrock API key in `x-api-key` | `anthropic.claude-opus-5-5` |
+| Google Vertex AI | `aiplatform.googleapis.com/v1/projects/{p}/locations/{loc}/publishers/anthropic/models/{model}:streamRawPredict` | Messages without `model`, with `anthropic_version` | SSE (to verify) | OAuth access token (`Authorization: Bearer`) | `claude-opus-5-5` |
+
+Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
+
+**Selection.** Candidates are configured per route (`[[upstreams]]` entries for the same models). Wye picks deterministically, from any replica alike: `cache_affine` by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares, with `ordered` as the simple alternative (first candidate unless it is excluded by the request's model or a feature it is known not to support). No health state is shared or remembered between requests.
+
+**Failover within a request**, only where it cannot duplicate billing: when a candidate answers `429`, `529`, or a connection refusal before any response byte reached the client, Wye sends the same request to the next candidate. A `5xx` after the provider may have accepted the request is not retried ([retries](#retries-and-fallback)). Resending needs the request body, so a route with failover holds the body up to `failover_max_body_bytes`, counted against `server.max_held_request_bytes`; larger bodies are forwarded without failover. Claude Code still retries on its own, so failover is a latency and availability improvement, not a correctness requirement. A failover costs that turn its prompt-cache discount at the new provider; affinity brings the next turn back.
+
+**Auth without state.** Each provider credential is resolved at startup like `api_key_env`. SigV4 signs each request on the request path (an HMAC chain, microseconds) with an unsigned payload hash if the service accepts it, since hashing a streamed multi-MB body before sending would mean buffering it; if not, Bedrock and AWS API keys avoid signing. Vertex access tokens expire after about an hour: either Wye exchanges a service-account key for tokens itself (an RS256-signed JWT and one HTTPS call per hour, cached in memory per process), or an external refresher writes a token file Wye re-reads. Both are open decisions below.
+
+**Telemetry and cost.** Usage records and OTLP gain `wye.provider` and the account id; pricing entries can be scoped to a provider, since partner and regional prices differ ([policy.md](policy.md#pricing-metadata)).
 
 ### Tools and MCP
 
@@ -307,15 +329,31 @@ models = [                             # up to 1000; listed per caller after mod
 Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
 
 ```toml
-# One entry per provider; each serves only its native API.
-[upstreams.anthropic]
-provider = "anthropic"                 # /v1/messages, /v1/messages/count_tokens
-base_url = "https://api.anthropic.com"
-select = "cache_affine"                # among accounts; stateless, same choice on every replica
-accounts = [
-  { id = "team-a", api_key_env = "ANTHROPIC_KEY_TEAM_A" },
-  { id = "team-b", api_key_env = "ANTHROPIC_KEY_TEAM_B", weight = 2 },
-]
+# Claude from several providers and accounts; each entry serves the Messages API.
+[routes.claude]
+select = "cache_affine"                # by session id; stateless, same choice on every replica
+failover = ["429", "529", "connect"]   # before any response byte; never on ambiguous 5xx
+failover_max_body_bytes = 8388608      # bodies held for resending, within max_held_request_bytes
+
+[[routes.claude.upstreams]]
+id = "anthropic-team-a"
+provider = "anthropic"
+api_key_env = "ANTHROPIC_KEY_TEAM_A"
+weight = 2
+
+[[routes.claude.upstreams]]
+id = "bedrock-us"
+provider = "bedrock"                   # Messages endpoint; model ids get the anthropic. prefix
+region = "us-east-1"
+api_key_env = "BEDROCK_API_KEY"        # or aws_credentials = "environment" for SigV4
+
+[[routes.claude.upstreams]]
+id = "vertex-global"
+provider = "vertex"
+project = "acme-ml"
+location = "global"
+service_account_file = "vertex-sa.json"  # open decision: token exchange in Wye, or token_file
+
 
 [upstreams.openai]
 provider = "openai"                    # /v1/responses, /v1/chat/completions (Codex)
@@ -363,7 +401,10 @@ unknown_cost_behavior = "reject"
 | Cross-provider translation | Out of scope: each agent's native API goes to its own provider |
 | Provider-hosted tools/MCP | Explicit adapter feature, not generic passthrough |
 | Per-node adaptive concurrency | Violates strict statelessness; research only |
-| Dynamic provider health routing | Excluded unless expressed as static policy |
+| Dynamic provider health routing | Excluded unless expressed as static policy; per-request failover to the next candidate is the stateless substitute |
+| SigV4 for AWS providers | Sign per request with an unsigned payload hash if Bedrock and Claude Platform on AWS accept it (to verify); otherwise support only their API keys |
+| Vertex access tokens | Token exchange inside Wye (service-account key, RS256 JWT, one call per hour, in-memory cache) or an external refresher writing a token file; undecided |
+| Failover body hold | Default bound for `failover_max_body_bytes`; agent contexts reach several MB, so the bound trades failover coverage against memory |
 | Edge support | WASM adapter after native correctness |
 | Maximum stream/request lifetime | Configurable timeouts plus shutdown semantics |
 | License / package name | After package, domain, and trademark checks |
