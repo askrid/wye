@@ -11,7 +11,9 @@ Each stage leaves a runnable system with focused tests. Provider phases (P0–P4
 | M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5–6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Open: published binaries and images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
 | M1b: agent-aware visibility | A1–A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
 | M2: cost policy | Cache-miss diagnostics done early (opt-in, sampled per session). Pricing, cost bound, provider-held budgets, `wye explain` cost output not started |
-| M3–M6 | Not started |
+| M3: Codex | Not started |
+| M4: Claude across providers and accounts | Designed ([architecture.md](architecture.md#claude-across-providers-planned-m4)); not started |
+| M5–M6 | Not started |
 
 ## Milestones
 
@@ -89,13 +91,19 @@ Agent-aware telemetry for Codex uses whatever signals Codex sends; the usage rec
 
 **Exit:** a team runs Claude Code and Codex through one Wye, under one policy, and sees both in one telemetry model.
 
-### M4: routing within a provider
+### M4: Claude across providers and accounts
 
-- Several accounts or workspaces per provider: `cache_affine` selection with a stateless load bound ([architecture.md](architecture.md#cache-affine-routing)), and provider-held budgets per team.
-- [Agent-aware routing](research.md#1-agent-aware-routing): request-class policy (for example auxiliary calls to a smaller model of the same provider), once its quality impact is measured.
-- Helm chart, minimal GitOps example, `wye doctor`.
+One Claude Code fleet served by several Claude providers and accounts, chosen per request and failed over without state ([design](architecture.md#claude-across-providers-planned-m4)).
 
-**Exit:** a small team deploys Wye into an existing cluster, spreads agents across provider accounts without losing prompt-cache discounts, and monitors usage in its existing OTel backend. No request is translated between provider APIs.
+| Stage | Scope | Acceptance evidence |
+| --- | --- | --- |
+| 10 | Routes with several upstreams of one provider (accounts), `ordered` and `cache_affine` selection by session, provider and account in telemetry | The same session reaches the same account from two replicas; shares follow configured weights |
+| 11 | Failover on `429`, `529`, or connection refusal before any response byte, with a bounded held body | Mock tests: failover happens only before output, never on ambiguous `5xx`, bodies above the bound go without failover, no gated metric worse without failover configured |
+| 12 | Claude Platform on AWS and Amazon Bedrock (Messages endpoint): model-id mapping, API-key auth, then SigV4 | Contract tests per provider against recorded responses; one opt-in real smoke test each |
+| 13 | Google Vertex AI: model in the URL, `anthropic_version` splice, access tokens | Body rewrite property-tested (every other byte unchanged); opt-in real smoke test |
+| 14 | Agent-aware model routing within Claude ([research](research.md#1-agent-aware-routing)), once its quality impact is measured; Helm chart, `wye doctor` | Request-class policy tested; quality measurement recorded |
+
+**Exit:** a team serves Claude Code from at least two providers, keeps prompt-cache hit rates within a few points of a single provider, rides out one provider's overload without failed turns, and sees cost per provider.
 
 ### M5: benchmarks and optimization
 
