@@ -81,16 +81,18 @@ Proposals, not built: `wye codex` (with M3), and profiles that select a gateway 
 
 ### SDK integration
 
-```python
-from openai import OpenAI
+Apps and custom agents keep the provider's official SDK and point it at Wye; the gateway credential takes the place of the provider key (Wye reads it from `x-api-key` or `Authorization: Bearer`):
 
-client = OpenAI(
-    base_url="https://gateway.example.com/v1",
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="https://gateway.example.com",
     api_key="gateway-credential",
 )
 ```
 
-Claude Code connects the same way:
+The OpenAI SDK connects the same way once the OpenAI routes exist (M3). Claude Code connects through environment variables:
 
 ```bash
 export ANTHROPIC_BASE_URL=https://gateway.example.com

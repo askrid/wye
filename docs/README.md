@@ -1,8 +1,8 @@
 # Wye design docs
 
-Wye is the gateway that understands agent traffic: a stateless Rust inference gateway for coding agents such as Claude Code. One binary and one Git-managed TOML file; no database, no control plane. It authenticates and constrains requests, streams them, reads the signals agents send (session, subagent, request class, compaction, tool time) to attribute and explain their work, and exports it through OpenTelemetry. Scope, strengths, and weaknesses: [product.md](product.md).
+Wye is an efficient, easy-to-use gateway between AI agents or AI-native apps and the model providers, in Rust. Clients keep the provider's official SDK and native API; model choice, provider, credentials, limits, failover, upgrades, telemetry, and cost live in one Git-managed TOML file. One stateless binary, no database, no control plane. It reads the signals coding agents send (session, subagent, request class, compaction, tool time) to attribute and explain their work, and exports it through OpenTelemetry. Scope, strengths, and weaknesses: [product.md](product.md).
 
-**Status (2026-10-22):** built for Claude Code on the Anthropic Messages API: the streaming proxy (M0), credentials including identity-provider tokens, model permissions and token ceilings, OTLP telemetry, `wye claude`, and a local OCI image (M1), and agent-aware visibility (M1b; secret detection open). Next: cost (M2). Not started: Codex (M3), Claude across providers and accounts (M4, designed), published packages. Detail: [roadmap.md](roadmap.md#status).
+**Status (2026-10-23):** built for the Anthropic Messages API (Claude Code and Anthropic SDK clients): the streaming proxy (M0), credentials including identity-provider tokens, model permissions and token ceilings, OTLP telemetry, `wye claude`, and a local OCI image (M1), and agent-aware visibility (M1b; secret detection open). Next, in order: cost (M2, format designed), published packages, model aliases and upgrade checks (M2b, designed), Claude across providers and accounts (M4, designed), Codex (M3). Detail: [roadmap.md](roadmap.md#status).
 
 ## Documents
 
