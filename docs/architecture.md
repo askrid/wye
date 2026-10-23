@@ -82,7 +82,7 @@ wye/
 │   │   ├── wrapper.rs, probe.rs `wye claude`, `wye probe`
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
-│   ├── wye-testkit/             test CA and mock upstream
+│   ├── wye-testkit/             test CA, mock upstream, test signing keys and IdP tokens
 │   └── wye-bench/               benchmark, regression gate, load and capacity runs, competitor runs
 ├── bench/baseline.json
 ├── scripts/                     check.sh (commit gate), ab.sh, image-smoke.sh, upload-latency.sh
@@ -120,11 +120,13 @@ Upstream connections come from one pool of lanes ([upstream connections](#upstre
 
 ## Public API
 
-- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough to Anthropic (P0, Claude Code).
-- `POST /v1/chat/completions`: Chat Completions with streaming and client-managed tool calls.
-- `POST /v1/responses`: Responses, initially only where backed by the native OpenAI Responses API.
-- `GET /healthz`, `GET /readyz`: operational probes.
+Implemented:
+
+- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough to Anthropic (P0: Claude Code and Anthropic SDK clients).
+- `GET /healthz`, `GET /readyz`: operational probes; `HEAD /api/hello`: Claude Code's warm-up probe.
 - `GET /v1/models`: with `[discovery]`, the configured catalog narrowed to the models the caller may use (the `[auth] models` ceiling, then the credential's `models` claim), so Claude Code's model picker shows only permitted models. Authenticated when `[auth]` is set; one page (`has_more: false`); no upstream contact and no usage record. Claude Code queries it only with `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, with a 3-second timeout, and keeps ids containing `claude` or `anthropic`.
+
+Planned (M3): `POST /v1/responses` and `POST /v1/chat/completions`, native passthrough to OpenAI. Every other path gets `404 not_found_error`.
 
 An `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` override works only when the client respects it **and** uses an implemented endpoint. Base-URL compatibility is not compatibility with proprietary SDK extensions.
 
@@ -162,7 +164,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 | Field | When | Why |
 |---|---|---|
-| `model` | Agent-aware routing (M4); a Claude provider's model id (M4) | Replace the requested model with one policy selects for the request class; write the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
+| `model` | [Model alias](#model-aliases-and-upgrade-checks-planned) (M2b); agent-aware routing and a Claude provider's model id (M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
 | `model` → URL, `anthropic_version` | Vertex AI (M4) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)) |
@@ -223,6 +225,35 @@ When a route has several eligible candidates, Wye can choose deterministically b
 Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
 Passing provider-native options through does not mean Wye interprets or enforces them.
+
+### Model aliases and upgrade checks (planned)
+
+**Aliases (M2b).** A client asks for a stable name and config decides the model:
+
+```toml
+[[aliases]]
+name = "coding-default"
+model = "claude-opus-5-5"
+# Staged rollout: credentials whose subject matches get another model first.
+when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
+```
+
+- Resolution reads the top-level `model` with the existing [policy scanner](policy.md#gateway-credentials) hold (Claude Code and the SDKs send `model` first) and splices the resolved name in place of the alias; every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
+- Model permissions and pricing apply to the resolved model, the one that runs and bills. `GET /v1/models` lists aliases next to models, filtered the same way.
+- Usage records carry both `requested_model` (the alias) and `model` (as the provider reports it); `wye explain` and `policy-test` show the resolution, so a rollout is reviewed like any policy change.
+- An alias names one model. Mapping one name to several providers of that model is [M4](#claude-across-providers-planned-m4)'s route, not a second alias mechanism.
+
+**Upgrade checks (M2b).** Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye knows each model's breaking request changes as a rule table shipped with Wye and tested per rule, for example on Anthropic models of 2026: `thinking.budget_tokens` (rejected on Opus 4.7 and later, Sonnet 5, Haiku 5.5), non-default sampling parameters, assistant prefill (a last message with role `assistant`), forced `tool_choice` (`any` or `tool`, rejected on Opus 5.5 and Sonnet 5.5), and the deprecated `output_format`.
+
+```toml
+[upgrade_check]
+targets = ["claude-opus-5-5"]          # models an alias may move to
+sample_percent = 10                    # share of sessions or clients checked
+```
+
+- For sampled requests, a scanner on the forwarded request body (the same constant-memory structure scanner as cache diagnostics, reading only the fields the rules name) records which rules each target would break: `upgrade_issues` in the usage record (`{"claude-opus-5-5": ["budget_tokens", "prefill"]}`), and `wye.upgrade.issues` by target, rule, and subject in OTLP. The backend shows which clients would fail before the switch.
+- `wye explain --target-model claude-opus-5-5 request.json` checks one request offline; `wye report` lists issues by client.
+- Report only: the request is forwarded unchanged ([non-goal](product.md#non-goals)). The rule table is versioned with Wye; a rule names its source (the provider's migration notes) and its test.
 
 ### Claude across providers (planned, M4)
 
@@ -359,6 +390,11 @@ service_account_file = "vertex-sa.json"  # open decision: token exchange in Wye,
 provider = "openai"                    # /v1/responses, /v1/chat/completions (Codex)
 base_url = "https://api.openai.com"
 api_key_env = "OPENAI_API_KEY"
+
+# Model aliases (M2b) and upgrade checks: see "Model aliases and upgrade checks".
+[[aliases]]
+name = "coding-default"
+model = "claude-opus-5-5"
 
 # Agent-aware model routing within a provider: the allowlisted `model` rewrite.
 [[routing.rules]]
