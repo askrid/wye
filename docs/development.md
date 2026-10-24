@@ -7,7 +7,7 @@ How changes are made, verified, and committed. Speed and statelessness are the p
 | Path | Contents |
 |---|---|
 | `crates/gateway-core` | Portable policy: config validation, credential verification, model permissions and token ceilings, request-body and SSE scanners, prompt hashes, agent headers. No I/O, no Tokio. |
-| `crates/wye` | The binary: CLI (`main.rs`, `token.rs`, `explain.rs`, `policy_test.rs`, `report.rs`, `wrapper.rs`, `probe.rs`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), credentials and permissions, forwarding (`upstream/`), usage log and OTLP export (`usage_log/`). Module map in [architecture.md](architecture.md#repository-and-workspace) |
+| `crates/wye` | The binary: `main.rs`, the offline commands (`cli/`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), credentials and permissions, forwarding (`upstream/`), usage log and OTLP export (`usage_log/`). Module map in [architecture.md](architecture.md#repository-and-workspace) |
 | `crates/wye-testkit` | Test support: throwaway CA, test signing keys, mock upstream (plain, or TLS with HTTP/2) |
 | `crates/wye-bench` | Benchmark and regression gate; mock Anthropic upstream, load client, soak and capacity runs, competitor runs |
 | `bench/baseline.json` | Gated benchmark baseline for the development machine |

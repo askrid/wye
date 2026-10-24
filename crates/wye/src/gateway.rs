@@ -340,15 +340,8 @@ fn otlp_target(
     extra_roots: &[rustls::pki_types::CertificateDer<'static>],
     headers: http::HeaderMap,
 ) -> Result<OtlpTarget, StartupError> {
-    let mut http = hyper_util::client::legacy::connect::HttpConnector::new();
-    http.enforce_http(false);
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_tls_config(crate::upstream::tls_config(extra_roots)?)
-        .https_or_http()
-        .enable_http1()
-        .build();
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build(https);
+        .build(crate::upstream::https_connector(extra_roots)?);
     Ok(OtlpTarget::new(
         telemetry.otlp_logs_uri.clone(),
         telemetry.otlp_metrics_uri.clone(),
