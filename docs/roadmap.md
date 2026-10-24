@@ -155,6 +155,8 @@ Core unit tests and property tests cover configuration validation, credential ve
 - [ ] P0 Anthropic Messages passes the Claude Code gateway contract tests for the target Claude Code version.
 - [ ] P1 native OpenAI Responses streaming works with the target Codex version.
 - [ ] P2 Chat Completions unary and streaming work with OpenAI.
+- [ ] P3 each Claude provider passes the Messages contract tests; failover happens only before any response byte, never after output.
+- [ ] Aliases resolve the same in `explain` and `serve`; upgrade checks report and never change a request.
 - [ ] Unsupported provider/endpoint combinations reject explicitly.
 - [ ] No unbounded buffering on SSE with a slow downstream.
 - [ ] Cancellation frees gateway resources and does not claim to cancel already billed usage.
@@ -178,8 +180,8 @@ Core unit tests and property tests cover configuration validation, credential ve
 - [ ] OCI image and Compose example need no gateway datastore.
 - [ ] Helm release exposes Wye internally with health probes and secret references.
 - [ ] An SDK backend switches using base URL plus gateway credential.
-- [ ] `wye claude` and `wye codex` configure and clean up supported child tools.
-- [ ] An OTel backend shows usage and model/project attribution without a custom dashboard.
+- [ ] `wye claude` and `wye codex` launch their agents against the gateway without changing the user's own configuration.
+- [ ] An OTel backend shows usage and cost by subject, model, and session without a custom dashboard.
 - [ ] Rollout and shutdown drain streams within a configured deadline.
 
 ### Benchmarks

@@ -45,13 +45,14 @@ Design decisions that depend on provider facts not yet checked. Each must be con
 | Whether Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with an unsigned payload hash (`UNSIGNED-PAYLOAD`) | Signing streamed bodies without buffering them ([architecture.md](architecture.md#claude-across-providers-planned-m4)) | AWS service docs; a signed request with an unsigned payload against each endpoint |
 | Vertex's streaming URL (`:streamRawPredict`) and that its stream is Anthropic SSE; `count_tokens` paths on Bedrock, Vertex, and Claude Platform on AWS; where each puts `anthropic-beta` | Claude across providers | Platform docs; one recorded stream and request per provider |
 | Whether `429`/`529` from each Claude provider always means the request was not processed (safe to fail over) | Failover without duplicate billing | Provider docs on rate limits and overload; billing records for refused requests |
+| Each upgrade-check rule (a field a model rejects) against the provider's migration notes and a real `400` | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks-planned): a wrong rule reports false failures | Provider migration guides; one opt-in request per rule and model |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` injection default | SDK conformance tests in Python, TypeScript, Go, and common agent frameworks |
 
 ## Benchmarks
 
 **Mock upstream first:** fixed event timing and payloads, varied concurrency, slow readers, deliberate disconnects.
 
-- **Baselines:** direct mock upstream, Wye, and LiteLLM, OmniRoute, or KrakenD only in a feature-equivalent streaming configuration.
+- **Baselines:** direct mock upstream, Wye, LiteLLM, and KrakenD (measured); newer lean gateways (Bifrost, Helicone's gateway, Portkey) next, each only in a feature-equivalent streaming configuration.
 - **Workloads:** small unary requests; SSE with controllable first-token delay and token rate; 1k/10k concurrent streams as stress targets; mixed fast/slow consumers; disconnect storms; upstream failures; TLS on/off where fair.
 - **Metrics:** throughput; p50/p95/p99 added latency; TTFT overhead; chunk propagation delay; RSS per active stream; CPU per request and per streamed byte; dropped/cancelled requests; leak checks; infrastructure cost at equivalent load.
 - **Controls:** identical hardware limits, payloads, keep-alive/TLS settings, upstream behavior, topology, and features.
@@ -131,7 +132,7 @@ Sustainable (added p99 at most 10 ms, no failures): 1,500 streams, about 36,000 
 
 ### Against KrakenD
 
-Goal: beat KrakenD on the benchmark. `wye-bench run ... --krakend <path>` runs every scenario through KrakenD 3.0.1 CE as well, in its documented pass-through mode (`no-op` encoding, all headers and query strings, one backend) and its best case (no access log, ERROR logging), while Wye keeps its per-request usage log.
+A reference comparison with a mature general gateway. `wye-bench run ... --krakend <path>` runs every scenario through KrakenD 3.0.1 CE as well, in its documented pass-through mode (`no-op` encoding, all headers and query strings, one backend) and its best case (no access log, ERROR logging), while Wye keeps its per-request usage log.
 
 **KrakenD CE cannot stream SSE.** In `no-op` mode it buffers the whole response: an event sent at 0 s arrived when the stream ended, 3 s later. `"sse"` encoding is Enterprise-only; CE answers it with 500. For Claude Code that means no tokens appear until the reply is complete. The idle-memory and cancel scenarios, which wait for the first event of a silent stream, therefore run only for Wye.
 
@@ -249,7 +250,7 @@ Each experiment names its status; feature-shaped experiments moved to [feature d
 
 ## Feature directions
 
-Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Understanding agent traffic is Wye's chosen direction ([product.md](product.md#principles)): directions 1 and 2 and the [agent-native directions](#agent-native-directions) below build it. Implemented: cache-miss diagnostics (2) and clean stream endings (in 7); the others are not.
+Research-backed functionality that fits the constraints: request-local decisions, no shared state, config in Git, analysis delegated to the telemetry backend. Wye's direction is native passthrough with everything that is not application logic in config ([product.md](product.md#principles)); understanding agent traffic is its distinctive part, built by directions 1 and 2 and the [agent-native directions](#agent-native-directions) below. Model aliases and upgrade checks are designed in [architecture.md](architecture.md#model-aliases-and-upgrade-checks-planned). Implemented: cache-miss diagnostics (2) and clean stream endings (in 7); the others are not.
 
 ### 1. Agent-aware routing
 

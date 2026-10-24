@@ -1,6 +1,6 @@
 # Architecture
 
-One process per replica, passing each agent's native API through to its own provider: Anthropic Messages for Claude Code today, OpenAI Responses for Codex next. Wye never translates between provider APIs ([product.md](product.md#non-goals)).
+One process per replica, passing each client's native API through to a provider that serves it: the Anthropic Messages API for Claude Code and Anthropic SDK clients today, the OpenAI APIs for Codex and OpenAI SDK clients later. Wye never translates between provider APIs ([product.md](product.md#non-goals)).
 
 ## System view
 
@@ -38,8 +38,8 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 1. Validate endpoint, framing, and request size.
 2. Verify the signed gateway credential against a configured verification key.
 3. Enforce static model permissions and per-request limits ([policy.md](policy.md)).
-4. Select the upstream that serves this endpoint natively, and among its accounts the one policy picks (`cache_affine`).
-5. Apply allowlisted rewrites (agent-aware model routing within the provider).
+4. Resolve a model alias; select the route that serves this endpoint natively, and among its upstreams the one policy picks (`cache_affine`).
+5. Apply allowlisted rewrites (the resolved model, the provider's model id, agent-aware model routing).
 6. Forward upstream unchanged beyond the allowlist.
 7. Stream incrementally with downstream backpressure; preserve tool calls and event semantics.
 8. Propagate cancellation, apply the retry policy, release request resources.
@@ -55,9 +55,10 @@ One repository, four Cargo workspace members:
 wye/
 ├── crates/
 │   ├── gateway-core/src/        portable policy, no I/O
-│   │   ├── config.rs            wye.toml parsing and validation
+│   │   ├── config.rs            wye.toml parsing and validation (config/validate/)
 │   │   ├── credential.rs        gateway credential verification (own and identity-provider) and issuance
 │   │   ├── credential/keys.rs   Ed25519, ES256, RS256 keys; JWKS parsing
+│   │   ├── credential/provider.rs  identity-provider claims and grants
 │   │   ├── policy.rs            model permissions, output-token ceilings, request-body scanner
 │   │   ├── prompt.rs            prompt hashes for cache-miss diagnostics
 │   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
@@ -158,7 +159,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 4. Forward upstream status and permitted headers.
 5. Stream the response body as the downstream consumes it.
 
-**Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. The request body streams to the upstream unchanged, bounded by `server.max_request_body_bytes` (default 32 MiB, Anthropic's limit). With [model permissions](policy.md#gateway-credentials), only the start of the body is held, until its top-level `model` has been read; the held bytes are bounded across the process by `server.max_held_request_bytes`, and the body is never re-serialized. Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
+**Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. The request body streams to the upstream unchanged, bounded by `server.max_request_body_bytes` (default 32 MiB, Anthropic's limit). With [model permissions or output-token ceilings](policy.md#gateway-credentials), only the start of the body is held, until its top-level `model` has been read; the held bytes are bounded across the process by `server.max_held_request_bytes`, and the body is never re-serialized. Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
 **Request rewrites.** Wye rewrites only an explicit allowlist of request fields; everything else passes through byte-equivalent in meaning:
 
@@ -177,7 +178,7 @@ Telemetry and cost accounting need usage, which arrives in the final response ob
 
 Implemented for Anthropic Messages streams (`gateway-core/src/usage.rs`): the scanner keeps at most one partial line (32 bytes for ordinary events, 64 KiB for usage events), finds line ends with SIMD `memchr`, and parses JSON only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names of `tool_use` blocks, borrowed, once per content block). A body wrapper emits one record per request when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; completion is also detected through `is_end_stream`, because hyper stops polling a known-length body without seeing its end. Non-streaming responses are recorded with `usage_status = not_observed` until a bounded JSON reader is added.
 
-Anthropic Messages streams always carry usage (`message_start` for input and cache tokens, `message_delta` for output), so P0 needs no rewrite. For OpenAI Chat Completions, enabling `include_usage` makes OpenAI send an extra final chunk with an empty `choices` array. Most SDKs accept it, but a client that indexes `choices[0]` unconditionally breaks. If the caller already set `include_usage`, Wye leaves it as is. Otherwise the route decides: inject it (`accounting_status = confirmed`), or don't (`accounting_status = estimated`, from the [cost ceiling](policy.md#provable-cost-ceiling) bound). Disconnected streams record usage as `unknown` with the known bound.
+Anthropic Messages streams always carry usage (`message_start` for input and cache tokens, `message_delta` for output), so P0 needs no rewrite. For OpenAI Chat Completions, enabling `include_usage` makes OpenAI send an extra final chunk with an empty `choices` array. Most SDKs accept it, but a client that indexes `choices[0]` unconditionally breaks. If the caller already set `include_usage`, Wye leaves it as is. Otherwise the route decides: inject it, so usage and cost are reported, or don't, so the record carries `usage_status = not_observed` and only the [cost ceiling](policy.md#provable-cost-ceiling) bound. Disconnected streams record usage as `unknown` with the known bound.
 
 **Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured provider credential, except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough). Forward only appropriate end-to-end headers. Replace `accept-encoding` with `identity`: Claude Code asks for `gzip, deflate, br, zstd` and Anthropic then compresses responses (Brotli), which would hide usage, model, and tool calls from the [usage observer](#usage-extraction); decompressing a copy would cost CPU per event and decoders for untrusted input, while an uncompressed response costs only bytes (responses are small; request bodies are unaffected). Claude Code reads the uncompressed stream as before. The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
 
@@ -203,7 +204,7 @@ Keep request IDs and trace linkage. Do not claim exactly-once execution.
 
 ## Providers
 
-Each provider is a concrete module serving its own native API: Anthropic for `/v1/messages` today, OpenAI for `/v1/responses` and `/v1/chat/completions` with Codex. A closed `Provider` enum selects it when the second one lands; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: the credential header, the usage events (for the usage observer and cost), the agent's attribution headers, and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted.
+A provider is a concrete module for one way of reaching a native API: Anthropic today; Claude Platform on AWS, Bedrock, and Vertex for the same Messages API (M4); OpenAI for `/v1/responses` and `/v1/chat/completions` (M3). A closed `Provider` enum selects it when the second one lands; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: endpoint and credential, model id, the usage events (for the usage observer and cost), and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted. Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Upstream connections
 
@@ -220,11 +221,9 @@ Some requests reference state stored by a specific provider account: Responses `
 
 Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Cost routing that spreads one conversation across accounts or providers forfeits that discount.
 
-When a route has several eligible candidates, Wye can choose deterministically by rendezvous hashing over the candidates, keyed by the credential subject plus a hash of a stable request prefix (system prompt and tool definitions). The same workload then reaches the same candidate from any replica, with no shared state, and moves only when the candidate set changes. Strategy name: `cache_affine` (illustrative). Its cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
+When a route has several eligible candidates, Wye chooses deterministically by rendezvous hashing over them, keyed by the Claude Code session id when the request carries one, and otherwise by the credential subject plus a hash of a stable request prefix (system prompt and tool definitions). The same workload then reaches the same candidate from any replica, with no shared state, and moves only when the candidate set changes. Strategy name: `cache_affine` (planned for [M4](#claude-across-providers-planned-m4)). Its cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
 
 Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
-
-Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Model aliases and upgrade checks (planned)
 
@@ -268,7 +267,7 @@ The same Claude models are sold by four providers. Wye can serve one Claude Code
 
 Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
 
-**Selection.** Candidates are configured per route (`[[upstreams]]` entries for the same models). Wye picks deterministically, from any replica alike: `cache_affine` by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares, with `ordered` as the simple alternative (first candidate unless it is excluded by the request's model or a feature it is known not to support). No health state is shared or remembered between requests.
+**Selection.** Candidates are configured per route (`[[routes.<name>.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affine-routing) by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares, with `ordered` as the simple alternative (first candidate unless it is excluded by the request's model or a feature it is known not to support). No health state is shared or remembered between requests.
 
 **Failover within a request**, only where it cannot duplicate billing: when a candidate answers `429`, `529`, or a connection refusal before any response byte reached the client, Wye sends the same request to the next candidate. A `5xx` after the provider may have accepted the request is not retried ([retries](#retries-and-fallback)). Resending needs the request body, so a route with failover holds the body up to `failover_max_body_bytes`, counted against `server.max_held_request_bytes`; larger bodies are forwarded without failover. Claude Code still retries on its own, so failover is a latency and availability improvement, not a correctness requirement. A failover costs that turn its prompt-cache discount at the new provider; affinity brings the next turn back.
 
@@ -292,7 +291,7 @@ This pattern needs no MCP gateway. Provider-hosted tools pass through like any o
 
 One TOML file, loaded at startup, is the source of truth for aliases, providers, routes, credential verification, and limits. Secrets are referenced by environment variable, never stored in Git, images, or IaC state.
 
-The runtime resolves environment variables; the core validates configuration without resolving secrets. Reject unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and missing price metadata at startup. Never print secrets or log request bodies by default.
+The runtime resolves environment variables; the core validates configuration without resolving secrets. Reject unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
 
 No hot reload; changes require a restart (or rolling deploy). A config snapshot stays consistent within a request. Planned: include the config version in logs and traces to diagnose rollout skew.
 
@@ -360,8 +359,9 @@ models = [                             # up to 1000; listed per caller after mod
 Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
 
 ```toml
-# Claude from several providers and accounts; each entry serves the Messages API.
+# A route serves one native API; a request goes to the route for its endpoint.
 [routes.claude]
+api = "anthropic-messages"             # /v1/messages, /v1/messages/count_tokens
 select = "cache_affine"                # by session id; stateless, same choice on every replica
 failover = ["429", "529", "connect"]   # before any response byte; never on ambiguous 5xx
 failover_max_body_bytes = 8388608      # bodies held for resending, within max_held_request_bytes
@@ -385,10 +385,11 @@ project = "acme-ml"
 location = "global"
 service_account_file = "vertex-sa.json"  # open decision: token exchange in Wye, or token_file
 
-
-[upstreams.openai]
-provider = "openai"                    # /v1/responses, /v1/chat/completions (Codex)
-base_url = "https://api.openai.com"
+[routes.openai]
+api = "openai"                         # /v1/responses, /v1/chat/completions (M3)
+[[routes.openai.upstreams]]
+id = "openai"
+provider = "openai"
 api_key_env = "OPENAI_API_KEY"
 
 # Model aliases (M2b) and upgrade checks: see "Model aliases and upgrade checks".
@@ -435,7 +436,7 @@ unknown_cost_behavior = "reject"
 | Configuration reload | Startup snapshot first; hot reload only on demand and without disrupting streams |
 | `/v1/models` | Implemented: the `[discovery]` catalog, filtered per caller by model permissions; absent without it |
 | Cross-provider translation | Out of scope: each agent's native API goes to its own provider |
-| Provider-hosted tools/MCP | Explicit adapter feature, not generic passthrough |
+| Provider-hosted tools/MCP | Passed through like any other field; Wye neither runs nor rewrites them, and a per-use charge (web search) makes the cost `partial` |
 | Per-node adaptive concurrency | Violates strict statelessness; research only |
 | Dynamic provider health routing | Excluded unless expressed as static policy; per-request failover to the next candidate is the stateless substitute |
 | SigV4 for AWS providers | Sign per request with an unsigned payload hash if Bedrock and Claude Platform on AWS accept it (to verify); otherwise support only their API keys |

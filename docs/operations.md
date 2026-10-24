@@ -29,21 +29,19 @@ wye probe http://127.0.0.1:8080/readyz
 wye doctor
 ```
 
-Implemented: `serve`, `check-config`, `token`, `policy-test`, `report`, `probe`, and a first `explain`; `doctor` is planned.
+Implemented: `serve`, `check-config` (parses the config and reads the identity providers' key sets; environment secrets are not checked), `token`, `policy-test`, `report`, `probe`, and a first `explain`; `doctor` is planned.
 
 `probe` sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
 `doctor` (planned) checks local config, resolved environment variables, DNS/TLS/provider connectivity, model availability, and compatibility warnings, without an admin API.
 
-**Implemented:** `explain` prints each check `serve` would make for the request and the decision, calling the same functions in the same order: endpoint, credential verification (at the current time), body size, the model permission (requested model, the configured and credential lists), the upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it. It exits 0 for "forward" and 3 for a refusal, with the status and error type the server would send. Conditions that exist only at run time (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With routing and cost ceilings (later milestones), `explain` grows to the full design:
+**Implemented:** `explain` prints each check `serve` would make for the request and the decision, calling the same functions in the same order: endpoint, credential verification (at the current time), body size, the model permission (requested model, the configured and credential lists), the `max_tokens` ceiling, the upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it. It exits 0 for "forward" and 3 for a refusal, with the status and error type the server would send. Conditions that exist only at run time (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With aliases, routing, and cost ceilings (later milestones), `explain` grows to the full design:
 
-`explain` runs the exact admission and routing code used by `serve`, offline, and prints the decision: selected route and candidate, rejected candidates with reasons, rewritten fields, provable cost bound, and the provider credential (by name, never value) that would be used. It makes no network calls. Because routing is a pure function of request, credential, and config, the output is what every replica would do.
+`explain` runs the exact admission and routing code used by `serve`, offline, and prints the decision: the resolved alias, selected route and candidate, rejected candidates with reasons, rewritten fields, provable cost bound, and the provider credential (by name, never value) that would be used. It makes no network calls. Because routing is a pure function of request, credential, and config, the output is what every replica would do.
 
 Policy becomes testable in CI: commit sample requests with expected decisions, and run them on every `wye.toml` change. A policy change that silently reroutes traffic or raises a cost bound fails review.
 
 **Implemented: `wye policy-test --config wye.toml <dir>`.** Each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and three cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused), and the test suite runs them.
-
-**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 
 ```text
 policy-tests/
@@ -53,7 +51,9 @@ policy-tests/
 └── opus-beyond-ceiling.expect.toml  # decision = "refuse", status = 403
 ```
 
-With routing and cost ceilings, expectations will also name the route and bound a cost (`route = "codex"`, `max_cost_usd <= "0.05"`).
+With routing and cost ceilings, expectations will also name the route and bound a cost (`route = "claude"`, `max_cost_usd <= "0.05"`).
+
+**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 
 `token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models, and `--max-output-tokens <n>` lowers its `max_tokens` ceiling.
 
@@ -200,10 +200,10 @@ The table and field list below are the target; the **Implemented** paragraphs af
 |---|---|
 | Metrics | Requests, active streams, latency histograms, TTFT, upstream failures, token counts |
 | Traces | Validation, selected route, upstream request, stream duration and cancellation |
-| Usage events | Subject/project, provider/model, tokens, cached tokens, cost estimate, accounting status, pricing version |
+| Usage events | Subject, session and agent structure, provider and model, tokens by kind, cost and its status, pricing version |
 | Errors | Auth rejection, incompatible feature, malformed SSE, provider timeout, export failure |
 
-Target usage event fields (cost and pricing fields wait for M2): `request_id`, `timestamp`, `subject_id`, `project_id`, `client_session_id`, `client_agent_id`, `provider`, `model`, `endpoint`, `input_tokens`, `output_tokens`, `cached_tokens`, `estimated_usd`, `max_cost_usd` (provable bound), `provider_reported_usd`, `pricing_version`, `accounting_status` (`confirmed` | `estimated` | `unknown`), `duration_ms`, `ttft_ms`, `config_version`.
+Target usage event fields beyond what is implemented: `request_id`, `requested_model` (an alias, M2b), `provider` and account (M4), `cost_usd`, `cost_status` (`complete` | `partial` | `unknown`), and `pricing_version` (M2, [format](policy.md#pricing-metadata)), `max_cost_usd` (the provable bound), `ttft_ms`, `upgrade_issues` (M2b), and `config_version`.
 
 **Implemented: usage records as OTLP logs.** With `[telemetry] otlp_endpoint`, every usage record is also exported as an OTLP log record over OTLP/HTTP with JSON encoding (`POST {otlp_endpoint}/v1/logs`), with resource attributes `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes use OpenTelemetry semantic conventions where they exist: `gen_ai.system` (`anthropic`), `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_creation.input_tokens`, `gen_ai.usage.cache_read.input_tokens`, `http.route`, `http.response.status_code`, `session.id` (Claude Code session), `enduser.id` (credential subject); `claude_code.request_class`, `claude_code.agent_type`, `claude_code.agent_id`, `claude_code.parent_agent_id`, `claude_code.prompt_id`, `claude_code.compaction`, `claude_code.context_compacted`, `wye.tool_calls` (the object as a JSON string), and `wye.cache_miss` from the usage-log fields above; and `wye.outcome`, `wye.duration_ms`, `wye.headers_ms`, `wye.usage_status`, and `wye.prompt` (the cache-diagnostics object as a JSON string) otherwise. The writer task batches records (sent at 512 records or after one second) and hands batches to an exporter task through a queue of 8 batches; a full queue, a failed request, or a collector slower than 10 s drops the batch, and the number of lost records is written to stderr at shutdown (`otlp_dropped`). `telemetry.otlp_headers_env` names an environment variable with extra request headers in the OpenTelemetry format `key=value,key2=value2` (for example a backend API key); values are treated as secrets. The export client trusts the same roots as the upstream (`upstream.ca_file` included). 
 
