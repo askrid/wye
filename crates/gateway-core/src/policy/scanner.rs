@@ -1,7 +1,7 @@
 //! The structure scanner behind [`PolicyScanner`].
 
 use super::{MAX_MODEL_BYTES, PolicyError};
-use crate::json::{StringEnd, is_space, short_string_len};
+use crate::json::{Nesting, StringEnd, is_space, short_string_len};
 
 /// What the bytes of the current top-level string are for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,9 +20,7 @@ const KEY_CAP: usize = 16;
 pub struct PolicyScanner {
     error: Option<PolicyError>,
     started: bool,
-    depth: u32,
-    /// Bit `d` is set when the container at depth `d` is an array (`d < 64`).
-    arrays: u64,
+    nest: Nesting,
     in_string: bool,
     string: StringEnd,
     expect_key: bool,
@@ -57,8 +55,7 @@ impl PolicyScanner {
         Self {
             error: None,
             started: false,
-            depth: 0,
-            arrays: 0,
+            nest: Nesting::default(),
             in_string: false,
             string: StringEnd::default(),
             expect_key: false,
@@ -151,8 +148,8 @@ impl PolicyScanner {
                         self.error = Some(PolicyError::InvalidMaxTokens);
                         break;
                     }
-                    let top_key = self.depth == 1 && self.expect_key;
-                    let model_value = self.depth == 1 && self.model_next;
+                    let top_key = self.nest.depth() == 1 && self.expect_key;
+                    let model_value = self.nest.depth() == 1 && self.model_next;
                     self.expect_key = false;
                     self.model_next = false;
                     if !top_key && !model_value {
@@ -178,7 +175,7 @@ impl PolicyScanner {
                     self.string.start();
                 }
                 b'{' | b'[' => {
-                    if self.depth == 1 && self.model_next {
+                    if self.nest.depth() == 1 && self.model_next {
                         self.error = Some(PolicyError::Invalid);
                         break;
                     }
@@ -186,14 +183,7 @@ impl PolicyScanner {
                         self.error = Some(PolicyError::InvalidMaxTokens);
                         break;
                     }
-                    self.depth = self.depth.saturating_add(1);
-                    if self.depth < 64 {
-                        if byte == b'[' {
-                            self.arrays |= 1 << self.depth;
-                        } else {
-                            self.arrays &= !(1 << self.depth);
-                        }
-                    }
+                    self.nest.open(byte == b'[');
                     self.expect_key = byte == b'{';
                 }
                 b'}' | b']' => {
@@ -201,16 +191,15 @@ impl PolicyScanner {
                     if self.error.is_some() {
                         break;
                     }
-                    let is_array = self.depth < 64 && self.arrays & (1 << self.depth) != 0;
-                    if self.depth == 0 || (self.depth < 64 && is_array != (byte == b']')) {
+                    if !self.nest.closes(byte == b']') {
                         self.error = Some(PolicyError::Malformed);
                         break;
                     }
-                    if self.depth == 1 && self.model_next {
+                    if self.nest.depth() == 1 && self.model_next {
                         self.error = Some(PolicyError::Invalid);
                         break;
                     }
-                    self.depth -= 1;
+                    self.nest.close(byte == b']');
                     self.expect_key = false;
                 }
                 b',' => {
@@ -218,18 +207,17 @@ impl PolicyScanner {
                     if self.error.is_some() {
                         break;
                     }
-                    if self.depth == 1 && self.model_next {
+                    if self.nest.depth() == 1 && self.model_next {
                         self.error = Some(PolicyError::Invalid);
                         break;
                     }
-                    let in_object = self.depth > 0
-                        && !(self.depth < 64 && self.arrays & (1 << self.depth) != 0);
-                    self.expect_key = in_object;
+                    let depth = self.nest.depth();
+                    self.expect_key = depth > 0 && !self.nest.is_array(depth);
                 }
                 b':' => {}
                 // A number, `true`, `false`, or `null`.
                 _ => {
-                    if self.depth == 1 && self.model_next {
+                    if self.nest.depth() == 1 && self.model_next {
                         self.error = Some(PolicyError::Invalid);
                         break;
                     }
