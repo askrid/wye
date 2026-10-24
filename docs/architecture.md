@@ -172,13 +172,11 @@ Each rewrite is per-route configuration, covered by tests, and reported by `wye 
 
 ### Usage extraction
 
-Telemetry and cost accounting need usage, which arrives in the final response object or the last stream events. Wye relays the original bytes unchanged and feeds the same bytes to a bounded, read-only observer that recognizes only usage-bearing events. The observer never delays, buffers, or modifies forwarded bytes. It caps the size of an event it will inspect; an oversized or malformed event marks usage `unknown` rather than failing the stream.
+A bounded, read-only observer reads the same bytes Wye relays and recognizes only usage-bearing events; it never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream.
 
-Implemented for Anthropic Messages streams (`gateway-core/src/usage.rs`): the scanner keeps at most one partial line (32 bytes for ordinary events, 64 KiB for usage events), finds line ends with SIMD `memchr`, and parses JSON only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names of `tool_use` blocks, borrowed, once per content block). A body wrapper emits one record per request when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; completion is also detected through `is_end_stream`, because hyper stops polling a known-length body without seeing its end. Non-streaming responses are recorded with `usage_status = not_observed` until a bounded JSON reader is added.
+For Anthropic Messages streams (`gateway-core/src/usage.rs`): at most one partial line is kept (32 bytes for ordinary events, 64 KiB for usage events), line ends are found with SIMD `memchr`, and JSON is parsed only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names, borrowed). A body wrapper emits one record when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; completion is also detected through `is_end_stream`, because hyper stops polling a known-length body before its end. Non-streaming responses are recorded `not_observed`. Messages streams always carry usage, so no rewrite is needed. OpenAI Chat Completions streams carry it only with `stream_options.include_usage`, which adds a final chunk with empty `choices` that some clients mishandle; the route decides whether to inject it (M3).
 
-Anthropic Messages streams always carry usage (`message_start` for input and cache tokens, `message_delta` for output), so P0 needs no rewrite. For OpenAI Chat Completions, enabling `include_usage` makes OpenAI send an extra final chunk with an empty `choices` array. Most SDKs accept it, but a client that indexes `choices[0]` unconditionally breaks. If the caller already set `include_usage`, Wye leaves it as is. Otherwise the route decides: inject it, so usage and cost are reported, or don't, so the record carries `usage_status = not_observed` and only the [cost ceiling](policy.md#provable-cost-ceiling) bound. Disconnected streams record usage as `unknown` with the known bound.
-
-**Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured provider credential, except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough). Forward only appropriate end-to-end headers. Replace `accept-encoding` with `identity`: Claude Code asks for `gzip, deflate, br, zstd` and Anthropic then compresses responses (Brotli), which would hide usage, model, and tool calls from the [usage observer](#usage-extraction); decompressing a copy would cost CPU per event and decoders for untrusted input, while an uncompressed response costs only bytes (responses are small; request bodies are unaffected). Claude Code reads the uncompressed stream as before. The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
+**Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured provider credential, except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough). Forward only appropriate end-to-end headers. Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response costs only bytes, decompressing a copy costs CPU per event ([research.md](research.md#current-harness-and-baseline)). The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
 
 **Backpressure and cancellation.** Downstream body polling applies backpressure. No unbounded queues or detached readers. Client disconnect releases or cancels upstream work, verified by integration tests. Already generated tokens may still be billed.
 
@@ -347,8 +345,8 @@ sample_percent = 100                   # share of Claude Code sessions diagnosed
 
 [discovery]                            # optional: GET /v1/models; absent without it
 models = [                             # up to 1000; listed per caller after model permissions
-  { id = "claude-sonnet-4-6", display_name = "Claude Sonnet 4.6", description = "Everyday coding" },
-  { id = "claude-haiku-4-5" },         # display_name and description optional
+  { id = "claude-sonnet-5-5", display_name = "Claude Sonnet 5.5", description = "Everyday coding" },
+  { id = "claude-haiku-5-5" },         # display_name and description optional
 ]
 ```
 
@@ -422,24 +420,15 @@ unknown_cost_behavior = "reject"
 
 ## Open design decisions
 
+Settled decisions live in the sections above; this table holds only what is still open.
+
 | Topic | Current preference / unresolved point |
 |---|---|
-| HTTP framework | Simplest correct Hyper implementation; Axum if routing grows |
-| Workspace layout | Four crates above; split further only as responsibilities stabilize |
-| Token format | Decided: compact JWT with `alg` pinned to `EdDSA` for Wye's own tokens, and pinned per issuer for identity providers ([policy.md](policy.md#gateway-credentials)); Macaroons/Biscuit only if delegation is needed |
-| Token issuance | Implemented: `wye token issue` offline; external issuers producing the same format work too; the server holds verification keys only |
 | `include_usage` injection | Per-route; default undecided until client compatibility is tested |
-| Caller-credential passthrough | Explicit, loopback only; no gateway auth or cost ceiling in that mode ([policy.md](policy.md#caller-credential-passthrough)) |
 | Pricing | Planned format: a versioned per-model table in `wye.toml`, integer money internally ([policy.md](policy.md#pricing-metadata)) |
 | Configuration reload | Startup snapshot first; hot reload only on demand and without disrupting streams |
-| `/v1/models` | Implemented: the `[discovery]` catalog, filtered per caller by model permissions; absent without it |
-| Cross-provider translation | Out of scope: each agent's native API goes to its own provider |
-| Provider-hosted tools/MCP | Passed through like any other field; Wye neither runs nor rewrites them, and a per-use charge (web search) makes the cost `partial` |
-| Per-node adaptive concurrency | Violates strict statelessness; research only |
-| Dynamic provider health routing | Excluded unless expressed as static policy; per-request failover to the next candidate is the stateless substitute |
 | SigV4 for AWS providers | Sign per request with an unsigned payload hash if Bedrock and Claude Platform on AWS accept it (to verify); otherwise support only their API keys |
 | Vertex access tokens | Token exchange inside Wye (service-account key, RS256 JWT, one call per hour, in-memory cache) or an external refresher writing a token file; undecided |
 | Failover body hold | Default bound for `failover_max_body_bytes`; agent contexts reach several MB, so the bound trades failover coverage against memory |
 | Edge support | WASM adapter after native correctness |
-| Maximum stream/request lifetime | Configurable timeouts plus shutdown semantics |
 | License / package name | After package, domain, and trademark checks |
