@@ -68,6 +68,7 @@ wye/
 │   │   ├── main.rs              command-line entry
 │   │   ├── startup.rs           secrets and files the config references
 │   │   ├── server.rs            listener, connections, two-phase shutdown
+│   │   ├── server/write_timeout.rs  closes connections whose writes stall
 │   │   ├── gateway.rs           routing, admission, gateway errors
 │   │   ├── auth.rs              credential checks, cached per connection
 │   │   ├── permissions.rs       model permissions and token ceilings on the request body
@@ -182,7 +183,7 @@ For Anthropic Messages streams (`gateway-core/src/usage.rs`): at most one partia
 
 **Errors.** Before downstream headers are sent, local failures produce a gateway error in the client-facing API's error shape (Anthropic error JSON on `/v1/messages`). Upstream error bodies pass through unmodified. After headers are sent, an upstream failure terminates the stream; it cannot become a new JSON error response.
 
-**Timeouts and shutdown.** Use three timeouts: a short connect timeout; a response-header timeout of several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure); and a streaming-inactivity timeout longer than the provider's `ping` interval. No total request timeout: it would kill valid generations. Shutdown has a drain phase (readiness fails, requests still served) and a grace phase that cancels whatever remains ([operations.md](operations.md#health-and-shutdown)).
+**Timeouts and shutdown.** Use three timeouts: a short connect timeout; a response-header timeout of several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure); and a streaming-inactivity timeout longer than the provider's `ping` interval. A fourth bounds the client side: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs. No total request timeout: it would kill valid generations. Shutdown has a drain phase (readiness fails, requests still served) and a grace phase that cancels whatever remains ([operations.md](operations.md#health-and-shutdown)).
 
 ## Retries and fallback
 
@@ -303,6 +304,7 @@ max_held_request_bytes = 67108864       # read for model permissions, all reques
 max_concurrent_requests = 10000        # beyond: 529 overloaded_error
 drain_delay_secs = 0                   # /readyz fails, still serving
 shutdown_grace_secs = 30               # then remaining requests are cancelled
+client_write_timeout_secs = 60         # a client accepting no response bytes this long is disconnected
 
 [upstream]
 base_url = "https://api.anthropic.com" # http only for loopback hosts

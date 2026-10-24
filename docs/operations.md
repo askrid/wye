@@ -247,7 +247,7 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 | Bad config or missing secret | Fail startup with an actionable diagnostic, without exposing secrets |
 | Invalid or expired credential | Reject locally |
 | No eligible route | Explicit compatibility or policy error |
-| Slow downstream | Bounded flow control: about 2.2 MB of heap per stalled stream (1 MiB upstream window), at most `max_concurrent_requests` of them; streams sharing its upstream connection are unaffected |
+| Slow downstream | Bounded flow control: about 2.2 MB of heap per stalled stream (1 MiB upstream window), at most `max_concurrent_requests` of them; streams sharing its upstream connection are unaffected; a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled |
 | Upstream failure before downstream output | Gateway error; later, bounded fallback where [safe](architecture.md#retries-and-fallback) |
 | Partial stream failure | Terminate the stream; never silently replay output. A successful event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error; mid-event failures still drop the stream, since appending would corrupt the event |
 | Client disconnect | Cancel upstream where possible, free resources, record uncertain cost |
