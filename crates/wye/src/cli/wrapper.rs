@@ -87,7 +87,7 @@ pub fn claude(args: &[&str]) -> Result<i32, String> {
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(crate::probe(&health))
+        .block_on(super::probe(&health))
         .map_err(|e| format!("gateway not reachable ({e}); start it with `wye serve`"))?;
     let program = std::env::var_os("WYE_CLAUDE_BIN").unwrap_or_else(|| "claude".into());
     let mut command = launch.command(program);

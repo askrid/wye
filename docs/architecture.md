@@ -65,7 +65,7 @@ wye/
 │   │   ├── json.rs              byte-level JSON lexing shared by the scanners
 │   │   └── usage.rs             SSE usage and tool-call scanner
 │   ├── wye/src/                 the binary
-│   │   ├── main.rs, token.rs    CLI, `wye token`
+│   │   ├── main.rs              command-line entry
 │   │   ├── startup.rs           secrets and files the config references
 │   │   ├── server.rs            listener, connections, two-phase shutdown
 │   │   ├── gateway.rs           routing, admission, gateway errors
@@ -78,9 +78,7 @@ wye/
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
-│   │   ├── explain.rs, policy_test.rs  `wye explain`, `wye policy-test`
-│   │   ├── report.rs            `wye report`
-│   │   ├── wrapper.rs, probe.rs `wye claude`, `wye probe`
+│   │   ├── cli/                 explain, policy-test, report, claude, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA, mock upstream, test signing keys and IdP tokens
