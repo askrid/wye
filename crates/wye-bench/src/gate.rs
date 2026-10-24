@@ -56,6 +56,8 @@ const GATES: &[(&str, f64, f64)] = &[
         0.10,
         2048.0,
     ),
+    // A client that stops reading: bounded by the upstream stream window.
+    ("alloc_tls_stalled_live_bytes_per_stream", 0.05, 65_536.0),
     // Uploads vary about 5% with how the body arrives in chunks.
     ("alloc_upload_per_request", 0.15, 2.0),
     ("alloc_upload_bytes_per_request", 0.15, 0.0),

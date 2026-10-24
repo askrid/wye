@@ -24,6 +24,7 @@
     "alloc_sse_per_stream": 23.11,
     "alloc_tls_idle_after_upload_live_bytes_per_stream": 48278.52,
     "alloc_tls_idle_live_bytes_per_stream": 23377.1,
+    "alloc_tls_stalled_live_bytes_per_stream": 2184620.5,
     "alloc_unary_bytes_per_request": 21569.73,
     "alloc_unary_per_request": 20.61,
     "alloc_upload_bytes_per_request": 433835.13,

@@ -31,6 +31,8 @@ const IDLE_STREAMS: usize = 1_000;
 /// Idle streams whose request carried an agent-sized context.
 const IDLE_AFTER_UPLOAD_STREAMS: usize = 200;
 const IDLE_UPLOAD_BYTES: usize = 512 * 1024;
+/// Clients that stop reading mid-stream, on the TLS path.
+const STALLED_STREAMS: usize = 32;
 
 #[derive(Clone, Copy)]
 struct Counters {
@@ -102,6 +104,20 @@ async fn idle_live_bytes(t: &Target, count: usize, body: Option<Bytes>) -> f64 {
     let live_open = counters(t).await.live_bytes;
     drop(held);
     // Let the gateway release the closed streams before the next measurement.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    (live_open - live_before) / count as f64
+}
+
+/// Live heap per stream while `count` clients have stopped reading a stream
+/// the upstream sends as fast as flow control allows.
+async fn stalled_live_bytes(t: &Target, count: usize) -> f64 {
+    let live_before = counters(t).await.live_bytes;
+    let held = scenarios::stalled_streams(t, count).await;
+    assert_eq!(held.len(), count, "stalled streams failed to open");
+    // Let every stalled stream fill its buffers and flow-control windows.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let live_open = counters(t).await.live_bytes;
+    drop(held);
     tokio::time::sleep(Duration::from_millis(300)).await;
     (live_open - live_before) / count as f64
 }
@@ -225,6 +241,10 @@ pub async fn measure(
             Some(upload_body(IDLE_UPLOAD_BYTES)),
         )
         .await,
+    );
+    put(
+        "alloc_tls_stalled_live_bytes_per_stream",
+        stalled_live_bytes(t, STALLED_STREAMS).await,
     );
     drop(tls);
 

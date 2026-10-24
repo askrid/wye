@@ -65,6 +65,7 @@ Heap allocations (`alloc_`, plain path; spread under 1%, uploads ~5%):
 | Live heap per idle stream | 49 KB plain, 23 KB TLS |
 | Live heap per idle stream after a 512 KB request | 77 KB plain, 48 KB TLS (150 KB before the 32 KiB buffer cap) |
 | Per 1 MiB upload | 44 allocations, 0.43 MB (1.27 MB before the cap) |
+| Live heap per stalled stream, TLS | 2.2 MB with a 1 MiB upstream window: about twice the window, independent of streams per connection |
 
 Variants (plain path):
 
