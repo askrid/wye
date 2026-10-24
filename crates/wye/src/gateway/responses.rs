@@ -98,3 +98,26 @@ pub(super) fn error(status: StatusCode, kind: &'static str, message: &str) -> Re
     );
     res
 }
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::BodyExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn error_bodies_are_valid_json_whatever_the_message() {
+        let res = error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "a \"quoted\" \\ word",
+        );
+        let Either::Left(body) = res.into_body() else {
+            panic!("a gateway error has a full body");
+        };
+        let bytes = body.collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["error"]["message"], "a \"quoted\" \\ word");
+        assert_eq!(json["error"]["type"], "invalid_request_error");
+    }
+}
