@@ -164,8 +164,8 @@ fn key(jwk: &Jwk, algorithm: Algorithm) -> Result<VerifyKey, &'static str> {
     };
     match algorithm {
         Algorithm::Rs256 => {
-            let n = strip_leading_zeros(member(&jwk.n, "missing n")?);
-            let e = strip_leading_zeros(member(&jwk.e, "missing e")?);
+            let n = strip_leading_zeros(&member(&jwk.n, "missing n")?);
+            let e = strip_leading_zeros(&member(&jwk.e, "missing e")?);
             if !RSA_MODULUS_BYTES.contains(&n.len()) {
                 return Err("RSA modulus must be 2048 to 8192 bits");
             }
@@ -201,7 +201,7 @@ fn key(jwk: &Jwk, algorithm: Algorithm) -> Result<VerifyKey, &'static str> {
 }
 
 /// ring reads `n` and `e` as minimal big-endian integers.
-fn strip_leading_zeros(bytes: Vec<u8>) -> Box<[u8]> {
+fn strip_leading_zeros(bytes: &[u8]) -> Box<[u8]> {
     let start = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len());
     bytes.get(start..).unwrap_or_default().into()
 }
