@@ -1,4 +1,4 @@
-//! The gateway under test (Wye, KrakenD, or LiteLLM), as a child process.
+//! The gateway under test (Wye, KrakenD, LiteLLM, or Bifrost), as a child process.
 
 use std::{collections::HashSet, path::Path, process::Stdio, time::Duration};
 
@@ -7,8 +7,9 @@ use tokio::process::Child;
 use crate::{
     client::Target,
     gateway_config::{
-        BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BenchCredentials, LITELLM_API_PREFIX,
-        LITELLM_MASTER_KEY, WyeOptions, krakend_config, litellm_config, wye_config,
+        BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BIFROST_API_PREFIX, BIFROST_USER_AGENT,
+        BenchCredentials, LITELLM_API_PREFIX, LITELLM_MASTER_KEY, WyeOptions, bifrost_config,
+        krakend_config, litellm_config, wye_config,
     },
 };
 
@@ -27,6 +28,7 @@ pub enum Gateway<'a> {
     WyeModels(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
+    Bifrost(&'a str),
 }
 
 impl Gateway<'_> {
@@ -39,6 +41,7 @@ impl Gateway<'_> {
             Self::WyeModels(_) => "wye-models",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
+            Self::Bifrost(_) => "bifrost",
         }
     }
 
@@ -52,6 +55,7 @@ impl Gateway<'_> {
             Self::WyeModels(_) => "models_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
+            Self::Bifrost(_) => "bifrost_",
         }
     }
 
@@ -128,12 +132,14 @@ impl GatewayProcess {
             | Gateway::WyeOtlp(program) => {
                 let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
-                // The mock's requests name model "bench": allowed by both lists.
-                let credentials = authenticated
-                    .then(|| BenchCredentials::generate(models.then_some(&["bench"][..])));
+                // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
+                // only for a provider-qualified model): allowed by both lists.
+                let credentials = authenticated.then(|| {
+                    BenchCredentials::generate(models.then_some(&["anthropic/bench"][..]))
+                });
                 let options = WyeOptions {
                     auth_public_key: credentials.as_ref().map(|c| c.public_key.as_str()),
-                    auth_models: models.then_some(r#"["bench*", "claude-*"]"#),
+                    auth_models: models.then_some(r#"["anthropic/bench*", "claude-*"]"#),
                     cache_diagnostics: matches!(gateway, Gateway::WyeDiag(_)),
                     // The mock answers the export POSTs like any request.
                     otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_))
@@ -211,6 +217,41 @@ impl GatewayProcess {
                     vec![("authorization", format!("Bearer {LITELLM_MASTER_KEY}"))],
                 ),
             },
+            Gateway::Bifrost(program) => {
+                // Bifrost reads `config.json` from its app directory.
+                let app_dir = dir.join(format!("bench-{name}-bifrost"));
+                std::fs::create_dir_all(&app_dir).unwrap();
+                std::fs::write(
+                    app_dir.join("config.json"),
+                    bifrost_config(upstream_base_url, ca_pem),
+                )
+                .unwrap();
+                Launch {
+                    program: program.into(),
+                    args: vec![
+                        "-app-dir".into(),
+                        app_dir.display().to_string(),
+                        "-host".into(),
+                        "127.0.0.1".into(),
+                        "-port".into(),
+                        port.to_string(),
+                        "-log-level".into(),
+                        "error".into(),
+                    ],
+                    env: Vec::new(),
+                    health: "/health",
+                    target: Target::gateway(
+                        addr,
+                        BIFROST_API_PREFIX,
+                        vec![("user-agent", BIFROST_USER_AGENT.into())],
+                    )
+                    // Bifrost forwards only allowlisted headers, plus any sent
+                    // as `x-bf-eh-<name>` (as `<name>`); its Anthropic route drops
+                    // those when the request carries `anthropic-version`, which
+                    // Bifrost adds upstream itself.
+                    .with_control_prefix("x-bf-eh-"),
+                }
+            }
         };
 
         // `WYE_BENCH_GATEWAY_LOG=1` keeps each gateway's output next to its config.

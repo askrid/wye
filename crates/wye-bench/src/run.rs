@@ -42,6 +42,13 @@ pub async fn run(
 ) {
     let mut gateways = vec![Gateway::Wye(wye)];
     gateways.extend_from_slice(others);
+    // Competitors may parse events and drop what is not Anthropic-shaped, so
+    // comparisons stream complete Anthropic frames, through every gateway
+    // alike. Gate runs keep the minimal events their baseline was recorded with.
+    let anthropic_frames = !others.is_empty();
+    if anthropic_frames {
+        crate::mock::use_anthropic_frames();
+    }
     let dir = Path::new(out)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -152,6 +159,7 @@ pub async fn run(
         "repeat": repeat,
         "paths": {"": "plain HTTP/1.1 upstream", "tls_": "TLS + HTTP/2 upstream"},
         "scenarios": measure::scenario_report(),
+        "stream_frames": if anthropic_frames { "anthropic" } else { "minimal" },
         "metrics": median(&runs),
     });
     std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
@@ -207,6 +215,7 @@ fn loser_label(name: &str) -> &'static str {
     match name {
         "krakend" => "KRAKEND",
         "litellm" => "LITELLM",
+        "bifrost" => "BIFROST",
         _ => "OTHER",
     }
 }

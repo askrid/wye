@@ -128,7 +128,7 @@ async fn agent_uploads(t: &Target) {
 
 fn upload_body(bytes: usize) -> Bytes {
     mock::padded_json(
-        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
         r#""}]}"#,
         bytes,
     )

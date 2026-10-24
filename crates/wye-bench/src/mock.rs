@@ -5,12 +5,19 @@
 //!   `x-bench-interval-us`. Each event carries the send time (`"t"`, ns since
 //!   process start), so the client can measure per-event delay.
 //! - `x-bench-report-drop`: report when the stream is dropped (cancel scenario).
+//!
+//! With [`use_anthropic_frames`], streams are valid Anthropic Messages streams
+//! (`message_start` first, deltas as `text_delta`, `message_stop` last), for
+//! gateways that parse events and drop what is not Anthropic-shaped.
 
 use std::{
     convert::Infallible,
     net::SocketAddr,
     pin::Pin,
-    sync::{Mutex, OnceLock},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -23,6 +30,20 @@ use tokio::{sync::mpsc, time::Sleep};
 use wye_testkit::TestCa;
 
 static EPOCH: OnceLock<Instant> = OnceLock::new();
+
+/// Set once before any stream starts; see [`use_anthropic_frames`].
+static ANTHROPIC_FRAMES: AtomicBool = AtomicBool::new(false);
+
+/// Frames every SSE stream as a complete Anthropic Messages stream.
+pub fn use_anthropic_frames() {
+    ANTHROPIC_FRAMES.store(true, Ordering::Relaxed);
+}
+
+const STREAM_START: &[u8] = b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_bench\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"bench\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n\
+event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+const STREAM_END: &[u8] = b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n\
+event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
+event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
 /// Receives drop times of streams that asked for it; installed by the cancel scenario.
 static BODY_DROPPED: Mutex<Option<mpsc::UnboundedSender<u64>>> = Mutex::new(None);
@@ -69,6 +90,7 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
         interval: Duration::from_micros(header_u64(&headers, "x-bench-interval-us").unwrap_or(0)),
         sleep: None,
         report_drop: headers.contains_key("x-bench-report-drop"),
+        started: false,
     }));
     res.headers_mut()
         .insert("content-type", "text/event-stream".parse().unwrap());
@@ -81,6 +103,9 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
 /// the last one marked with `cache_control`. Exercises the cache diagnostics
 /// scanner on realistic structure, where one long string would be its best case.
 pub fn agent_json(size: usize) -> Bytes {
+    // Claude Code streams; but upload scenarios get a unary reply, which a
+    // gateway that parses requests would reject for `"stream":true`.
+    let stream = !ANTHROPIC_FRAMES.load(Ordering::Relaxed);
     const CODE: &str = "fn main() {\n    let path = \"src/main.rs\";\n    println!(\"{}\\n\", path);\n    if args.len() > 1 { return Err(\"usage: wye <cmd>\".into()); }\n}\n";
     let code = serde_json::to_string(&CODE.repeat(12)).unwrap();
     let words =
@@ -93,7 +118,7 @@ pub fn agent_json(size: usize) -> Bytes {
         })
         .collect();
     let mut body = format!(
-        r#"{{"model":"bench","max_tokens":32000,"stream":true,"system":[{{"type":"text","text":{words}}},{{"type":"text","text":{words},"cache_control":{{"type":"ephemeral"}}}}],"tools":[{}],"messages":["#,
+        r#"{{"model":"anthropic/bench","max_tokens":32000,"stream":{stream},"system":[{{"type":"text","text":{words}}},{{"type":"text","text":{words},"cache_control":{{"type":"ephemeral"}}}}],"tools":[{}],"messages":["#,
         tools.join(",")
     );
     let mut turn = 0;
@@ -133,6 +158,7 @@ struct SseBody {
     interval: Duration,
     sleep: Option<Pin<Box<Sleep>>>,
     report_drop: bool,
+    started: bool,
 }
 
 impl Body for SseBody {
@@ -155,13 +181,27 @@ impl Body for SseBody {
         if !self.interval.is_zero() && self.remaining > 0 {
             self.sleep = Some(Box::pin(tokio::time::sleep(self.interval)));
         }
-        let mut event = format!(
-            "event: content_block_delta\ndata: {{\"t\":{},\"p\":\"",
-            now_nanos()
-        )
-        .into_bytes();
-        event.extend_from_slice(&self.payload);
-        event.extend_from_slice(b"\"}\n\n");
+        let frames = ANTHROPIC_FRAMES.load(Ordering::Relaxed);
+        let mut event = Vec::with_capacity(self.payload.len() + 512);
+        if frames && !std::mem::replace(&mut self.started, true) {
+            event.extend_from_slice(STREAM_START);
+        }
+        let sent = now_nanos();
+        if frames {
+            // A valid `text_delta`; the send time rides in an extra field.
+            event.extend_from_slice(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"");
+            event.extend_from_slice(&self.payload);
+            event.extend_from_slice(format!("\"}},\"t\":{sent}}}\n\n").as_bytes());
+        } else {
+            event.extend_from_slice(
+                format!("event: content_block_delta\ndata: {{\"t\":{sent},\"p\":\"").as_bytes(),
+            );
+            event.extend_from_slice(&self.payload);
+            event.extend_from_slice(b"\"}\n\n");
+        }
+        if frames && self.remaining == 0 {
+            event.extend_from_slice(STREAM_END);
+        }
         Poll::Ready(Some(Ok(Frame::data(Bytes::from(event)))))
     }
 }
