@@ -123,7 +123,9 @@ pub(crate) struct Scope {
 /// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
 ///
 /// Scenario order matters for memory metrics: idle streams are measured before
-/// the upload and paced scenarios, whose allocations would otherwise distort them.
+/// the throughput, upload, and paced scenarios, whose freed buffers the idle
+/// streams would otherwise reuse (hiding their memory) or not, depending on
+/// buffer sizes elsewhere.
 pub(crate) async fn measure(
     direct: &Direct,
     process: &GatewayProcess,
@@ -197,6 +199,14 @@ pub(crate) async fn measure(
         }
         return;
     }
+    if scope.streams_sse {
+        phase(
+            format!("{prefix}idle+cancel"),
+            measure_idle_and_cancel(process, prefix, metrics),
+        )
+        .await;
+    }
+
     let cpu_before = process.cpu_secs();
     let (mb_s, mb) = phase(format!("{prefix}throughput"), throughput(process.target())).await;
     let cpu_after = process.cpu_secs();
@@ -208,14 +218,6 @@ pub(crate) async fn measure(
         "throughput_cpu_ms_per_mb",
         (cpu_after - cpu_before) * 1_000.0 / mb,
     );
-
-    if scope.streams_sse {
-        phase(
-            format!("{prefix}idle+cancel"),
-            measure_idle_and_cancel(process, prefix, metrics),
-        )
-        .await;
-    }
 
     measure_uploads(direct, process, prefix, metrics).await;
 
