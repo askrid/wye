@@ -24,7 +24,7 @@ use std::{fmt::Write as _, path::Path};
 use gateway_core::{config::Config, credential::Identity, policy::ModelPattern};
 use serde::Deserialize;
 
-use crate::explain::{Credential, explain};
+use super::explain::{Credential, explain};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -1,5 +1,3 @@
-mod token;
-
 #[cfg(feature = "alloc-stats")]
 #[global_allocator]
 static ALLOCATOR: wye::alloc_stats::Counting = wye::alloc_stats::Counting;
@@ -38,8 +36,8 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
         ["serve", "--config", path] => serve(load(path)?, config_dir(path)),
-        ["token", "keygen", "--out", path] => token::keygen(Path::new(path)),
-        ["token", "issue", flags @ ..] => token::issue(flags),
+        ["token", "keygen", "--out", path] => wye::cli::token::keygen(Path::new(path)),
+        ["token", "issue", flags @ ..] => wye::cli::token::issue(flags),
         ["claude", rest @ ..] => {
             let code = wye::claude(rest)?;
             std::process::exit(code);

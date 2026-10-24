@@ -224,10 +224,20 @@ fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Option<PolicyRef
     None
 }
 
-/// Built-in web PKI roots plus the configured extra roots.
-pub(crate) fn tls_config(
+/// An HTTP/1.1 client connector for `http` and `https` URLs, trusting
+/// `extra_roots` besides the built-in roots: the OTLP exporter and `wye probe`.
+pub(crate) fn https_connector(
     extra_roots: &[CertificateDer<'static>],
-) -> Result<ClientConfig, StartupError> {
+) -> Result<HttpsConnector<HttpConnector>, StartupError> {
+    Ok(HttpsConnectorBuilder::new()
+        .with_tls_config(tls_config(extra_roots)?)
+        .https_or_http()
+        .enable_http1()
+        .build())
+}
+
+/// Built-in web PKI roots plus the configured extra roots.
+fn tls_config(extra_roots: &[CertificateDer<'static>]) -> Result<ClientConfig, StartupError> {
     let mut roots = RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
