@@ -7,7 +7,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 | Milestone | State |
 |---|---|
 | M0: Claude Code stream proxy | Done and gated. Exit check partly run: one real session through subscription passthrough (2026-10-17) streamed correctly and exposed compressed responses, since fixed; the full check with an API key is open |
-| Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, KrakenD and LiteLLM comparisons |
+| Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, KrakenD, LiteLLM, and Bifrost comparisons |
 | M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5–6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Open: published binaries and images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
 | M1b: agent-aware visibility | A1–A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
 | M2: cost policy | Pricing format designed ([policy.md](policy.md#pricing-metadata)); cache-miss diagnostics done early (opt-in, sampled per session). Pricing, cost bound, provider-held budgets, `wye explain` cost output not started |
@@ -28,7 +28,7 @@ Bulk throughput is the least relevant metric for an LLM gateway; traffic is toke
 
 **Exit:** gated metrics for all three workloads, and a comparison table against at least one streaming-capable gateway.
 
-**Status: done.** Uploads, token-paced streams, and the stress scenarios (cold connections, mixed load, stalled clients) are measured and gated on the TLS + HTTP/2 path. LiteLLM is the streaming-capable comparison ([research.md](research.md#against-litellm)); the next competitors are in M5.
+**Status: done.** Uploads, token-paced streams, and the stress scenarios (cold connections, mixed load, stalled clients) are measured and gated on the TLS + HTTP/2 path. LiteLLM and Bifrost are the streaming-capable comparisons ([research.md](research.md#against-bifrost)); the next competitors are in M5.
 
 ### M0: Claude Code stream proxy (P0)
 
@@ -119,7 +119,7 @@ One Claude Code fleet served by several Claude providers and accounts, chosen pe
 
 ### M5: benchmarks and optimization
 
-- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, cold connections, mixed load, stalled clients, capacity per core, KrakenD and LiteLLM. M5 adds a floor baseline (nginx or Envoy as a plain streaming proxy), Envoy AI Gateway, Bifrost, Helicone's gateway, and Portkey ([research.md](research.md#benchmark-suite-kept-cut-missing)); 10k streams; Linux and a separate load machine; and replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)).
+- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, cold connections, mixed load, stalled clients, capacity per core, KrakenD, LiteLLM, and Bifrost. M5 adds a floor baseline (nginx or Envoy as a plain streaming proxy), Envoy AI Gateway, Helicone's gateway, and Portkey ([research.md](research.md#benchmark-suite-kept-cut-missing)); 10k streams; Linux and a separate load machine; and replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)).
 - Equivalent baseline configurations and published methodology ([research.md](research.md#benchmarks)).
 - Profiling and targeted optimization of memory, TTFT, backpressure, and CPU.
 

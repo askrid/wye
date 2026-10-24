@@ -7,7 +7,8 @@
 //! token-paced and stress scenarios (cold connections, mixed load, stalled
 //! clients). With `--krakend`, the
 //! same scenarios also run through KrakenD (`krakend_` prefix); with `--litellm`,
-//! through LiteLLM's pass-through endpoint (`litellm_` prefix).
+//! through LiteLLM's pass-through endpoint (`litellm_` prefix); with `--bifrost`,
+//! through Bifrost's Anthropic route as Claude Code (`bifrost_` prefix).
 //! Wye also runs on the plain path with `[auth]` (`auth_`), model permissions
 //! (`models_`), cache diagnostics (`diag_`), and OTLP export (`otlp_`).
 //! With `--wye-alloc`, a `--features alloc-stats` build of Wye adds heap allocation
@@ -18,7 +19,7 @@
 //! Usage:
 //!
 //! ```text
-//! wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]
+//! wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]
 //! wye-bench compare <baseline.json> <results.json>
 //! wye-bench adopt-new <baseline.json> <results.json>
 //! wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N
@@ -64,6 +65,7 @@ fn main() -> ExitCode {
                     },
                     "--krakend" => others.push(gateway_process::Gateway::KrakenD(value)),
                     "--litellm" => others.push(gateway_process::Gateway::LiteLlm(value)),
+                    "--bifrost" => others.push(gateway_process::Gateway::Bifrost(value)),
                     "--wye-alloc" => wye_alloc = Some(*value),
                     _ => return usage(),
                 }
@@ -123,7 +125,7 @@ fn main() -> ExitCode {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>]\n  \
+        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
          wye-bench adopt-new <baseline.json> <results.json>\n  \
          wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N"

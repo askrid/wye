@@ -143,6 +143,35 @@ LiteLLM 1.105 (Python 3.14) at its leanest: byte-level pass-through (`pass_throu
 
 Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its regular API path would cost more than pass-through. The comparison found four flaws in the harness, all fixed: invalid JSON in mock payloads, error responses counted as successes (now `*_failed_requests`, gated at zero), a test CA Python 3.13 rejects, and gateway workers outliving their run.
 
+### Against Bifrost
+
+Bifrost v2.3.2 (Go, `transports/v2.3.2` built from source; its web UI left out) at its best case: the request as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing; no config or log store, request logging off, retries off, 4,000 provider workers (above the benchmark's peak), default object pools. Its upstream connection is HTTP/1.1 (fasthttp). Median of 3, 2026-10-25, zero failures on both. Streams are complete Anthropic frames for both gateways ([below](#comparison-runs)).
+
+| Metric (TLS unless noted) | Wye | Bifrost |
+|---|---|---|
+| Added unary latency p50 | 0.24 ms | 3.1 ms |
+| CPU per request | 161 µs | 1,040 µs |
+| Added time to first byte p50 | 0.22 ms | 5.1 ms |
+| Added delay per SSE event p50 / p99 | 315 / 219 µs | 293 / 1,244 µs |
+| 2,000 paced streams: event delay p50 / p99 | 2.0 / 3.5 ms | 126 ms / 2.1 s |
+| 2,000 paced streams: CPU per event | 38 µs | 142 µs |
+| Beside 200 stalled clients: event p99 | 2.8 ms | 2.2 s |
+| 1 MiB upload: CPU per MB | 2.6 ms | 46 ms |
+| Claude Code-shaped upload, plain: CPU per MB | 1.49 ms | 73 ms |
+| Bulk relay: CPU per MB | 4.3 ms | 25 ms |
+| 32 first requests on a new process: added p50 | 3.2 ms | 75 ms |
+| Process at idle; after 2,000 streams | 15 MB; 179 MB | 328 MB; 3.4 GB |
+
+Bifrost leads in one metric: per-event delay at p50, by 22 µs. Its upstream is HTTP/1.1, and the direct baseline is HTTP/2, so an HTTP/1.1 relay also skips the mock's HTTP/2 framing. Like for like, with Wye on HTTP/1.1 (`http_version = "1.1"`): 294 vs 298 µs p50, 255 vs 639 µs p99. Wye keeps HTTP/2 as the default because one connection per stream costs more under load (2,000 paced streams: event p50 3.6 ms on HTTP/1.1, 2.0 ms on HTTP/2). Its memory per paced stream reads lower (3.6 vs 9.6 KB) only against a 328 MB idle process.
+
+#### Comparison runs
+
+Competitors run with `--bifrost`, `--litellm`, or `--krakend`. Gateways that parse requests and events need what real traffic always has, so comparison runs differ from gate runs in two ways, through every gateway alike:
+- streams are complete Anthropic Messages streams (`message_start`, `text_delta` deltas carrying the send time in an extra field, `message_stop`); Bifrost drops events that are not Anthropic-shaped;
+- the Claude Code-shaped upload says `"stream":false`, since the upload scenarios get a unary reply.
+
+All runs send `"stream":true` on streaming requests and name the model `anthropic/bench`. Bifrost needs two more things: the mock's control headers go as `x-bf-eh-<name>`, the only extra headers it forwards, and requests leave `anthropic-version` to it, because its Anthropic route drops forwarded headers when the request carries one.
+
 ### Benchmark suite: kept, cut, missing
 
 The suite measures the gateway's own cost under agent-shaped load; each part earns its run time or goes. Approved 2026-10-24; the stress scenarios are built, the competitors are next (M5).
@@ -168,7 +197,7 @@ The suite measures the gateway's own cost under agent-shaped load; each part ear
 |---|---|
 | nginx or Envoy, plain streaming proxy (`proxy_buffering off`) | The floor: the cost of a proxy that does nothing |
 | Envoy AI Gateway | The infrastructure-standard data plane with LLM routing |
-| Bifrost (Go) | Markets low overhead against LiteLLM; Wye's own claim |
+| Bifrost (Go) | Done ([above](#against-bifrost)): markets low overhead against LiteLLM, Wye's own claim |
 | Helicone AI Gateway (Rust) | Same language and speed pitch |
 | Portkey gateway (Node) | Popular open-source gateway |
 | LiteLLM | Keep: the incumbent |

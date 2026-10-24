@@ -11,6 +11,13 @@ pub(crate) const LITELLM_MASTER_KEY: &str = "sk-bench-master";
 /// model mapping); its byte-level pass-through is mounted here instead.
 pub(crate) const LITELLM_API_PREFIX: &str = "/pt";
 
+/// Bifrost's Anthropic-native routes live under this prefix.
+pub(crate) const BIFROST_API_PREFIX: &str = "/anthropic";
+/// Bifrost relays Anthropic request and response bytes unchanged only for
+/// Claude Code (detected by this user agent) asking for a Claude model;
+/// other requests are normalized and re-encoded. Its best case is Claude Code.
+pub(crate) const BIFROST_USER_AGENT: &str = "claude-cli/2.1.0 (external, cli)";
+
 /// Provider key variable for the authenticated Wye variant.
 pub(crate) const BENCH_PROVIDER_KEY_ENV: &str = "WYE_BENCH_PROVIDER_KEY";
 /// Hash key variable for the cache-diagnostics Wye variant.
@@ -149,4 +156,38 @@ pub(crate) fn litellm_config(upstream_base_url: &str) -> String {
          target: \"{upstream_base_url}/v1/messages\"\n      \
          forward_headers: true\n      merge_query_params: true\n      timeout: 600\n"
     )
+}
+
+/// Bifrost with one Anthropic key and no stores (no config or log database,
+/// no request logging), retries off, and provider workers above the
+/// benchmark's peak (2,000 streams plus uploads), so neither queueing nor
+/// bookkeeping is measured; object pools stay at their default size. `ca_pem` is the
+/// upstream's CA, trusted for provider connections.
+pub(crate) fn bifrost_config(upstream_base_url: &str, ca_pem: Option<&str>) -> String {
+    let mut network = serde_json::json!({
+        "base_url": upstream_base_url,
+        "max_retries": 0,
+        "default_request_timeout_in_seconds": 600,
+        "stream_idle_timeout_in_seconds": 300,
+    });
+    if let Some(pem) = ca_pem {
+        network["ca_cert_pem"] = pem.into();
+    }
+    serde_json::json!({
+        "client": {
+            "enable_logging": false,
+            "disable_content_logging": true,
+            "drop_excess_requests": false,
+        },
+        "config_store": {"enabled": false},
+        "logs_store": {"enabled": false},
+        "providers": {
+            "anthropic": {
+                "keys": [{"name": "bench", "value": "sk-bench-upstream", "models": ["bench"], "weight": 1.0}],
+                "network_config": network,
+                "concurrency_and_buffer_size": {"concurrency": 4_000, "buffer_size": 8_000},
+            }
+        }
+    })
+    .to_string()
 }
