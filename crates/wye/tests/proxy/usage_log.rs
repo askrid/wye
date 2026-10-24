@@ -39,6 +39,16 @@ async fn completed_stream_logs_usage_without_changing_bytes() {
     assert_eq!(record["cache_read_input_tokens"], 90);
     assert_eq!(record["output_tokens"], 7);
     assert!(record.get("cache_creation_input_tokens").is_none());
+
+    // A session id that is not a bounded token never reaches telemetry.
+    let res = h
+        .send(
+            Request::post("/v1/messages").header("x-claude-code-session-id", "a b\"c"),
+            "{}",
+        )
+        .await;
+    read_body(res).await;
+    assert!(h.usage_record().await.get("session_id").is_none());
 }
 
 #[tokio::test]

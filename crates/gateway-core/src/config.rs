@@ -191,11 +191,11 @@ pub struct Grant {
 
 #[derive(Debug, Clone)]
 pub struct Server {
-    /// Always a loopback address until gateway credentials are implemented.
+    /// A loopback address unless `[auth]` is set.
     pub listen: SocketAddr,
     pub max_request_body_bytes: u64,
-    /// Request bytes held across all requests while reading `model` for model
-    /// permissions; beyond it, requests are answered with an overload error.
+    /// Request bytes held across all requests while reading `model` and
+    /// `max_tokens`; beyond it, requests are answered with an overload error.
     pub max_held_request_bytes: u64,
     /// Proxied requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.

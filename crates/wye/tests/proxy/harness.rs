@@ -302,3 +302,11 @@ pub(crate) async fn read_body(res: Response<Incoming>) -> Bytes {
         .unwrap()
         .to_bytes()
 }
+
+/// Unix time in seconds, for credential claims.
+pub(crate) fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}

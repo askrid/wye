@@ -227,8 +227,10 @@ async fn write_records<W>(
                 }
             }
         }
+        // A closed log ends the writer, through the shutdown below, so the
+        // exporter task still finishes its queue and is awaited.
         if out.write_all(&buf).await.is_err() || out.flush().await.is_err() {
-            return;
+            break;
         }
         buf.clear();
     }

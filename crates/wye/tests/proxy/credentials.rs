@@ -5,13 +5,6 @@ use ring::signature::{Ed25519KeyPair, KeyPair};
 
 use super::harness::*;
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
 use wye_testkit::ed25519_keypair as keypair;
 
 fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {

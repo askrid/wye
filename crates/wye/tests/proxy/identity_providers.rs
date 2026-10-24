@@ -7,13 +7,6 @@ use super::harness::*;
 
 const ISS: &str = "https://token.actions.githubusercontent.com";
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
 /// Gateway trusting `key` (kid `gh-1`) as a GitHub Actions-style issuer,
 /// with subject `repository` and one grant for the `acme` owner.
 async fn harness(key: &IdpKey) -> (Harness, mpsc::Receiver<HeaderMap>) {

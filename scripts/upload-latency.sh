@@ -10,7 +10,7 @@
 # request through a running Wye (with upstream.http_version auto or "1.1").
 set -euo pipefail
 rounds=${1:-5}
-model=${MODEL:-claude-haiku-4-5}
+model=${MODEL:-claude-haiku-5-5}
 : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}"
 body=$(mktemp)
 trap 'command rm -f "$body"' EXIT
