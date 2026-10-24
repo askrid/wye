@@ -109,6 +109,16 @@ pub(crate) enum PolicyRefusal {
     OverTokenLimit(String),
 }
 
+/// HTTP/2 receive window per upstream stream: what one response may buffer
+/// in Wye while its client is not reading. 1 MiB sustains about 20 MB/s per
+/// response at 50 ms round trip; 256 KiB cost 6% more CPU per MB relayed.
+const STREAM_WINDOW: u32 = 1024 * 1024;
+/// The largest HTTP/2 window, so the connection never limits: streams share
+/// an upstream connection, and with a finite window a few clients that stop
+/// reading fill it and stall every other stream on it. Buffering stays bounded
+/// by `STREAM_WINDOW` per stream.
+const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
+
 pub(crate) struct Upstream {
     clients: ClientPool,
     scheme: Scheme,
@@ -139,7 +149,12 @@ impl Upstream {
             config::UpstreamHttpVersion::Http1 => protocols.wrap_connector(http),
         };
         Ok(Self {
-            clients: ClientPool::new(|| Client::builder(TokioExecutor::new()).build(https.clone())),
+            clients: ClientPool::new(|| {
+                Client::builder(TokioExecutor::new())
+                    .http2_initial_stream_window_size(STREAM_WINDOW)
+                    .http2_initial_connection_window_size(CONNECTION_WINDOW)
+                    .build(https.clone())
+            }),
             scheme: config.scheme.clone(),
             authority: config.authority.clone(),
             path_prefix: config.path_prefix.as_str().into(),

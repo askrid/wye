@@ -107,3 +107,32 @@ async fn http_version_pins_the_upstream_protocol() {
         assert_eq!(rx.recv().await.unwrap(), expected, "{extra:?}");
     }
 }
+
+#[tokio::test]
+async fn clients_that_stop_reading_do_not_stall_other_streams() {
+    // Four per upstream lane: enough to fill a lane's connection window if
+    // that, not each stream's own window, bounded what stalled streams buffer.
+    const STALLED: usize = 256;
+    let ca = TestCa::generate();
+    let large = Bytes::from(vec![b'x'; 16 << 20]);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let body = if seen.body.is_empty() {
+            Bytes::from_static(b"{}")
+        } else {
+            large.clone()
+        };
+        Box::pin(async move { Response::new(Either::Left(Full::new(body))) })
+    });
+    let h = Harness::start_tls(handler, &ca, true).await;
+    let mut stalled = Vec::new();
+    for _ in 0..STALLED {
+        stalled.push(h.send(messages(), "stall").await);
+    }
+    // Let the stalled responses fill every buffer on the way.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let res = h.send(messages(), "").await;
+    let body = tokio::time::timeout(WAIT, read_body(res)).await;
+    assert_eq!(body.expect("stalled by other clients"), "{}");
+    drop(stalled);
+}
