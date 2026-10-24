@@ -119,7 +119,7 @@ One Claude Code fleet served by several Claude providers and accounts, chosen pe
 
 ### M5: benchmarks and optimization
 
-- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, slow-reader backpressure (integration test), KrakenD and LiteLLM. M5 adds 10k streams, Linux and multi-machine runs, Envoy AI Gateway, and replay of the public TraceLab coding-agent trace (real context sizes, output lengths, and turn gaps) as a workload ([research.md](research.md#related-work)).
+- Reproducible SSE upstream emulator and load generator. **Started early:** `wye-bench` and the commit gate exist since M0, because speed is a release criterion for every milestone, not only M5 ([research.md](research.md#current-harness-and-baseline)). Already covered: TLS + HTTP/2 upstream, uploads, 2,000 token-paced streams, cold connections, mixed load, stalled clients, capacity per core, KrakenD and LiteLLM. M5 adds a floor baseline (nginx or Envoy as a plain streaming proxy), Envoy AI Gateway, Bifrost, Helicone's gateway, and Portkey ([research.md](research.md#benchmark-suite-kept-cut-missing)); 10k streams; Linux and a separate load machine; and replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)).
 - Equivalent baseline configurations and published methodology ([research.md](research.md#benchmarks)).
 - Profiling and targeted optimization of memory, TTFT, backpressure, and CPU.
 
