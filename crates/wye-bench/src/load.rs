@@ -73,7 +73,7 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
         return;
     }
     let body = mock::padded_json(
-        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
         r#""}]}"#,
         UPLOAD_BYTES,
     );

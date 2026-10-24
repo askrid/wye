@@ -67,7 +67,7 @@ pub(super) async fn measure_uploads(
 /// Agent-sized request body: one long message string.
 pub(super) fn upload_body() -> Bytes {
     mock::padded_json(
-        r#"{"model":"bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
         r#""}]}"#,
         UPLOAD_BYTES,
     )
