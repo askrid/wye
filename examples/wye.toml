@@ -15,6 +15,9 @@ listen = "127.0.0.1:8080"
 # SIGTERM, so traffic moves away before connections are refused.
 # drain_delay_secs = 0
 # shutdown_grace_secs = 30
+# A client that accepts no response bytes this long is disconnected, which
+# cancels its upstream request and frees its buffers:
+# client_write_timeout_secs = 60
 
 [upstream]
 base_url = "https://api.anthropic.com"

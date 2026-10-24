@@ -70,6 +70,7 @@ pub struct Gateway {
     draining: AtomicBool,
     pub(crate) drain_delay: Duration,
     pub(crate) shutdown_grace: Duration,
+    pub(crate) client_write_timeout: Duration,
 }
 
 impl Gateway {
@@ -108,6 +109,7 @@ impl Gateway {
             draining: AtomicBool::new(false),
             drain_delay: config.server.drain_delay,
             shutdown_grace: config.server.shutdown_grace,
+            client_write_timeout: config.server.client_write_timeout,
         })
     }
 

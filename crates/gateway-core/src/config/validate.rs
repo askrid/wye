@@ -63,6 +63,7 @@ pub(super) struct RawServer {
     pub(super) max_concurrent_requests: Option<usize>,
     pub(super) drain_delay_secs: Option<u64>,
     pub(super) shutdown_grace_secs: Option<u64>,
+    pub(super) client_write_timeout_secs: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +111,11 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             raw.shutdown_grace_secs
                 .unwrap_or(DEFAULT_SHUTDOWN_GRACE_SECS),
         ),
+        client_write_timeout: secs(
+            raw.client_write_timeout_secs
+                .unwrap_or(DEFAULT_CLIENT_WRITE_TIMEOUT_SECS),
+            "server.client_write_timeout_secs",
+        )?,
     })
 }
 

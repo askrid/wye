@@ -236,3 +236,31 @@ async fn slow_reader_backpressures_the_upstream() {
         .to_bytes();
     assert_eq!(body.len(), CHUNK * CHUNKS);
 }
+
+#[tokio::test]
+async fn client_that_stops_reading_is_disconnected() {
+    let (released_tx, released) = oneshot::channel();
+    let released_tx = std::sync::Mutex::new(Some(released_tx));
+    let handler: Handler = Arc::new(move |_| {
+        let released_tx = released_tx.lock().unwrap().take().unwrap();
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move {
+                let chunk = Bytes::from(vec![b'x'; 64 * 1024]);
+                while tx.send(chunk.clone()).await.is_ok() {}
+                let _ = released_tx.send(());
+            });
+            Response::new(Either::Right(ChannelBody(rx)))
+        })
+    });
+    let h = Harness::with_server_config(handler, "client_write_timeout_secs = 1").await;
+
+    // Receive headers, then read nothing: the socket fills, writes block,
+    // and after the timeout Wye closes the connection and the upstream stream.
+    let res = h.send(messages(), "{}").await;
+    tokio::time::timeout(WAIT, released)
+        .await
+        .expect("upstream stream was not released")
+        .unwrap();
+    drop(res);
+}

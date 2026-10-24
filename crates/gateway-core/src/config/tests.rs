@@ -187,7 +187,7 @@ fn ca_file_is_kept_as_written() {
 }
 
 #[test]
-fn lifecycle_defaults_and_zero_concurrency_rejected() {
+fn lifecycle_defaults_and_zero_limits_rejected() {
     let config =
         parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
             .unwrap();
@@ -199,6 +199,13 @@ fn lifecycle_defaults_and_zero_concurrency_rejected() {
     )
     .unwrap_err();
     assert_eq!(err, ConfigError::Zero("server.max_concurrent_requests"));
+    assert_eq!(config.server.client_write_timeout, Duration::from_secs(60));
+    let err = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\nclient_write_timeout_secs = 0\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true",
+    )
+    .unwrap_err();
+    assert_eq!(err, ConfigError::Zero("server.client_write_timeout_secs"));
 }
 
 #[test]

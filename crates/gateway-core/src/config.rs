@@ -24,6 +24,7 @@ const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
+const DEFAULT_CLIENT_WRITE_TIMEOUT_SECS: u64 = 60;
 /// Generous for one process: an idle Claude Code stream costs Wye about 5-30 KB.
 const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 10_000;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -206,6 +207,10 @@ pub struct Server {
     pub drain_delay: Duration,
     /// After the drain delay, active requests get this long to finish.
     pub shutdown_grace: Duration,
+    /// A client connection whose response writes make no progress for this
+    /// long is closed, which cancels its upstream request: a client that
+    /// stops reading would otherwise hold its stream and buffers indefinitely.
+    pub client_write_timeout: Duration,
 }
 
 #[derive(Debug, Clone)]
