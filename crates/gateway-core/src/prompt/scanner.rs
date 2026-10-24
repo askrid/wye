@@ -2,7 +2,7 @@
 
 use xxhash_rust::xxh3::Xxh3Default;
 
-use crate::json::{StringEnd, is_space, short_string_len};
+use crate::json::{Nesting, StringEnd, is_space, short_string_len};
 
 use super::{Breakpoint, MessagePrefix, PromptHashes, Section, SectionHash};
 
@@ -10,9 +10,6 @@ use super::{Breakpoint, MessagePrefix, PromptHashes, Section, SectionHash};
 const KEY_CAP: usize = 16;
 const CACHE_CONTROL: &[u8] = b"cache_control";
 const QUOTED_CACHE_CONTROL: &[u8] = b"\"cache_control\"";
-/// Nesting depths whose container kind is tracked; deeper JSON is followed
-/// without the bracket-kind check.
-const TRACKED_DEPTH: u32 = 64;
 
 /// How the key string being read is used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,9 +35,7 @@ pub struct PromptScanner {
     ended: bool,
 
     // Lexical state.
-    depth: u32,
-    /// Bit `d` is set when the container at depth `d` is an array.
-    arrays: u64,
+    nest: Nesting,
     in_string: bool,
     string_is_key: bool,
     string: StringEnd,
@@ -96,8 +91,7 @@ impl PromptScanner {
             failed: false,
             started: false,
             ended: false,
-            depth: 0,
-            arrays: 0,
+            nest: Nesting::default(),
             in_string: false,
             string_is_key: false,
             string: StringEnd::default(),
@@ -186,7 +180,7 @@ impl PromptScanner {
                     if !self.pop(byte == b']') {
                         return i + 1;
                     }
-                    if self.depth == self.raw_floor {
+                    if self.nest.depth() == self.raw_floor {
                         self.raw_floor = 0;
                         self.expect_key = false;
                         return i + 1;
@@ -205,35 +199,16 @@ impl PromptScanner {
 
     #[inline(always)]
     fn push(&mut self, is_array: bool) {
-        self.depth = self.depth.saturating_add(1);
-        if self.depth < TRACKED_DEPTH {
-            if is_array {
-                self.arrays |= 1 << self.depth;
-            } else {
-                self.arrays &= !(1 << self.depth);
-            }
-        }
+        self.nest.open(is_array);
     }
 
     /// Leaves the open container; `false` (and the scan fails) if `is_array`
     /// does not match it.
     #[inline(always)]
     fn pop(&mut self, is_array: bool) -> bool {
-        if !self.closes_open(is_array) {
-            return false;
-        }
-        self.depth -= 1;
-        true
-    }
-
-    /// Whether a closing bracket of kind `is_array` matches the open
-    /// container; fails the scan if not.
-    #[inline(always)]
-    fn closes_open(&mut self, is_array: bool) -> bool {
-        let matches = self.depth > 0
-            && (self.depth >= TRACKED_DEPTH || self.is_array(self.depth) == is_array);
-        self.failed |= !matches;
-        matches
+        let closed = self.nest.close(is_array);
+        self.failed |= !closed;
+        closed
     }
 
     /// Deepest level whose structure matters in the current position.
@@ -264,7 +239,7 @@ impl PromptScanner {
 
     #[inline(always)]
     fn is_array(&self, depth: u32) -> bool {
-        depth < TRACKED_DEPTH && self.arrays & (1 << depth) != 0
+        self.nest.is_array(depth)
     }
 
     /// Whether the open object is a block that may hold `cache_control`: a tool
@@ -272,7 +247,7 @@ impl PromptScanner {
     /// nest, so one set of block flags suffices.
     #[inline(always)]
     fn in_block(&self) -> bool {
-        match (self.section, self.depth) {
+        match (self.section, self.nest.depth()) {
             (Some(Section::Tools | Section::System), 3) => self.is_array(2) && !self.is_array(3),
             (Some(Section::Messages), 5) => {
                 self.in_content && self.is_array(4) && !self.is_array(5)
@@ -284,7 +259,7 @@ impl PromptScanner {
     #[inline(always)]
     fn in_content_array(&self) -> bool {
         self.section == Some(Section::Messages)
-            && self.depth == 4
+            && self.nest.depth() == 4
             && self.in_content
             && self.is_array(4)
     }
@@ -350,7 +325,7 @@ impl PromptScanner {
             b'}' | b']' => self.close(chunk, i, byte == b']', run),
             b',' => self.comma(chunk, i, run),
             b':' => {
-                if self.depth == 1 && self.member.is_some() {
+                if self.nest.depth() == 1 && self.member.is_some() {
                     self.awaiting_value = true;
                 }
             }
@@ -362,7 +337,7 @@ impl PromptScanner {
     /// Called at the first byte of every value, and at each byte of a bare scalar.
     #[inline(always)]
     fn value_start(&mut self, chunk: &[u8], i: usize, run: &mut usize) {
-        if self.awaiting_value && self.depth == 1 {
+        if self.awaiting_value && self.nest.depth() == 1 {
             self.awaiting_value = false;
             self.flush(chunk, run, i);
             self.section = self.member;
@@ -370,7 +345,7 @@ impl PromptScanner {
             self.hasher.reset();
             self.elements = 0;
             self.element_open = false;
-        } else if self.depth == 2 && self.section.is_some() {
+        } else if self.nest.depth() == 2 && self.section.is_some() {
             self.element_open = true;
         }
     }
@@ -383,8 +358,10 @@ impl PromptScanner {
         let short = short_string_len(rest);
         if self.expect_key {
             self.expect_key = false;
-            let role = if self.depth == 1
-                || (self.section == Some(Section::Messages) && self.depth == 3 && !self.is_array(3))
+            let role = if self.nest.depth() == 1
+                || (self.section == Some(Section::Messages)
+                    && self.nest.depth() == 3
+                    && !self.is_array(3))
             {
                 Capture::Plain
             } else if self.skip_depth == 0 && self.in_block() {
@@ -426,7 +403,7 @@ impl PromptScanner {
         } else {
             self.value_start(chunk, i, run);
             if let Some(len) = short
-                && !(self.depth == 1 && self.section.is_some())
+                && !(self.nest.depth() == 1 && self.section.is_some())
             {
                 return i + len + 2;
             }
@@ -447,7 +424,7 @@ impl PromptScanner {
 
     /// The open block's `cache_control` member starts: skip it.
     fn start_marker(&mut self) {
-        self.skip_depth = self.depth;
+        self.skip_depth = self.nest.depth();
         self.marked = true;
         self.comma_held = false;
         self.out.breakpoint_count = self.out.breakpoint_count.saturating_add(1);
@@ -455,7 +432,7 @@ impl PromptScanner {
 
     /// Acts on a key whose name matters; `None` for a key too long to match.
     fn classify(&mut self, key: Option<&[u8]>) {
-        if self.depth == 1 {
+        if self.nest.depth() == 1 {
             self.member = match key {
                 Some(b"tools") => Some(Section::Tools),
                 Some(b"system") => Some(Section::System),
@@ -475,7 +452,7 @@ impl PromptScanner {
 
     fn end_string(&mut self, chunk: &[u8], quote: usize, run: &mut usize) {
         if !self.string_is_key {
-            if self.depth == 1 && self.section.is_some() {
+            if self.nest.depth() == 1 && self.section.is_some() {
                 // A string `system` ends here.
                 self.flush(chunk, run, quote + 1);
                 self.finish_section();
@@ -517,8 +494,8 @@ impl PromptScanner {
         }
         self.started = true;
         self.push(is_array);
-        if self.depth > self.tracked_depth() {
-            self.raw_floor = self.depth - 1;
+        if self.nest.depth() > self.tracked_depth() {
+            self.raw_floor = self.nest.depth() - 1;
             return;
         }
         self.expect_key = !is_array;
@@ -534,16 +511,17 @@ impl PromptScanner {
 
     #[inline(always)]
     fn close(&mut self, chunk: &[u8], i: usize, is_array: bool, run: &mut usize) {
-        if !self.closes_open(is_array) {
+        if !self.nest.closes(is_array) {
+            self.failed = true;
             return;
         }
-        if self.skip_depth == self.depth {
+        if self.skip_depth == self.nest.depth() {
             // The skipped `cache_control` was the object's last member.
             self.skip_depth = 0;
             *run = i;
         }
         if self.section.is_some() {
-            match self.depth {
+            match self.nest.depth() {
                 // A bare scalar section value ends at the top-level `}`.
                 1 => {
                     self.flush(chunk, run, i);
@@ -554,17 +532,17 @@ impl PromptScanner {
             }
         }
         let marked = self.in_block() && std::mem::take(&mut self.marked);
-        self.depth -= 1;
+        self.nest.close(is_array);
         self.expect_key = false;
         if marked {
             self.flush(chunk, run, i + 1);
             self.record_breakpoint();
         }
-        if self.depth == 1 && self.section.is_some() {
+        if self.nest.depth() == 1 && self.section.is_some() {
             self.flush(chunk, run, i + 1);
             self.finish_section();
         }
-        if self.depth == 0 {
+        if self.nest.depth() == 0 {
             self.ended = true;
         }
     }
@@ -572,7 +550,7 @@ impl PromptScanner {
     #[inline(always)]
     fn comma(&mut self, chunk: &[u8], i: usize, run: &mut usize) {
         if self.section.is_some() {
-            match self.depth {
+            match self.nest.depth() {
                 // A bare scalar section value ends at the next top-level member.
                 1 => {
                     self.flush(chunk, run, i);
@@ -582,7 +560,7 @@ impl PromptScanner {
                 _ => {}
             }
         }
-        if self.skip_depth != 0 && self.skip_depth == self.depth {
+        if self.skip_depth != 0 && self.skip_depth == self.nest.depth() {
             // The comma after a skipped `cache_control` member separates the
             // hashed members around it, if there are any.
             self.skip_depth = 0;
@@ -600,7 +578,7 @@ impl PromptScanner {
         if self.in_content_array() {
             self.block = self.block.saturating_add(1);
         }
-        self.expect_key = self.depth > 0 && !self.is_array(self.depth);
+        self.expect_key = self.nest.depth() > 0 && !self.is_array(self.nest.depth());
     }
 
     /// Ends the section element whose last byte precedes `end`.
