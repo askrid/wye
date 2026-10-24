@@ -6,7 +6,11 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use super::{PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US, successes, upload::upload_body};
+use super::{
+    paced::{PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US},
+    successes,
+    upload::upload_body,
+};
 use crate::{
     client::Target,
     gateway_process::GatewayProcess,
