@@ -4,12 +4,15 @@ use std::{collections::BTreeMap, time::Duration};
 
 use serde_json::{Value, json};
 
+mod stress;
 mod upload;
 
 use upload::{
     AGENT_UPLOAD_REQUESTS, UPLOAD_BYTES, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, agent_body,
     measure_uploads, upload, upload_agent, upload_body,
 };
+
+use stress::{Cold, Stress, measure_cold, measure_stress};
 
 use crate::{
     client::Target,
@@ -53,6 +56,7 @@ pub(crate) fn scenario_report() -> Value {
         "upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": UPLOAD_REQUESTS, "body_bytes": UPLOAD_BYTES},
         "agent_upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": AGENT_UPLOAD_REQUESTS, "body_bytes": agent_body().len()},
         "paced": {"streams": PACED_STREAMS, "events": PACED_EVENTS, "interval_us": PACED_INTERVAL_US, "event_bytes": PACED_EVENT_BYTES, "ramp_ms": PACED_RAMP.as_millis() as u64},
+        "stress": stress::scenario_report(),
     })
 }
 
@@ -65,6 +69,8 @@ pub(crate) struct Direct {
     /// uploads cannot disturb the paced tail latencies.
     agent_upload: Option<(Vec<u64>, usize)>,
     paced: Option<Paced>,
+    /// Measured with the paced scenario, on the production path.
+    stress: Option<(Cold, Stress)>,
 }
 
 impl Direct {
@@ -77,10 +83,16 @@ impl Direct {
         } else {
             Some(upload_agent(target).await)
         };
-        let paced = if paced {
-            Some(Paced::measure(target, || {}).await)
+        let (paced, stress) = if paced {
+            (
+                Some(Paced::measure(target, || {}).await),
+                Some((
+                    Cold::measure(target).await,
+                    Stress::measure(target, || 0.0).await,
+                )),
+            )
         } else {
-            None
+            (None, None)
         };
         Self {
             latency,
@@ -88,6 +100,7 @@ impl Direct {
             upload,
             agent_upload,
             paced,
+            stress,
         }
     }
 }
@@ -118,6 +131,10 @@ pub(crate) async fn measure(
     scope: Scope,
     metrics: &mut BTreeMap<String, f64>,
 ) {
+    // First, while the gateway's upstream connections are still cold.
+    if let (true, Some((cold, _))) = (scope.paced && !scope.per_request_only, &direct.stress) {
+        measure_cold(cold, process, prefix, metrics).await;
+    }
     let via = phase(
         format!("{prefix}latency"),
         Latency::measure(process.target()),
@@ -246,6 +263,11 @@ pub(crate) async fn measure(
             "paced_rss_kb_per_stream",
             (rss_loaded - rss_before) / PACED_STREAMS as f64,
         );
+    }
+
+    // Stalled streams would make a buffering gateway hold whole responses.
+    if let (true, true, Some((_, stress))) = (scope.paced, scope.streams_sse, &direct.stress) {
+        measure_stress(stress, process, prefix, metrics).await;
     }
 
     put(metrics, prefix, "rss_after_load_kb", process.rss_kb());

@@ -89,6 +89,22 @@ const GATES: &[(&str, f64, f64)] = &[
     ("diag_unary_failed_requests", 0.0, 0.0),
     ("diag_upload_failed_requests", 0.0, 0.0),
     ("diag_agent_upload_failed_requests", 0.0, 0.0),
+    // OTLP export runs off the data path, so it must cost no request time.
+    ("otlp_unary_cpu_us_per_request", 0.20, 10.0),
+    ("otlp_unary_added_p50_us", 0.20, 40.0),
+    ("otlp_unary_failed_requests", 0.0, 0.0),
+    // Stress (TLS path). Cold connections swing 3-9 ms with machine load, so
+    // that gate only catches connections set up one after another. Stalled
+    // clients: memory per stream is the precise signal (default HTTP/2
+    // windows: 3.3 MB, and other streams failed).
+    ("tls_cold_unary_added_p50_us", 1.50, 5_000.0),
+    ("tls_mixed_event_added_p50_us", 0.50, 1_000.0),
+    ("tls_mixed_event_added_p99_us", 0.50, 2_000.0),
+    ("tls_mixed_upload_added_p50_us", 0.50, 1_000.0),
+    ("tls_stalled_event_added_p99_us", 0.50, 2_000.0),
+    ("tls_stalled_rss_kb_per_stream", 0.20, 200.0),
+    ("tls_cold_failed_requests", 0.0, 0.0),
+    ("tls_stress_failed_requests", 0.0, 0.0),
     // Any failed request or dropped stream is a regression.
     ("unary_failed_requests", 0.0, 0.0),
     ("upload_failed_requests", 0.0, 0.0),

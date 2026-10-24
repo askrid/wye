@@ -26,8 +26,7 @@ struct UpstreamPath<'a> {
     /// path: over HTTP/1.1 every stream opens its own connections, and
     /// repeated runs exhaust the laptop's ephemeral ports.
     paced: bool,
-    /// Also measures the Wye variants with `[auth]` (per-request scenarios)
-    /// and `[cache_diagnostics]` (per-request and upload scenarios).
+    /// Also measures the Wye variants (`auth_`, `models_`, `diag_`, `otlp_`).
     variants: bool,
 }
 
