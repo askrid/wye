@@ -145,7 +145,7 @@ Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its r
 
 ### Against Bifrost
 
-Bifrost v2.3.2 (Go, `transports/v2.3.2` built from source; its web UI left out) at its best case: the request as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing; no config or log store, request logging off, retries off, 4,000 provider workers (above the benchmark's peak), default object pools. Its upstream connection is HTTP/1.1 (fasthttp). Median of 3, 2026-10-25, zero failures on both. Streams are complete Anthropic frames for both gateways ([below](#comparison-runs)).
+Bifrost v2.3.2 (Go; `go build` of `transports/bifrost-http` at tag `transports/v2.3.2`, with a placeholder `ui/index.html`, since the module embeds a web UI built by npm and ships no binaries) at its best case: the request as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing; no config or log store, request logging off, retries off, 4,000 provider workers (above the benchmark's peak), default object pools. Its upstream connection is HTTP/1.1 (fasthttp). Median of 3, 2026-10-25, zero failures on both. Streams are complete Anthropic frames for both gateways ([below](#comparison-runs)).
 
 | Metric (TLS unless noted) | Wye | Bifrost |
 |---|---|---|
@@ -309,7 +309,7 @@ Each is a hypothesis until `wye-bench` measures it.
 | mimalloc | **Rejected**: idle memory +9%, RSS +12%, CPU per MB +4% |
 | Fat LTO, one codegen unit | **Not adopted**: CPU per MB −6–8%, worse event p99 in both A/B runs, 2× build time |
 | One h2 lock per frame | **Candidate**: A/B inconclusive (−5%, +12%) |
-| Fewer runtime threads | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises |
+| Fewer runtime threads | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises. 2026-10-25, TLS, single runs, 16 / 4 / 2 workers: per-event delay p50 318 / 266 / 305 µs, CPU per paced event 38 / 25 / 18 µs, but unary added p50 237 / 690 / 823 µs |
 | Pre-warmed connections | **Low value**: 32 first requests on a new process add 3.6–8.4 ms p50, mostly first execution of the TLS and h2 code; after one warm-up request ~2 ms (concurrent handshakes), and a single cold connection adds nothing |
 | kTLS + splice; thread-per-core runtime | Research only |
 | Transparent stream repair | **Rejected**: changes semantics and billing; Claude Code retries |
