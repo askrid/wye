@@ -15,6 +15,10 @@ use tokio::{
 
 use crate::{Gateway, auth::ConnectionAuth, usage_log::UsageLog};
 
+mod write_timeout;
+
+use write_timeout::WriteTimeout;
+
 /// Upper bound on a client connection's read buffer (hyper's default is ~400 KiB).
 ///
 /// hyper grows the buffer while a large request body arrives and keeps it for
@@ -56,6 +60,7 @@ pub async fn serve(
         // Transient accept errors (for example, file descriptor exhaustion) must not stop the server.
         let Ok((stream, _)) = accepted else { return };
         let _ = stream.set_nodelay(true);
+        let io = TokioIo::new(WriteTimeout::new(stream, gateway.client_write_timeout));
         let gateway = Arc::clone(&gateway);
         let log = log.clone();
         // One per connection, dropped with it; see `auth`.
@@ -67,7 +72,7 @@ pub async fn serve(
             async move { Ok::<_, Infallible>(gateway.handle(req, &log, &auth).await) }
         });
         // Watched by `graceful` so shutdown can ask it to finish its current request.
-        connections.spawn(graceful.watch(http.serve_connection(TokioIo::new(stream), service)));
+        connections.spawn(graceful.watch(http.serve_connection(io, service)));
     };
 
     tokio::pin!(shutdown);
