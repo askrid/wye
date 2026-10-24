@@ -115,8 +115,17 @@ pub fn explain(
             .collect::<Vec<_>>()
             .join(", "),
     };
-    if configured.is_none() && granted.is_none() {
-        out.step("model permissions: none apply; the body is not read".into());
+    // The server reads the body once, for both checks, whenever either applies.
+    let token_limit = (path == "/v1/messages")
+        .then(|| {
+            policy::token_limit(
+                config.auth.as_ref().and_then(|a| a.max_output_tokens),
+                identity.as_ref().and_then(|i| i.max_output_tokens),
+            )
+        })
+        .flatten();
+    if configured.is_none() && granted.is_none() && token_limit.is_none() {
+        out.step("model permissions and token ceiling: none apply; the body is not read".into());
     } else {
         let mut scanner = PolicyScanner::new();
         scanner.feed(body);
@@ -136,34 +145,22 @@ pub fn explain(
                 format!("this credential may not use {requested}"),
             );
         }
-    }
-
-    let token_limit = (path == "/v1/messages")
-        .then(|| {
-            policy::token_limit(
-                config.auth.as_ref().and_then(|a| a.max_output_tokens),
-                identity.as_ref().and_then(|i| i.max_output_tokens),
-            )
-        })
-        .flatten();
-    if let Some(limit) = token_limit {
-        let mut scanner = PolicyScanner::new();
-        scanner.feed(body);
-        if let Some(e) = scanner.error() {
-            return out.refuse(400, "invalid_request_error", e.to_string());
-        }
-        match scanner.max_tokens() {
-            Some(requested) if requested > limit => {
-                return out.refuse(
-                    403,
-                    "permission_error",
-                    format!("max_tokens {requested} exceeds this credential's limit of {limit}"),
-                );
+        if let Some(limit) = token_limit {
+            match scanner.max_tokens() {
+                Some(requested) if requested > limit => {
+                    return out.refuse(
+                        403,
+                        "permission_error",
+                        format!(
+                            "max_tokens {requested} exceeds this credential's limit of {limit}"
+                        ),
+                    );
+                }
+                Some(requested) => out.step(format!("max_tokens: {requested} (limit {limit})")),
+                None => out.step(format!(
+                    "max_tokens: absent (limit {limit}; the provider requires it)"
+                )),
             }
-            Some(requested) => out.step(format!("max_tokens: {requested} (limit {limit})")),
-            None => out.step(format!(
-                "max_tokens: absent (limit {limit}; the provider requires it)"
-            )),
         }
     }
 
@@ -358,5 +355,22 @@ mod tests {
         )
         .report();
         assert!(report.contains("max_tokens: 100 (limit 100)"), "{report}");
+
+        // A token ceiling alone still makes the server read the body, so a
+        // request without a model is refused, as `serve` refuses it.
+        let mut only_ceiling = limited.clone();
+        only_ceiling.auth.as_mut().unwrap().models = None;
+        let t = token(&key, None);
+        assert_eq!(
+            refused(explain(
+                &only_ceiling,
+                "/v1/messages",
+                Credential::Token(&t, &verifier(&only_ceiling)),
+                None,
+                br#"{"max_tokens":10}"#,
+                NOW
+            )),
+            Some((400, "invalid_request_error"))
+        );
     }
 }
