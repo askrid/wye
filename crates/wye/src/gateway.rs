@@ -240,58 +240,13 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
-        let (parts, mut body) = req.into_parts();
-        let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
-        // `max_tokens` bounds generation; count_tokens generates nothing.
-        let token_limit = (info.path == "/v1/messages")
-            .then(|| {
-                policy::token_limit(
-                    self.max_output_tokens,
-                    info.identity.as_ref().and_then(|i| i.max_output_tokens),
-                )
-            })
-            .flatten();
-        let body = if self.models.is_none() && credential_models.is_none() && token_limit.is_none()
-        {
-            RequestBody::new(body)
-        } else {
-            let held = match hold_until_model(
-                &mut body,
-                &self.held_bytes,
-                self.max_held_request_bytes,
-                self.max_request_body_bytes,
-                token_limit,
-            )
-            .await
-            {
-                Ok(held) => held,
-                Err(e) => {
-                    let res = hold_error(e);
-                    log.gateway_error(info, res.status());
-                    return res;
-                }
-            };
-            let allowed = held
-                .model()
-                .is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
-            if !allowed {
-                let res = error(
-                    StatusCode::FORBIDDEN,
-                    "permission_error",
-                    "this credential may not use the requested model",
-                );
+        let (parts, body) = req.into_parts();
+        let body = match self.admit_body(body, &info).await {
+            Ok(body) => body,
+            Err(res) => {
                 log.gateway_error(info, res.status());
-                return res;
+                return *res;
             }
-            if let (Some(limit), Some(requested)) = (token_limit, held.max_tokens())
-                && requested > limit
-            {
-                let message = OverTokenLimit { requested, limit }.to_string();
-                let res = error(StatusCode::FORBIDDEN, "permission_error", &message);
-                log.gateway_error(info, res.status());
-                return res;
-            }
-            RequestBody::after_hold(held, body)
         };
         let req = Request::from_parts(parts, body);
         if self.prompt_key.is_some()
@@ -331,6 +286,59 @@ impl Gateway {
                 res
             }
         }
+    }
+
+    /// Checks the request body against model permissions and the output-token
+    /// ceiling. Without either, the body passes untouched; with one, it is held
+    /// until its `model` is read, then replayed and checked as it streams.
+    async fn admit_body(
+        &self,
+        mut body: Incoming,
+        info: &RequestInfo,
+    ) -> Result<RequestBody<Incoming>, Box<Response<ResBody>>> {
+        let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
+        // `max_tokens` bounds generation; count_tokens generates nothing.
+        let token_limit = (info.path == "/v1/messages")
+            .then(|| {
+                policy::token_limit(
+                    self.max_output_tokens,
+                    info.identity.as_ref().and_then(|i| i.max_output_tokens),
+                )
+            })
+            .flatten();
+        if self.models.is_none() && credential_models.is_none() && token_limit.is_none() {
+            return Ok(RequestBody::new(body));
+        }
+        let held = hold_until_model(
+            &mut body,
+            &self.held_bytes,
+            self.max_held_request_bytes,
+            self.max_request_body_bytes,
+            token_limit,
+        )
+        .await
+        .map_err(|e| Box::new(hold_error(e)))?;
+        let allowed = held
+            .model()
+            .is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
+        if !allowed {
+            return Err(Box::new(error(
+                StatusCode::FORBIDDEN,
+                "permission_error",
+                "this credential may not use the requested model",
+            )));
+        }
+        if let (Some(limit), Some(requested)) = (token_limit, held.max_tokens())
+            && requested > limit
+        {
+            let message = OverTokenLimit { requested, limit }.to_string();
+            return Err(Box::new(error(
+                StatusCode::FORBIDDEN,
+                "permission_error",
+                &message,
+            )));
+        }
+        Ok(RequestBody::after_hold(held, body))
     }
 }
 
