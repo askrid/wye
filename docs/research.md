@@ -261,6 +261,8 @@ Each is a hypothesis until `wye-bench` measures it.
 |---|---|
 | HTTP/2 to the provider | **In effect**: negotiated by ALPN (verified against `api.anthropic.com`) |
 | Spread streams over 64 connections | **Adopted**: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; RSS after load 10 → 30 MB |
+| 256 lanes instead of 64 | **Rejected** (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%. A profile of the paced load had shown ~10% of busy samples waiting on h2's per-connection lock, but more connections cost more than the contention they remove |
+| Unbounded HTTP/2 connection window, 1 MiB per stream | **Adopted** (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643–811 other streams fail; now 0. Memory per stalled stream 3.3 → 2.0 MB, CPU per MB relayed −6% against 256 KiB, which held 0.48 MB per stalled stream |
 | Per-connection credential cache | **Adopted**: CPU per authenticated request −38% and −44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
 | Shared cached identity (`Arc`) and borrowed log line | **Adopted**: allocations per authenticated request 37.5 → 20.6 |
 | 32 KiB client-connection buffer cap | **Adopted** (approved tradeoff): idle TLS stream after 512 KB 150 → 48 KB; plain uploads +7% CPU; 16 KiB cost +50% plain upload CPU |
