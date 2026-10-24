@@ -65,7 +65,7 @@ Heap allocations (`alloc_`, plain path; spread under 1%, uploads ~5%):
 | Live heap per idle stream | 49 KB plain, 23 KB TLS |
 | Live heap per idle stream after a 512 KB request | 77 KB plain, 48 KB TLS (150 KB before the 32 KiB buffer cap) |
 | Per 1 MiB upload | 44 allocations, 0.43 MB (1.27 MB before the cap) |
-| Live heap per stalled stream, TLS | 2.2 MB with a 1 MiB upstream window: about twice the window, independent of streams per connection |
+| Live heap per stalled stream, TLS | 0.56 MB with a 256 KiB upstream window, 2.2 MB with 1 MiB: about twice the window, independent of streams per connection |
 
 Variants (plain path):
 
@@ -76,7 +76,7 @@ Variants (plain path):
 | `diag_`: cache diagnostics | +2 allocations per request; +48% upload CPU on Claude Code-shaped bodies (2.75 vs 1.86 ms/MB), hence per-session sampling |
 | `otlp_`: OTLP export | within noise (118.5 vs 120 µs CPU per request) |
 
-**Stress** (TLS path, median of 3, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.7 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +3.7 ms p99, 2.0 MB per stalled stream (its 1 MiB upstream window plus socket buffers), no failures; RSS stays near 400 MB after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +3.2 ms p50 ([pre-warming](#performance-techniques)).
+**Stress** (TLS path, median of 3, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.7 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +2.7 ms p99, 0.49 MB RSS per stalled stream with the 256 KiB upstream window (2.0 MB with 1 MiB), no failures; RSS stays at its peak after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +3.2 ms p50 ([pre-warming](#performance-techniques)).
 
 **Soak** (`wye-bench load --scenario paced --seconds 150`, alloc-stats build): 34 batches of 2,000 paced streams, 6.8M events, zero failures, 34 µs CPU per event. Live heap rose ~600 KB over the first ~20 batches (lanes and buffers warming), then held at 49,363 KB; RSS levelled near 56 MB. No growth per stream served. A multi-hour soak is open: the overnight attempt (2026-10-18) was void because the laptop slept.
 
@@ -265,7 +265,8 @@ Each is a hypothesis until `wye-bench` measures it.
 | HTTP/2 to the provider | **In effect**: negotiated by ALPN (verified against `api.anthropic.com`) |
 | Spread streams over 64 connections | **Adopted**: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; RSS after load 10 → 30 MB |
 | 256 lanes instead of 64 | **Rejected** (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%. A profile of the paced load had shown ~10% of busy samples waiting on h2's per-connection lock, but more connections cost more than the contention they remove |
-| Unbounded HTTP/2 connection window, 1 MiB per stream | **Adopted** (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643–811 other streams fail; now 0. Memory per stalled stream 3.3 → 2.0 MB, CPU per MB relayed −6% against 256 KiB, which held 0.48 MB per stalled stream |
+| Unbounded HTTP/2 connection window, 256 KiB per stream | **Adopted** (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643–811 other streams fail; now 0. RSS per stalled stream 3.3 MB (defaults) → 2.0 MB (1 MiB, first fix) → 0.49 MB; bulk CPU per MB relayed +10% against 1 MiB (4.06 → 4.47 ms), token streams unaffected |
+| Client write-stall timeout | **Adopted**: a connection whose writes make no progress for `client_write_timeout_secs` (60) is closed, which ends a stalled stream; zero cost while writes never block (the timer is allocated at the first blocked write) |
 | Per-connection credential cache | **Adopted**: CPU per authenticated request −38% and −44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
 | Shared cached identity (`Arc`) and borrowed log line | **Adopted**: allocations per authenticated request 37.5 → 20.6 |
 | 32 KiB client-connection buffer cap | **Adopted** (approved tradeoff): idle TLS stream after 512 KB 150 → 48 KB; plain uploads +7% CPU; 16 KiB cost +50% plain upload CPU |

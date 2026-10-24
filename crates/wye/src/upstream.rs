@@ -110,10 +110,11 @@ pub(crate) enum PolicyRefusal {
 }
 
 /// HTTP/2 receive window per upstream stream: what one response may buffer
-/// in Wye while its client is not reading (measured: 2.2 MB of heap per
-/// stalled stream). 1 MiB sustains about 20 MB/s per response at 50 ms round
-/// trip; 256 KiB cost 6% more CPU per MB relayed.
-const STREAM_WINDOW: u32 = 1024 * 1024;
+/// in Wye while its client is not reading (heap per stalled stream: ~0.5 MB;
+/// 2.2 MB at 1 MiB). It sustains about 5 MB/s per response at 50 ms round
+/// trip, far above token pace; bulk relays cost ~6% more CPU per MB than
+/// with 1 MiB.
+const STREAM_WINDOW: u32 = 256 * 1024;
 /// The largest HTTP/2 window, so the connection never limits: streams share
 /// an upstream connection, and with a finite window a few clients that stop
 /// reading fill it and stall every other stream on it. Buffering stays bounded
