@@ -24,11 +24,11 @@ Bulk throughput is the least relevant metric for an LLM gateway; traffic is toke
 
 - **Large request bodies:** Claude Code resends its whole context every turn (hundreds of KB to several MB). Measure added upload latency and CPU per uploaded MB.
 - **Token-paced streams at scale:** 1,000–10,000 concurrent streams at ~50 events/s with ~100-byte events. Measure CPU per streamed event, memory per active stream, and p99 time to first byte and per-event delay under that load. Make CPU per event the primary efficiency metric; keep bulk MB/s as a secondary one.
-- **Competitors that stream:** LiteLLM, then Envoy AI Gateway, in feature-equivalent pass-through configurations. KrakenD CE stays as a reference but cannot stream SSE.
+- **Competitors that stream:** LiteLLM first, in a feature-equivalent pass-through configuration. KrakenD CE stays as a reference but cannot stream SSE.
 
 **Exit:** gated metrics for all three workloads, and a comparison table against at least one streaming-capable gateway.
 
-**Status: done.** Uploads and token-paced streams are measured and gated (paced on the TLS + HTTP/2 path only). LiteLLM is benchmarked as the streaming-capable competitor ([research.md](research.md#against-litellm)); Envoy AI Gateway remains a later comparison.
+**Status: done.** Uploads, token-paced streams, and the stress scenarios (cold connections, mixed load, stalled clients) are measured and gated on the TLS + HTTP/2 path. LiteLLM is the streaming-capable comparison ([research.md](research.md#against-litellm)); the next competitors are in M5.
 
 ### M0: Claude Code stream proxy (P0)
 

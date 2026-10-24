@@ -18,6 +18,9 @@ use crate::{
 
 /// Reported when an upstream stream is not released at all within this time.
 pub const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
+/// A paced stream that has not ended by then counts as failed: a gateway that
+/// stalls streams is a result, not a hung benchmark.
+const STREAM_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Per-stream SSE sample.
 pub struct Stream {
@@ -128,7 +131,17 @@ pub async fn paced(
         let delay = ramp.mul_f64(i as f64 / streams as f64);
         set.spawn(async move {
             tokio::time::sleep(delay).await;
-            read_stream(&target, events, size, interval_us).await
+            tokio::time::timeout(
+                STREAM_DEADLINE,
+                read_stream(&target, events, size, interval_us),
+            )
+            .await
+            .unwrap_or(Stream {
+                ttfb_us: 0,
+                event_delays_us: Vec::new(),
+                bytes: 0,
+                failed: true,
+            })
         });
     }
     let mut out = Vec::with_capacity(streams);
@@ -280,4 +293,49 @@ pub async fn cancel_latency(target: &Target, rounds: usize) -> Vec<u64> {
         while rx.try_recv().is_ok() {}
     }
     out
+}
+
+/// Small requests, each on a new connection, all at once: what the first
+/// requests after a start or a scale-out pay to open connections (on the TLS
+/// path, a handshake). `None` for a failed request.
+pub async fn cold_unary(target: &Target, count: usize) -> Vec<Option<u64>> {
+    let mut set = JoinSet::new();
+    for _ in 0..count {
+        let target = target.fresh();
+        set.spawn(async move {
+            let req = target.messages(&[("x-bench-unary", "512".into())]);
+            timed(&target, req).await
+        });
+    }
+    let mut out = Vec::with_capacity(count);
+    while let Some(sample) = set.join_next().await {
+        out.push(sample.unwrap());
+    }
+    out
+}
+
+/// Opens `count` streams that send as fast as flow control allows, reads one
+/// frame of each, then stops reading: clients that stall mid-stream. Each is
+/// its own client with its own connection, as real clients are; the held
+/// bodies keep the streams open until dropped.
+pub async fn stalled_streams(target: &Target, count: usize) -> Vec<Incoming> {
+    let mut set = JoinSet::new();
+    for _ in 0..count {
+        let target = target.fresh();
+        set.spawn(async move {
+            let req = target.messages(&[
+                ("x-bench-events", "2000".into()),
+                ("x-bench-size", "4096".into()),
+                ("x-bench-interval-us", "0".into()),
+            ]);
+            let mut body = target.client().request(req).await.ok()?.into_body();
+            body.frame().await?.ok()?;
+            Some(body)
+        });
+    }
+    let mut bodies = Vec::with_capacity(count);
+    while let Some(body) = set.join_next().await {
+        bodies.extend(body.unwrap());
+    }
+    bodies
 }

@@ -3,7 +3,9 @@
 //! Runs the same scenarios directly against a mock Anthropic upstream and
 //! through a real `wye` binary, then reports Wye's added cost. Two upstream
 //! paths are measured: plain HTTP/1.1 (metric names without prefix) and TLS
-//! with HTTP/2, like the real provider (`tls_` prefix). With `--krakend`, the
+//! with HTTP/2, like the real provider (`tls_` prefix), which also runs the
+//! token-paced and stress scenarios (cold connections, mixed load, stalled
+//! clients). With `--krakend`, the
 //! same scenarios also run through KrakenD (`krakend_` prefix); with `--litellm`,
 //! through LiteLLM's pass-through endpoint (`litellm_` prefix).
 //! Wye also runs on the plain path with `[auth]` (`auth_`), model permissions
