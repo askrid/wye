@@ -73,7 +73,9 @@ Variants (plain path):
 | `auth_`: Ed25519 credentials | +88 µs CPU per full verification (the check itself 55–62 µs); on a reused connection the per-connection cache makes it free |
 | `models_`: model permissions | +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies |
 | `diag_`: cache diagnostics | +2 allocations per request; +48% upload CPU on Claude Code-shaped bodies (2.75 vs 1.86 ms/MB), hence per-session sampling |
-| `otlp_`: OTLP export | within noise (116.5 vs 113 µs CPU per request); reported, not gated |
+| `otlp_`: OTLP export | within noise (118.5 vs 120 µs CPU per request) |
+
+**Stress** (TLS path, median of 3, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.7 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +3.7 ms p99, 2.0 MB per stalled stream (its 1 MiB upstream window plus socket buffers), no failures; RSS stays near 400 MB after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +3.2 ms p50 ([pre-warming](#performance-techniques)).
 
 **Soak** (`wye-bench load --scenario paced --seconds 150`, alloc-stats build): 34 batches of 2,000 paced streams, 6.8M events, zero failures, 34 µs CPU per event. Live heap rose ~600 KB over the first ~20 batches (lanes and buffers warming), then held at 49,363 KB; RSS levelled near 56 MB. No growth per stream served. A multi-hour soak is open: the overnight attempt (2026-10-18) was void because the laptop slept.
 
@@ -140,21 +142,21 @@ LiteLLM 1.105 (Python 3.14) at its leanest: byte-level pass-through (`pass_throu
 
 Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its regular API path would cost more than pass-through. The comparison found four flaws in the harness, all fixed: invalid JSON in mock payloads, error responses counted as successes (now `*_failed_requests`, gated at zero), a test CA Python 3.13 rejects, and gateway workers outliving their run.
 
-### Benchmark suite: kept, cut, missing (proposal)
+### Benchmark suite: kept, cut, missing
 
-The suite measures the gateway's own cost under agent-shaped load. Each part earns its run time or goes. Changes to gated metrics need approval; this is the proposal.
+The suite measures the gateway's own cost under agent-shaped load; each part earns its run time or goes. Approved 2026-10-24; the stress scenarios are built, the competitors are next (M5).
 
 | Part | Verdict | Why |
 |---|---|---|
 | TLS + HTTP/2 path, paced streams, uploads, idle memory, cancel, allocations | Keep | The production shape and the costs agents feel |
 | Plain HTTP/1.1 path | Keep | Lowest noise: catches regressions the TLS path hides |
 | `auth_`, `models_`, `diag_` variants | Keep | Each guards a per-request or per-MB cost of a feature |
-| `otlp_` variant | Gate it | Export is on in every team deployment; reported-only metrics regress silently |
+| `otlp_` variant | Gated | Export is on in every team deployment; reported-only metrics regress silently |
 | Bulk throughput (MB/s) | Report, stop gating MB/s | Least relevant to token-paced traffic; CPU per MB stays gated |
 | KrakenD runs | Retire from routine runs | Cannot stream SSE on CE; the recorded result above stands |
-| Missing: mixed load | Add | Uploads and paced streams at once: head-of-line effects on event p99 when agents send MB contexts |
-| Missing: cold upstream connection | Add | TTFB with a connect and TLS handshake to a mock with delay; also measures pre-warming |
-| Missing: slow consumer under load | Add | Memory and event delay with a share of readers stalled; today only an integration test |
+| Mixed load (`mixed_`) | Built | Uploads and paced streams at once: head-of-line effects on event p99 when agents send MB contexts |
+| Cold connections (`cold_`) | Built | First requests on a new process: connects and TLS handshakes |
+| Stalled clients (`stalled_`) | Built | Memory and event delay beside readers that stopped; found the shared-window stall on its first run |
 | Missing: agent trace replay | Add (M5) | [TraceLab](#related-work) context sizes, output lengths, turn gaps |
 | Missing: floor baseline | Add | Wye against a dumb streaming proxy shows what its features cost |
 | Missing: separate load machine, Linux | Add (M5) | The laptop's load generator saturates first at multi-core load |
@@ -277,6 +279,6 @@ Each is a hypothesis until `wye-bench` measures it.
 | Fat LTO, one codegen unit | **Not adopted**: CPU per MB −6–8%, worse event p99 in both A/B runs, 2× build time |
 | One h2 lock per frame | **Candidate**: A/B inconclusive (−5%, +12%) |
 | Fewer runtime threads | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises |
-| Pre-warmed connections | Planned; needs the cold-connection scenario |
+| Pre-warmed connections | **Low value**: 32 first requests on a new process add 3.6–8.4 ms p50, mostly first execution of the TLS and h2 code; after one warm-up request ~2 ms (concurrent handshakes), and a single cold connection adds nothing |
 | kTLS + splice; thread-per-core runtime | Research only |
 | Transparent stream repair | **Rejected**: changes semantics and billing; Claude Code retries |

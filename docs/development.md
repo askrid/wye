@@ -32,11 +32,19 @@ A check takes about 100 seconds after an ordinary code change: tests 11 s, incre
 
 ## Benchmark
 
-`wye-bench run --wye <path> --out <results.json>` measures each scenario directly against the mock and through the gateway, on a plain HTTP/1.1 upstream and on TLS + HTTP/2 (`tls_` metrics), plus, on the plain path, Wye with `[auth]` (`auth_` metrics, per-request scenarios only), Wye with model permissions (`models_` metrics, per-request and upload scenarios), Wye with `[cache_diagnostics]` (`diag_` metrics, per-request and upload scenarios), and Wye exporting OTLP to the mock (`otlp_` metrics, per-request scenarios; reported, not gated). It reports what the gateway adds: latency (unary, time to first byte, per SSE event), CPU per request, per MB, and per event, memory per idle and active stream, upstream release after a disconnect, uploads (one long string, and on the plain path `agent_upload`: the same size shaped like a Claude Code request, which costs the diagnostics scanner more), 2,000 token-paced streams, and failed requests (gated at zero). `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways and print a comparison table.
+`wye-bench run --wye <path> --out <results.json>` runs each scenario directly against a mock Anthropic upstream and through Wye, and reports what Wye adds:
 
-`--wye-alloc <path>` takes a Wye build with `--features alloc-stats`, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (that build only; never ship it). It adds `alloc_` metrics: allocations and bytes per request, allocations per streamed event and per stream setup, live heap per idle stream (also after a 512 KB request, and on the TLS upstream), and allocations per 1 MiB upload (also for the agent-shaped body, with and without cache diagnostics). Counts are nearly deterministic (under 1% spread, uploads about 5%), so the gate catches a single extra allocation per request, stream, or event that CPU timing would never resolve.
+| Path or variant | Scenarios |
+|---|---|
+| Plain HTTP/1.1 (no prefix) | unary latency and CPU, SSE time to first byte and per-event delay, bulk CPU per MB, 1,000 idle streams, cancel release, 1 MiB uploads, the Claude Code-shaped `agent_upload` |
+| TLS + HTTP/2 (`tls_`, the production shape) | the same, plus 2,000 token-paced streams and the stress scenarios: 32 requests on cold connections, paced streams during back-to-back 1 MiB uploads (`mixed_`), paced streams beside 200 stalled clients (`stalled_`) |
+| `auth_`, `models_`, `diag_`, `otlp_` (plain path) | per-request scenarios; `models_` and `diag_` also uploads |
 
-For diagnosis beyond these numbers, `wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N` keeps one scenario running against one gateway and prints its pid and cost, so it can be profiled with macOS `sample <pid>` or Linux `perf`. With `paced` it is a soak test: it prints resident memory, and with an `alloc-stats` build the live heap, after every batch of 2,000 streams. With `capacity` it runs Wye on one Tokio worker thread (`WYE_BENCH_GATEWAY_THREADS=N` for more) and steps the number of paced streams up, printing events per second, Wye's CPU, and the p99 event delay Wye adds over a direct run, and the largest step within 10 ms added p99 (`--seconds` is ignored).
+Failed requests and streams are gated at zero. `--krakend <path>` and `--litellm <path>` run the same scenarios through those gateways.
+
+`--wye-alloc <path>` adds `alloc_` metrics from a `--features alloc-stats` build, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (benchmarks only; never ship it): allocations and bytes per request, per streamed event, and per stream; live heap per idle stream, also after a 512 KB request and on TLS; allocations per 1 MiB upload. Counts vary under 1% (uploads ~5%), so the gate catches one extra allocation per request, stream, or event, which CPU timing never resolves.
+
+`wye-bench load (--wye | --krakend) <path> --scenario <upload|tls-upload|paced|capacity> --seconds N` keeps one scenario running and prints the gateway's pid, for `sample <pid>` (macOS) or `perf` (Linux). `paced` is the soak test: resident memory, and with an alloc-stats build the live heap, after every batch of 2,000 streams. `capacity` runs Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more) and steps paced streams up until the added p99 passes 10 ms (`--seconds` is ignored).
 
 ## Code changes
 
