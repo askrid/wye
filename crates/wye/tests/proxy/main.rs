@@ -6,6 +6,7 @@
     clippy::panic
 )]
 
+mod aliases;
 mod credentials;
 mod forwarding;
 mod harness;

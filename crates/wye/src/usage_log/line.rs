@@ -44,6 +44,9 @@ pub(super) struct Line<'a> {
     /// Tool calls that ran since the agent's previous request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tool_durations: Option<ToolDurations<'a>>,
+    /// The alias the client named, when config resolved one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) requested_model: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) model: Option<&'a str>,
     pub(super) usage_status: &'static str,
@@ -97,6 +100,7 @@ pub(super) fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> 
         compaction: agent.compaction.map(|c| c.as_str()),
         context_compacted: agent.context_compacted.map(|c| c.as_str()),
         tool_durations: agent.tool_durations,
+        requested_model: r.info.requested_model.as_deref(),
         model: r.model.as_deref(),
         usage_status: r
             .usage

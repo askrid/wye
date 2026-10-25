@@ -22,6 +22,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         compaction: None,
         context_compacted: None,
         tool_durations: None,
+        requested_model: None,
         model,
         usage_status: "complete",
         input_tokens: Some(10),

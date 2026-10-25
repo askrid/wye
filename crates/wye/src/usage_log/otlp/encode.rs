@@ -88,6 +88,9 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
             attribute(key, Value::Str(value));
         }
     }
+    if let Some(alias) = line.requested_model {
+        attribute("wye.requested_model", Value::Str(alias));
+    }
     if let Some(model) = line.model {
         attribute("gen_ai.response.model", Value::Str(model));
     }
@@ -285,6 +288,7 @@ mod tests {
             context_compacted: None,
             tool_durations: tools.map(crate::usage_log::agent::ToolDurations),
             tool_calls: None,
+            requested_model: None,
             model: None,
             usage_status: "not_observed",
             input_tokens: None,

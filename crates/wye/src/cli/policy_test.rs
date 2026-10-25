@@ -8,6 +8,7 @@
 //! decision = "refuse"        # or "forward"
 //! status = 403               # optional
 //! error = "permission_error" # optional
+//! model = "claude-opus-5-5"  # optional: the model it runs on, after aliases
 //! path = "/v1/messages"      # optional, the default
 //! session = "s-1"            # optional Claude Code session id
 //!
@@ -32,6 +33,7 @@ struct Expect {
     decision: Decision,
     status: Option<u16>,
     error: Option<String>,
+    model: Option<String>,
     path: Option<String>,
     session: Option<String>,
     credential: Option<Claims>,
@@ -135,6 +137,17 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
             explain_tail()
         ));
     }
+    if let Some(model) = &expect.model
+        && result.model.as_ref() != Some(model)
+    {
+        return Err(format!(
+            "expected model {model}, got {}",
+            result
+                .model
+                .as_deref()
+                .unwrap_or("none (the body was not read)")
+        ));
+    }
     if let Some((status, kind, _)) = &result.refused {
         if expect.status.is_some_and(|s| s != *status) {
             return Err(format!(
@@ -178,7 +191,12 @@ mod tests {
         case(
             "a-haiku",
             r#"{"model":"claude-haiku-4-5"}"#,
-            &format!("decision = \"forward\"\n{haiku_only}"),
+            &format!("decision = \"forward\"\nmodel = \"claude-haiku-4-5\"\n{haiku_only}"),
+        );
+        case(
+            "e-model",
+            r#"{"model":"claude-haiku-4-5"}"#,
+            &format!("decision = \"forward\"\nmodel = \"claude-opus-5-5\"\n{haiku_only}"),
         );
         case(
             "b-sonnet",
@@ -206,7 +224,11 @@ mod tests {
             report.contains("FAIL  d-wrong: expected Forward, got decision: refuse 403"),
             "{report}"
         );
-        assert!(report.ends_with("3 passed, 1 failed\n"), "{report}");
+        assert!(
+            report.contains("FAIL  e-model: expected model claude-opus-5-5, got claude-haiku-4-5"),
+            "{report}"
+        );
+        assert!(report.ends_with("3 passed, 2 failed\n"), "{report}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

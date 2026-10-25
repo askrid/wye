@@ -31,7 +31,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-planned-m4)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |
 | `429`/`529` from each Claude provider means the request was not processed | Failover without duplicate billing | Provider docs; billing records |
-| Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks-planned) | Migration notes; one opt-in request per rule |
+| Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks) | Migration notes; one opt-in request per rule |
 
 ## Benchmarks
 
@@ -234,7 +234,7 @@ Summaries come from abstracts; check figures against the papers before citing th
 
 ## Feature directions
 
-Request-local, no shared state, config in Git, analysis in the user's backend. Built: cache-miss diagnostics (2), clean stream endings (7), and the [agent-native directions](#agent-native-directions) A1–A4. Aliases and upgrade checks are designed in [architecture.md](architecture.md#model-aliases-and-upgrade-checks-planned).
+Request-local, no shared state, config in Git, analysis in the user's backend. Built: cache-miss diagnostics (2), clean stream endings (7), and the [agent-native directions](#agent-native-directions) A1–A4. Aliases and upgrade checks are designed in [architecture.md](architecture.md#model-aliases-and-upgrade-checks).
 
 ### 1. Agent-aware routing
 

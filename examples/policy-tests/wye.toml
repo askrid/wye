@@ -13,3 +13,9 @@ models = ["claude-sonnet-*", "claude-haiku-*"]
 [[auth.keys]]
 id = "k1"
 ed25519_public_key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+
+# Services ask for "coding"; config decides the model. The canary team moves first.
+[[aliases]]
+name = "coding"
+model = "claude-sonnet-5-5"
+when = [{ subjects = ["team-canary-*"], model = "claude-haiku-5-5" }]

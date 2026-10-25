@@ -10,7 +10,14 @@ fn scan(body: &[u8]) -> Result<String, PolicyError> {
     scanner.finish().map(str::to_owned)
 }
 
-fn scan_chunked(body: &[u8], sizes: &[usize]) -> (Result<String, PolicyError>, Option<usize>) {
+/// The outcome, the bytes fed when the model became known, and its span.
+type Chunked = (
+    Result<String, PolicyError>,
+    Option<usize>,
+    Option<std::ops::Range<u64>>,
+);
+
+fn scan_chunked(body: &[u8], sizes: &[usize]) -> Chunked {
     let mut scanner = PolicyScanner::new();
     let mut fed = 0;
     let mut known_after = None;
@@ -27,7 +34,11 @@ fn scan_chunked(body: &[u8], sizes: &[usize]) -> (Result<String, PolicyError>, O
         }
         rest = tail;
     }
-    (scanner.finish().map(str::to_owned), known_after)
+    (
+        scanner.finish().map(str::to_owned),
+        known_after,
+        scanner.model_span(),
+    )
 }
 
 fn patterns(list: &[&str]) -> Vec<ModelPattern> {
@@ -177,7 +188,7 @@ proptest! {
             [one] => Ok((*one).clone()),
             _ => Err(PolicyError::Repeated),
         };
-        let (got, known_after) = scan_chunked(body.as_bytes(), &sizes);
+        let (got, known_after, span) = scan_chunked(body.as_bytes(), &sizes);
         prop_assert_eq!(&got, &want, "{}", body);
         prop_assert_eq!(scan(body.as_bytes()), want.clone());
         if let Ok(model) = &want {
@@ -185,6 +196,9 @@ proptest! {
             let value = format!(r#""model":{}"#, serde_json::to_string(model).unwrap());
             let end = body.find(&value).unwrap() + value.len();
             prop_assert!(known_after.unwrap() <= end + 24, "{} {:?}", end, known_after);
+            // The span is the value's bytes, whatever the chunking.
+            let span = span.unwrap();
+            prop_assert_eq!(&body.as_bytes()[span.start as usize..span.end as usize], model.as_bytes());
         }
     }
 
