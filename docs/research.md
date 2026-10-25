@@ -145,24 +145,32 @@ Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its r
 
 ### Against Bifrost
 
-Bifrost v2.3.2 (Go; `go build` of `transports/bifrost-http` at tag `transports/v2.3.2`, with a placeholder `ui/index.html`, since the module embeds a web UI built by npm and ships no binaries) at its best case: the request as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing; no config or log store, request logging off, retries off, 4,000 provider workers (above the benchmark's peak), default object pools. Its upstream connection is HTTP/1.1 (fasthttp). Median of 3, 2026-10-25, zero failures on both. Streams are complete Anthropic frames for both gateways ([below](#comparison-runs)).
+Bifrost v2.3.2 (Go), the official prebuilt binary (`downloads.getmaxim.ai`, darwin/amd64), at its best case: the request as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing; no config or log store, request logging off, retries off; the pool and queue sizes of Bifrost's own published benchmark (`initial_pool_size` 15,000, `buffer_size` 20,000) and 4,000 provider workers, above this benchmark's peak. Its upstream connection is HTTP/1.1 (fasthttp). Median of 3, 2026-10-26, zero failures on both. Streams are complete Anthropic frames for both gateways ([below](#comparison-runs)).
 
 | Metric (TLS unless noted) | Wye | Bifrost |
 |---|---|---|
-| Added unary latency p50 | 0.24 ms | 3.1 ms |
-| CPU per request | 161 µs | 1,040 µs |
-| Added time to first byte p50 | 0.22 ms | 5.1 ms |
-| Added delay per SSE event p50 / p99 | 315 / 219 µs | 293 / 1,244 µs |
-| 2,000 paced streams: event delay p50 / p99 | 2.0 / 3.5 ms | 126 ms / 2.1 s |
-| 2,000 paced streams: CPU per event | 38 µs | 142 µs |
-| Beside 200 stalled clients: event p99 | 2.8 ms | 2.2 s |
-| 1 MiB upload: CPU per MB | 2.6 ms | 46 ms |
-| Claude Code-shaped upload, plain: CPU per MB | 1.49 ms | 73 ms |
+| Added unary latency p50 | 0.25 ms | 2.7 ms |
+| CPU per request | 157 µs | 1,044 µs |
+| Added time to first byte p50 | 0.39 ms | 4.5 ms |
+| Added delay per SSE event p50 / p99 | 195 / 219 µs | 190 / 671 µs |
+| 2,000 paced streams: event delay p50 / p99 | 2.1 / 4.3 ms | 1.6 / 58 ms |
+| 2,000 paced streams: time to first byte p99 | 9 ms | 0.99 s |
+| 2,000 paced streams: CPU per event | 37 µs | 162 µs |
+| Beside 200 stalled clients: event p99 | 3.0 ms | 229 ms |
+| Paced streams during uploads: event p99 | 2.3 ms | 30 ms |
+| 1 MiB upload: CPU per MB | 2.6 ms | 45 ms |
+| Claude Code-shaped upload, plain: CPU per MB | 1.56 ms | 74 ms |
 | Bulk relay: CPU per MB | 4.3 ms | 25 ms |
-| 32 first requests on a new process: added p50 | 3.2 ms | 75 ms |
-| Process at idle; after 2,000 streams | 15 MB; 179 MB | 328 MB; 3.4 GB |
+| Upstream release after a client disconnect, p50 | 0.08 ms | 498 ms |
+| 32 first requests on a new process: added p50 | 3.2 ms | 84 ms |
+| Process at idle; after load (default pools) | 15 MB; 179 MB | 328 MB; 3.7 GB |
 
-Bifrost leads in one metric: per-event delay at p50, by 22 µs. Its upstream is HTTP/1.1, and the direct baseline is HTTP/2, so an HTTP/1.1 relay also skips the mock's HTTP/2 framing. Like for like, with Wye on HTTP/1.1 (`http_version = "1.1"`): 294 vs 298 µs p50, 255 vs 639 µs p99. Wye keeps HTTP/2 as the default because one connection per stream costs more under load (2,000 paced streams: event p50 3.6 ms on HTTP/1.1, 2.0 ms on HTTP/2). Its memory per paced stream reads lower (3.6 vs 9.6 KB) only against a 328 MB idle process.
+Where Bifrost leads, and why:
+- **Paced event p50** (1.6 vs 2.1 ms, this run only): Bifrost queues stream starts (time to first byte p99 0.99 s), so fewer of the 2,000 streams overlap and those running see less contention; its p99 is 58 ms. In the other two runs its paced p50 was 129 and 159 ms.
+- **Per-event delay p50** is a tie within noise: Wye's swung from 195 to 375 µs between identical runs, Bifrost's from 190 to 272 µs. Bifrost's upstream is HTTP/1.1 and the direct baseline is HTTP/2, so an HTTP/1.1 relay also skips the mock's HTTP/2 framing. With Wye on HTTP/1.1 as well (`http_version = "1.1"`): 217 vs 243 µs p50, 236 vs 1,502 µs p99. Wye keeps HTTP/2 as the default because one connection per stream costs more under load (paced event p50 3.4 ms on HTTP/1.1).
+- **Memory per paced stream** reads lower (5 vs 9.6 KB), but from an idle process 20 times larger.
+
+Bifrost's published "11 µs" counts only its internal stages ("excludes JSON marshalling and HTTP calls"); the numbers here are end to end, what a client sees.
 
 #### Comparison runs
 
@@ -198,6 +206,7 @@ The suite measures the gateway's own cost under agent-shaped load; each part ear
 | nginx or Envoy, plain streaming proxy (`proxy_buffering off`) | The floor: the cost of a proxy that does nothing |
 | Envoy AI Gateway | The infrastructure-standard data plane with LLM routing |
 | Bifrost (Go) | Done ([above](#against-bifrost)): markets low overhead against LiteLLM, Wye's own claim |
+| LiteLLM Rust gateway | Next: its July 2026 benchmark claims 0.7 ms p99 overhead against Bifrost's 4.5 ms |
 | Helicone AI Gateway (Rust) | Same language and speed pitch |
 | Portkey gateway (Node) | Popular open-source gateway |
 | LiteLLM | Keep: the incumbent |
