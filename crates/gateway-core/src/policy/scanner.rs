@@ -33,7 +33,11 @@ pub struct PolicyScanner {
     model_next: bool,
     model: [u8; MAX_MODEL_BYTES],
     model_len: usize,
+    /// Offset of the model value's first byte in the body.
+    model_start: u64,
     found: bool,
+    /// Body bytes fed before the current chunk.
+    offset: u64,
     /// The last top-level key was `max_tokens` and its value comes next.
     tokens_next: bool,
     /// Digits of `max_tokens` are being read.
@@ -67,7 +71,9 @@ impl PolicyScanner {
             model_next: false,
             model: [0; MAX_MODEL_BYTES],
             model_len: 0,
+            model_start: 0,
             found: false,
+            offset: 0,
             tokens_next: false,
             tokens_reading: false,
             tokens_value: 0,
@@ -84,6 +90,14 @@ impl PolicyScanner {
         // Built only from complete string contents without escapes; a body
         // that is not UTF-8 there yields no model.
         std::str::from_utf8(self.model.get(..self.model_len)?).ok()
+    }
+
+    /// Where the model's value lies in the body, once read: its bytes
+    /// exactly, since the value has no escapes. Lets a caller splice in
+    /// another name and keep every other byte.
+    pub fn model_span(&self) -> Option<std::ops::Range<u64>> {
+        self.model()?;
+        Some(self.model_start..self.model_start + self.model_len as u64)
     }
 
     /// `max_tokens`, once its value has been read completely.
@@ -170,6 +184,7 @@ impl PolicyScanner {
                     self.escaped = false;
                     if model_value {
                         self.model_len = 0;
+                        self.model_start = self.offset + i as u64;
                     }
                     self.in_string = true;
                     self.string.start();
@@ -240,6 +255,7 @@ impl PolicyScanner {
                 }
             }
         }
+        self.offset += chunk.len() as u64;
     }
 
     /// Completes a `max_tokens` value at a terminator; a key whose value

@@ -1,0 +1,5 @@
+# A canary credential's "coding" requests run on the model its rollout rule names.
+decision = "forward"
+model = "claude-haiku-5-5"
+[credential]
+subject = "team-canary-search"

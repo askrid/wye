@@ -104,3 +104,13 @@ api_key_env = "ANTHROPIC_API_KEY"
 #   { id = "claude-sonnet-5-5", display_name = "Claude Sonnet 5.5", description = "Everyday coding" },
 #   { id = "claude-haiku-5-5" },
 # ]
+
+# Model aliases: clients ask for a stable name, config decides the model, and
+# a model upgrade is one reviewed change here. Permissions apply to the model
+# that runs; usage records show both (requested_model, model). `when` rules
+# move matching credential subjects first. Claude Code's /model picker lists
+# only ids containing "claude", so name aliases it should show accordingly.
+# [[aliases]]
+# name = "claude-coding"
+# model = "claude-opus-5-5"
+# when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]

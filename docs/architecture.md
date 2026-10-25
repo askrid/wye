@@ -164,7 +164,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 | Field | When | Why |
 |---|---|---|
-| `model` | [Model alias](#model-aliases-and-upgrade-checks-planned) (M2b); agent-aware routing and a Claude provider's model id (M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
+| `model` | [Model alias](#model-aliases-and-upgrade-checks) (M2b); agent-aware routing and a Claude provider's model id (M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
 | `model` → URL, `anthropic_version` | Vertex AI (M4) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)) |
@@ -222,9 +222,9 @@ When a route has several eligible candidates, Wye chooses deterministically by r
 
 Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
-### Model aliases and upgrade checks (planned)
+### Model aliases and upgrade checks
 
-**Aliases (M2b).** A client asks for a stable name and config decides the model:
+**Implemented: aliases (M2b stage A).** A client asks for a stable name and config decides the model:
 
 ```toml
 [[aliases]]
@@ -234,12 +234,14 @@ model = "claude-opus-5-5"
 when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 ```
 
-- Resolution reads the top-level `model` with the existing [policy scanner](policy.md#gateway-credentials) hold (Claude Code and the SDKs send `model` first) and splices the resolved name in place of the alias; every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
-- Model permissions and pricing apply to the resolved model, the one that runs and bills. `GET /v1/models` lists aliases next to models, filtered the same way.
-- Usage records carry both `requested_model` (the alias) and `model` (as the provider reports it); `wye explain` and `policy-test` show the resolution, so a rollout is reviewed like any policy change.
+- **Resolution** reads the top-level `model` with the existing [policy scanner](policy.md#gateway-credentials) hold (Claude Code and the SDKs send `model` first; only `[[aliases]]` being configured makes the hold apply to every request) and splices the resolved name in place of the alias: the held chunks are sliced around the value, so only the new name is allocated, every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
+- **Rollout:** `when` rules match the credential's subject (exact or a prefix ending in `*`, as in model permissions); the first match wins, and callers without a credential get the alias's `model`. Resolution is one step: an alias names a model, never another alias.
+- **Policy on the model that runs:** model permissions (and pricing, M2) apply to the resolved model. `GET /v1/models` lists aliases after the catalog's models, each when the model it resolves to for that caller is permitted. Claude Code's model picker keeps only ids containing `claude` or `anthropic`, so aliases meant for it are named accordingly (`claude-coding`).
+- **Visible:** usage records carry `requested_model` (the alias) next to `model` (as the provider reports it), OTLP logs `wye.requested_model`; `wye explain` prints the resolution, and a policy test can pin the resolved model (`model = "claude-opus-5-5"` in its `.expect.toml`), so a rollout is reviewed like any policy change.
+- **Cost**, measured with every benchmark request aliased: one allocation per request for the hold (as with model permissions), one more when the name's length changes (the new `content-length`), CPU per request within noise. With aliases alone the rest of the body is not lexed: the repeated-`model` check protects permissions, which do not apply (Claude Code-shaped uploads 1.64 vs 1.49 ms per MB, within noise; with the check, 2.16).
 - An alias names one model. Mapping one name to several providers of that model is [M4](#claude-across-providers-planned-m4)'s route, not a second alias mechanism.
 
-**Upgrade checks (M2b).** Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye knows each model's breaking request changes as a rule table shipped with Wye and tested per rule, for example on Anthropic models of 2026: `thinking.budget_tokens` (rejected on Opus 4.7 and later, Sonnet 5, Haiku 5.5), non-default sampling parameters, assistant prefill (a last message with role `assistant`), forced `tool_choice` (`any` or `tool`, rejected on Opus 5.5 and Sonnet 5.5), and the deprecated `output_format`.
+**Upgrade checks (M2b stage B, planned).** Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye knows each model's breaking request changes as a rule table shipped with Wye and tested per rule, for example on Anthropic models of 2026: `thinking.budget_tokens` (rejected on Opus 4.7 and later, Sonnet 5, Haiku 5.5), non-default sampling parameters, assistant prefill (a last message with role `assistant`), forced `tool_choice` (`any` or `tool`, rejected on Opus 5.5 and Sonnet 5.5), and the deprecated `output_format`.
 
 ```toml
 [upgrade_check]
@@ -350,11 +352,16 @@ models = [                             # up to 1000; listed per caller after mod
   { id = "claude-sonnet-5-5", display_name = "Claude Sonnet 5.5", description = "Everyday coding" },
   { id = "claude-haiku-5-5" },         # display_name and description optional
 ]
+
+[[aliases]]                            # optional, up to 256: a name clients send, the model that runs
+name = "coding-default"
+model = "claude-opus-5-5"
+when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]  # first match by subject; up to 32
 ```
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, and `[discovery]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, and `[[aliases]]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
 
 ```toml
 # A route serves one native API; a request goes to the route for its endpoint.
@@ -390,10 +397,9 @@ id = "openai"
 provider = "openai"
 api_key_env = "OPENAI_API_KEY"
 
-# Model aliases (M2b) and upgrade checks: see "Model aliases and upgrade checks".
-[[aliases]]
-name = "coding-default"
-model = "claude-opus-5-5"
+# Upgrade checks (M2b stage B): see "Model aliases and upgrade checks".
+[upgrade_check]
+targets = ["claude-opus-5-5"]
 
 # Agent-aware model routing within a provider: the allowlisted `model` rewrite.
 [[routing.rules]]

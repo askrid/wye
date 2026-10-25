@@ -440,3 +440,30 @@ fn identity_provider_issuers_are_validated() {
         assert!(parse_auth(&bad).is_err(), "accepted:\n{bad}");
     }
 }
+
+#[test]
+fn aliases_parse_and_reject_duplicates() {
+    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+    assert!(parse(base).unwrap().aliases.is_none());
+    let config = parse(&format!(
+        "{base}[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
+         when = [{{ subjects = [\"canary-*\"], model = \"claude-sonnet-5-5\" }}]\n"
+    ))
+    .unwrap();
+    let aliases = config.aliases.unwrap();
+    let alias = aliases.get("coding").unwrap();
+    assert_eq!(&**alias.model_for(Some("canary-1")), "claude-sonnet-5-5");
+    assert_eq!(&**alias.model_for(Some("main")), "claude-opus-5-5");
+
+    let twice = "[[aliases]]\nname = \"a\"\nmodel = \"m\"\n";
+    assert_eq!(
+        parse(&format!("{base}{twice}{twice}")).unwrap_err(),
+        ConfigError::Invalid("aliases: duplicate name")
+    );
+    assert!(
+        parse(&format!(
+            "{base}[[aliases]]\nname = \"a\"\nmodel = \"m*\"\n"
+        ))
+        .is_err()
+    );
+}

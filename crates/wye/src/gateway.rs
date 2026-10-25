@@ -1,6 +1,7 @@
 //! Request routing, forwarding, and gateway-generated responses.
 
 use std::{
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -10,13 +11,14 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
+    alias::Aliases,
     config::Config,
     credential::Verifier,
     policy::{self, ModelPattern},
     prompt::{self, HashKey},
 };
 use http::{
-    HeaderName, HeaderValue, Method, Request, Response, StatusCode,
+    HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode,
     header::{CONTENT_LENGTH, CONTENT_TYPE},
 };
 use http_body_util::{Either, Full};
@@ -55,6 +57,10 @@ pub struct Gateway {
     max_output_tokens: Option<u64>,
     /// `GET /v1/models`, when `[discovery]` is configured.
     catalog: Option<ModelCatalog>,
+    /// `[[aliases]]`, resolved while the body's `model` is held.
+    aliases: Option<Aliases>,
+    /// Each model an alias resolves to, built once so a splice shares it.
+    alias_models: HashMap<Arc<str>, Bytes>,
     /// Request bytes held while reading `model`, across all requests.
     held_bytes: Gauge,
     max_held_request_bytes: usize,
@@ -83,9 +89,18 @@ impl Gateway {
             catalog: config.discovery.as_ref().map(|discovery| {
                 ModelCatalog::new(
                     discovery,
+                    config.aliases.as_ref(),
                     config.auth.as_ref().and_then(|auth| auth.models.as_deref()),
                 )
             }),
+            aliases: config.aliases.clone(),
+            alias_models: config
+                .aliases
+                .iter()
+                .flat_map(Aliases::iter)
+                .flat_map(|alias| alias.models())
+                .map(|model| (Arc::clone(model), Bytes::copy_from_slice(model.as_bytes())))
+                .collect(),
             held_bytes: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
@@ -180,6 +195,7 @@ impl Gateway {
             agent: AgentHeaders::from_headers(req.headers()),
             identity: None,
             prompt: None,
+            requested_model: None,
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
@@ -210,7 +226,10 @@ impl Gateway {
                 Err(_) => return unauthorized(),
             },
         };
-        let body = catalog.list(identity.as_ref().and_then(|i| i.models.as_deref()));
+        let body = catalog.list(
+            identity.as_ref().and_then(|i| i.models.as_deref()),
+            identity.as_ref().map(|i| &*i.subject),
+        );
         let mut res = Response::new(Either::Left(Full::new(body)));
         res.headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -242,8 +261,8 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
-        let (parts, body) = req.into_parts();
-        let body = match self.admit_body(body, &info).await {
+        let (mut parts, body) = req.into_parts();
+        let body = match self.admit_body(body, &mut info, &mut parts.headers).await {
             Ok(body) => body,
             Err(res) => {
                 log.gateway_error(info, res.status());
@@ -290,13 +309,16 @@ impl Gateway {
         }
     }
 
-    /// Checks the request body against model permissions and the output-token
-    /// ceiling. Without either, the body passes untouched; with one, it is held
-    /// until its `model` is read, then replayed and checked as it streams.
+    /// Resolves model aliases and checks the request body against model
+    /// permissions and the output-token ceiling. Without any of them, the
+    /// body passes untouched; otherwise it is held until its `model` is read,
+    /// then replayed (with an alias replaced by its model, and `headers`'
+    /// `content-length` adjusted) and checked as it streams.
     async fn admit_body(
         &self,
         mut body: Incoming,
-        info: &RequestInfo,
+        info: &mut RequestInfo,
+        headers: &mut HeaderMap,
     ) -> Result<RequestBody<Incoming>, Box<Response<ResBody>>> {
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
         // `max_tokens` bounds generation; count_tokens generates nothing.
@@ -308,10 +330,14 @@ impl Gateway {
                 )
             })
             .flatten();
-        if self.models.is_none() && credential_models.is_none() && token_limit.is_none() {
+        if self.models.is_none()
+            && credential_models.is_none()
+            && token_limit.is_none()
+            && self.aliases.is_none()
+        {
             return Ok(RequestBody::new(body));
         }
-        let held = hold_until_model(
+        let mut held = hold_until_model(
             &mut body,
             &self.held_bytes,
             self.max_held_request_bytes,
@@ -320,9 +346,40 @@ impl Gateway {
         )
         .await
         .map_err(|e| Box::new(hold_error(e)))?;
-        let allowed = held
-            .model()
-            .is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
+        // Permissions and pricing apply to the model that runs.
+        let alias = self
+            .aliases
+            .as_ref()
+            .zip(held.model())
+            .and_then(|(aliases, model)| aliases.get(model));
+        let resolved = alias.map(|alias| {
+            let subject = info.identity.as_ref().map(|i| &*i.subject);
+            (
+                Arc::clone(alias.name()),
+                Arc::clone(alias.model_for(subject)),
+            )
+        });
+        if let Some((name, model)) = &resolved {
+            let spliced = self
+                .alias_models
+                .get(model)
+                .and_then(|bytes| held.splice_model(bytes));
+            let Some(delta) = spliced else {
+                return Err(Box::new(error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "api_error",
+                    "model alias could not be applied",
+                )));
+            };
+            adjust_content_length(headers, delta);
+            info.requested_model = Some(Arc::clone(name));
+        }
+        if self.models.is_none() && credential_models.is_none() && token_limit.is_none() {
+            held.skip_rest_check();
+        }
+        let model = resolved.as_ref().map(|(_, m)| &**m).or(held.model());
+        let allowed =
+            model.is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
         if !allowed {
             return Err(Box::new(error(
                 StatusCode::FORBIDDEN,
@@ -341,6 +398,24 @@ impl Gateway {
             )));
         }
         Ok(RequestBody::after_hold(held, body))
+    }
+}
+
+/// Keeps a declared `content-length` true after the body changed by `delta`
+/// bytes; a chunked body has none to fix.
+fn adjust_content_length(headers: &mut HeaderMap, delta: i64) {
+    if delta == 0 {
+        return;
+    }
+    let Some(len) = headers
+        .get(CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return;
+    };
+    if let Some(len) = len.checked_add_signed(delta) {
+        headers.insert(CONTENT_LENGTH, HeaderValue::from(len));
     }
 }
 

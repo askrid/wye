@@ -13,10 +13,10 @@ use http::{
 
 mod validate;
 
-use crate::policy::ModelPattern;
+use crate::{alias::Aliases, policy::ModelPattern};
 use validate::{
-    RawConfig, env_name, validate_auth, validate_discovery, validate_server, validate_telemetry,
-    validate_upstream,
+    RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_server,
+    validate_telemetry, validate_upstream,
 };
 
 /// Request bytes held process-wide while reading `model` for permissions.
@@ -47,6 +47,8 @@ pub struct Config {
     pub telemetry: Option<Telemetry>,
     /// Models listed at `GET /v1/models`; without it the endpoint is absent.
     pub discovery: Option<Discovery>,
+    /// `[[aliases]]`: names clients send, resolved to the model that runs.
+    pub aliases: Option<Aliases>,
 }
 
 /// Most catalog entries: Claude Code asks for `limit=1000`, and Wye serves
@@ -343,6 +345,7 @@ impl Config {
             .transpose()?;
         let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
         let discovery = raw.discovery.map(validate_discovery).transpose()?;
+        let aliases = validate_aliases(raw.aliases)?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
@@ -350,6 +353,7 @@ impl Config {
             cache_diagnostics,
             telemetry,
             discovery,
+            aliases,
         })
     }
 }

@@ -11,7 +11,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 | M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5–6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Open: published binaries and images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
 | M1b: agent-aware visibility | A1–A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
 | M2: cost policy | Pricing format designed ([policy.md](policy.md#pricing-metadata)); cache-miss diagnostics done early (opt-in, sampled per session). Pricing, cost bound, provider-held budgets, `wye explain` cost output not started |
-| M2b: model aliases and upgrade checks | Designed ([architecture.md](architecture.md#model-aliases-and-upgrade-checks-planned)); not started |
+| M2b: model aliases and upgrade checks | Stage A done: `[[aliases]]` with per-subject rollout, spliced in place, in `GET /v1/models`, usage records, `explain`, and policy tests. Stage B (upgrade checks) designed ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)) |
 | M3: Codex | Not started |
 | M4: Claude across providers and accounts | Designed ([architecture.md](architecture.md#claude-across-providers-planned-m4)); not started |
 | M5–M6 | Not started |
@@ -82,11 +82,11 @@ Turns the signals Claude Code sends gateways into attribution and explanations (
 
 ### M2b: model aliases and upgrade checks
 
-Takes model choice and model upgrades out of client code ([design](architecture.md#model-aliases-and-upgrade-checks-planned)).
+Takes model choice and model upgrades out of client code ([design](architecture.md#model-aliases-and-upgrade-checks)).
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| A | `[[aliases]]` with per-subject rollout, resolved by the existing model hold and spliced in place; permissions and pricing on the resolved model; aliases in `GET /v1/models`; `requested_model` in records; `explain` and `policy-test` show resolution | Splice property-tested (only the value changes, `content-length` matches); non-alias requests unchanged and no gated metric worse without `[[aliases]]` |
+| A (done) | `[[aliases]]` with per-subject rollout, resolved by the existing model hold and spliced in place; permissions and pricing on the resolved model; aliases in `GET /v1/models`; `requested_model` in records; `explain` and `policy-test` show resolution | Splice property-tested (only the value changes, `content-length` matches); non-alias requests unchanged and no gated metric worse without `[[aliases]]` |
 | B | Upgrade-check rule table for current Anthropic models with a test per rule; sampled body scan; `upgrade_issues` in records, `wye.upgrade.issues` in OTLP, `explain --target-model`, `wye report` by client | Each rule caught on a fixture, none on a clean request; scan cost per MB measured and within the diagnostics budget when sampled |
 
 **Exit:** a team moves a model alias for all its services by one reviewed config change, after the upgrade check showed no failing client.

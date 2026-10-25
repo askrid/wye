@@ -192,5 +192,5 @@ fn example_policy_tests_pass() {
         Config::from_toml_str(&std::fs::read_to_string(dir.join("wye.toml")).unwrap()).unwrap();
     let (report, passed) = wye::policy_test(&config, &dir, 0).unwrap();
     assert!(passed, "{report}");
-    assert!(report.ends_with("3 passed, 0 failed\n"), "{report}");
+    assert!(report.ends_with("4 passed, 0 failed\n"), "{report}");
 }

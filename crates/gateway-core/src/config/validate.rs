@@ -9,6 +9,7 @@ use http::{
 use serde::Deserialize;
 
 use super::*;
+use crate::alias::{Alias, AliasError};
 
 mod auth;
 
@@ -23,6 +24,24 @@ pub(super) struct RawConfig {
     pub(super) cache_diagnostics: Option<RawCacheDiagnostics>,
     pub(super) telemetry: Option<RawTelemetry>,
     pub(super) discovery: Option<RawDiscovery>,
+    #[serde(default)]
+    pub(super) aliases: Vec<RawAlias>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAlias {
+    pub(super) name: String,
+    pub(super) model: String,
+    #[serde(default)]
+    pub(super) when: Vec<RawAliasRule>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawAliasRule {
+    pub(super) subjects: Vec<String>,
+    pub(super) model: String,
 }
 
 #[derive(Deserialize)]
@@ -232,6 +251,28 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
             name => name.unwrap_or_else(|| "wye".to_owned()),
         },
     })
+}
+
+pub(super) fn validate_aliases(raw: Vec<RawAlias>) -> Result<Option<Aliases>, ConfigError> {
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let aliases = raw
+        .into_iter()
+        .map(|alias| {
+            Alias::new(
+                &alias.name,
+                &alias.model,
+                alias
+                    .when
+                    .into_iter()
+                    .map(|rule| (rule.subjects, rule.model)),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(Aliases::new)
+        .map_err(|AliasError(reason)| ConfigError::Invalid(reason))?;
+    Ok(Some(aliases))
 }
 
 pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigError> {

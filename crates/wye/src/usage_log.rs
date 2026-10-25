@@ -84,6 +84,8 @@ pub(crate) struct RequestInfo {
     pub identity: Option<Arc<Identity>>,
     /// Filled with the request body's prompt hashes when cache diagnostics are on.
     pub prompt: Option<PromptSlot>,
+    /// The alias the request named, when one was resolved.
+    pub requested_model: Option<Arc<str>>,
     pub started: Instant,
 }
 
