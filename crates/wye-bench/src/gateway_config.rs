@@ -159,11 +159,15 @@ pub(crate) fn litellm_config(upstream_base_url: &str) -> String {
 }
 
 /// Bifrost with one Anthropic key and no stores (no config or log database,
-/// no request logging), retries off, and provider workers above the
+/// no request logging), retries off, the pool and queue sizes of Bifrost's own
+/// published benchmark (t3.xlarge), and provider workers above this
 /// benchmark's peak (2,000 streams plus uploads), so neither queueing nor
-/// bookkeeping is measured; object pools stay at their default size. `ca_pem` is the
-/// upstream's CA, trusted for provider connections.
+/// bookkeeping is measured. `ca_pem` is the upstream's CA, trusted for
+/// provider connections. `WYE_BENCH_BIFROST_POOLS=default` keeps Bifrost's
+/// default pool and queue sizes instead: the published sizes are allocated up
+/// front and inflate its memory.
 pub(crate) fn bifrost_config(upstream_base_url: &str, ca_pem: Option<&str>) -> String {
+    let published = std::env::var("WYE_BENCH_BIFROST_POOLS").as_deref() != Ok("default");
     let mut network = serde_json::json!({
         "base_url": upstream_base_url,
         "max_retries": 0,
@@ -173,19 +177,26 @@ pub(crate) fn bifrost_config(upstream_base_url: &str, ca_pem: Option<&str>) -> S
     if let Some(pem) = ca_pem {
         network["ca_cert_pem"] = pem.into();
     }
+    let mut client = serde_json::json!({
+        "enable_logging": false,
+        "disable_content_logging": true,
+        "drop_excess_requests": false,
+    });
+    if published {
+        client["initial_pool_size"] = 15_000.into();
+    }
     serde_json::json!({
-        "client": {
-            "enable_logging": false,
-            "disable_content_logging": true,
-            "drop_excess_requests": false,
-        },
+        "client": client,
         "config_store": {"enabled": false},
         "logs_store": {"enabled": false},
         "providers": {
             "anthropic": {
                 "keys": [{"name": "bench", "value": "sk-bench-upstream", "models": ["bench"], "weight": 1.0}],
                 "network_config": network,
-                "concurrency_and_buffer_size": {"concurrency": 4_000, "buffer_size": 8_000},
+                "concurrency_and_buffer_size": {
+                    "concurrency": 4_000,
+                    "buffer_size": if published { 20_000 } else { 8_000 },
+                },
             }
         }
     })

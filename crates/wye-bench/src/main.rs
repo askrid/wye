@@ -15,6 +15,7 @@
 //! metrics (`alloc_` prefix).
 //! `WYE_BENCH_UPSTREAM` appends lines to Wye's `[upstream]` config, for tuning experiments.
 //! `WYE_BENCH_GATEWAY_LOG=1` writes each gateway's output to a log next to its config.
+//! `WYE_BENCH_BIFROST_POOLS=default` runs Bifrost with its default pool sizes.
 //!
 //! Usage:
 //!
