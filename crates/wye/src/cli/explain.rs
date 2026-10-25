@@ -28,6 +28,9 @@ pub struct Explanation {
     pub steps: Vec<String>,
     /// `Some((status, error type, message))` when the request is refused.
     pub refused: Option<(u16, &'static str, String)>,
+    /// The model the request runs on, after alias resolution, when the body
+    /// was read.
+    pub model: Option<String>,
 }
 
 impl Explanation {
@@ -60,6 +63,7 @@ pub fn explain(
     let mut out = Explanation {
         steps: Vec::new(),
         refused: None,
+        model: None,
     };
     if !matches!(path, "/v1/messages" | "/v1/messages/count_tokens") {
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
@@ -115,7 +119,7 @@ pub fn explain(
             .collect::<Vec<_>>()
             .join(", "),
     };
-    // The server reads the body once, for both checks, whenever either applies.
+    // The server reads the body once, for every check, whenever one applies.
     let token_limit = (path == "/v1/messages")
         .then(|| {
             policy::token_limit(
@@ -124,15 +128,32 @@ pub fn explain(
             )
         })
         .flatten();
-    if configured.is_none() && granted.is_none() && token_limit.is_none() {
-        out.step("model permissions and token ceiling: none apply; the body is not read".into());
+    if configured.is_none()
+        && granted.is_none()
+        && token_limit.is_none()
+        && config.aliases.is_none()
+    {
+        out.step(
+            "model aliases, permissions, and token ceiling: none apply; the body is not read"
+                .into(),
+        );
     } else {
         let mut scanner = PolicyScanner::new();
         scanner.feed(body);
-        let requested = match scanner.finish() {
+        let mut requested = match scanner.finish() {
             Ok(m) => m.to_owned(),
             Err(e) => return out.refuse(400, "invalid_request_error", e.to_string()),
         };
+        if let Some(alias) = config.aliases.as_ref().and_then(|a| a.get(&requested)) {
+            let subject = identity.as_ref().map(|i| &*i.subject);
+            let resolved = alias.model_for(subject);
+            out.step(format!(
+                "alias: {requested} resolves to {resolved}{}; the body names {resolved} upstream",
+                subject.map_or(String::new(), |s| format!(" for subject {s}"))
+            ));
+            requested = resolved.to_string();
+        }
+        out.model = Some(requested.clone());
         out.step(format!(
             "model: {requested}; allowed by config: {}; by credential: {}",
             list(configured),
@@ -372,5 +393,30 @@ mod tests {
             )),
             Some((400, "invalid_request_error"))
         );
+    }
+
+    #[test]
+    fn explains_alias_resolution_before_permissions() {
+        let config = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+             [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
+        )
+        .unwrap();
+        let report = explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            None,
+            br#"{"model":"coding"}"#,
+            NOW,
+        )
+        .report();
+        assert!(
+            report.contains("alias: coding resolves to claude-opus-5-5;"),
+            "{report}"
+        );
+        assert!(report.contains("model: claude-opus-5-5;"), "{report}");
+        assert!(report.ends_with("decision: forward\n"), "{report}");
     }
 }

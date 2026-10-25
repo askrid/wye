@@ -49,7 +49,7 @@ In this order ([roadmap.md](roadmap.md)):
 
 1. **Cost (M2):** pricing in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report`.
 2. **Packaging:** published binaries and images, a Compose example.
-3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks-planned)).
+3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks)).
 4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)).
 
 ### Later
@@ -111,7 +111,7 @@ Landscape as of 2026-10; competitor features change quickly and should be re-che
 
 **Weaknesses**
 
-- **One API, one upstream so far.** Anthropic Messages to one Anthropic account; no OpenAI, no aliases, no multi-provider Claude, no failover yet.
+- **One API, one upstream so far.** Anthropic Messages to one Anthropic account; no OpenAI, no multi-provider Claude, no failover yet.
 - **Tokens, not dollars.** No pricing yet (M2).
 - **Not packaged.** Build from source; no published binaries or images. This works against "easy to use" more than any missing feature.
 - **No cumulative limits by design:** budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
