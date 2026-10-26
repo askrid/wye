@@ -308,7 +308,7 @@ impl Metrics {
                 &[
                     ("gen_ai.token.type", Some(Value::Str(s.kind))),
                     ("gen_ai.response.model", Some(Value::Str(&s.model))),
-                    ("claude_code.request_class", s.request_class.map(Value::Str)),
+                    ("wye.request_class", s.request_class.map(Value::Str)),
                     ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
                 ],
             );
@@ -333,7 +333,7 @@ impl Metrics {
                 &mut buf,
                 &[
                     ("gen_ai.response.model", Some(Value::Str(&s.model))),
-                    ("claude_code.request_class", s.request_class.map(Value::Str)),
+                    ("wye.request_class", s.request_class.map(Value::Str)),
                     ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
                 ],
             );
@@ -367,10 +367,7 @@ impl Metrics {
         );
         for (i, (name, count)) in self.tool_calls.iter().enumerate() {
             point_start(&mut buf, i, &times, *count);
-            attributes(
-                &mut buf,
-                &[("claude_code.tool.name", Some(Value::Str(name)))],
-            );
+            attributes(&mut buf, &[("gen_ai.tool.name", Some(Value::Str(name)))]);
         }
         buf.extend_from_slice(b"]}},");
 
