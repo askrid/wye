@@ -41,3 +41,28 @@ async fn reports_each_problem_and_what_works() {
     );
     assert!(report.ends_with("2 problems\n"), "{report}");
 }
+
+#[tokio::test]
+async fn a_bedrock_upstream_needs_the_anthropic_path() {
+    // Nothing listens on port 1: only the path check is asserted.
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
+         [[routes.claude.upstreams]]\nid = \"right\"\nprovider = \"bedrock\"\n\
+         base_url = \"http://127.0.0.1:1/anthropic\"\napi_key_env = \"PATH\"\n\
+         [[routes.claude.upstreams]]\nid = \"wrong\"\nprovider = \"bedrock\"\n\
+         base_url = \"http://127.0.0.1:1\"\napi_key_env = \"PATH\"\n",
+    )
+    .unwrap();
+    let (report, _) = doctor(&config, Path::new(".")).await;
+    assert!(
+        report.contains("ok    upstream right: Bedrock Messages endpoint path"),
+        "{report}"
+    );
+    assert!(
+        report.contains(
+            "FAIL  upstream wrong: Bedrock's Messages endpoint is under /anthropic: \
+             base_url = \"http://127.0.0.1:1/anthropic\""
+        ),
+        "{report}"
+    );
+}

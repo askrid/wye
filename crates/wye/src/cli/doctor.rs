@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    config::{Config, Upstream, UpstreamCredential},
+    config::{Config, Provider, Upstream, UpstreamCredential},
     prompt::HashKey,
 };
 use http::{Request, Uri};
@@ -44,6 +44,7 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
                 .as_deref()
                 .map_or_else(|| "[upstream]".to_owned(), |id| format!("upstream {id}"));
             checks.push(credential(&name, upstream, config_dir));
+            checks.extend(endpoint_path(&name, upstream));
             checks.push(reachable(&name, upstream, config_dir).await);
         }
     }
@@ -107,6 +108,22 @@ fn fail(line: impl Into<String>) -> Check {
         ok: false,
         line: line.into(),
     }
+}
+
+/// A Bedrock upstream's base URL ends in `/anthropic`, where its Messages
+/// endpoint is (VPC endpoints too); `None` for other providers.
+fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
+    (upstream.provider == Provider::Bedrock).then(|| {
+        if upstream.path_prefix.ends_with("/anthropic") {
+            pass(format!("{name}: Bedrock Messages endpoint path"))
+        } else {
+            fail(format!(
+                "{name}: Bedrock's Messages endpoint is under /anthropic: \
+                 base_url = \"{}://{}/anthropic\"",
+                upstream.scheme, upstream.authority
+            ))
+        }
+    })
 }
 
 /// The provider credential is present, without printing it.
