@@ -52,8 +52,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # sessions between accounts. Every [upstream] field above works per entry,
 # except forward_caller_credential.
 # [routes.claude]
-# A refused request (rate limit, overload, connection refused, before any
-# response byte) goes to the session's next account in the same turn:
+# A refused request (rate limit, overload, a connection refused or cut before
+# the body was sent whole; never after a response byte) goes to the session's
+# next account in the same turn:
 # failover = ["429", "529", "connect"]
 # [[routes.claude.upstreams]]
 # id = "team-a"

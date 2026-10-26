@@ -35,6 +35,17 @@ pub(crate) struct Unsent<B> {
     /// The kept bytes, counted against the process-wide bound.
     budget: Held,
     bytes: usize,
+    /// The attempt delivered every byte: nothing was left to replay and the
+    /// client's body was read to its end.
+    whole: bool,
+}
+
+impl<B> Unsent<B> {
+    /// Whether the attempt delivered the whole body. When it did not, the
+    /// provider cannot have received a complete request.
+    pub(crate) fn sent_whole(&self) -> bool {
+        self.whole
+    }
 }
 
 impl<B> Unsent<RequestBody<B>> {
@@ -89,6 +100,8 @@ struct Keep<B> {
     sent: Vec<Bytes>,
     budget: Held,
     bytes: usize,
+    /// The client's body was read to its end in this attempt.
+    ended: bool,
     bounds: Bounds,
     back: oneshot::Sender<Unsent<B>>,
 }
@@ -123,6 +136,7 @@ impl<B> FailoverBody<B> {
                 rest: Some(inner),
                 budget: held.hold_none(),
                 bytes: 0,
+                whole: false,
             },
             bounds,
         )
@@ -139,6 +153,7 @@ impl<B> FailoverBody<B> {
                     sent: Vec::new(),
                     budget: unsent.budget,
                     bytes: unsent.bytes,
+                    ended: false,
                     bounds,
                     back,
                 })),
@@ -170,7 +185,8 @@ where
         let Some(rest) = this.rest.as_mut() else {
             return Poll::Ready(None);
         };
-        let polled = Pin::new(rest).poll_frame(cx);
+        let polled = Pin::new(&mut *rest).poll_frame(cx);
+        let at_end = rest.is_end_stream();
         match &polled {
             Poll::Ready(Some(Ok(frame))) => {
                 if let (Some(data), Some(keep)) = (frame.data_ref(), this.keep.as_mut()) {
@@ -179,6 +195,7 @@ where
                     if fits {
                         keep.bytes += data.len();
                         keep.sent.push(data.clone());
+                        keep.ended = at_end;
                     } else {
                         this.keep = None;
                     }
@@ -227,9 +244,11 @@ impl<B> Drop for FailoverBody<B> {
             sent,
             budget,
             bytes,
+            ended,
             back,
             ..
         } = *keep;
+        let whole = replay.is_empty() && (ended || self.rest.is_none());
         let mut chunks: VecDeque<Bytes> = sent.into();
         chunks.extend(replay);
         // A receiver gone means the request is answered; the bytes are dropped.
@@ -238,6 +257,7 @@ impl<B> Drop for FailoverBody<B> {
             rest: self.rest.take(),
             budget,
             bytes,
+            whole,
         });
     }
 }
