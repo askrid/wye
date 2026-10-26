@@ -170,3 +170,21 @@ fn claude_platform_on_aws_needs_a_workspace() {
         assert!(err.contains(expected), "{extra}: {err}");
     }
 }
+
+#[test]
+fn pricing_scoped_to_upstreams_names_route_upstreams() {
+    let route = format!(
+        "[[routes.claude.upstreams]]\nid = \"aws-east\"\n{ACCOUNT}\
+         [pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"claude-*\"]\n\
+         input = \"1\"\noutput = \"2\"\nupstreams = [\"UPSTREAM\"]\n"
+    );
+    let ok = parse_route(&route.replace("UPSTREAM", "aws-east")).unwrap();
+    assert_eq!(&*ok.pricing.unwrap().entries[0].upstreams[0], "aws-east");
+    let err = parse_route(&route.replace("UPSTREAM", "aws-wset"))
+        .map(|_| ())
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("must name a route upstream"),
+        "{err}"
+    );
+}

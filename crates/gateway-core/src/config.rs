@@ -433,6 +433,18 @@ impl Config {
         let discovery = raw.discovery.map(validate_discovery).transpose()?;
         let aliases = validate_aliases(raw.aliases)?;
         let pricing = raw.pricing.map(validate_pricing).transpose()?;
+        // A price scoped to an upstream the routes do not have would never apply.
+        if let Some(pricing) = &pricing
+            && pricing
+                .entries
+                .iter()
+                .flat_map(|e| &e.upstreams)
+                .any(|id| !routes.upstreams().any(|u| u.id.as_deref() == Some(&**id)))
+        {
+            return Err(ConfigError::Invalid(
+                "pricing.models.upstreams: every id must name a route upstream",
+            ));
+        }
         let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
