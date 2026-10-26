@@ -182,7 +182,11 @@ async fn a_handed_back_body_respells_its_model_wherever_it_is() {
                 drop(body);
                 let mut unsent = handback.await.unwrap();
                 let straddles = span.start < sent && sent < span.end;
-                assert_eq!(unsent.respell(&span, &value), !straddles, "{parts:?}");
+                assert_eq!(
+                    unsent.respell(&span, value.clone()),
+                    !straddles,
+                    "{parts:?}"
+                );
                 let (again, next) = FailoverBody::resume(unsent, ROOMY);
                 let got = collect(again).await;
                 drop(next);

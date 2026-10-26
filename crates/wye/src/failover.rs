@@ -42,7 +42,7 @@ impl<B> Unsent<RequestBody<B>> {
     /// with `value`, wherever they are: in what was sent, or still in the
     /// unread rest. `false` when the value straddles the two, so the body
     /// cannot be re-spelled.
-    pub(crate) fn respell(&mut self, span: &Range<u64>, value: &Bytes) -> bool {
+    pub(crate) fn respell(&mut self, span: &Range<u64>, value: Bytes) -> bool {
         let sent: u64 = self.chunks.iter().map(|c| c.len() as u64).sum();
         let delta = value.len() as i64 - (span.end - span.start) as i64;
         if span.end <= sent {
