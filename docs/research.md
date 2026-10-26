@@ -279,7 +279,7 @@ Proposal: a signed receipt per request (subject, session, model, status, reporte
 
 ### 5. Queryable and provable policy
 
-Beyond `wye explain` for one request: "who can reach Opus?", and a CI check that fails when a config change widens access (Zelkova-style analysis over static config).
+Beyond `wye explain` for one request: "who can reach Opus?", and a CI check that fails when a config change widens access (Zelkova-style analysis over static config). The CI check is built as `wye policy-diff` ([operations.md](operations.md#cli)): model patterns compare by coverage, ceilings and trusted signers by value. Open: the question form ("which subjects or grants reach this model?"), which needs the credential side as data.
 
 ### 6. Provable cost bound
 

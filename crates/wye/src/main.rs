@@ -14,6 +14,7 @@ const USAGE: &str = "usage:
   wye doctor --config <path>
   wye init [--subscription] [--anthropic-key-env <name>] [--openai-key-env <name>] [--out <path>]
   wye policy-test --config <path> <dir>
+  wye policy-diff <old-config> <new-config>   (exit 3 when access widens)
   wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
@@ -57,6 +58,14 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             let (report, passed) = wye::policy_test(&load(path)?, Path::new(dir), now)?;
             print!("{report}");
             if !passed {
+                std::process::exit(3);
+            }
+            Ok(())
+        }
+        ["policy-diff", old, new] => {
+            let diff = wye::policy_diff(&load(old)?, &load(new)?);
+            print!("{}", diff.report());
+            if diff.widens() {
                 std::process::exit(3);
             }
             Ok(())
