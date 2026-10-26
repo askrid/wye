@@ -663,3 +663,39 @@ fn base_url_ending_in_v1_is_refused() {
     }
     assert!(parse("base_url = \"https://gw.example.com/v1beta\"\napi_key_env = \"K\"").is_ok());
 }
+
+#[test]
+fn claude_platform_on_aws_needs_a_workspace() {
+    let entry = |extra: &str| {
+        format!(
+            "[[routes.claude.upstreams]]\nid = \"aws\"\n{extra}\n\
+             base_url = \"https://aws-external-anthropic.us-west-2.api.aws\"\napi_key_env = \"K\"\n"
+        )
+    };
+    let ok = parse_route(&entry(
+        "provider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCdEf23GhIj\"",
+    ))
+    .unwrap();
+    let upstream = &claude(&ok).upstreams()[0];
+    assert_eq!(upstream.provider, Provider::ClaudePlatformAws);
+    assert_eq!(
+        upstream.workspace_id.as_deref(),
+        Some("wrkspc_01AbCdEf23GhIj")
+    );
+    let refused = [
+        ("provider = \"claude-platform-aws\"", "needs workspace_id"),
+        (
+            "provider = \"claude-platform-aws\"\nworkspace_id = \"ws-1\"",
+            "wrkspc_ followed by",
+        ),
+        ("workspace_id = \"wrkspc_1\"", "claude-platform-aws\" only"),
+        ("provider = \"bedrock\"", "Bedrock and Vertex are planned"),
+    ];
+    for (extra, expected) in refused {
+        let err = parse_route(&entry(extra))
+            .map(|_| ())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(expected), "{extra}: {err}");
+    }
+}

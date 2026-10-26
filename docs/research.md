@@ -29,6 +29,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | Codex's transport and base-URL support for Responses | M3 | Read from Codex's source (970111f) and gateway guide, 2026-10-26 ([architecture.md](architecture.md#codex-integration)); one real Codex session through Wye still open |
 | OpenAI `input_tokens` include `cached_tokens`; reasoning tokens are part of `output_tokens` | Responses cost | OpenAI API reference; one recorded response with a cache hit |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` default | SDK conformance tests |
+| Bedrock's Messages endpoint takes its API key in `x-api-key` (Anthropic's page) or `Authorization: Bearer` (AWS's page) | Bedrock provider (M4 stage 12) | One request with each |
 | Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-planned-m4)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |
 | `429`/`529` from each Claude provider means the request was not processed | Failover without duplicate billing | Provider docs; billing records |

@@ -274,6 +274,9 @@ pub struct Upstream {
     /// Share of affinity keys, relative to the route's other upstreams.
     pub weight: u32,
     pub provider: Provider,
+    /// The `anthropic-workspace-id` sent with every request; set exactly
+    /// for [`Provider::ClaudePlatformAws`].
+    pub workspace_id: Option<Box<str>>,
     pub scheme: Scheme,
     pub authority: Authority,
     /// Base path without a trailing slash; empty for a bare origin.
@@ -294,6 +297,10 @@ pub struct Upstream {
 pub enum Provider {
     /// Anthropic's API: the key goes in `x-api-key`.
     Anthropic,
+    /// Claude Platform on AWS: Anthropic's API, operated by Anthropic in
+    /// AWS; the key goes in `Authorization: Bearer`, and every request names
+    /// the workspace (`anthropic-workspace-id`).
+    ClaudePlatformAws,
     /// OpenAI's API: the key goes in `Authorization: Bearer`.
     OpenAi,
 }

@@ -51,6 +51,7 @@ type UpstreamClient =
     Client<HttpsConnector<HttpConnector>, PromptBody<UpgradeBody<Limited<SendBody>>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
+const WORKSPACE_ID: HeaderName = HeaderName::from_static("anthropic-workspace-id");
 /// Asked of the upstream instead of the caller's `accept-encoding`: Wye
 /// reads usage, models, and tool calls from the response bytes it relays,
 /// and Anthropic compresses responses (Brotli) when Claude Code asks for it.
@@ -147,6 +148,8 @@ const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
 pub(crate) struct Upstream {
     /// The route's name for it, in usage records; `None` for `[upstream]`.
     pub(crate) id: Option<Arc<str>>,
+    /// `anthropic-workspace-id` for Claude Platform on AWS, built once.
+    workspace: Option<HeaderValue>,
     clients: ClientPool,
     scheme: Scheme,
     authority: Authority,
@@ -177,6 +180,12 @@ impl Upstream {
         };
         Ok(Self {
             id: config.id.as_deref().map(Arc::from),
+            workspace: match config.workspace_id.as_deref() {
+                Some(id) => {
+                    Some(HeaderValue::from_str(id).map_err(|_| StartupError::InvalidApiKey)?)
+                }
+                None => None,
+            },
             clients: ClientPool::new(|| {
                 Client::builder(TokioExecutor::new())
                     .http2_initial_stream_window_size(STREAM_WINDOW)
@@ -224,6 +233,9 @@ impl Upstream {
                 parts.headers.insert(AUTHORIZATION, value.clone());
             }
             UpstreamAuth::ForwardCaller => {}
+        }
+        if let Some(workspace) = &self.workspace {
+            parts.headers.insert(WORKSPACE_ID, workspace.clone());
         }
         let body = PromptBody::new(
             UpgradeBody::new(Limited::new(body, max_body_bytes), upgrade),

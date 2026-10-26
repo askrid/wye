@@ -37,6 +37,7 @@ pub(crate) struct RawUpstream {
     pub(crate) id: Option<String>,
     pub(crate) provider: Option<String>,
     pub(crate) weight: Option<u32>,
+    pub(crate) workspace_id: Option<String>,
     pub(crate) base_url: String,
     pub(crate) api_key_env: Option<String>,
     pub(crate) api_key_file: Option<PathBuf>,
@@ -58,9 +59,14 @@ pub(crate) fn validate_routes(
     let (claude, openai) = routes.map_or((None, None), |r| (r.claude, r.openai));
     let claude = match (single, claude) {
         (Some(raw), None) => {
-            if raw.id.is_some() || raw.provider.is_some() || raw.weight.is_some() {
+            if raw.id.is_some()
+                || raw.provider.is_some()
+                || raw.weight.is_some()
+                || raw.workspace_id.is_some()
+            {
                 return Err(ConfigError::Invalid(
-                    "upstream: id, provider, and weight belong in [[routes.claude.upstreams]]",
+                    "upstream: id, provider, weight, and workspace_id belong in \
+                     [[routes.claude.upstreams]]",
                 ));
             }
             Some(Route::new(
@@ -189,21 +195,42 @@ fn validate_route_upstreams(
         if upstreams.iter().any(|u| u.id.as_deref() == Some(&*id)) {
             return Err(in_entry(ConfigError::Invalid("id is used twice")));
         }
-        match (provider, entry.provider.as_deref()) {
-            (_, None)
-            | (Provider::Anthropic, Some("anthropic"))
-            | (Provider::OpenAi, Some("openai")) => {}
-            (Provider::Anthropic, Some(_)) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "provider must be \"anthropic\" (other Claude providers are planned)",
-                )));
-            }
+        let provider = match (provider, entry.provider.as_deref()) {
+            (default, None) => default,
+            (Provider::Anthropic, Some("anthropic")) => Provider::Anthropic,
+            (Provider::Anthropic, Some("claude-platform-aws")) => Provider::ClaudePlatformAws,
+            (Provider::OpenAi, Some("openai")) => Provider::OpenAi,
             (Provider::OpenAi, Some(_)) => {
                 return Err(in_entry(ConfigError::Invalid(
                     "provider must be \"openai\"",
                 )));
             }
-        }
+            (_, Some(_)) => {
+                return Err(in_entry(ConfigError::Invalid(
+                    "provider must be \"anthropic\" or \"claude-platform-aws\" (Bedrock and \
+                     Vertex are planned)",
+                )));
+            }
+        };
+        let workspace_id = match (provider, entry.workspace_id.take()) {
+            (Provider::ClaudePlatformAws, Some(id)) if is_workspace_id(&id) => Some(id.into()),
+            (Provider::ClaudePlatformAws, Some(_)) => {
+                return Err(in_entry(ConfigError::Invalid(
+                    "workspace_id must be wrkspc_ followed by letters and digits",
+                )));
+            }
+            (Provider::ClaudePlatformAws, None) => {
+                return Err(in_entry(ConfigError::Invalid(
+                    "claude-platform-aws needs workspace_id: every request names its workspace",
+                )));
+            }
+            (_, Some(_)) => {
+                return Err(in_entry(ConfigError::Invalid(
+                    "workspace_id belongs to provider \"claude-platform-aws\" only",
+                )));
+            }
+            (_, None) => None,
+        };
         let weight = match entry.weight {
             None => 1,
             Some(w @ 1..=MAX_WEIGHT) => w,
@@ -222,9 +249,17 @@ fn validate_route_upstreams(
         let mut upstream = validate_upstream(entry, provider).map_err(in_entry)?;
         upstream.id = Some(id.into());
         upstream.weight = weight;
+        upstream.workspace_id = workspace_id;
         upstreams.push(upstream);
     }
     Ok(upstreams)
+}
+
+/// A Claude Platform on AWS workspace id (`wrkspc_01AbCd...`): sent as a header.
+fn is_workspace_id(id: &str) -> bool {
+    id.strip_prefix("wrkspc_").is_some_and(|rest| {
+        (1..=64).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
 }
 
 /// Ids appear in telemetry attributes: short, printable, no separators.
@@ -267,6 +302,7 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
         id: None,
         weight: 1,
         provider,
+        workspace_id: None,
         scheme,
         authority,
         path_prefix,

@@ -70,3 +70,41 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
     }
     assert_eq!(used, [true, true], "16 sessions all landed on one upstream");
 }
+
+#[tokio::test]
+async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
+    let (tx, mut rx) = mpsc::channel(2);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send(seen.headers).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"aws\"\n\
+         provider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCd\"\n\
+         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![UpstreamResources::new(
+            UpstreamAuth::bearer("aws-short-term-key").unwrap(),
+        )],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h = Harness::launch_config(&config, resources, hits).await;
+    let res = h
+        .send(messages().header("x-api-key", "client-key"), "{}")
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
+    let headers = rx.recv().await.unwrap();
+    assert_eq!(headers["authorization"], "Bearer aws-short-term-key");
+    assert_eq!(headers["anthropic-workspace-id"], "wrkspc_01AbCd");
+    assert!(headers.get("x-api-key").is_none());
+}
