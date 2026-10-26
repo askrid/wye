@@ -135,6 +135,10 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         let json = serde_json::to_string(issues).unwrap_or_default();
         attribute("wye.upgrade_issues", Value::Str(&json));
     }
+    if !line.failovers.is_empty() {
+        let json = serde_json::to_string(line.failovers).unwrap_or_default();
+        attribute("wye.failovers", Value::Str(&json));
+    }
     if let Some(miss) = line.cache_miss {
         attribute("wye.cache_miss", Value::Str(miss));
     }
@@ -322,6 +326,7 @@ mod tests {
             cache_miss: None,
             prompt: None,
             upgrade_issues: None,
+            failovers: &[],
         }
     }
 

@@ -12,6 +12,7 @@ use gateway_core::{
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
     prompt,
+    route::Select,
     upgrade::{self, UpgradeScanner},
 };
 
@@ -209,19 +210,44 @@ pub fn explain(
         .or(identity.as_ref().map(|i| i.subject.as_bytes()))
         .unwrap_or_default();
     let upstreams = route.upstreams();
-    let Some(upstream) = upstreams.get(route.pick(key)) else {
+    let Some(upstream) = upstreams.get(route.rank(key).first()) else {
         unreachable!("a route has at least one upstream")
     };
     if let Some(id) = &upstream.id {
         out.upstream = Some(id.to_string());
-        out.step(format!(
-            "route: upstream {id} of {} (cache_affine by {})",
-            upstreams.len(),
-            match (session, &identity) {
-                (Some(_), _) => "session id",
-                (None, Some(_)) => "credential subject",
-                (None, None) => "nothing: no session id or credential",
+        let how = match (route.select(), session, &identity) {
+            (Select::Ordered, _, _) => "ordered: the first in config",
+            (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
+            (Select::CacheAffine, None, Some(_)) => "cache_affine by credential subject",
+            (Select::CacheAffine, None, None) => {
+                "cache_affine by nothing: no session id or credential"
             }
+        };
+        out.step(format!(
+            "route: upstream {id} of {} ({how})",
+            upstreams.len()
+        ));
+    }
+    if let Some(failover) = route.failover() {
+        let next: Vec<&str> = route
+            .rank(key)
+            .iter()
+            .skip(1)
+            .filter_map(|i| upstreams.get(i)?.id.as_deref())
+            .collect();
+        let reasons: Vec<&str> = [
+            (failover.on_429, "429"),
+            (failover.on_529, "529"),
+            (failover.on_connect, "connect"),
+        ]
+        .into_iter()
+        .filter_map(|(on, name)| on.then_some(name))
+        .collect();
+        out.step(format!(
+            "failover: on {} to {} in that order, for bodies up to {} bytes",
+            reasons.join(", "),
+            next.join(", "),
+            failover.max_body_bytes
         ));
     }
     out.step(format!(
