@@ -1,7 +1,9 @@
 //! `wye-bench load`: one scenario, sustained, so a gateway can be profiled
 //! (`sample <pid>` on macOS, `perf record -p <pid>` on Linux) or soaked
 //! (`paced`: memory should stay flat across batches of streams), or stepped
-//! up to one core's capacity (`capacity`, see [`crate::capacity`]).
+//! up to one core's capacity (`capacity`, see [`crate::capacity`]). `events`
+//! streams unpaced token-sized events, the gated CPU-per-event scenario, so
+//! the cost per event can be sampled (`--wye-openai`: OpenAI Responses).
 
 use std::time::{Duration, Instant};
 
@@ -30,8 +32,8 @@ const PACED_RAMP: Duration = Duration::from_millis(2_000);
 pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     let tls = match scenario {
         "tls-upload" | "paced" | "capacity" => true,
-        "upload" => false,
-        _ => panic!("scenario must be upload, tls-upload, paced, or capacity"),
+        "upload" | "events" => false,
+        _ => panic!("scenario must be upload, tls-upload, paced, capacity, or events"),
     };
     let ca = TestCa::generate();
     let upstream = mock::spawn(tls.then_some(&ca)).await;
@@ -62,6 +64,12 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
             .parse()
             .expect("WYE_BENCH_GATEWAY_THREADS must be a number");
         crate::capacity::run(&direct, &process, threads).await;
+        drop(process);
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    if scenario == "events" {
+        soak_events(&process, seconds).await;
         drop(process);
         let _ = std::fs::remove_dir_all(dir);
         return;
@@ -112,6 +120,35 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     );
     drop(process);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Batches of unpaced 64-byte events (64 streams of 2,000) until `seconds`
+/// pass; prints the gateway's CPU per event.
+async fn soak_events(process: &GatewayProcess, seconds: u64) {
+    // `WYE_BENCH_EVENT_BYTES` changes the payload, to compare event sizes.
+    let bytes = std::env::var("WYE_BENCH_EVENT_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(64);
+    let run = || scenarios::sse(process.target(), 32, 64, 2_000, bytes, 0);
+    run().await;
+    eprintln!("gateway pid {} under events for {seconds}s", process.pid());
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let cpu_before = process.cpu_secs();
+    let (mut events, mut failed) = (0usize, 0usize);
+    while Instant::now() < deadline {
+        let streams = run().await;
+        failed += streams.iter().filter(|s| s.failed).count();
+        events += streams
+            .iter()
+            .map(|s| s.event_delays_us.len())
+            .sum::<usize>();
+    }
+    let cpu = process.cpu_secs() - cpu_before;
+    println!(
+        "{events} events ({failed} streams failed), gateway CPU {:.2} us/event",
+        cpu * 1e6 / events.max(1) as f64
+    );
 }
 
 /// Batches of token-paced streams until `seconds` pass; prints CPU per event
