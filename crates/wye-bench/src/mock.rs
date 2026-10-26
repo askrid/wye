@@ -100,7 +100,10 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
             r#""}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
             size as usize,
         );
-        return Response::new(Either::Left(Full::new(body)));
+        let mut res = Response::new(Either::Left(Full::new(body)));
+        res.headers_mut()
+            .insert("content-type", "application/json".parse().unwrap());
+        return res;
     }
     let size = header_u64(&headers, "x-bench-size").unwrap_or(64) as usize;
     let mut res = Response::new(Either::Right(SseBody {
