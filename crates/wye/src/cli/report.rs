@@ -43,6 +43,15 @@ struct Record {
     tool_durations: Vec<Tool>,
     #[serde(default)]
     tool_calls: HashMap<String, u64>,
+    #[serde(default)]
+    failovers: Vec<FailoverRecord>,
+}
+
+/// An upstream that refused the request before another answered.
+#[derive(Deserialize)]
+struct FailoverRecord {
+    upstream: Option<String>,
+    status: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -148,6 +157,8 @@ struct Summary {
     classes: HashMap<String, Group>,
     /// Route upstreams, when the log names them.
     upstreams: HashMap<String, Group>,
+    /// Refusals that moved requests on, by (upstream, reason).
+    failovers: HashMap<(String, String), u64>,
     sessions: HashMap<String, Session>,
     prompts: HashMap<String, Group>,
     /// Per tool: calls with a reported duration, their total ms, and calls
@@ -169,6 +180,13 @@ impl Summary {
         self.classes.entry(class.to_owned()).or_default().add(&r);
         if let Some(upstream) = &r.upstream {
             self.upstreams.entry(upstream.clone()).or_default().add(&r);
+        }
+        for failover in &r.failovers {
+            let reason = failover
+                .status
+                .map_or_else(|| "connect".to_owned(), |s| s.to_string());
+            let upstream = failover.upstream.clone().unwrap_or_default();
+            *self.failovers.entry((upstream, reason)).or_default() += 1;
         }
         if let Some(miss) = &r.cache_miss {
             *self.misses.entry(miss.clone()).or_default() += 1;
@@ -270,6 +288,22 @@ fn render(s: &Summary) -> String {
         upstreams.sort_by(|a, b| a.0.cmp(b.0));
         for (name, group) in upstreams {
             table_row(&mut out, name, group);
+        }
+    }
+    if !s.failovers.is_empty() {
+        let _ = writeln!(
+            out,
+            "\nFailovers: refusals that moved a request to the next upstream"
+        );
+        let _ = writeln!(
+            out,
+            "  {:24} {:>8} {:>10}",
+            "upstream", "reason", "requests"
+        );
+        let mut failovers: Vec<_> = s.failovers.iter().collect();
+        failovers.sort();
+        for ((upstream, reason), count) in failovers {
+            let _ = writeln!(out, "  {upstream:24} {reason:>8} {count:>10}");
         }
     }
 
