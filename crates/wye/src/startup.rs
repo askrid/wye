@@ -7,7 +7,7 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, Provider, UpstreamCredential},
+    config::{Config, UpstreamCredential},
     credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
 };
@@ -125,12 +125,10 @@ impl Resources {
                 UpstreamCredential::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
                 UpstreamCredential::ForwardCaller => None,
             };
-            let auth = match (key, upstream.provider) {
-                (Some(key), Provider::Anthropic) => UpstreamAuth::api_key(&key)?,
-                (Some(key), Provider::OpenAi | Provider::ClaudePlatformAws) => {
-                    UpstreamAuth::bearer(&key)?
-                }
-                (None, _) => UpstreamAuth::ForwardCaller,
+            let auth = match key {
+                Some(key) if upstream.provider.bearer_key() => UpstreamAuth::bearer(&key)?,
+                Some(key) => UpstreamAuth::api_key(&key)?,
+                None => UpstreamAuth::ForwardCaller,
             };
             let extra_roots = match &upstream.ca_file {
                 Some(path) => load_certificates(&config_dir.join(path))?,

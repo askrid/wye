@@ -305,6 +305,23 @@ pub enum Provider {
     OpenAi,
 }
 
+impl Provider {
+    /// Whether the provider key goes as `Authorization: Bearer` rather than
+    /// `x-api-key`.
+    pub fn bearer_key(self) -> bool {
+        matches!(self, Self::OpenAi | Self::ClaudePlatformAws)
+    }
+
+    /// How the key is sent, for messages.
+    pub fn key_header(self) -> &'static str {
+        if self.bearer_key() {
+            "Authorization: Bearer"
+        } else {
+            "x-api-key"
+        }
+    }
+}
+
 /// Protocols Wye offers a TLS upstream through ALPN.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpstreamHttpVersion {
