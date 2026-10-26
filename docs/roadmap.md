@@ -127,7 +127,7 @@ One Claude Code fleet served by several Claude providers and accounts, chosen pe
 
 ### M6: optional extensions
 
-Edge/WASM adapter, [delegable credentials](research.md#3-delegable-credentials-for-agent-swarms), [signed usage receipts](research.md#4-signed-usage-receipts), [queryable policy](research.md#5-queryable-and-provable-policy), connect-only hedging, and other request-local experiments.
+Edge/WASM adapter, [delegable credentials](research.md#3-delegable-credentials-for-agent-swarms), [signed usage receipts](research.md#4-signed-usage-receipts), [queryable policy](research.md#5-queryable-and-provable-policy) (its CI check, `wye policy-diff`, is **done**), connect-only hedging, and other request-local experiments.
 
 **Exit:** each extension preserves or explicitly revises statelessness and compatibility guarantees.
 

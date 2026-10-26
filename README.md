@@ -4,7 +4,7 @@ A stateless gateway between AI agents (Claude Code, Codex) or AI-native apps and
 
 - **Native passthrough.** Anthropic Messages, OpenAI Responses and Chat Completions, forwarded byte for byte: no translation, new provider features work on day one.
 - **Agent-aware.** Sessions, subagents, request classes, compactions, tool time, cache misses, and cost per request, as usage records, `wye report`, and OpenTelemetry.
-- **Policy as code.** Signed gateway credentials, model permissions, output-token ceilings, model aliases with staged rollout, and upgrade checks; `wye explain` and `wye policy-test` show every decision offline.
+- **Policy as code.** Signed gateway credentials, model permissions, output-token ceilings, model aliases with staged rollout, and upgrade checks; `wye explain` and `wye policy-test` show every decision offline, and `wye policy-diff` fails CI when a config change widens access.
 - **Several accounts and providers.** Each session stays on one account (its prompt cache stays warm), failing over before any output on a rate limit or overload.
 - **Fast, and gated on it.** Every commit runs a benchmark gate: added latency, CPU per request and per event, memory per stream, allocations ([results](docs/research.md)).
 
