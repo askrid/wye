@@ -134,9 +134,16 @@ impl Gateway {
                 (Ok(res), Some(f)) if f.retries_status(res.status().as_u16()) => {
                     Some(Some(res.status().as_u16()))
                 }
-                (Err(ForwardError::Connect), Some(f)) if f.on_connect => Some(None),
+                // Any other failure qualifies only if the attempt did not
+                // deliver the whole body (checked below): a provider can
+                // refuse early and close while the upload runs, and an
+                // incomplete request cannot have been processed.
+                (Err(ForwardError::Connect | ForwardError::Upstream), Some(f)) if f.on_connect => {
+                    Some(None)
+                }
                 _ => None,
             };
+            let cut = matches!(result, Err(ForwardError::Upstream));
             if let (Some(status), Some(f), Some(handback), true) = (
                 refusal,
                 &failover,
@@ -154,7 +161,8 @@ impl Gateway {
                         .await
                         .ok()
                         .and_then(Result::ok),
-                };
+                }
+                .filter(|unsent| !cut || !unsent.sent_whole());
                 // The next upstream's provider may spell the model differently.
                 let next = order.peek().and_then(|&i| route.upstreams.get(i));
                 let unsent = match (unsent, &model_at, next) {
