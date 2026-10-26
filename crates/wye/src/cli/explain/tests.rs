@@ -328,6 +328,7 @@ fn shows_the_model_id_a_provider_spells_its_own_way() {
             "{report}"
         );
         assert!(report.contains("x-api-key from $B"), "{report}");
+        assert!(!report.contains("the body is not read"), "{report}");
         assert_eq!(report.contains("model id:"), step.is_some(), "{report}");
         if let Some(step) = step {
             assert!(report.contains(step), "{report}");
@@ -388,5 +389,45 @@ fn explains_responses_on_the_openai_route() {
     assert_eq!(
         no_claude.refused.as_ref().map(|r| r.2.as_str()),
         Some("/v1/messages is not proxied: no [routes.claude]")
+    );
+}
+
+#[test]
+fn shows_the_price_that_applies_at_the_upstream() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\nselect = \"ordered\"\n\
+         [[routes.claude.upstreams]]\nid = \"aws\"\nbase_url = \"https://a.example\"\napi_key_env = \"A\"\n\
+         [[routes.claude.upstreams]]\nid = \"direct\"\nbase_url = \"https://b.example\"\napi_key_env = \"B\"\n\
+         [pricing]\nversion = \"v1\"\n\
+         [[pricing.models]]\nmodels = [\"claude-opus-*\"]\nupstreams = [\"aws\"]\n\
+         input = \"5.50\"\noutput = \"27.50\"\n\
+         [[pricing.models]]\nmodels = [\"claude-opus-*\"]\ninput = \"5.00\"\noutput = \"25.00\"\n\
+         cache_read = \"0.50\"\n",
+    )
+    .unwrap();
+    let report = |body: &[u8]| {
+        explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            None,
+            body,
+            NOW,
+            &[],
+        )
+        .report()
+    };
+    let priced = report(br#"{"model":"claude-opus-5-5"}"#);
+    assert!(
+        priced.contains(
+            "price: claude-opus-5-5 at aws: input $5.5, output $27.5 per million tokens \
+             (pricing version v1)"
+        ),
+        "{priced}"
+    );
+    let unpriced = report(br#"{"model":"claude-haiku-5-5"}"#);
+    assert!(
+        unpriced.contains("price: none for claude-haiku-5-5 at aws"),
+        "{unpriced}"
     );
 }
