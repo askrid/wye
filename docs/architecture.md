@@ -357,11 +357,19 @@ models = [                             # up to 1000; listed per caller after mod
 name = "coding-default"
 model = "claude-opus-5-5"
 when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]  # first match by subject; up to 32
+
+[pricing]                              # optional: cost in usage records; rules in policy.md
+version = "anthropic-2026-10-06"       # recorded with every cost
+[[pricing.models]]                     # up to 256; first match on the reported model wins
+models = ["claude-opus-5-5"]
+input = "4.00"                         # USD per million tokens, at most 6 decimals
+output = "20.00"
+cache_read = "0.20"                    # optional, like cache_write_5m and cache_write_1h
 ```
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, and `[[aliases]]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. Pricing has its own planned format ([policy.md](policy.md#pricing-metadata)).
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, and `[pricing]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand.
 
 ```toml
 # A route serves one native API; a request goes to the route for its endpoint.
@@ -433,7 +441,6 @@ Settled decisions live in the sections above; this table holds only what is stil
 | Topic | Current preference / unresolved point |
 |---|---|
 | `include_usage` injection | Per-route; default undecided until client compatibility is tested |
-| Pricing | Planned format: a versioned per-model table in `wye.toml`, integer money internally ([policy.md](policy.md#pricing-metadata)) |
 | Configuration reload | Startup snapshot first; hot reload only on demand and without disrupting streams |
 | SigV4 for AWS providers | Sign per request with an unsigned payload hash if Bedrock and Claude Platform on AWS accept it (to verify); otherwise support only their API keys |
 | Vertex access tokens | Token exchange inside Wye (service-account key, RS256 JWT, one call per hour, in-memory cache) or an external refresher writing a token file; undecided |

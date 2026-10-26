@@ -104,7 +104,7 @@ The bound is deliberately loose. It is a guarantee, not an estimate. Telemetry r
 
 ### Pricing metadata
 
-**Planned format (M2).** Prices are declarative, versioned, and live in `wye.toml` next to the policy that uses them, so a price change is a reviewed commit like any other. Wye ships no built-in price table: one would be stale the day a provider changes prices, silently.
+**Implemented (M2).** Prices are declarative, versioned, and live in `wye.toml` next to the policy that uses them, so a price change is a reviewed commit like any other. Wye ships no built-in price table: one would be stale the day a provider changes prices, silently.
 
 ```toml
 [pricing]
@@ -144,12 +144,13 @@ Rules:
 
 - **Fields.** `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config. A tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - **Matching.** By the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
-- **Per provider.** Claude on Bedrock, Vertex, or another provider ([planned](architecture.md#claude-across-providers-planned-m4)) is billed by that provider, at prices and regional premiums that can differ. An entry may name `upstreams = ["bedrock-us"]` (upstream ids from the route config); entries with `upstreams` are tried before those without for requests served there.
+- **Per provider (planned, with M4).** Claude on Bedrock, Vertex, or another provider ([planned](architecture.md#claude-across-providers-planned-m4)) is billed by that provider, at prices and regional premiums that can differ. An entry will name `upstreams = ["bedrock-us"]` (upstream ids from the route config); entries with `upstreams` are tried before those without for requests served there.
 - **Money is never floating point.** Each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error. A request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`. Floating point appears only where a number is displayed.
 - **Cache writes by TTL.** Anthropic reports `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; the usage scanner reads both. When only the total `cache_creation_input_tokens` is reported, writes are priced at `cache_write_1h` when it is set, the higher price, so the reported cost does not undercount, and the cost is `partial`.
-- **What it does not price.** Fast mode, priority or other service tiers, regional inference premiums, and server tools billed per use (web search) are reported in `usage` but not in the table; a request that used any of them is `partial`, with the token cost still recorded. Batch requests do not pass through the gateway.
+- **What it does not price.** Fast mode, priority or other service tiers, regional inference premiums, and server tools billed per use (web search) are reported in `usage` but not in the table; a request that used any of them (a positive count in `usage.server_tool_use`, a `service_tier` or `speed` other than `standard`) is `partial`, with the token cost still recorded. A stream that ended before its final usage is `partial`. Batch requests do not pass through the gateway.
+- **No usage, no cost.** A record without observed usage (a gateway or provider error, a non-streaming response) is `unknown`, never $0.
 
-Every usage record then carries `cost_usd` (a decimal string), `cost_status` (`complete` | `partial` | `unknown`), and `pricing_version`; OTLP gains `wye.cost` by model and request class, and `wye report` prints dollars next to tokens. The same table feeds the [provable cost ceiling](#provable-cost-ceiling), which additionally needs each model's context window and verified bounds.
+With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP logs carry the same three as `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; the `wye.cost` metric sums priced costs by model and request class (in USD, a double: the export is display); `wye report` adds a cost column, summed exactly, marked `+` when it includes partial or unknown costs. The same table feeds the [provable cost ceiling](#provable-cost-ceiling), which additionally needs each model's context window and verified bounds.
 
 ## State boundary
 

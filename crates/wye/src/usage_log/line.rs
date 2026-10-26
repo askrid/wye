@@ -2,8 +2,13 @@
 
 use std::time::Duration;
 
-use gateway_core::{agent::CacheMiss, prompt::HashKey, usage::ToolCalls};
-use serde::Serialize;
+use gateway_core::{
+    agent::CacheMiss,
+    pricing::{CostStatus, Pico, Pricing, Usd},
+    prompt::HashKey,
+    usage::ToolCalls,
+};
+use serde::{Serialize, Serializer};
 
 use super::{Record, agent::ToolDurations};
 use crate::diagnostics::PromptRecord;
@@ -58,6 +63,18 @@ pub(super) struct Line<'a> {
     pub(super) cache_creation_input_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) cache_read_input_tokens: Option<u64>,
+    /// The request's cost in USD, an exact decimal string, when `[pricing]`
+    /// priced it.
+    #[serde(
+        rename = "cost_usd",
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "usd"
+    )]
+    pub(super) cost: Option<Pico>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) cost_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) pricing_version: Option<&'a str>,
     /// Tool calls the response requested, by tool name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tool_calls: Option<ToolCallsField<'a>>,
@@ -68,13 +85,33 @@ pub(super) struct Line<'a> {
     pub(super) prompt: Option<PromptRecord>,
 }
 
-/// The record as borrowed fields, written as a JSON line and as OTLP.
-pub(super) fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> {
+/// A cost as an exact decimal string, written without an intermediate String.
+fn usd<S: Serializer>(cost: &Option<Pico>, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.collect_str(&Usd(cost.unwrap_or(0)))
+}
+
+/// The record as borrowed fields, written as a JSON line and as OTLP. With
+/// `pricing`, every record carries a cost status: a record without usage
+/// (an error, a non-streaming response) is `unknown`, never $0.
+pub(super) fn line<'a>(
+    r: &'a Record,
+    prompt_key: Option<&HashKey>,
+    pricing: Option<&'a Pricing>,
+) -> Line<'a> {
     let usage = r
         .usage
         .as_ref()
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
+    let cost = pricing.map(|pricing| match (&r.model, &r.usage) {
+        (Some(model), Some((usage, status))) if *status != "unknown" => {
+            pricing.cost(model, usage, *status == "complete")
+        }
+        _ => gateway_core::pricing::Cost {
+            pico: None,
+            status: CostStatus::Unknown,
+        },
+    });
     let agent = r.info.agent.fields();
     Line {
         event: "request",
@@ -110,6 +147,9 @@ pub(super) fn line<'a>(r: &'a Record, prompt_key: Option<&HashKey>) -> Line<'a> 
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
         cache_read_input_tokens: usage.cache_read_input_tokens,
+        cost: cost.and_then(|c| c.pico),
+        cost_status: cost.map(|c| c.status.as_str()),
+        pricing_version: pricing.map(|p| &*p.version),
         tool_calls: r.tool_calls.as_deref().map(ToolCallsField),
         cache_miss: CacheMiss::classify(
             usage.cache_read_input_tokens,

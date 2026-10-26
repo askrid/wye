@@ -4,6 +4,8 @@ use std::io::Write;
 
 use ring::rand::{SecureRandom, SystemRandom};
 
+use gateway_core::pricing::Usd;
+
 use super::super::Line;
 
 #[derive(Clone, Copy)]
@@ -111,6 +113,16 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         if let Some(count) = count {
             attribute(key, Value::Int(count));
         }
+    }
+    if let Some(cost) = line.cost {
+        // A string keeps the exact decimal.
+        attribute("wye.cost_usd", Value::Str(&Usd(cost).to_string()));
+    }
+    if let Some(status) = line.cost_status {
+        attribute("wye.cost_status", Value::Str(status));
+    }
+    if let Some(version) = line.pricing_version {
+        attribute("wye.pricing_version", Value::Str(version));
     }
     if let Some(tools) = &line.tool_calls {
         let json = serde_json::to_string(tools).unwrap_or_default();
@@ -287,6 +299,9 @@ mod tests {
             compaction: None,
             context_compacted: None,
             tool_durations: tools.map(crate::usage_log::agent::ToolDurations),
+            cost: None,
+            cost_status: None,
+            pricing_version: None,
             tool_calls: None,
             requested_model: None,
             model: None,

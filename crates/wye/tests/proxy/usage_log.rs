@@ -404,3 +404,37 @@ async fn usage_records_are_exported_as_otlp_logs() {
     );
     assert!(record["timeUnixNano"].as_str().unwrap().len() >= 19);
 }
+
+#[tokio::test]
+async fn priced_records_carry_cost_status_and_version() {
+    let handler: Handler = Arc::new(|_| {
+        Box::pin(async {
+            let mut res = full(StatusCode::OK, USAGE_STREAM);
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    });
+    let pricing = "api_key_env = \"UNUSED\"\n\n[pricing]\nversion = \"test-1\"\n\
+                   [[pricing.models]]\nmodels = [\"claude-test\"]\ninput = \"1.00\"\noutput = \"10.00\"\n\
+                   cache_read = \"0.10\"\n";
+    let h = Harness::start(handler, pricing, UpstreamAuth::api_key(API_KEY).unwrap()).await;
+    read_body(h.send(messages(), "{}").await).await;
+    let record = h.usage_record().await;
+    // 10 input x $1 + 90 cache reads x $0.10 + 7 output x $10, per million.
+    assert_eq!(record["cost_usd"], "0.000089");
+    assert_eq!(record["cost_status"], "complete");
+    assert_eq!(record["pricing_version"], "test-1");
+
+    // No usage observed (a refused request): unknown, never $0.
+    read_body(h.send(Request::get("/v1/nothing"), "").await).await;
+    read_body(
+        h.send(messages().header("content-length", "99999"), "{}")
+            .await,
+    )
+    .await;
+    let refused = h.usage_record().await;
+    assert_eq!(refused["status"], 413);
+    assert!(refused.get("cost_usd").is_none());
+    assert_eq!(refused["cost_status"], "unknown");
+}
