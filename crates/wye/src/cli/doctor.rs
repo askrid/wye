@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    config::{Config, Provider, Upstream, UpstreamCredential},
+    config::{Config, Upstream, UpstreamCredential},
     prompt::HashKey,
 };
 use http::{Request, Uri};
@@ -111,10 +111,7 @@ fn fail(line: impl Into<String>) -> Check {
 
 /// The provider credential is present, without printing it.
 fn credential(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
-    let header = match upstream.provider {
-        Provider::Anthropic => "x-api-key",
-        Provider::OpenAi | Provider::ClaudePlatformAws => "Authorization: Bearer",
-    };
+    let header = upstream.provider.key_header();
     match &upstream.credential {
         UpstreamCredential::ApiKeyEnv(var) => match env(var) {
             Ok(key) if !key.trim().is_empty() => {
