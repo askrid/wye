@@ -13,7 +13,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 | M2: cost policy | Pricing done ([policy.md](policy.md#pricing-metadata)): cost, cost status, and pricing version in usage records, `wye.cost` in OTLP, dollars in `wye report`; cache-miss diagnostics done early (opt-in, sampled per session). `wye explain` prints the price that applies; cost bound and provider-held budgets not started |
 | M2b: model aliases and upgrade checks | Done: `[[aliases]]` with per-subject rollout (stage A) and upgrade checks with a sourced rule table, sampled body scan, `upgrade_issues` in records and OTLP, `explain --target-model`, `wye report` by client (stage B) ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Exit check (a real alias move) open |
 | M3: Codex | Stage 7 started: `[routes.openai]`, `/v1/responses` passthrough with the OpenAI key as a bearer token, OpenAI-shaped gateway errors, model permissions and token ceilings on Responses, `wye codex` ([architecture.md](architecture.md#codex-integration)). Usage extraction for Responses done (usage, cached tokens, model, tool calls, cost), and Codex's session, thread, and subagent headers mapped onto the same record fields. Stage 9: Chat Completions passthrough. Usage from non-streaming JSON responses on all three APIs. Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision |
-| M4: Claude across providers and accounts | Stages 10–11 done: routes with several accounts, `cache_affine` (weighted rendezvous by session id, then subject) or `ordered`, failover on `429`, `529`, and refused connections before output with bounded kept bodies, `upstream` and `failovers` in records, OTLP, `explain`, and `wye report` ([architecture.md](architecture.md#claude-across-providers-planned-m4)). Stage 12: Claude Platform on AWS and Bedrock with API keys, Bedrock's model ids spelled per attempt (live check open). Vertex (stage 13) and SigV4 open; 12–13 need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
+| M4: Claude across providers and accounts | Stages 10–11 done: routes with several accounts, `cache_affine` (weighted rendezvous by session id, then subject) or `ordered`, failover on `429`, `529`, and refused connections before output with bounded kept bodies, `upstream` and `failovers` in records, OTLP, `explain`, and `wye report` ([architecture.md](architecture.md#claude-across-providers-m4)). Stage 12: Claude Platform on AWS and Bedrock with API keys, Bedrock's model ids spelled per attempt (live check open). Vertex (stage 13) and SigV4 open; 12–13 need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
 | M5–M6 | Not started |
 
 ## Milestones
@@ -105,7 +105,7 @@ Agent-aware telemetry for Codex uses whatever signals Codex sends; the usage rec
 
 ### M4: Claude across providers and accounts
 
-One Claude Code fleet served by several Claude providers and accounts, chosen per request and failed over without state ([design](architecture.md#claude-across-providers-planned-m4)).
+One Claude Code fleet served by several Claude providers and accounts, chosen per request and failed over without state ([design](architecture.md#claude-across-providers-m4)).
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
@@ -186,7 +186,7 @@ Core unit tests and property tests cover configuration validation, credential ve
 
 ### Benchmarks
 
-- [ ] Mock upstream varies TTFT, token rate, failure rate, and stream length.
+- [ ] Mock upstream varies TTFT, token rate, failure rate, and stream length. (Token rate, stream length, and a refusal rate are built; TTFT is not.)
 - [ ] Reports include p50/p95/p99 added latency, RSS, CPU, and slow-consumer behavior.
 - [ ] Competitor tests use comparable features and disclose differences.
 - [ ] Cost-saving claims are backed by usage, pricing, and task-quality evidence.
