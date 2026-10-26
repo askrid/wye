@@ -10,9 +10,11 @@
 //! including inside UTF-8.
 
 mod fields;
+mod json;
 mod raw;
 mod responses;
 
+pub use json::JsonUsageScanner;
 use raw::{BlockStartData, DeltaData, StartData};
 pub use responses::ResponsesUsageScanner;
 
@@ -138,16 +140,19 @@ impl ToolCalls {
     }
 }
 
-/// The usage scanner for one response stream of either API: an enum, so
-/// the per-chunk call is a match, not a virtual call. The Responses scanner
-/// is boxed, so Messages streams keep their size.
+/// The usage scanner for one response body: an SSE stream of either API,
+/// or a non-streaming JSON body. An enum, so the per-chunk call is a match,
+/// not a virtual call; the other scanners are boxed, so Messages streams
+/// keep their size.
 #[derive(Debug)]
 pub enum UsageScanner {
     Messages(SseUsageScanner),
     Responses(Box<ResponsesUsageScanner>),
+    Json(Box<JsonUsageScanner>),
 }
 
 impl UsageScanner {
+    /// For an SSE stream of `api`.
     pub fn new(api: Api) -> Self {
         match api {
             Api::Messages => Self::Messages(SseUsageScanner::new()),
@@ -155,11 +160,17 @@ impl UsageScanner {
         }
     }
 
+    /// For a non-streaming JSON body of `api`.
+    pub fn json(api: Api) -> Self {
+        Self::Json(Box::new(JsonUsageScanner::new(api)))
+    }
+
     /// Feeds the next chunk of response bytes.
     pub fn feed(&mut self, chunk: &[u8]) {
         match self {
             Self::Messages(s) => s.feed(chunk),
             Self::Responses(s) => s.feed(chunk),
+            Self::Json(s) => s.feed(chunk),
         }
     }
 
@@ -167,6 +178,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.usage(),
             Self::Responses(s) => s.usage(),
+            Self::Json(s) => s.usage(),
         }
     }
 
@@ -174,6 +186,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.model(),
             Self::Responses(s) => s.model(),
+            Self::Json(s) => s.model(),
         }
     }
 
@@ -181,6 +194,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.status(),
             Self::Responses(s) => s.status(),
+            Self::Json(s) => s.status(),
         }
     }
 
@@ -189,6 +203,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.take_tool_calls(),
             Self::Responses(s) => s.take_tool_calls(),
+            Self::Json(s) => s.take_tool_calls(),
         }
     }
 }

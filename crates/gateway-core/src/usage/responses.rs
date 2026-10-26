@@ -15,7 +15,10 @@
 
 use serde::Deserialize;
 
-use super::{ToolCalls, Usage, UsageStatus, fields::ResponseFields};
+use super::{
+    ToolCalls, Usage, UsageStatus,
+    fields::{Items, ResponseFields, openai_tool},
+};
 
 /// Longest event name kept; longer names are other events.
 const EVENT_NAME_BYTES: usize = 64;
@@ -81,7 +84,7 @@ impl ResponsesUsageScanner {
             event: Event::Other,
             item: Vec::new(),
             item_long: false,
-            fields: ResponseFields::new(),
+            fields: ResponseFields::new(Some(b"response"), Items::None),
             usage: Usage::default(),
             model: None,
             tools: None,
@@ -195,7 +198,10 @@ impl ResponsesUsageScanner {
     fn end_data(&mut self) {
         match self.event {
             Event::Created | Event::Terminal => {
-                let fields = std::mem::replace(&mut self.fields, ResponseFields::new());
+                let fields = std::mem::replace(
+                    &mut self.fields,
+                    ResponseFields::new(Some(b"response"), Items::None),
+                );
                 self.read_fields(&fields);
             }
             Event::ItemAdded => {
@@ -225,18 +231,12 @@ impl ResponsesUsageScanner {
         if fields.service_tier().is_some_and(|tier| tier != "default") {
             self.usage.unpriced = true;
         }
-        match fields.usage() {
+        match fields.openai_usage() {
             Err(()) => self.corrupt = true,
             Ok(None) => {}
             Ok(Some(raw)) => {
                 self.saw_usage = true;
-                let cached = raw
-                    .input_tokens_details
-                    .and_then(|d| d.cached_tokens)
-                    .unwrap_or(0);
-                self.usage.input_tokens = raw.input_tokens.map(|i| i.saturating_sub(cached));
-                self.usage.cache_read_input_tokens = raw.input_tokens.map(|_| cached);
-                self.usage.output_tokens = raw.output_tokens;
+                raw.merge_into(&mut self.usage);
             }
         }
     }
@@ -246,23 +246,10 @@ impl ResponsesUsageScanner {
             return;
         };
         let item = added.item;
-        let name = match item.kind {
-            "function_call" | "custom_tool_call" => item.name.unwrap_or_default(),
-            "message" | "reasoning" => return,
-            kind => match kind.strip_suffix("_call") {
-                Some(tool) => {
-                    // Hosted tools are billed per call, outside token prices.
-                    if matches!(
-                        tool,
-                        "web_search" | "file_search" | "code_interpreter" | "image_generation"
-                    ) {
-                        self.usage.unpriced = true;
-                    }
-                    tool
-                }
-                None => return,
-            },
+        let Some((name, hosted)) = openai_tool(item.kind, item.name) else {
+            return;
         };
+        self.usage.unpriced |= hosted;
         self.tools
             .get_or_insert_with(|| Box::new(ToolCalls::new()))
             .count(name);

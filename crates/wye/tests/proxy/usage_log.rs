@@ -465,3 +465,24 @@ async fn checked_requests_record_what_each_target_would_reject() {
         serde_json::json!({})
     );
 }
+
+#[tokio::test]
+async fn non_streaming_json_responses_report_usage() {
+    const BODY: &str = r#"{"id":"msg_1","type":"message","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t","name":"Read","input":{}}],"usage":{"input_tokens":12,"output_tokens":34}}"#;
+    let h = Harness::api_key(Arc::new(|_| {
+        Box::pin(async {
+            let mut res = full(StatusCode::OK, BODY);
+            res.headers_mut()
+                .insert("content-type", "application/json".parse().unwrap());
+            res
+        })
+    }))
+    .await;
+    assert_eq!(read_body(h.send(messages(), "{}").await).await, BODY);
+    let record = h.usage_record().await;
+    assert_eq!(record["usage_status"], "complete");
+    assert_eq!(record["model"], "claude-sonnet-5-5");
+    assert_eq!(record["input_tokens"], 12);
+    assert_eq!(record["output_tokens"], 34);
+    assert_eq!(record["tool_calls"]["Read"], 1);
+}

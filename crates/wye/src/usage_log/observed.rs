@@ -22,10 +22,29 @@ use crate::gauge::Held;
 /// event.
 const STALLED_EVENT: &[u8] = b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"upstream stream stalled or broke; retry the request\"}}\n\n";
 
+/// What a response body is, from its `content-type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BodyKind {
+    EventStream,
+    Json,
+    Other,
+}
+
+impl BodyKind {
+    pub(crate) fn of(content_type: Option<&[u8]>) -> Self {
+        match content_type {
+            Some(t) if t.starts_with(b"text/event-stream") => Self::EventStream,
+            Some(t) if t.starts_with(b"application/json") => Self::Json,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Response body wrapper that observes usage and emits a record on drop.
 pub(crate) struct Observed<B> {
     inner: B,
-    /// Present for successful SSE responses only.
+    /// Present for successful responses of endpoints that generate: SSE
+    /// streams and JSON bodies.
     scanner: Option<UsageScanner>,
     /// The bytes forwarded so far end at an SSE event boundary.
     at_boundary: bool,
@@ -45,15 +64,22 @@ impl<B> Observed<B> {
         inner: B,
         info: RequestInfo,
         status: StatusCode,
-        is_event_stream: bool,
+        body: BodyKind,
         log: UsageLog,
         permit: Held,
     ) -> Self {
         let headers_after = info.started.elapsed();
         let api = info.endpoint.api;
+        // count_tokens answers with a count, not usage.
+        let scanner = match body {
+            _ if !status.is_success() || !info.endpoint.generates => None,
+            BodyKind::EventStream => Some(UsageScanner::new(api)),
+            BodyKind::Json => Some(UsageScanner::json(api)),
+            BodyKind::Other => None,
+        };
         Self {
             inner,
-            scanner: (status.is_success() && is_event_stream).then(|| UsageScanner::new(api)),
+            scanner,
             at_boundary: true,
             closed: false,
             info: Some(info),
