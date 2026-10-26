@@ -30,7 +30,11 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
          [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\napi_key_env = \"UNUSED\"\n\
          [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let route = Config::from_toml_str(&config).unwrap().route;
+    let route = Config::from_toml_str(&config)
+        .unwrap()
+        .routes
+        .claude
+        .unwrap();
     let resources = Resources {
         upstreams: vec![
             UpstreamResources::new(UpstreamAuth::api_key("key-team-a").unwrap()),

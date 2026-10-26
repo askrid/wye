@@ -12,6 +12,7 @@ mod forwarding;
 mod harness;
 mod identity_providers;
 mod lifecycle;
+mod openai;
 mod routes;
 mod streaming;
 mod tls;

@@ -1,15 +1,16 @@
 //! Model permissions and output-token ceilings: the request's `model` (and
-//! `max_tokens`, when it arrives in time) is checked before anything is sent
-//! upstream.
+//! its output-token maximum, `max_tokens` or `max_output_tokens`, when it
+//! arrives in time) is checked before anything is sent upstream.
 //!
 //! [`hold_until_model`] reads the request body only until its top-level
 //! `model` value has been read. Claude Code sends `model` first, so usually
 //! only the first chunk waits. The held bytes count against a process-wide
 //! budget (`server.max_held_request_bytes`). When the model is allowed,
 //! [`RequestBody`] replays the held chunks and streams the rest, and keeps
-//! checking it: a second top-level `model` key, or a `max_tokens` above the
-//! ceiling that arrives after the hold, fails the body, which aborts the
-//! upstream request before the provider sees a complete request.
+//! checking it: a second top-level `model` key, an output-token maximum above
+//! the ceiling that arrives after the hold, or (on Responses, where the field
+//! is optional) none at all, fails the body, which aborts the upstream request
+//! before the provider sees a complete request.
 
 use std::{
     collections::VecDeque,
@@ -18,7 +19,10 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::policy::{PolicyError, PolicyScanner};
+use gateway_core::{
+    api::Api,
+    policy::{PolicyError, PolicyScanner},
+};
 use http_body_util::BodyExt;
 use hyper::body::{Body, Frame, SizeHint};
 
@@ -101,31 +105,60 @@ struct Hold {
     scanner: PolicyScanner,
     /// The whole body is in `chunks`.
     ended: bool,
-    /// The request's `max_tokens` ceiling, checked again as the rest streams.
+    /// The request's output-token ceiling, checked again as the rest streams.
     token_limit: Option<u64>,
+    /// The API: which field holds the output-token maximum, and whether a
+    /// ceiling requires it.
+    api: Api,
     /// Whether the rest of the body is checked as it streams (a repeated
     /// `model`, a late `max_tokens`); off when no permission or ceiling applies.
     check_rest: bool,
 }
 
-/// A `max_tokens` above the request's ceiling, found after forwarding began.
+/// An output-token maximum above the request's ceiling, or missing where
+/// the ceiling requires it.
 #[derive(Debug)]
-pub(crate) struct OverTokenLimit {
-    pub(crate) requested: u64,
+pub(crate) struct TokenLimitError {
+    /// `max_tokens` or `max_output_tokens`.
+    pub(crate) field: &'static str,
+    /// `None`: the request did not set the field.
+    pub(crate) requested: Option<u64>,
     pub(crate) limit: u64,
 }
 
-impl std::fmt::Display for OverTokenLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "max_tokens {} exceeds this credential's limit of {}",
-            self.requested, self.limit
-        )
+impl TokenLimitError {
+    /// The refusal for `requested` under `limit` on `api`, if any.
+    pub(crate) fn check(api: Api, limit: u64, requested: Option<u64>) -> Option<Self> {
+        let refused = match requested {
+            Some(requested) => requested > limit,
+            None => api.token_field_required(),
+        };
+        refused.then_some(Self {
+            field: api.token_field(),
+            requested,
+            limit,
+        })
     }
 }
 
-impl std::error::Error for OverTokenLimit {}
+impl std::fmt::Display for TokenLimitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.requested {
+            Some(requested) => write!(
+                f,
+                "{} {requested} exceeds this credential's limit of {}",
+                self.field, self.limit
+            ),
+            None => write!(
+                f,
+                "{} is required: this credential's limit is {}",
+                self.field, self.limit
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TokenLimitError {}
 
 /// The start of a request body, read until its model was known.
 ///
@@ -141,9 +174,14 @@ impl HeldStart {
         self.0.scanner.model()
     }
 
-    /// The request's `max_tokens`, if it was read before the hold ended.
-    pub(crate) fn max_tokens(&self) -> Option<u64> {
-        self.0.scanner.max_tokens()
+    /// Whether the hold read the whole body.
+    pub(crate) fn ended(&self) -> bool {
+        self.0.ended
+    }
+
+    /// The request's output-token maximum, if it was read before the hold ended.
+    pub(crate) fn max_output_tokens(&self) -> Option<u64> {
+        self.0.scanner.max_output_tokens()
     }
 
     /// Streams the rest of the body unchecked. For a request held only to
@@ -203,6 +241,7 @@ impl HeldStart {
 /// their budget.
 pub(crate) async fn hold_until_model<B>(
     body: &mut B,
+    api: Api,
     budget: &Gauge,
     max_held: usize,
     max_body: usize,
@@ -214,9 +253,10 @@ where
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
         budget: budget.hold_none(),
-        scanner: PolicyScanner::new(),
+        scanner: PolicyScanner::for_api(api),
         ended: false,
         token_limit,
+        api,
         check_rest: true,
     });
     let mut total = 0usize;
@@ -306,12 +346,29 @@ where
                 this.inner = None;
                 return Poll::Ready(Some(Err(Box::new(error))));
             }
-            if let (Some(limit), Some(requested)) = (hold.token_limit, hold.scanner.max_tokens())
-                && requested > limit
-            {
-                this.inner = None;
-                return Poll::Ready(Some(Err(Box::new(OverTokenLimit { requested, limit }))));
+            if let Some(limit) = hold.token_limit {
+                // The field may still come later: only a value is final
+                // before the body ends.
+                let ended = this.inner.as_ref().is_none_or(B::is_end_stream);
+                let requested = hold.scanner.max_output_tokens();
+                if (requested.is_some() || ended)
+                    && let Some(refusal) = TokenLimitError::check(hold.api, limit, requested)
+                {
+                    this.inner = None;
+                    return Poll::Ready(Some(Err(Box::new(refusal))));
+                }
             }
+        }
+        // A body without a known length ends with `Ready(None)`: a missing
+        // required field is refused instead of ending the request.
+        if let (Poll::Ready(None), Some(hold)) = (&polled, this.hold.as_ref())
+            && hold.check_rest
+            && let Some(limit) = hold.token_limit
+            && let Some(refusal) =
+                TokenLimitError::check(hold.api, limit, hold.scanner.max_output_tokens())
+        {
+            this.inner = None;
+            return Poll::Ready(Some(Err(Box::new(refusal))));
         }
         polled.map(|frame| frame.map(|f| f.map_err(Into::into)))
     }

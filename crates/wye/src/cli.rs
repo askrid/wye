@@ -4,7 +4,7 @@
 //! - `explain`: the server's decisions for one request, offline
 //! - `policy_test`: sample requests checked against expected decisions
 //! - `report`: a usage-log summary per session, request class, and prompt
-//! - `wrapper`: `wye claude`, Claude Code pointed at a gateway
+//! - `wrapper`: `wye claude` and `wye codex`, an agent pointed at a gateway
 //! - `probe`: a one-shot health check client
 //! - `token`: offline key generation and credential issuance
 
@@ -19,4 +19,4 @@ pub use explain::{Credential, Explanation, explain};
 pub use policy_test::policy_test;
 pub use probe::probe;
 pub use report::report;
-pub use wrapper::{ClaudeLaunch, claude};
+pub use wrapper::{Agent, Launch, claude, codex};

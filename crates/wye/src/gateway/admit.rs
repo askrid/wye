@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use gateway_core::policy;
 use http::{HeaderMap, HeaderValue, Response, StatusCode, header::CONTENT_LENGTH};
-use hyper::body::Incoming;
+use hyper::body::{Body, Incoming};
 
 use super::{
     Gateway, ResBody,
     responses::{error, hold_error},
 };
 use crate::{
-    permissions::{OverTokenLimit, RequestBody, hold_until_model},
+    permissions::{RequestBody, TokenLimitError, hold_until_model},
     usage_log::RequestInfo,
 };
 
@@ -28,9 +28,12 @@ impl Gateway {
         info: &mut RequestInfo,
         headers: &mut HeaderMap,
     ) -> Result<RequestBody<Incoming>, Box<Response<ResBody>>> {
+        let api = info.endpoint.api;
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
-        // `max_tokens` bounds generation; count_tokens generates nothing.
-        let token_limit = (info.path == "/v1/messages")
+        // The ceiling bounds generation; count_tokens generates nothing.
+        let token_limit = info
+            .endpoint
+            .generates
             .then(|| {
                 policy::token_limit(
                     self.max_output_tokens,
@@ -47,13 +50,14 @@ impl Gateway {
         }
         let mut held = hold_until_model(
             &mut body,
+            api,
             &self.held_bytes,
             self.max_held_request_bytes,
             self.max_request_body_bytes,
             token_limit,
         )
         .await
-        .map_err(|e| Box::new(hold_error(e)))?;
+        .map_err(|e| Box::new(hold_error(api, e)))?;
         // Permissions and pricing apply to the model that runs.
         let alias = self
             .aliases
@@ -74,6 +78,7 @@ impl Gateway {
                 .and_then(|bytes| held.splice_model(bytes));
             let Some(delta) = spliced else {
                 return Err(Box::new(error(
+                    api,
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "api_error",
                     "model alias could not be applied",
@@ -90,16 +95,22 @@ impl Gateway {
             model.is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
         if !allowed {
             return Err(Box::new(error(
+                api,
                 StatusCode::FORBIDDEN,
                 "permission_error",
                 "this credential may not use the requested model",
             )));
         }
-        if let (Some(limit), Some(requested)) = (token_limit, held.max_tokens())
-            && requested > limit
+        // A value is final now; a missing field only once the whole body was read.
+        let requested = held.max_output_tokens();
+        let body_read = held.ended() || body.is_end_stream();
+        if let Some(limit) = token_limit
+            && (requested.is_some() || body_read)
+            && let Some(refusal) = TokenLimitError::check(api, limit, requested)
         {
-            let message = OverTokenLimit { requested, limit }.to_string();
+            let message = refusal.to_string();
             return Err(Box::new(error(
+                api,
                 StatusCode::FORBIDDEN,
                 "permission_error",
                 &message,

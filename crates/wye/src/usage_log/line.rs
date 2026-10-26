@@ -27,6 +27,9 @@ pub(super) struct Line<'a> {
     pub(super) event: &'static str,
     pub(super) unix_ms: u64,
     pub(super) path: &'a str,
+    /// `gen_ai.system` in OTLP; the path names the API in the JSON line.
+    #[serde(skip)]
+    pub(super) system: &'static str,
     pub(super) status: u16,
     pub(super) outcome: &'static str,
     pub(super) duration_ms: f64,
@@ -126,7 +129,8 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     Line {
         event: "request",
         unix_ms: r.unix_ms as u64,
-        path: r.info.path,
+        path: r.info.endpoint.path,
+        system: r.info.endpoint.api.system(),
         status: r.status.as_u16(),
         outcome: r.outcome.as_str(),
         duration_ms: ms(r.duration),

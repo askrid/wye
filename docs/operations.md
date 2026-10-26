@@ -73,6 +73,8 @@ wye report ~/.wye/usage.jsonl                  # afterwards, or at any time
 
 The usage log goes to the gateway's stderr, so redirecting it keeps it; `wye report` skips the startup lines. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
+**Implemented: `wye codex`.** Same flags and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway credential (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after the flags go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a credential without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
+
 Proposals, not built: `wye codex` (with M3), and profiles that select a gateway and credential by name.
 
 ### SDK integration
@@ -88,7 +90,7 @@ client = Anthropic(
 )
 ```
 
-The OpenAI SDK connects the same way once the OpenAI routes exist (M3). Claude Code connects through environment variables:
+The OpenAI SDK connects the same way to `/v1/responses` when the config has `[routes.openai]` (`base_url="https://gateway.example.com/v1"`, the gateway credential as `api_key`). Claude Code connects through environment variables:
 
 ```bash
 export ANTHROPIC_BASE_URL=https://gateway.example.com
@@ -234,7 +236,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` (with a second provider, M4), `ttft_ms`, `config_version`.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 

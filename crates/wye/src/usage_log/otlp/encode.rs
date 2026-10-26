@@ -60,7 +60,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         }
         write_attribute(buf, key, value);
     };
-    attribute("gen_ai.system", Value::Str("anthropic"));
+    attribute("gen_ai.system", Value::Str(line.system));
     attribute("http.route", Value::Str(line.path));
     attribute(
         "http.response.status_code",
@@ -291,6 +291,7 @@ mod tests {
             event: "request",
             unix_ms: 10_000,
             path: "/v1/messages",
+            system: "anthropic",
             status: 200,
             outcome: "completed",
             duration_ms: 2_000.0,

@@ -103,9 +103,10 @@ pub enum PolicyError {
     EscapedKey,
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
-    /// `max_tokens` is not a non-negative integer.
+    /// The output-token field (`max_tokens`, `max_output_tokens`) is not a
+    /// non-negative integer.
     InvalidMaxTokens,
-    /// A second top-level `max_tokens` key.
+    /// A second top-level output-token field.
     RepeatedMaxTokens,
 }
 
@@ -118,8 +119,10 @@ impl PolicyError {
             Self::Repeated => "request names model more than once",
             Self::EscapedKey => "top-level keys must not contain escapes",
             Self::Malformed => "request body is not a JSON object",
-            Self::InvalidMaxTokens => "max_tokens must be a non-negative integer",
-            Self::RepeatedMaxTokens => "request names max_tokens more than once",
+            Self::InvalidMaxTokens => {
+                "the output-token limit (max_tokens, max_output_tokens) must be a non-negative integer"
+            }
+            Self::RepeatedMaxTokens => "request names its output-token limit more than once",
         }
     }
 }

@@ -1,6 +1,7 @@
 //! The structure scanner behind [`PolicyScanner`].
 
 use super::{MAX_MODEL_BYTES, PolicyError};
+use crate::api::Api;
 use crate::json::{Nesting, StringEnd, is_space, short_string_len};
 
 /// What the bytes of the current top-level string are for.
@@ -13,8 +14,8 @@ enum Capture {
     Model,
 }
 
-/// Bytes kept of a top-level key: enough to compare with `max_tokens`.
-const KEY_CAP: usize = 16;
+/// Bytes kept of a top-level key: enough to compare with `max_output_tokens`.
+const KEY_CAP: usize = 24;
 
 /// Incremental reader of one request body's top-level `model`.
 pub struct PolicyScanner {
@@ -26,6 +27,8 @@ pub struct PolicyScanner {
     expect_key: bool,
     capture: Capture,
     key: [u8; KEY_CAP],
+    /// The API's output-token field: `max_tokens` or `max_output_tokens`.
+    token_key: &'static [u8],
     key_len: usize,
     key_long: bool,
     escaped: bool,
@@ -38,13 +41,13 @@ pub struct PolicyScanner {
     found: bool,
     /// Body bytes fed before the current chunk.
     offset: u64,
-    /// The last top-level key was `max_tokens` and its value comes next.
+    /// The last top-level key was the token field and its value comes next.
     tokens_next: bool,
-    /// Digits of `max_tokens` are being read.
+    /// Digits of the token field are being read.
     tokens_reading: bool,
     tokens_value: u64,
     tokens_seen: bool,
-    /// `max_tokens`, once its value has been read completely.
+    /// The token field, once its value has been read completely.
     max_tokens: Option<u64>,
 }
 
@@ -55,7 +58,13 @@ impl Default for PolicyScanner {
 }
 
 impl PolicyScanner {
+    /// A scanner for Anthropic Messages bodies.
     pub fn new() -> Self {
+        Self::for_api(Api::Messages)
+    }
+
+    /// A scanner for `api`'s request bodies.
+    pub fn for_api(api: Api) -> Self {
         Self {
             error: None,
             started: false,
@@ -65,6 +74,7 @@ impl PolicyScanner {
             expect_key: false,
             capture: Capture::None,
             key: [0; KEY_CAP],
+            token_key: api.token_field().as_bytes(),
             key_len: 0,
             key_long: false,
             escaped: false,
@@ -100,8 +110,9 @@ impl PolicyScanner {
         Some(self.model_start..self.model_start + self.model_len as u64)
     }
 
-    /// `max_tokens`, once its value has been read completely.
-    pub fn max_tokens(&self) -> Option<u64> {
+    /// The requested output-token maximum (`max_tokens` on Messages,
+    /// `max_output_tokens` on Responses), once its value was read completely.
+    pub fn max_output_tokens(&self) -> Option<u64> {
         self.max_tokens
     }
 
@@ -258,7 +269,7 @@ impl PolicyScanner {
         self.offset += chunk.len() as u64;
     }
 
-    /// Completes a `max_tokens` value at a terminator; a key whose value
+    /// Completes a token-field value at a terminator; a key whose value
     /// never started is an error.
     fn end_tokens(&mut self) {
         if self.tokens_reading {
@@ -302,7 +313,7 @@ impl PolicyScanner {
                         self.error = Some(PolicyError::Repeated);
                     }
                     self.model_next = true;
-                } else if !self.key_long && self.key.get(..self.key_len) == Some(b"max_tokens") {
+                } else if !self.key_long && self.key.get(..self.key_len) == Some(self.token_key) {
                     if self.tokens_seen {
                         self.error = Some(PolicyError::RepeatedMaxTokens);
                     }

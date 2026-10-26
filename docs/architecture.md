@@ -57,6 +57,7 @@ wye/
 │   ├── gateway-core/src/        portable policy, no I/O
 │   │   ├── config.rs            wye.toml parsing and validation (config/validate/)
 │   │   ├── alias.rs             model aliases and per-subject rollout
+│   │   ├── api.rs               the native APIs and what differs between them
 │   │   ├── credential.rs        gateway credential verification (own and identity-provider) and issuance
 │   │   ├── credential/keys.rs   Ed25519, ES256, RS256 keys; JWKS parsing
 │   │   ├── credential/provider.rs  identity-provider claims and grants
@@ -128,11 +129,12 @@ Upstream connections come from one pool of lanes ([upstream connections](#upstre
 
 Implemented:
 
-- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough to Anthropic (P0: Claude Code and Anthropic SDK clients).
+- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough to Anthropic (P0: Claude Code and Anthropic SDK clients), when `[upstream]` or `[routes.claude]` is set.
+- `POST /v1/responses`: OpenAI Responses, native passthrough to OpenAI (P1: Codex and OpenAI SDK clients), when `[routes.openai]` is set ([Codex integration](#codex-integration)). Usage extraction for it is next (M3 stage 7).
 - `GET /healthz`, `GET /readyz`: operational probes; `HEAD /api/hello`: Claude Code's warm-up probe.
-- `GET /v1/models`: with `[discovery]`, the configured catalog narrowed to the models the caller may use (the `[auth] models` ceiling, then the credential's `models` claim), so Claude Code's model picker shows only permitted models. Authenticated when `[auth]` is set; one page (`has_more: false`); no upstream contact and no usage record. Claude Code queries it only with `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, with a 3-second timeout, and keeps ids containing `claude` or `anthropic`.
+- `GET /v1/models`: with `[discovery]`, the configured catalog narrowed to the models the caller may use (the `[auth] models` ceiling, then the credential's `models` claim), so Claude Code's model picker shows only permitted models. Authenticated when `[auth]` is set; one page (`has_more: false`); no upstream contact and no usage record. Claude Code queries it only with `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, with a 3-second timeout, and keeps ids containing `claude` or `anthropic`. Codex's catalog request (`GET /v1/models?client_version=...`, its own format) gets `404`, so Codex uses its bundled catalog.
 
-Planned (M3): `POST /v1/responses` and `POST /v1/chat/completions`, native passthrough to OpenAI. Every other path gets `404 not_found_error`.
+Planned (M3): `POST /v1/chat/completions`, native passthrough to OpenAI. Every other path, and an API whose route is not configured, gets `404 not_found_error`.
 
 An `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` override works only when the client respects it **and** uses an implemented endpoint. Base-URL compatibility is not compatibility with proprietary SDK extensions.
 
@@ -153,6 +155,17 @@ Claude Code documents what a gateway must do ([gateway compatibility guide](http
 - Claude Code sends background requests to a second, smaller model unless one is pinned; model permissions must cover it or those requests fail.
 
 The guide changes with the client. Re-run the contract tests against each targeted Claude Code release.
+
+### Codex integration
+
+What Codex sends a custom provider, from its source (openai/codex at `970111f`, read 2026-10-26) and its gateway guide (learn.chatgpt.com, "Gateway compatibility"):
+
+- A custom `[model_providers.<id>]` with `wire_api = "responses"` gets `POST {base_url}/responses` over HTTP with SSE; its `supports_websockets` defaults to false, so no WebSocket transport. The built-in `openai` provider (also reached through `openai_base_url`) tries WebSockets first and falls back to HTTP; `wye codex` therefore defines its own provider.
+- The bearer token comes from the environment variable the provider's `env_key` names, as `Authorization: Bearer`: with `[auth]` a Wye credential, which Wye verifies and replaces with the OpenAI key. Request bodies are zstd-compressed only with a ChatGPT login on the built-in provider, never for an API-key custom provider, so Wye reads plain JSON. Codex serializes `model` first ("gateways may inspect request bodies incrementally"), so the model hold usually reads one chunk.
+- Headers for attribution: `session-id` (affinity and the record's `session_id`), `thread-id` and `x-client-request-id`, `x-openai-subagent` (`review`, `compact`, `memory_consolidation`, `collab_spawn`), and `originator`. Over HTTP Codex replays the whole input each turn and sends no `previous_response_id` (that is WebSocket-only), so no upstream-held state pins a request yet.
+- Retries: `request_max_retries` (default 4) on 5xx and transport errors, never on `429`; `stream_max_retries` (5) for interrupted streams. Wye's overload answer on Responses is therefore `503` with `retry-after`, which Codex and the OpenAI SDKs retry.
+
+Gateway-generated errors on `/v1/responses` use OpenAI's shape: `{"error": {"message", "type", "param", "code"}}`, with `type` `invalid_request_error` or `server_error` and `code` naming Wye's reason (`permission_error`, `authentication_error`, `overloaded_error`, ...).
 
 ## Forwarding contract
 
@@ -187,7 +200,7 @@ For Anthropic Messages streams (`gateway-core/src/usage.rs`): at most one partia
 
 **Backpressure and cancellation.** Downstream body polling applies backpressure. No unbounded queues or detached readers. Client disconnect releases or cancels upstream work, verified by integration tests. Already generated tokens may still be billed.
 
-**Errors.** Before downstream headers are sent, local failures produce a gateway error in the client-facing API's error shape (Anthropic error JSON on `/v1/messages`). Upstream error bodies pass through unmodified. After headers are sent, an upstream failure terminates the stream; it cannot become a new JSON error response.
+**Errors.** Before downstream headers are sent, local failures produce a gateway error in the client-facing API's error shape (Anthropic error JSON on `/v1/messages`, OpenAI's on `/v1/responses`). Upstream error bodies pass through unmodified. After headers are sent, an upstream failure terminates the stream; it cannot become a new JSON error response.
 
 **Timeouts and shutdown.** Use three timeouts: a short connect timeout; a response-header timeout of several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure); and a streaming-inactivity timeout longer than the provider's `ping` interval. A fourth bounds the client side: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs. No total request timeout: it would kill valid generations. Shutdown has a drain phase (readiness fails, requests still served) and a grace phase that cancels whatever remains ([operations.md](operations.md#health-and-shutdown)).
 
@@ -207,7 +220,7 @@ Keep request IDs and trace linkage. Do not claim exactly-once execution.
 
 ## Providers
 
-A provider is a concrete module for one way of reaching a native API: Anthropic today; Claude Platform on AWS, Bedrock, and Vertex for the same Messages API (M4); OpenAI for `/v1/responses` and `/v1/chat/completions` (M3). A closed `Provider` enum selects it when the second one lands; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: endpoint and credential, model id, the usage events (for the usage observer and cost), and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted. Passing provider-native options through does not mean Wye interprets or enforces them.
+A provider is a concrete module for one way of reaching a native API: Anthropic and OpenAI (`/v1/responses`) today; Claude Platform on AWS, Bedrock, and Vertex for the same Messages API (M4); OpenAI `/v1/chat/completions` (M3). A closed `Provider` enum (`config::Provider`) selects how Wye authenticates (`x-api-key` or `Authorization: Bearer`), and a closed `Api` enum (`gateway-core/src/api.rs`) holds what differs per native API: the output-token field, the session header, the error shape; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: endpoint and credential, model id, the usage events (for the usage observer and cost), and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted. Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Upstream connections
 
@@ -315,7 +328,7 @@ No hot reload; changes require a restart (or rolling deploy). A config snapshot 
 
 ### Current schema (implemented)
 
-Every field except `listen`, `base_url`, and one credential mode is optional; values shown are defaults. `examples/wye.toml` is the annotated version. `[upstream]` and `[routes.claude]` are alternatives: one Anthropic upstream, or several.
+Every field except `listen`, `base_url`, and one credential mode is optional; values shown are defaults. `examples/wye.toml` is the annotated version. `[upstream]` and `[routes.claude]` are alternatives: one Anthropic upstream, or several; `[routes.openai]` adds OpenAI, and at least one route is required.
 
 ```toml
 [server]
@@ -336,6 +349,14 @@ connect_timeout_secs = 10
 response_header_timeout_secs = 600
 stream_idle_timeout_secs = 120
 http_version = "auto"                  # HTTP/2 via ALPN when offered; "1.1": no HTTP/2 flow control on uploads
+
+# OpenAI Responses for Codex and OpenAI SDKs (/v1/responses); same fields as above.
+# [routes.openai]
+# [[routes.openai.upstreams]]
+# id = "openai"
+# provider = "openai"                  # the default here
+# base_url = "https://api.openai.com"  # without /v1: clients send /v1/responses
+# api_key_env = "OPENAI_API_KEY"       # sent as Authorization: Bearer
 
 # Instead of [upstream]: several Anthropic accounts, chosen per session.
 # [routes.claude]

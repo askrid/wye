@@ -10,7 +10,7 @@ fn route(upstreams: &[(&str, u32)]) -> Route {
              base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n"
         ));
     }
-    Config::from_toml_str(&toml).unwrap().route
+    Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
 }
 
 fn picks(route: &Route, keys: usize) -> Vec<usize> {

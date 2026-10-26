@@ -7,6 +7,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         event: "request",
         unix_ms: 0,
         path,
+        system: "anthropic",
         status,
         outcome: "completed",
         duration_ms: ms,

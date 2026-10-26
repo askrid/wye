@@ -253,7 +253,7 @@ mod tests {
              [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"B\"\n",
         )
         .unwrap();
-        let route = &config.route;
+        let route = config.routes.claude.as_ref().unwrap();
         let id = |session: &str| {
             route.upstreams()[route.pick(session.as_bytes())]
                 .id

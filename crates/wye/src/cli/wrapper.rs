@@ -1,29 +1,53 @@
-//! `wye claude`: runs Claude Code against a Wye gateway.
+//! `wye claude` and `wye codex`: run an agent against a Wye gateway.
 //!
-//! Only environment variables change, so nothing needs cleaning up: the
-//! wrapper checks that the gateway answers, sets `ANTHROPIC_BASE_URL` (and
-//! `ANTHROPIC_AUTH_TOKEN` when a gateway credential is given), and then
-//! replaces itself with `claude`. Signals, the terminal, and the exit code
-//! are therefore Claude Code's own.
+//! Nothing on disk changes, so nothing needs cleaning up: the wrapper checks
+//! that the gateway answers, points the agent at it through its environment
+//! (Claude Code) or command-line config overrides (Codex), and then replaces
+//! itself with the agent. Signals, the terminal, and the exit code are
+//! therefore the agent's own.
 
 use std::{ffi::OsString, process::Command};
 
 /// Gateway URL when neither `--gateway` nor `WYE_GATEWAY_URL` is set.
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
+/// The environment variable Codex reads its bearer token from (the Codex
+/// provider's `env_key`).
+const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";
+/// Sent by Codex when the gateway takes no credential: Codex needs a token,
+/// and a gateway without `[auth]` replaces it with the provider key.
+const CODEX_NO_CREDENTIAL: &str = "wye-loopback";
 
-/// Where the wrapper sends Claude Code, and with which credential.
+/// The agents the wrapper can launch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Agent {
+    Claude,
+    Codex,
+}
+
+impl Agent {
+    fn program(self) -> OsString {
+        let (variable, default) = match self {
+            Self::Claude => ("WYE_CLAUDE_BIN", "claude"),
+            Self::Codex => ("WYE_CODEX_BIN", "codex"),
+        };
+        std::env::var_os(variable).unwrap_or_else(|| default.into())
+    }
+}
+
+/// Where the wrapper sends the agent, and with which credential.
 #[derive(Debug, PartialEq, Eq)]
-pub struct ClaudeLaunch {
+pub struct Launch {
     pub gateway: String,
     /// A gateway credential, sent as `Authorization: Bearer`; `None` keeps
-    /// Claude Code's own login (subscription passthrough).
+    /// Claude Code's own login (subscription passthrough), or lets Codex
+    /// reach a gateway without `[auth]`.
     pub credential: Option<String>,
-    /// Arguments for `claude` itself.
+    /// Arguments for the agent itself.
     pub args: Vec<String>,
 }
 
-impl ClaudeLaunch {
-    /// Parses `[--gateway URL] [--credential-file PATH] [--] [claude args...]`,
+impl Launch {
+    /// Parses `[--gateway URL] [--credential-file PATH] [--] [agent args...]`,
     /// falling back to `WYE_GATEWAY_URL` and `WYE_CREDENTIAL`.
     pub fn from_args(args: &[&str], env: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
         let mut gateway = env("WYE_GATEWAY_URL");
@@ -62,26 +86,76 @@ impl ClaudeLaunch {
         })
     }
 
-    /// The `claude` command with the gateway environment.
-    pub fn command(&self, program: impl Into<OsString>) -> Command {
+    /// The agent's command, pointed at the gateway.
+    pub fn command(&self, agent: Agent, program: impl Into<OsString>) -> Command {
         let mut command = Command::new(program.into());
-        command
-            .args(&self.args)
-            .env("ANTHROPIC_BASE_URL", &self.gateway);
-        if let Some(credential) = &self.credential {
-            command.env("ANTHROPIC_AUTH_TOKEN", credential);
-            // An API key would be sent too and take precedence in Claude Code.
-            command.env_remove("ANTHROPIC_API_KEY");
+        match agent {
+            Agent::Claude => {
+                command.env("ANTHROPIC_BASE_URL", &self.gateway);
+                if let Some(credential) = &self.credential {
+                    command.env("ANTHROPIC_AUTH_TOKEN", credential);
+                    // An API key would be sent too and take precedence in Claude Code.
+                    command.env_remove("ANTHROPIC_API_KEY");
+                }
+            }
+            Agent::Codex => {
+                // A custom provider: Codex speaks Responses over HTTP and SSE
+                // to it (no WebSocket transport, no ChatGPT-only headers).
+                for (key, value) in [
+                    ("model_provider", "wye"),
+                    ("model_providers.wye.name", "Wye"),
+                    (
+                        "model_providers.wye.base_url",
+                        &format!("{}/v1", self.gateway),
+                    ),
+                    ("model_providers.wye.env_key", CODEX_TOKEN_ENV),
+                    ("model_providers.wye.wire_api", "responses"),
+                ] {
+                    command
+                        .arg("-c")
+                        .arg(format!("{key}={}", toml_string(value)));
+                }
+                command.env(
+                    CODEX_TOKEN_ENV,
+                    self.credential.as_deref().unwrap_or(CODEX_NO_CREDENTIAL),
+                );
+            }
         }
+        command.args(&self.args);
         command
     }
 }
 
-/// Runs `claude` through the gateway. On Unix the process becomes `claude`
-/// and this returns only if it cannot start; elsewhere it returns
-/// Claude Code's exit code.
+/// `value` as a TOML basic string, as Codex parses `-c` values.
+fn toml_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Runs `claude` through the gateway; see [`run`].
 pub fn claude(args: &[&str]) -> Result<i32, String> {
-    let launch = ClaudeLaunch::from_args(args, |name| std::env::var(name).ok())?;
+    run(Agent::Claude, args)
+}
+
+/// Runs `codex` through the gateway; see [`run`].
+pub fn codex(args: &[&str]) -> Result<i32, String> {
+    run(Agent::Codex, args)
+}
+
+/// Runs the agent through the gateway. On Unix the process becomes the
+/// agent and this returns only if it cannot start; elsewhere it returns the
+/// agent's exit code.
+fn run(agent: Agent, args: &[&str]) -> Result<i32, String> {
+    let launch = Launch::from_args(args, |name| std::env::var(name).ok())?;
     let health = format!("{}/healthz", launch.gateway);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -89,20 +163,21 @@ pub fn claude(args: &[&str]) -> Result<i32, String> {
         .map_err(|e| e.to_string())?
         .block_on(super::probe(&health))
         .map_err(|e| format!("gateway not reachable ({e}); start it with `wye serve`"))?;
-    let program = std::env::var_os("WYE_CLAUDE_BIN").unwrap_or_else(|| "claude".into());
-    let mut command = launch.command(program);
+    let program = agent.program();
+    let name = program.to_string_lossy().into_owned();
+    let mut command = launch.command(agent, program);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         // Only returns on failure.
         let error = command.exec();
-        Err(format!("cannot run claude: {error}"))
+        Err(format!("cannot run {name}: {error}"))
     }
     #[cfg(not(unix))]
     {
         let status = command
             .status()
-            .map_err(|e| format!("cannot run claude: {e}"))?;
+            .map_err(|e| format!("cannot run {name}: {e}"))?;
         Ok(status.code().unwrap_or(1))
     }
 }
@@ -114,39 +189,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn flags_override_environment_and_the_rest_goes_to_claude() {
+    fn flags_override_environment_and_the_rest_goes_to_the_agent() {
         let env = |name: &str| match name {
             "WYE_GATEWAY_URL" => Some("http://gw:9000/".to_owned()),
             "WYE_CREDENTIAL" => Some("from-env".to_owned()),
             _ => None,
         };
-        let launch = ClaudeLaunch::from_args(&["-p", "fix tests"], env).unwrap();
+        let launch = Launch::from_args(&["-p", "fix tests"], env).unwrap();
         assert_eq!(launch.gateway, "http://gw:9000");
         assert_eq!(launch.credential.as_deref(), Some("from-env"));
         assert_eq!(launch.args, ["-p", "fix tests"]);
 
         let launch =
-            ClaudeLaunch::from_args(&["--gateway", "http://other", "--", "--gateway"], env)
-                .unwrap();
+            Launch::from_args(&["--gateway", "http://other", "--", "--gateway"], env).unwrap();
         assert_eq!(launch.gateway, "http://other");
         assert_eq!(launch.args, ["--gateway"]);
 
-        let defaults = ClaudeLaunch::from_args(&[], |_| None).unwrap();
+        let defaults = Launch::from_args(&[], |_| None).unwrap();
         assert_eq!(defaults.gateway, DEFAULT_GATEWAY);
         assert_eq!(defaults.credential, None);
     }
 
     #[test]
-    fn command_sets_the_gateway_environment() {
-        let launch = ClaudeLaunch {
+    fn claude_gets_the_gateway_environment() {
+        let launch = Launch {
             gateway: "http://gw".into(),
             credential: Some("tok".into()),
             args: vec!["-p".into()],
         };
-        let command = launch.command("claude");
+        let command = launch.command(Agent::Claude, "claude");
         let envs: Vec<_> = command.get_envs().collect();
         assert!(envs.contains(&("ANTHROPIC_BASE_URL".as_ref(), Some("http://gw".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_AUTH_TOKEN".as_ref(), Some("tok".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_API_KEY".as_ref(), None)));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-p"]);
+    }
+
+    #[test]
+    fn codex_gets_a_wye_provider_and_its_token() {
+        let launch = Launch {
+            gateway: "http://gw:9000".into(),
+            credential: None,
+            args: vec!["exec".into(), "fix tests".into()],
+        };
+        let command = launch.command(Agent::Codex, "codex");
+        let args: Vec<_> = command
+            .get_args()
+            .map(|a| a.to_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "-c",
+                r#"model_provider="wye""#,
+                "-c",
+                r#"model_providers.wye.name="Wye""#,
+                "-c",
+                r#"model_providers.wye.base_url="http://gw:9000/v1""#,
+                "-c",
+                r#"model_providers.wye.env_key="WYE_CODEX_TOKEN""#,
+                "-c",
+                r#"model_providers.wye.wire_api="responses""#,
+                "exec",
+                "fix tests",
+            ]
+        );
+        let envs: Vec<_> = command.get_envs().collect();
+        assert!(envs.contains(&("WYE_CODEX_TOKEN".as_ref(), Some("wye-loopback".as_ref()))));
+        assert_eq!(toml_string(r#"a"b\c"#), r#""a\"b\\c""#);
     }
 }

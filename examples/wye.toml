@@ -37,6 +37,15 @@ api_key_env = "ANTHROPIC_API_KEY"
 # PEM file of extra trusted root certificates (e.g. a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
+# OpenAI Responses for Codex (`wye codex`) and the OpenAI SDKs, beside or
+# instead of [upstream]. Clients use base URL http://<gateway>/v1; the key
+# goes upstream as Authorization: Bearer.
+# [routes.openai]
+# [[routes.openai.upstreams]]
+# id = "openai"
+# base_url = "https://api.openai.com"
+# api_key_env = "OPENAI_API_KEY"
+
 # Several Anthropic accounts: replace [upstream] with [routes.claude]. Each
 # Claude Code session stays on one account (its prompt cache stays warm),
 # chosen from the session id the same way on every replica; weights share

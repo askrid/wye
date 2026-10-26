@@ -19,7 +19,7 @@ pub(super) use models::{
     RawAlias, RawPricing, RawUpgradeCheck, validate_aliases, validate_pricing,
     validate_upgrade_check,
 };
-pub(super) use upstream::{RawRoutes, RawUpstream, validate_route};
+pub(super) use upstream::{RawRoutes, RawUpstream, validate_routes};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

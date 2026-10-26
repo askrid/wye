@@ -24,6 +24,7 @@ use std::{
 };
 
 use gateway_core::{
+    api::Endpoint,
     credential::Identity,
     pricing::Pricing,
     prompt::HashKey,
@@ -75,7 +76,8 @@ impl Outcome {
 
 /// Request facts known before the response arrives.
 pub(crate) struct RequestInfo {
-    pub path: &'static str,
+    /// The proxied endpoint: its path and API.
+    pub endpoint: Endpoint,
     pub session_id: Option<HeaderValue>,
     /// W3C `traceparent`, the parent of the request's OTLP span.
     pub traceparent: Option<HeaderValue>,

@@ -7,7 +7,7 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, UpstreamCredential},
+    config::{Config, Provider, UpstreamCredential},
     credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
 };
@@ -86,7 +86,8 @@ impl std::error::Error for StartupError {}
 /// Secrets and files the configuration references, loaded at startup.
 #[derive(Debug)]
 pub struct Resources {
-    /// One per upstream of the route, in config order.
+    /// One per upstream, in `Routes::upstreams` order: the Claude route's,
+    /// then the OpenAI route's.
     pub upstreams: Vec<UpstreamResources>,
     /// Gateway credential checks, when `[auth]` is configured.
     pub verifier: Option<Verifier>,
@@ -117,14 +118,17 @@ impl UpstreamResources {
 impl Resources {
     /// Loads what `config` references. Relative paths resolve against `config_dir`.
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
-        let mut upstreams = Vec::with_capacity(config.route.upstreams().len());
-        for upstream in config.route.upstreams() {
-            let auth = match &upstream.credential {
-                UpstreamCredential::ApiKeyEnv(name) => UpstreamAuth::api_key(&env(name)?)?,
-                UpstreamCredential::ApiKeyFile(path) => {
-                    UpstreamAuth::api_key(&read_secret(&config_dir.join(path))?)?
-                }
-                UpstreamCredential::ForwardCaller => UpstreamAuth::ForwardCaller,
+        let mut upstreams = Vec::with_capacity(config.routes.upstreams().count());
+        for upstream in config.routes.upstreams() {
+            let key = match &upstream.credential {
+                UpstreamCredential::ApiKeyEnv(name) => Some(env(name)?),
+                UpstreamCredential::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
+                UpstreamCredential::ForwardCaller => None,
+            };
+            let auth = match (key, upstream.provider) {
+                (Some(key), Provider::Anthropic) => UpstreamAuth::api_key(&key)?,
+                (Some(key), Provider::OpenAi) => UpstreamAuth::bearer(&key)?,
+                (None, _) => UpstreamAuth::ForwardCaller,
             };
             let extra_roots = match &upstream.ca_file {
                 Some(path) => load_certificates(&config_dir.join(path))?,
