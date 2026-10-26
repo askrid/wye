@@ -93,7 +93,16 @@ pub(crate) struct RequestInfo {
     pub upgrade: Option<UpgradeSlot>,
     /// The route upstream the request went to, when the route names them.
     pub upstream: Option<Arc<str>>,
+    /// Upstreams that refused the request before the one that answered.
+    pub failovers: Vec<Failover>,
     pub started: Instant,
+}
+
+/// An upstream that refused a request, which then went to the next one.
+pub(crate) struct Failover {
+    pub upstream: Option<Arc<str>>,
+    /// The refusal's status; `None`: the connection could not be made.
+    pub status: Option<u16>,
 }
 
 pub(crate) struct Record {

@@ -38,6 +38,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         cache_miss: None,
         prompt: None,
         upgrade_issues: None,
+        failovers: &[],
     }
 }
 

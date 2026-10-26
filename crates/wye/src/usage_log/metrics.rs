@@ -60,6 +60,14 @@ struct UpgradeSeries {
     count: u64,
 }
 
+/// Refusals that moved a request to the route's next upstream.
+struct FailoverSeries {
+    /// The upstream that refused.
+    upstream: Option<Box<str>>,
+    reason: &'static str,
+    count: u64,
+}
+
 /// Cache-miss reasons, in [`CACHE_MISS_REASONS`] order.
 const CACHE_MISS_REASONS: [&str; 3] = ["compaction", "after_compaction", "unexplained"];
 
@@ -71,6 +79,7 @@ pub(super) struct Metrics {
     tokens: Vec<TokenSeries>,
     costs: Vec<CostSeries>,
     upgrades: Vec<UpgradeSeries>,
+    failovers: Vec<FailoverSeries>,
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<(Box<str>, u64)>,
     /// Requests that wrote the prompt cache without reading it, by reason.
@@ -87,6 +96,7 @@ impl Metrics {
             tokens: Vec::new(),
             costs: Vec::new(),
             upgrades: Vec::new(),
+            failovers: Vec::new(),
             tool_calls: Vec::new(),
             cache_misses: [0; CACHE_MISS_REASONS.len()],
             overflow: 0,
@@ -175,6 +185,30 @@ impl Metrics {
                     target: target.into(),
                     rule,
                     subject: line.subject.map(Into::into),
+                    count: 1,
+                });
+            } else {
+                self.overflow += 1;
+            }
+        }
+        for failover in line.failovers {
+            let reason = match failover.status {
+                Some(429) => "429",
+                Some(529) => "529",
+                Some(_) => "other",
+                None => "connect",
+            };
+            let upstream = failover.upstream.as_deref();
+            let found = self
+                .failovers
+                .iter()
+                .position(|s| s.upstream.as_deref() == upstream && s.reason == reason);
+            if let Some(series) = found.and_then(|i| self.failovers.get_mut(i)) {
+                series.count += 1;
+            } else if self.failovers.len() < MAX_SERIES {
+                self.failovers.push(FailoverSeries {
+                    upstream: upstream.map(Into::into),
+                    reason,
                     count: 1,
                 });
             } else {
@@ -354,6 +388,24 @@ impl Metrics {
                     ("wye.upgrade.target", Some(Value::Str(&s.target))),
                     ("wye.upgrade.rule", Some(Value::Str(s.rule))),
                     ("enduser.id", s.subject.as_deref().map(Value::Str)),
+                ],
+            );
+        }
+        buf.extend_from_slice(b"]}},");
+
+        sum_header(
+            &mut buf,
+            "wye.failovers",
+            "{request}",
+            "Requests moved to the route's next upstream, by the upstream that refused and why",
+        );
+        for (i, s) in self.failovers.iter().enumerate() {
+            point_start(&mut buf, i, &times, s.count);
+            attributes(
+                &mut buf,
+                &[
+                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                    ("wye.failover.reason", Some(Value::Str(s.reason))),
                 ],
             );
         }
