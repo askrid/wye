@@ -123,3 +123,21 @@ fn splits_cost_by_upstream_when_records_name_one() {
     // Without upstream names, no section.
     assert!(!report(LOG.as_bytes()).unwrap().contains("By upstream"));
 }
+
+#[test]
+fn counts_failovers_by_upstream_and_reason() {
+    let log = r#"{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","status":429}]}
+{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","status":429}]}
+{"event":"request","outcome":"completed","upstream":"a","failovers":[{"upstream":"c","error":"connect"}]}
+"#;
+    let out = report(log.as_bytes()).unwrap();
+    let section = out.split("\nFailovers:").nth(1).unwrap();
+    let rows: Vec<String> = section
+        .lines()
+        .skip(2)
+        .take_while(|l| !l.trim().is_empty())
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(rows, ["a 429 2", "c connect 1"]);
+    assert!(!report(LOG.as_bytes()).unwrap().contains("Failovers"));
+}
