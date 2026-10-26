@@ -263,7 +263,8 @@ fn shows_the_upstream_a_session_goes_to() {
     )
     .unwrap();
     for session in ["s-1", "s-2", "s-3", "s-4"] {
-        let picked = &config.route.upstreams()[config.route.pick(session.as_bytes())];
+        let route = config.routes.claude.as_ref().unwrap();
+        let picked = &route.upstreams()[route.pick(session.as_bytes())];
         let id = picked.id.as_deref().unwrap();
         let out = explain(
             &config,
@@ -293,4 +294,60 @@ fn shows_the_upstream_a_session_goes_to() {
             if id == "team-a" { "A" } else { "B" }
         )));
     }
+}
+
+#[test]
+fn explains_responses_on_the_openai_route() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\n\
+         max_output_tokens = 1000\n\
+         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"\n\
+         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
+         base_url = \"https://api.openai.com\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+    )
+    .unwrap();
+    let dev = || {
+        Credential::Trusted(Identity {
+            subject: "dev".into(),
+            key_id: "k1".into(),
+            expires_at: NOW + 60,
+            models: None,
+            max_output_tokens: None,
+        })
+    };
+    let run =
+        |path: &str, body: &[u8]| explain(&config, path, dev(), Some("codex-1"), body, NOW, &[]);
+    let ok = run(
+        "/v1/responses",
+        br#"{"model":"gpt-5.5","max_output_tokens":500,"input":[]}"#,
+    );
+    let report = ok.report();
+    assert!(ok.refused.is_none(), "{report}");
+    assert!(
+        report.contains("max_output_tokens: 500 (limit 1000)"),
+        "{report}"
+    );
+    assert!(
+        report.contains("provider credential: Authorization: Bearer from $OPENAI_API_KEY"),
+        "{report}"
+    );
+    assert!(
+        report.contains("upstream: POST https://api.openai.com/v1/responses"),
+        "{report}"
+    );
+
+    let missing = run("/v1/responses", br#"{"model":"gpt-5.5","input":[]}"#);
+    assert_eq!(
+        missing.refused.as_ref().map(|r| r.2.as_str()),
+        Some("max_output_tokens is required: this credential's limit is 1000")
+    );
+
+    let no_claude = run(
+        "/v1/messages",
+        br#"{"model":"claude-opus-5-5","max_tokens":1}"#,
+    );
+    assert_eq!(
+        no_claude.refused.as_ref().map(|r| r.2.as_str()),
+        Some("/v1/messages is not proxied: no [routes.claude]")
+    );
 }

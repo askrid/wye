@@ -37,7 +37,7 @@ use gateway_core::policy::PolicyError;
 use crate::{
     StartupError,
     diagnostics::{PromptBody, PromptSlot},
-    permissions::{OverTokenLimit, RequestBody},
+    permissions::{RequestBody, TokenLimitError},
     upgrade_check::{UpgradeBody, UpgradeSlot},
 };
 
@@ -67,24 +67,37 @@ const HOP_BY_HOP: [HeaderName; 9] = [
 
 /// Credential Wye presents upstream.
 pub enum UpstreamAuth {
-    /// Replace the caller's credential headers with this `x-api-key` value.
+    /// Replace the caller's credential headers with this `x-api-key` value
+    /// (Anthropic).
     ApiKey(HeaderValue),
+    /// Replace the caller's credential headers with this `Authorization`
+    /// value, `Bearer` and the key (OpenAI).
+    Bearer(HeaderValue),
     /// Forward the caller's credential headers unchanged.
     ForwardCaller,
 }
 
 impl UpstreamAuth {
     pub fn api_key(key: &str) -> Result<Self, StartupError> {
-        let mut value = HeaderValue::from_str(key).map_err(|_| StartupError::InvalidApiKey)?;
-        value.set_sensitive(true);
-        Ok(Self::ApiKey(value))
+        Ok(Self::ApiKey(secret(key)?))
     }
+
+    pub fn bearer(key: &str) -> Result<Self, StartupError> {
+        Ok(Self::Bearer(secret(&format!("Bearer {key}"))?))
+    }
+}
+
+fn secret(value: &str) -> Result<HeaderValue, StartupError> {
+    let mut value = HeaderValue::from_str(value).map_err(|_| StartupError::InvalidApiKey)?;
+    value.set_sensitive(true);
+    Ok(value)
 }
 
 impl fmt::Debug for UpstreamAuth {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
+            Self::Bearer(_) => f.write_str("Bearer(<redacted>)"),
             Self::ForwardCaller => f.write_str("ForwardCaller"),
         }
     }
@@ -106,8 +119,8 @@ pub(crate) enum ForwardError {
 pub(crate) enum PolicyRefusal {
     /// A repeated `model`, an escaped top-level key, or a bad `max_tokens`.
     Invalid(PolicyError),
-    /// `max_tokens` above the request's ceiling.
-    OverTokenLimit(String),
+    /// The output-token maximum above the request's ceiling, or missing.
+    TokenLimit(String),
 }
 
 /// HTTP/2 receive window per upstream stream: what one response may buffer
@@ -190,9 +203,18 @@ impl Upstream {
         strip_hop_by_hop(&mut parts.headers);
         parts.headers.remove(HOST);
         parts.headers.insert(ACCEPT_ENCODING, IDENTITY);
-        if let UpstreamAuth::ApiKey(key) = &self.auth {
-            parts.headers.remove(AUTHORIZATION);
-            parts.headers.insert(X_API_KEY, key.clone());
+        // The caller's headers carried the gateway credential, in either
+        // header: neither may reach the provider.
+        match &self.auth {
+            UpstreamAuth::ApiKey(key) => {
+                parts.headers.remove(AUTHORIZATION);
+                parts.headers.insert(X_API_KEY, key.clone());
+            }
+            UpstreamAuth::Bearer(value) => {
+                parts.headers.remove(X_API_KEY);
+                parts.headers.insert(AUTHORIZATION, value.clone());
+            }
+            UpstreamAuth::ForwardCaller => {}
         }
         let body = PromptBody::new(
             UpgradeBody::new(Limited::new(body, max_body_bytes), upgrade),
@@ -242,8 +264,8 @@ fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Option<PolicyRef
         if let Some(e) = e.downcast_ref::<PolicyError>() {
             return Some(PolicyRefusal::Invalid(*e));
         }
-        if let Some(e) = e.downcast_ref::<OverTokenLimit>() {
-            return Some(PolicyRefusal::OverTokenLimit(e.to_string()));
+        if let Some(e) = e.downcast_ref::<TokenLimitError>() {
+            return Some(PolicyRefusal::TokenLimit(e.to_string()));
         }
         cause = e.source();
     }
@@ -319,5 +341,7 @@ mod tests {
     fn api_key_debug_is_redacted() {
         let auth = UpstreamAuth::api_key("sk-secret").unwrap();
         assert_eq!(format!("{auth:?}"), "ApiKey(<redacted>)");
+        let auth = UpstreamAuth::bearer("sk-secret").unwrap();
+        assert_eq!(format!("{auth:?}"), "Bearer(<redacted>)");
     }
 }

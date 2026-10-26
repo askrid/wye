@@ -12,6 +12,7 @@ use std::{
 use bytes::Bytes;
 use gateway_core::{
     alias::Aliases,
+    api::{self, Api},
     config::{Config, UpgradeCheck},
     credential::Verifier,
     policy::ModelPattern,
@@ -44,7 +45,6 @@ use responses::{empty, error, forward_error, overloaded, unauthorized};
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
-const SESSION_ID: HeaderName = HeaderName::from_static("x-claude-code-session-id");
 /// W3C trace context: the parent of the request's OTLP span.
 const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 
@@ -53,9 +53,10 @@ const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 pub struct Gateway {
     /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
-    /// Picks an upstream per request; the same order as `upstreams`.
-    route: Route,
-    upstreams: Box<[Upstream]>,
+    /// Anthropic Messages, when `[upstream]` or `[routes.claude]` is set.
+    claude: Option<ApiRoute>,
+    /// OpenAI Responses, when `[routes.openai]` is set.
+    openai: Option<ApiRoute>,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
     /// Largest `max_tokens` any credential may request.
@@ -88,23 +89,39 @@ pub struct Gateway {
     pub(crate) client_write_timeout: Duration,
 }
 
+/// One API's route: how a request picks an upstream, and the upstreams, in
+/// the route's order.
+struct ApiRoute {
+    route: Route,
+    upstreams: Box<[Upstream]>,
+}
+
 impl Gateway {
     pub fn new(config: &Config, resources: Resources) -> Result<Self, StartupError> {
-        if resources.upstreams.len() != config.route.upstreams().len() {
+        if resources.upstreams.len() != config.routes.upstreams().count() {
             return Err(StartupError::UpstreamCount);
         }
         let otlp_roots = resources.all_extra_roots();
-        let upstreams = config
-            .route
-            .upstreams()
-            .iter()
-            .zip(resources.upstreams)
-            .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
-            .collect::<Result<_, _>>()?;
+        // Resources come in `Routes::upstreams` order: Claude's, then OpenAI's.
+        let mut resolved = resources.upstreams.into_iter();
+        let mut build = |route: &Route| -> Result<ApiRoute, StartupError> {
+            let upstreams = route
+                .upstreams()
+                .iter()
+                .zip(resolved.by_ref())
+                .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
+                .collect::<Result<_, _>>()?;
+            Ok(ApiRoute {
+                route: route.clone(),
+                upstreams,
+            })
+        };
+        let claude = config.routes.claude.as_ref().map(&mut build).transpose()?;
+        let openai = config.routes.openai.as_ref().map(&mut build).transpose()?;
         Ok(Self {
             verifier: resources.verifier,
-            route: config.route.clone(),
-            upstreams,
+            claude,
+            openai,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
             max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),
             catalog: config.discovery.as_ref().map(|discovery| {
@@ -151,6 +168,13 @@ impl Gateway {
         })
     }
 
+    fn route(&self, api: Api) -> Option<&ApiRoute> {
+        match api {
+            Api::Messages => self.claude.as_ref(),
+            Api::Responses => self.openai.as_ref(),
+        }
+    }
+
     /// Endpoints Wye answers itself.
     fn local(&self, method: &Method, path: &str) -> Response<ResBody> {
         match (method, path) {
@@ -173,6 +197,7 @@ impl Gateway {
                 res
             }
             _ => error(
+                Api::Messages,
                 StatusCode::NOT_FOUND,
                 "not_found_error",
                 "unsupported endpoint",
@@ -208,19 +233,28 @@ impl Gateway {
         log: &UsageLog,
         connection: &ConnectionAuth,
     ) -> Response<ResBody> {
-        let path = match (req.method(), req.uri().path()) {
-            (&Method::POST, "/v1/messages") => "/v1/messages",
-            (&Method::POST, "/v1/messages/count_tokens") => "/v1/messages/count_tokens",
-            (&Method::GET, "/v1/models") if self.catalog.is_some() => {
+        let endpoint = match (req.method(), req.uri().path()) {
+            (&Method::GET, "/v1/models")
+                if self.catalog.is_some() && !is_codex_catalog(req.uri().query()) =>
+            {
                 return self.models(&req, connection);
             }
+            (&Method::POST, path) => match api::endpoint(path) {
+                Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
+                _ => return self.local(req.method(), path),
+            },
             (method, path) => return self.local(method, path),
         };
+        let api = endpoint.api;
         let mut info = RequestInfo {
-            path,
-            session_id: req.headers().get(SESSION_ID).cloned(),
+            endpoint,
+            session_id: req.headers().get(api.session_header()).cloned(),
             traceparent: req.headers().get(TRACEPARENT).cloned(),
-            agent: AgentHeaders::from_headers(req.headers()),
+            // Claude Code's agent headers; Codex's are not read yet.
+            agent: match api {
+                Api::Messages => AgentHeaders::from_headers(req.headers()),
+                Api::Responses => AgentHeaders::default(),
+            },
             identity: None,
             prompt: None,
             requested_model: None,
@@ -232,7 +266,7 @@ impl Gateway {
             match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => info.identity = Some(identity),
                 Err(_) => {
-                    let res = unauthorized();
+                    let res = unauthorized(api);
                     log.gateway_error(info, res.status());
                     return res;
                 }
@@ -253,7 +287,7 @@ impl Gateway {
             None => None,
             Some(verifier) => match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => Some(identity),
-                Err(_) => return unauthorized(),
+                Err(_) => return unauthorized(Api::Messages),
             },
         };
         let body = catalog.list(
@@ -272,8 +306,9 @@ impl Gateway {
         mut info: RequestInfo,
         log: &UsageLog,
     ) -> Response<ResBody> {
+        let api = info.endpoint.api;
         let Some(permit) = self.in_flight.try_hold(self.max_concurrent_requests) else {
-            let res = overloaded("gateway is at its concurrent request limit");
+            let res = overloaded(api, "gateway is at its concurrent request limit");
             log.gateway_error(info, res.status());
             return res;
         };
@@ -284,6 +319,7 @@ impl Gateway {
             .and_then(|v| v.parse::<u64>().ok());
         if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
             let res = error(
+                api,
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request_too_large",
                 "request body exceeds the gateway limit",
@@ -300,7 +336,10 @@ impl Gateway {
             }
         };
         let req = Request::from_parts(parts, body);
-        if self.prompt_key.is_some()
+        // Prompt hashes and upgrade checks read Anthropic request bodies.
+        let messages = api == Api::Messages;
+        if messages
+            && self.prompt_key.is_some()
             && prompt::session_sampled(
                 info.session_id.as_ref().map(HeaderValue::as_bytes),
                 self.prompt_sample_percent,
@@ -309,7 +348,8 @@ impl Gateway {
             info.prompt = Some(PromptSlot::default());
         }
         // Sampled by session, or by client for SDK callers without one.
-        if let Some(check) = &self.upgrade_check
+        if messages
+            && let Some(check) = &self.upgrade_check
             && prompt::session_sampled(
                 info.session_id
                     .as_ref()
@@ -327,7 +367,10 @@ impl Gateway {
             .map(HeaderValue::as_bytes)
             .or(info.identity.as_ref().map(|i| i.subject.as_bytes()))
             .unwrap_or_default();
-        let Some(upstream) = self.upstreams.get(self.route.pick(key)) else {
+        let Some(route) = self.route(api) else {
+            unreachable!("handle only forwards endpoints with a route")
+        };
+        let Some(upstream) = route.upstreams.get(route.route.pick(key)) else {
             unreachable!("the route and its upstreams have the same length")
         };
         info.upstream = upstream.id.clone();
@@ -359,12 +402,18 @@ impl Gateway {
                 })
             }
             Err(e) => {
-                let res = forward_error(e);
+                let res = forward_error(api, e);
                 log.gateway_error(info, res.status());
                 res
             }
         }
     }
+}
+
+/// Codex asks `GET {base_url}/models?client_version=...` for its own catalog
+/// format, not Claude Code's: a 404 makes it use its bundled catalog.
+fn is_codex_catalog(query: Option<&str>) -> bool {
+    query.is_some_and(|q| q.split('&').any(|pair| pair.starts_with("client_version=")))
 }
 
 /// The OTLP export client trusts the same roots as the upstream connection.
@@ -383,4 +432,17 @@ fn otlp_target(
         client,
         &telemetry.service_name,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_codex_catalog;
+
+    #[test]
+    fn codex_catalog_requests_are_recognized() {
+        assert!(is_codex_catalog(Some("client_version=0.130.0")));
+        assert!(is_codex_catalog(Some("limit=5&client_version=1")));
+        assert!(!is_codex_catalog(Some("limit=1000")));
+        assert!(!is_codex_catalog(None));
+    }
 }

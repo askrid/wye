@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use gateway_core::api::Api;
+
 use super::*;
 
 /// A client body that yields its chunks, one per poll.
@@ -37,7 +39,7 @@ async fn holds_only_until_the_model_then_replays_everything() {
     let budget = Gauge::default();
     let parts = [r#"{"model":"m","#, r#""messages":[]"#, "}"];
     let mut client = chunks(&parts);
-    let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20, None)
+    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
         .await
         .unwrap();
     assert_eq!(held.model(), Some("m"));
@@ -69,9 +71,10 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
                     .collect();
                 let budget = Gauge::default();
                 let mut client = chunks(&parts);
-                let mut held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20, None)
-                    .await
-                    .unwrap();
+                let mut held =
+                    hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
+                        .await
+                        .unwrap();
                 assert_eq!(held.splice_model(&Bytes::from(to)), Some(want_delta));
                 let got = collect(RequestBody::after_hold(held, client))
                     .await
@@ -87,7 +90,7 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
 async fn a_repeated_model_later_fails_the_body() {
     let budget = Gauge::default();
     let mut client = chunks(&[r#"{"model":"allowed","#, r#""model":"other"}"#]);
-    let held = hold_until_model(&mut client, &budget, 1 << 20, 1 << 20, None)
+    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
         .await
         .unwrap();
     let error = collect(RequestBody::after_hold(held, client))
@@ -102,15 +105,26 @@ async fn a_repeated_model_later_fails_the_body() {
 #[tokio::test]
 async fn a_late_max_tokens_above_the_limit_fails_the_body() {
     let mut client = chunks(&[r#"{"model":"m","messages":[],"#, r#""max_tokens":9000}"#]);
-    let held = hold_until_model(&mut client, &Gauge::default(), 1 << 20, 1 << 20, Some(4000))
-        .await
-        .unwrap();
-    assert_eq!(held.max_tokens(), None, "not read before the hold ended");
+    let held = hold_until_model(
+        &mut client,
+        Api::Messages,
+        &Gauge::default(),
+        1 << 20,
+        1 << 20,
+        Some(4000),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        held.max_output_tokens(),
+        None,
+        "not read before the hold ended"
+    );
     let error = collect(RequestBody::after_hold(held, client))
         .await
         .unwrap_err();
-    let over = error.downcast_ref::<OverTokenLimit>().unwrap();
-    assert_eq!((over.requested, over.limit), (9000, 4000));
+    let over = error.downcast_ref::<TokenLimitError>().unwrap();
+    assert_eq!((over.requested, over.limit), (Some(9000), 4000));
 }
 
 #[tokio::test]
@@ -122,7 +136,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
         other
     };
     let mut client = chunks(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
-    let error = hold_until_model(&mut client, &budget, 100, 1 << 20, None)
+    let error = hold_until_model(&mut client, Api::Messages, &budget, 100, 1 << 20, None)
         .await
         .err()
         .unwrap();
@@ -130,16 +144,87 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     assert_eq!(budget.current(), 90);
 
     let mut client = chunks(&[r#"{"messages":[]}"#]);
-    let error = hold_until_model(&mut client, &Gauge::default(), 100, 1 << 20, None)
-        .await
-        .err()
-        .unwrap();
+    let error = hold_until_model(
+        &mut client,
+        Api::Messages,
+        &Gauge::default(),
+        100,
+        1 << 20,
+        None,
+    )
+    .await
+    .err()
+    .unwrap();
     assert!(matches!(error, HoldError::Model(PolicyError::Missing)));
 
     let mut client = chunks(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]);
-    let error = hold_until_model(&mut client, &Gauge::default(), 100, 10, None)
+    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, 10, None)
         .await
         .err()
         .unwrap();
     assert!(matches!(error, HoldError::TooLarge));
+}
+
+#[tokio::test]
+async fn responses_need_max_output_tokens_under_a_ceiling() {
+    // Absent: refused when the body ends, so the request is never complete.
+    let mut client = chunks(&[r#"{"model":"m","input":[]"#, r#","stream":true}"#]);
+    let held = hold_until_model(
+        &mut client,
+        Api::Responses,
+        &Gauge::default(),
+        1 << 20,
+        1 << 20,
+        Some(4000),
+    )
+    .await
+    .unwrap();
+    let error = collect(RequestBody::after_hold(held, client))
+        .await
+        .unwrap_err();
+    let missing = error.downcast_ref::<TokenLimitError>().unwrap();
+    assert_eq!(missing.requested, None);
+    assert_eq!(
+        missing.to_string(),
+        "max_output_tokens is required: this credential's limit is 4000"
+    );
+
+    // Present and within the limit: forwarded unchanged.
+    let body = [
+        r#"{"model":"m","input":[],"#,
+        r#""max_output_tokens":1000}"#,
+    ];
+    let mut client = chunks(&body);
+    let held = hold_until_model(
+        &mut client,
+        Api::Responses,
+        &Gauge::default(),
+        1 << 20,
+        1 << 20,
+        Some(4000),
+    )
+    .await
+    .unwrap();
+    let forwarded = collect(RequestBody::after_hold(held, client))
+        .await
+        .unwrap();
+    assert_eq!(forwarded, body.concat());
+
+    // Anthropic's max_tokens is not the Responses field.
+    let mut client = chunks(&[r#"{"model":"m","#, r#""max_tokens":10}"#]);
+    let held = hold_until_model(
+        &mut client,
+        Api::Responses,
+        &Gauge::default(),
+        1 << 20,
+        1 << 20,
+        Some(4000),
+    )
+    .await
+    .unwrap();
+    assert!(
+        collect(RequestBody::after_hold(held, client))
+            .await
+            .is_err()
+    );
 }

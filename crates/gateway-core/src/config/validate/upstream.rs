@@ -1,4 +1,5 @@
-//! The upstreams: `[upstream]`, or `[routes.claude]` with several.
+//! The upstreams: `[upstream]` or `[routes.claude]` for Anthropic Messages,
+//! and `[routes.openai]` for OpenAI Responses.
 
 use std::net::IpAddr;
 
@@ -7,11 +8,12 @@ use serde::Deserialize;
 use super::*;
 use crate::route::{MAX_UPSTREAMS, MAX_WEIGHT};
 
-/// `[routes]`: one route per native API; Claude's for now.
+/// `[routes]`: one route per native API.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRoutes {
-    pub(crate) claude: RawRoute,
+    pub(crate) claude: Option<RawRoute>,
+    pub(crate) openai: Option<RawRoute>,
 }
 
 #[derive(Deserialize)]
@@ -21,7 +23,7 @@ pub(crate) struct RawRoute {
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
-/// `[upstream]`, or one `[[routes.claude.upstreams]]` entry, which also
+/// `[upstream]`, or one `[[routes.<route>.upstreams]]` entry, which also
 /// takes `id`, `provider`, and `weight`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -41,57 +43,71 @@ pub(crate) struct RawUpstream {
     pub(crate) http_version: Option<String>,
 }
 
-/// `[upstream]` alone, or `[routes.claude]` alone.
-pub(crate) fn validate_route(
+/// The Claude route from `[upstream]` or `[routes.claude]`, and the OpenAI
+/// route from `[routes.openai]`; at least one.
+pub(crate) fn validate_routes(
     single: Option<RawUpstream>,
     routes: Option<RawRoutes>,
-) -> Result<Route, ConfigError> {
-    let upstreams = match (single, routes) {
+) -> Result<Routes, ConfigError> {
+    let (claude, openai) = routes.map_or((None, None), |r| (r.claude, r.openai));
+    let claude = match (single, claude) {
         (Some(raw), None) => {
             if raw.id.is_some() || raw.provider.is_some() || raw.weight.is_some() {
                 return Err(ConfigError::Invalid(
                     "upstream: id, provider, and weight belong in [[routes.claude.upstreams]]",
                 ));
             }
-            vec![validate_upstream(raw)?]
+            Some(Route::new(vec![validate_upstream(
+                raw,
+                Provider::Anthropic,
+            )?]))
         }
-        (None, Some(RawRoutes { claude })) => validate_route_upstreams(claude)?,
-        (None, None) => {
-            return Err(ConfigError::Invalid(
-                "set [upstream], or [routes.claude] for several upstreams",
-            ));
-        }
+        (None, Some(route)) => Some(Route::new(validate_route_upstreams(route, Api::Messages)?)),
+        (None, None) => None,
         (Some(_), Some(_)) => {
             return Err(ConfigError::Invalid(
                 "set either [upstream] or [routes.claude], not both",
             ));
         }
     };
-    Ok(Route::new(upstreams))
+    let openai = openai
+        .map(|route| validate_route_upstreams(route, Api::Responses).map(Route::new))
+        .transpose()?;
+    if claude.is_none() && openai.is_none() {
+        return Err(ConfigError::Invalid(
+            "set [upstream] (or [routes.claude]) for Claude, [routes.openai] for OpenAI, or both",
+        ));
+    }
+    Ok(Routes { claude, openai })
 }
 
-fn validate_route_upstreams(raw: RawRoute) -> Result<Vec<Upstream>, ConfigError> {
+fn validate_route_upstreams(raw: RawRoute, api: Api) -> Result<Vec<Upstream>, ConfigError> {
+    let (route, provider) = match api {
+        Api::Messages => ("claude", Provider::Anthropic),
+        Api::Responses => ("openai", Provider::OpenAi),
+    };
     match raw.select.as_deref() {
         None | Some("cache_affine") => {}
         Some(_) => {
             return Err(ConfigError::Invalid(
-                "routes.claude.select must be \"cache_affine\"",
+                "routes select must be \"cache_affine\"",
             ));
         }
     }
     if raw.upstreams.is_empty() || raw.upstreams.len() > MAX_UPSTREAMS {
         return Err(ConfigError::Invalid(
-            "routes.claude.upstreams must have between 1 and 16 entries",
+            "a route's upstreams must have between 1 and 16 entries",
         ));
     }
     let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw.upstreams.len());
     for mut entry in raw.upstreams {
         let Some(id) = entry.id.take() else {
             return Err(ConfigError::Invalid(
-                "routes.claude.upstreams: every entry needs an id",
+                "every [[routes.<route>.upstreams]] entry needs an id",
             ));
         };
         let in_entry = |error| ConfigError::RouteUpstream {
+            route,
             id: id.clone(),
             error: Box::new(error),
         };
@@ -103,11 +119,18 @@ fn validate_route_upstreams(raw: RawRoute) -> Result<Vec<Upstream>, ConfigError>
         if upstreams.iter().any(|u| u.id.as_deref() == Some(&*id)) {
             return Err(in_entry(ConfigError::Invalid("id is used twice")));
         }
-        match entry.provider.as_deref() {
-            None | Some("anthropic") => {}
-            Some(_) => {
+        match (provider, entry.provider.as_deref()) {
+            (_, None)
+            | (Provider::Anthropic, Some("anthropic"))
+            | (Provider::OpenAi, Some("openai")) => {}
+            (Provider::Anthropic, Some(_)) => {
                 return Err(in_entry(ConfigError::Invalid(
                     "provider must be \"anthropic\" (other Claude providers are planned)",
+                )));
+            }
+            (Provider::OpenAi, Some(_)) => {
+                return Err(in_entry(ConfigError::Invalid(
+                    "provider must be \"openai\"",
                 )));
             }
         }
@@ -126,7 +149,7 @@ fn validate_route_upstreams(raw: RawRoute) -> Result<Vec<Upstream>, ConfigError>
                  their own provider credentials",
             )));
         }
-        let mut upstream = validate_upstream(entry).map_err(in_entry)?;
+        let mut upstream = validate_upstream(entry, provider).map_err(in_entry)?;
         upstream.id = Some(id.into());
         upstream.weight = weight;
         upstreams.push(upstream);
@@ -142,7 +165,7 @@ fn is_upstream_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
+fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, ConfigError> {
     let credential = match (
         raw.api_key_env,
         raw.api_key_file,
@@ -173,6 +196,7 @@ fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
     Ok(Upstream {
         id: None,
         weight: 1,
+        provider,
         scheme,
         authority,
         path_prefix,
@@ -234,6 +258,11 @@ fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError>
         Some(pq) => pq.path().trim_end_matches('/').to_owned(),
         None => String::new(),
     };
+    if path_prefix.ends_with("/v1") {
+        return Err(invalid(
+            "drop the trailing /v1: Wye forwards the client's /v1/... path after it",
+        ));
+    }
     Ok((scheme, authority, path_prefix))
 }
 

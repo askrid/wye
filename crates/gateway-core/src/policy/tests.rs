@@ -216,7 +216,7 @@ fn reads_max_tokens_and_rejects_bad_values() {
     let tokens = |body: &[u8]| {
         let mut scanner = PolicyScanner::new();
         scanner.feed(body);
-        scanner.error().map_or(Ok(scanner.max_tokens()), Err)
+        scanner.error().map_or(Ok(scanner.max_output_tokens()), Err)
     };
     assert_eq!(
         tokens(br#"{"model":"m","max_tokens":32000}"#),

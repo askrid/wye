@@ -10,6 +10,7 @@
 
 pub mod agent;
 pub mod alias;
+pub mod api;
 pub mod config;
 pub mod credential;
 mod json;
