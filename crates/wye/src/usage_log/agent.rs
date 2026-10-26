@@ -1,5 +1,6 @@
-//! Claude Code's agent headers, captured on the request path and validated in
-//! the writer task (see [`gateway_core::agent`]).
+//! Agent headers (Claude Code's, or Codex's mapped onto the same fields),
+//! captured on the request path and validated in the writer task (see
+//! [`gateway_core::agent`]).
 
 use gateway_core::agent::{self, Compaction, RequestClass};
 use http::{HeaderMap, HeaderName, HeaderValue};
@@ -14,6 +15,12 @@ const CONTEXT_COMPACTED: HeaderName = HeaderName::from_static("x-claude-code-con
 const PROMPT_ID: HeaderName = HeaderName::from_static("x-claude-code-prompt-id");
 const PREV_TOOL_DURATIONS: HeaderName =
     HeaderName::from_static("x-claude-code-prev-tool-durations");
+/// Codex: the thread (one agent's conversation), its parent for spawned
+/// threads, the subagent kind, and the client name (`codex_cli_rs`, ...).
+const CODEX_THREAD_ID: HeaderName = HeaderName::from_static("thread-id");
+const CODEX_PARENT_THREAD_ID: HeaderName = HeaderName::from_static("x-codex-parent-thread-id");
+const CODEX_SUBAGENT: HeaderName = HeaderName::from_static("x-openai-subagent");
+const ORIGINATOR: HeaderName = HeaderName::from_static("originator");
 
 /// The agent headers of one request. Closed vocabularies are parsed here
 /// (a few byte comparisons); open values are kept as received, sharing the
@@ -58,6 +65,25 @@ impl AgentHeaders {
             agent_type: headers.get(AGENT_TYPE).cloned(),
             prompt_id: headers.get(PROMPT_ID).cloned(),
             prev_tool_durations: headers.get(PREV_TOOL_DURATIONS).cloned(),
+        }
+    }
+
+    /// Codex's headers: a thread is an agent, `x-openai-subagent` names the
+    /// subagent kind and gives the request class.
+    pub(crate) fn from_codex_headers(headers: &HeaderMap) -> Self {
+        let subagent = headers.get(CODEX_SUBAGENT);
+        let is_codex = headers
+            .get(ORIGINATOR)
+            .is_some_and(|v| v.as_bytes().starts_with(b"codex"));
+        Self {
+            request_class: RequestClass::from_codex_subagent(
+                subagent.map(HeaderValue::as_bytes),
+                is_codex,
+            ),
+            agent_id: headers.get(CODEX_THREAD_ID).cloned(),
+            parent_agent_id: headers.get(CODEX_PARENT_THREAD_ID).cloned(),
+            agent_type: subagent.cloned(),
+            ..Self::default()
         }
     }
 
