@@ -91,6 +91,15 @@ const GATES: &[(&str, f64, f64)] = &[
     ("diag_unary_failed_requests", 0.0, 0.0),
     ("diag_upload_failed_requests", 0.0, 0.0),
     ("diag_agent_upload_failed_requests", 0.0, 0.0),
+    // CPU per token-sized event, unpaced (plain path): the Messages usage
+    // scanner, and Wye on `[routes.openai]` with the mock framing OpenAI
+    // Responses streams and JSON (the Responses scanners).
+    ("sse_cpu_us_per_event", 0.25, 0.5),
+    ("openai_sse_cpu_us_per_event", 0.25, 0.5),
+    ("openai_unary_cpu_us_per_request", 0.20, 10.0),
+    ("openai_unary_added_p50_us", 0.20, 40.0),
+    ("openai_sse_ttfb_added_p50_us", 0.40, 100.0),
+    ("openai_unary_failed_requests", 0.0, 0.0),
     // OTLP export runs off the data path, so it must cost no request time.
     ("otlp_unary_cpu_us_per_request", 0.20, 10.0),
     ("otlp_unary_added_p50_us", 0.20, 40.0),
