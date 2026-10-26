@@ -214,6 +214,20 @@ The suite measures the gateway's own cost under agent-shaped load; each part ear
 
 Licenses, versions, and Claude Code support of each are to verify before a run; results go in this file with their configurations.
 
+
+### OpenAI stream scanners (micro-benchmark)
+
+The gate's mock upstream speaks Anthropic only, so the Responses and Chat Completions usage scanners are measured with a release micro-benchmark: 200,000 token-sized events fed one per call, best of 7, on the baseline laptop (2026-10-26).
+
+| Scanner | Event | ns per event |
+|---|---|---|
+| Messages (gated path) | 124 B `content_block_delta` | 27 |
+| Responses, first version | 173 B `response.output_text.delta` | 89 |
+| Responses, whole field name matched per line | same | 34 |
+| Chat, first version (searchers built per line) | 180 B content chunk | 106 |
+| Chat, searchers built once per stream | same | 40 |
+
+Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56–0.61 ms per MiB, at 16 or 64 KiB chunks. A full OpenAI mock in `wye-bench` (per-event CPU through the binary) is still missing.
 ## Related work
 
 | Work | Core idea | Fit with no shared state |

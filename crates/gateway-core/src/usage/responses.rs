@@ -113,7 +113,19 @@ impl ResponsesUsageScanner {
 
     /// Part of a line, without its newline.
     fn segment(&mut self, mut bytes: &[u8]) {
-        // The field name: at most six bytes per line, read one at a time.
+        // The field name. Usually the whole name is in this segment.
+        if self.line == Line::Prefix && self.prefix_len == 0 {
+            if let Some(rest) = bytes.strip_prefix(b"event:") {
+                self.line = Line::EventName;
+                self.prefix_len = 6;
+                bytes = rest;
+            } else if let Some(rest) = bytes.strip_prefix(b"data:") {
+                self.line = Line::Data;
+                self.prefix_len = 5;
+                bytes = rest;
+            }
+        }
+        // Otherwise at most six bytes per line, read one at a time.
         while self.line == Line::Prefix {
             let Some((&byte, rest)) = bytes.split_first() else {
                 return;

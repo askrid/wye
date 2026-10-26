@@ -21,8 +21,12 @@ use super::{ToolCalls, Usage, UsageStatus, fields::InputDetails};
 const MAX_LINE_BYTES: usize = 8 * 1024;
 
 /// Incremental usage scanner for one Chat Completions stream.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ChatUsageScanner {
+    /// Substring searchers, built once per stream rather than per line.
+    usage_key: memmem::Finder<'static>,
+    tool_calls_key: memmem::Finder<'static>,
+    name_key: memmem::Finder<'static>,
     /// Partial line carried over from the previous chunk.
     line: Vec<u8>,
     line_truncated: bool,
@@ -35,9 +39,27 @@ pub struct ChatUsageScanner {
     corrupt: bool,
 }
 
+impl Default for ChatUsageScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChatUsageScanner {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            usage_key: memmem::Finder::new(br#""usage":{"#),
+            tool_calls_key: memmem::Finder::new(br#""tool_calls""#),
+            name_key: memmem::Finder::new(br#""name":""#),
+            line: Vec::new(),
+            line_truncated: false,
+            usage: Usage::default(),
+            model: None,
+            tools: None,
+            saw_usage: false,
+            saw_data: false,
+            corrupt: false,
+        }
     }
 
     /// Feeds the next chunk of response bytes.
@@ -77,7 +99,7 @@ impl ChatUsageScanner {
         };
         let data = data.trim_ascii();
         let first = !std::mem::replace(&mut self.saw_data, true);
-        let has_usage = memmem::find(data, br#""usage":{"#).is_some();
+        let has_usage = self.usage_key.find(data).is_some();
         if truncated {
             // The usage chunk is small; a cut one cannot be read.
             self.corrupt |= has_usage;
@@ -102,8 +124,8 @@ impl ChatUsageScanner {
         } else if first && let Ok(chunk) = serde_json::from_slice::<ModelChunk<'_>>(data) {
             self.model = chunk.model.map(Box::from);
         }
-        if memmem::find(data, br#""tool_calls""#).is_some()
-            && memmem::find(data, br#""name":""#).is_some()
+        if self.tool_calls_key.find(data).is_some()
+            && self.name_key.find(data).is_some()
             && let Ok(chunk) = serde_json::from_slice::<ToolChunk<'_>>(data)
         {
             // A tool call's first delta names its function; later deltas
