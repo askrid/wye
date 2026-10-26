@@ -8,7 +8,7 @@
 
 use gateway_core::{
     api::{self, Api},
-    config::{Config, Provider, UpstreamCredential},
+    config::{Config, UpstreamCredential},
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
     prompt,
@@ -254,10 +254,7 @@ pub fn explain(
         "upstream: POST {}://{}{}{path}",
         upstream.scheme, upstream.authority, upstream.path_prefix
     ));
-    let header = match upstream.provider {
-        Provider::Anthropic => "x-api-key",
-        Provider::OpenAi | Provider::ClaudePlatformAws => "Authorization: Bearer",
-    };
+    let header = upstream.provider.key_header();
     if let Some(workspace) = &upstream.workspace_id {
         out.step(format!(
             "workspace: anthropic-workspace-id {workspace} (Claude Platform on AWS)"

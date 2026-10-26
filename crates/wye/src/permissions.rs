@@ -14,6 +14,7 @@
 
 use std::{
     collections::VecDeque,
+    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -196,42 +197,62 @@ impl HeldStart {
     /// (negative when shorter). Chunks are sliced, not copied, and `model` is
     /// shared. `None` if the model's position is unknown.
     pub(crate) fn splice_model(&mut self, model: &Bytes) -> Option<i64> {
-        let hold = &mut *self.0;
-        let span = hold.scanner.model_span()?;
+        let span = self.0.scanner.model_span()?;
+        Some(self.0.splice(&span, model))
+    }
+}
+
+impl Hold {
+    /// Replaces the held bytes at `span` with `value`; returns the change in
+    /// length. The hold covers every byte of `span`: it stopped right after
+    /// the model's value.
+    fn splice(&mut self, span: &Range<u64>, value: &Bytes) -> i64 {
         let mut out = Chunks::default();
-        let mut start = 0u64;
-        while let Some(chunk) = hold.chunks.pop() {
-            let end = start + chunk.len() as u64;
-            if end <= span.start || start >= span.end {
-                out.push(chunk);
-            } else {
-                // The value begins in the first chunk it overlaps; the hold
-                // stopped right after it, so every byte of it is held.
-                let head = span.start.saturating_sub(start) as usize;
-                if head > 0 {
-                    out.push(chunk.slice(..head));
-                }
-                if span.start >= start {
-                    out.push(model.clone());
-                }
-                let tail = (span.end.min(end) - start) as usize;
-                if tail < chunk.len() {
-                    out.push(chunk.slice(tail..));
-                }
-            }
-            start = end;
-        }
-        hold.chunks = out;
-        let delta = model.len() as i64 - (span.end - span.start) as i64;
+        splice_chunks(std::iter::from_fn(|| self.chunks.pop()), span, value, |c| {
+            out.push(c);
+        });
+        self.chunks = out;
+        let delta = value.len() as i64 - (span.end - span.start) as i64;
         let grown = delta.unsigned_abs() as usize;
         if delta > 0 {
             // At most MAX_MODEL_BYTES per request, so the hold limit is not
             // re-checked for it.
-            hold.budget.try_grow(grown, usize::MAX);
+            self.budget.try_grow(grown, usize::MAX);
         } else {
-            hold.budget.release(grown);
+            self.budget.release(grown);
         }
-        Some(delta)
+        delta
+    }
+}
+
+/// Replaces the bytes at `span` of a body, given as its chunks in order from
+/// offset 0, with `value`, passing the result to `push`: every other byte is
+/// kept, and chunks are sliced, not copied.
+pub(crate) fn splice_chunks(
+    chunks: impl Iterator<Item = Bytes>,
+    span: &Range<u64>,
+    value: &Bytes,
+    mut push: impl FnMut(Bytes),
+) {
+    let mut start = 0u64;
+    for chunk in chunks {
+        let end = start + chunk.len() as u64;
+        if end <= span.start || start >= span.end {
+            push(chunk);
+        } else {
+            let head = span.start.saturating_sub(start) as usize;
+            if head > 0 {
+                push(chunk.slice(..head));
+            }
+            if span.start >= start {
+                push(value.clone());
+            }
+            let tail = (span.end.min(end) - start) as usize;
+            if tail < chunk.len() {
+                push(chunk.slice(tail..));
+            }
+        }
+        start = end;
     }
 }
 
