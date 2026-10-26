@@ -228,6 +228,8 @@ The gate's mock upstream speaks Anthropic only, so the Responses and Chat Comple
 | Chat, searchers built once per stream | same | 40 |
 
 Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56–0.61 ms per MiB, at 16 or 64 KiB chunks. A full OpenAI mock in `wye-bench` (per-event CPU through the binary) is still missing.
+
+**Coverage gap: unary JSON responses.** The mock's unary replies carry no `content-type`, so the gate never runs the non-streaming usage scanner that real `application/json` replies get. With the mock sending `application/json` (a full `wye-bench run` per binary, idle machine, 2026-10-26), Wye before JSON usage scanning (3fe2d4c) against Wye with it, one allocation per response: `alloc_unary_per_request` 20.6 → 21.6, `alloc_unary_bytes_per_request` 21.8 → 24.4 KB (the boxed scanner with its inline 2 KiB usage buffer), `unary_cpu_us_per_request` 120 → 124.5 (within noise), unary latency unchanged within noise. Making the mock realistic moves those gated values, so it waits for a baseline decision.
 ## Related work
 
 | Work | Core idea | Fit with no shared state |

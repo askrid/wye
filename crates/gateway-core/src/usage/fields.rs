@@ -126,7 +126,9 @@ pub(super) struct ResponseFields {
     model: ([u8; MAX_FIELD_BYTES], usize),
     service_tier: ([u8; MAX_FIELD_BYTES], usize),
     /// The usage object's bytes; empty when absent or `null`.
-    usage: Vec<u8>,
+    /// Inline, so reading a response allocates nothing beyond the scanner.
+    usage: [u8; MAX_USAGE_BYTES],
+    usage_len: usize,
     /// Inside the usage object.
     in_usage: bool,
     usage_long: bool,
@@ -161,7 +163,8 @@ impl ResponseFields {
             text_long: false,
             model: ([0; MAX_FIELD_BYTES], 0),
             service_tier: ([0; MAX_FIELD_BYTES], 0),
-            usage: Vec::new(),
+            usage: [0; MAX_USAGE_BYTES],
+            usage_len: 0,
             in_usage: false,
             usage_long: false,
             items,
@@ -322,10 +325,15 @@ impl ResponseFields {
     }
 
     fn keep_usage(&mut self, bytes: &[u8]) {
-        if self.usage.len() + bytes.len() > MAX_USAGE_BYTES {
-            self.usage_long = true;
-        } else {
-            self.usage.extend_from_slice(bytes);
+        match self
+            .usage
+            .get_mut(self.usage_len..self.usage_len + bytes.len())
+        {
+            Some(slot) => {
+                slot.copy_from_slice(bytes);
+                self.usage_len += bytes.len();
+            }
+            None => self.usage_long = true,
         }
     }
 
@@ -417,7 +425,7 @@ impl ResponseFields {
         if self.usage_long || self.in_usage {
             return Err(());
         }
-        Ok((!self.usage.is_empty()).then_some(&self.usage[..]))
+        Ok(self.usage.get(..self.usage_len).filter(|u| !u.is_empty()))
     }
 
     /// The usage object in OpenAI's shape; `Err` when too large or malformed.
