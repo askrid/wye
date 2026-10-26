@@ -25,6 +25,7 @@ wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path 
 wye token keygen --out issuer.key
 wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --subject team-research --ttl-secs 3600
 wye policy-test --config wye.toml policy-tests/
+wye policy-diff old.toml wye.toml
 wye report usage.jsonl
 wye probe http://127.0.0.1:8080/readyz
 wye doctor --config wye.toml
@@ -49,6 +50,8 @@ policy-tests/
 ```
 
 With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"`).
+
+**Implemented: `wye policy-diff <old> <new>`.** Compares two configs offline and prints what the change widens, narrows, or only changes, then exits 3 when anything widens, so CI can ask for a second review (`git show main:wye.toml > old.toml && wye policy-diff old.toml wye.toml`). Widening: authentication removed, a listener moved beyond loopback, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_credential_ttl_secs`, and a newly trusted signer (a signing key, Wye's own credentials, an identity provider, or a changed audience, algorithm, key set, or subject claim). Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows. Upstreams added, removed, or moved are listed as changes for review, not as widening: where requests go is not who may send them. Credentials are not read: a credential can only narrow what config allows.
 
 **Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), cost (with `[pricing]`: summed exactly from `cost_usd`, `+` when it includes partial or unknown costs), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; requests, tokens, and cost by upstream, when records name one ([routes](architecture.md#cache-affine-routing)), and failovers by refusing upstream and reason; upgrade issues by target, rule, and client; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 

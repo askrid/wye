@@ -275,3 +275,20 @@ fn chat_completions_take_either_token_field_but_not_both() {
     s.feed(br#"{"model":"m","max_completion_tokens":50}"#);
     assert_eq!(s.max_output_tokens(), None);
 }
+
+#[test]
+fn a_pattern_covers_what_it_matches_and_nothing_more() {
+    let p = |s: &str| ModelPattern::parse(s).unwrap();
+    for (outer, inner, covers) in [
+        ("claude-*", "claude-opus-*", true),
+        ("claude-*", "claude-opus-5-5", true),
+        ("claude-*", "claude-*", true),
+        ("claude-opus-*", "claude-*", false),
+        ("claude-opus-5-5", "claude-opus-5-5", true),
+        ("claude-opus-5-5", "claude-opus-*", false),
+        ("claude-opus-5-5", "claude-opus-5-5-x", false),
+        ("gpt-*", "claude-opus-5-5", false),
+    ] {
+        assert_eq!(p(outer).covers(&p(inner)), covers, "{outer} covers {inner}");
+    }
+}

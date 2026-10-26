@@ -40,7 +40,7 @@ For the Anthropic Messages API, passthrough to Anthropic ([roadmap.md](roadmap.m
 - **Credentials:** Wye's own Ed25519 tokens (`wye token`), or identity-provider tokens directly (CI workload identity such as GitHub Actions, or the team's IdP through Claude Code's `apiKeyHelper`), with model permissions and output-token ceilings checked before the provider is contacted.
 - **Subscription passthrough** for a single developer on a claude.ai plan, loopback only.
 - **Agent-aware telemetry:** usage records with subject, session, subagent, request class, prompt, compaction, and tool calls; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
-- **Offline tools:** `wye report` (usage log summary, no backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye probe`, `GET /v1/models` from policy.
+- **Offline tools:** `wye report` (usage log summary, no backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye probe`, `GET /v1/models` from policy.
 - **Deployment:** native binary from source, OCI image (built locally, not published).
 
 ### Next
@@ -106,7 +106,7 @@ Landscape as of 2026-10; competitor features change quickly and should be re-che
 - **Agent-aware attribution:** sessions, subagents, work types, tool time, and explained cache misses, request-local and consistent across replicas.
 - **Operationally trivial:** one stateless binary and one TOML file on any platform that runs N identical processes behind a load balancer ([operations.md](operations.md#without-kubernetes)).
 - **Identity without a token service:** CI and IdP tokens verified directly, with keys pinned in config.
-- **Policy as code:** `explain` and `policy-test` show and check every decision offline; credentials can only narrow config.
+- **Policy as code:** `explain` and `policy-test` show and check every decision offline, and `policy-diff` flags a config change that widens access; credentials can only narrow config.
 - **Measured efficiency, gated on every commit:** about 0.2–0.3 ms added per request, zero allocations per event, about 1,500 token-paced streams within 10 ms added p99 on one core (laptop, mock upstream).
 
 **Weaknesses**

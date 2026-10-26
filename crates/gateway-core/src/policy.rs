@@ -47,6 +47,15 @@ impl ModelPattern {
         })
     }
 
+    /// Whether every model `other` matches is matched by this pattern.
+    pub fn covers(&self, other: &Self) -> bool {
+        match (self.prefix, other.prefix) {
+            (true, _) => other.text.starts_with(&*self.text),
+            (false, false) => self.text == other.text,
+            (false, true) => false,
+        }
+    }
+
     pub fn matches(&self, model: &str) -> bool {
         if self.prefix {
             model.starts_with(&*self.text)
