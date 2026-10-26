@@ -41,7 +41,7 @@ use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
 
 pub(crate) use agent::AgentHeaders;
 use line::{Line, line, push_line};
-pub(crate) use observed::Observed;
+pub(crate) use observed::{BodyKind, Observed};
 pub(crate) use otlp::{OtlpTarget, parse_headers};
 
 /// Records buffered before new ones are dropped.

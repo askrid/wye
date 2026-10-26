@@ -26,7 +26,8 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | Claude Code's gateway contract per release | M0 | [Gateway guide](https://code.claude.com/docs/en/llm-gateway-protocol); contract tests per release |
 | A process `ANTHROPIC_BASE_URL` overrides one in Claude Code settings | `wye claude` | Launch with both set |
 | Share of `auxiliary`, `compaction`, `subagent` requests, and quality when each goes to a smaller model | [Agent-aware routing](#1-agent-aware-routing) | Opt-in telemetry with hint headers; task-level evaluation |
-| Codex's transport and base-URL support for Responses | M3 | Codex source and docs |
+| Codex's transport and base-URL support for Responses | M3 | Read from Codex's source (970111f) and gateway guide, 2026-10-26 ([architecture.md](architecture.md#codex-integration)); one real Codex session through Wye still open |
+| OpenAI `input_tokens` include `cached_tokens`; reasoning tokens are part of `output_tokens` | Responses cost | OpenAI API reference; one recorded response with a cache hit |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` default | SDK conformance tests |
 | Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-planned-m4)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |

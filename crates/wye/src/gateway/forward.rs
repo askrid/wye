@@ -16,7 +16,7 @@ use super::{
 use crate::{
     diagnostics::PromptSlot,
     upgrade_check::UpgradeSlot,
-    usage_log::{Observed, RequestInfo, UsageLog},
+    usage_log::{BodyKind, Observed, RequestInfo, UsageLog},
 };
 
 impl Gateway {
@@ -105,21 +105,9 @@ impl Gateway {
         {
             Ok(res) => {
                 let status = res.status();
-                let is_event_stream = res
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .is_some_and(|v| v.as_bytes().starts_with(b"text/event-stream"));
+                let kind = BodyKind::of(res.headers().get(CONTENT_TYPE).map(HeaderValue::as_bytes));
                 let log = log.clone();
-                res.map(|body| {
-                    Either::Right(Observed::new(
-                        body,
-                        info,
-                        status,
-                        is_event_stream,
-                        log,
-                        permit,
-                    ))
-                })
+                res.map(|body| Either::Right(Observed::new(body, info, status, kind, log, permit)))
             }
             Err(e) => {
                 let res = forward_error(api, e);
