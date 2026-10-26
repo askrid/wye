@@ -1,6 +1,6 @@
 //! Raw TOML shapes and the validation that turns them into [`Config`] types.
 
-use std::{net::IpAddr, net::SocketAddr, path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use http::{
     Uri,
@@ -12,18 +12,21 @@ use super::*;
 
 mod auth;
 mod models;
+mod upstream;
 
 pub(super) use auth::{RawAuth, validate_auth};
 pub(super) use models::{
     RawAlias, RawPricing, RawUpgradeCheck, validate_aliases, validate_pricing,
     validate_upgrade_check,
 };
+pub(super) use upstream::{RawRoutes, RawUpstream, validate_route};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawConfig {
     pub(super) server: RawServer,
-    pub(super) upstream: RawUpstream,
+    pub(super) upstream: Option<RawUpstream>,
+    pub(super) routes: Option<RawRoutes>,
     pub(super) auth: Option<RawAuth>,
     pub(super) cache_diagnostics: Option<RawCacheDiagnostics>,
     pub(super) telemetry: Option<RawTelemetry>,
@@ -75,21 +78,6 @@ pub(super) struct RawServer {
     pub(super) client_write_timeout_secs: Option<u64>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct RawUpstream {
-    pub(super) base_url: String,
-    pub(super) api_key_env: Option<String>,
-    pub(super) api_key_file: Option<PathBuf>,
-    #[serde(default)]
-    pub(super) forward_caller_credential: bool,
-    pub(super) ca_file: Option<PathBuf>,
-    pub(super) connect_timeout_secs: Option<u64>,
-    pub(super) response_header_timeout_secs: Option<u64>,
-    pub(super) stream_idle_timeout_secs: Option<u64>,
-    pub(super) http_version: Option<String>,
-}
-
 pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
     let listen: SocketAddr = raw
         .listen
@@ -124,72 +112,6 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             raw.client_write_timeout_secs
                 .unwrap_or(DEFAULT_CLIENT_WRITE_TIMEOUT_SECS),
             "server.client_write_timeout_secs",
-        )?,
-    })
-}
-
-pub(super) fn validate_upstream(raw: RawUpstream) -> Result<Upstream, ConfigError> {
-    let credential = match (
-        raw.api_key_env,
-        raw.api_key_file,
-        raw.forward_caller_credential,
-    ) {
-        (Some(name), None, false) => {
-            UpstreamCredential::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
-        }
-        (None, Some(path), false) => {
-            if path.as_os_str().is_empty() {
-                return Err(ConfigError::EmptyPath("upstream.api_key_file"));
-            }
-            UpstreamCredential::ApiKeyFile(path)
-        }
-        (None, None, true) => UpstreamCredential::ForwardCaller,
-        (None, None, false) => {
-            return Err(ConfigError::Credential(
-                "set api_key_env, api_key_file, or forward_caller_credential = true",
-            ));
-        }
-        _ => {
-            return Err(ConfigError::Credential(
-                "set only one of api_key_env, api_key_file, and forward_caller_credential",
-            ));
-        }
-    };
-    let (scheme, authority, path_prefix) = parse_base_url(&raw.base_url)?;
-    Ok(Upstream {
-        scheme,
-        authority,
-        path_prefix,
-        credential,
-        ca_file: match raw.ca_file {
-            Some(path) if path.as_os_str().is_empty() => {
-                return Err(ConfigError::EmptyPath("upstream.ca_file"));
-            }
-            path => path,
-        },
-        connect_timeout: secs(
-            raw.connect_timeout_secs
-                .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
-            "upstream.connect_timeout_secs",
-        )?,
-        response_header_timeout: secs(
-            raw.response_header_timeout_secs
-                .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
-            "upstream.response_header_timeout_secs",
-        )?,
-        http_version: match raw.http_version.as_deref() {
-            None | Some("auto") => UpstreamHttpVersion::Auto,
-            Some("1.1") => UpstreamHttpVersion::Http1,
-            Some(_) => {
-                return Err(ConfigError::Invalid(
-                    "upstream.http_version must be \"auto\" or \"1.1\"",
-                ));
-            }
-        },
-        stream_idle_timeout: secs(
-            raw.stream_idle_timeout_secs
-                .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
-            "upstream.stream_idle_timeout_secs",
         )?,
     })
 }
@@ -282,39 +204,6 @@ pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigE
         });
     }
     Ok(Discovery { models })
-}
-
-fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError> {
-    let invalid = |reason| ConfigError::InvalidBaseUrl {
-        url: url.to_owned(),
-        reason,
-    };
-    let uri: Uri = url.parse().map_err(|_| invalid("not a valid URL"))?;
-    let parts = uri.into_parts();
-    let scheme = parts.scheme.ok_or_else(|| invalid("missing scheme"))?;
-    let authority = parts.authority.ok_or_else(|| invalid("missing host"))?;
-    if authority.as_str().contains('@') {
-        return Err(invalid("credentials in the URL are not allowed"));
-    }
-    if scheme == Scheme::HTTP {
-        if !is_loopback_host(authority.host()) {
-            return Err(invalid("plain http is allowed only for loopback hosts"));
-        }
-    } else if scheme != Scheme::HTTPS {
-        return Err(invalid("scheme must be https"));
-    }
-    let path_prefix = match parts.path_and_query {
-        Some(pq) if pq.query().is_some() => return Err(invalid("query strings are not allowed")),
-        Some(pq) => pq.path().trim_end_matches('/').to_owned(),
-        None => String::new(),
-    };
-    Ok((scheme, authority, path_prefix))
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 pub(super) fn env_name(name: String, field: &'static str) -> Result<String, ConfigError> {

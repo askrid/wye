@@ -29,7 +29,7 @@ pub(crate) use tokio::{
     sync::{Mutex, mpsc, oneshot},
     task::JoinHandle,
 };
-pub(crate) use wye::{Gateway, Resources, UpstreamAuth};
+pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources};
 pub(crate) use wye_testkit::TestCa;
 
 pub(crate) const API_KEY: &str = "sk-test-provider-key";
@@ -80,9 +80,8 @@ impl Harness {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
-            auth,
+            upstreams: vec![UpstreamResources::new(auth)],
             verifier: None,
-            extra_roots: Vec::new(),
             prompt_key: None,
             otlp_headers: HeaderMap::new(),
         };
@@ -101,9 +100,10 @@ impl Harness {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
-            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            upstreams: vec![UpstreamResources::new(
+                UpstreamAuth::api_key(API_KEY).unwrap(),
+            )],
             verifier: None,
-            extra_roots: Vec::new(),
             prompt_key: None,
             otlp_headers: HeaderMap::new(),
         };
@@ -128,9 +128,10 @@ impl Harness {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
         let resources = Resources {
-            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            upstreams: vec![UpstreamResources::new(
+                UpstreamAuth::api_key(API_KEY).unwrap(),
+            )],
             verifier: None,
-            extra_roots: Vec::new(),
             prompt_key: Some(HashKey::new(key).unwrap()),
             otlp_headers: HeaderMap::new(),
         };
@@ -157,13 +158,15 @@ impl Harness {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca), mock_max_streams).await;
         let resources = Resources {
-            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            upstreams: vec![UpstreamResources {
+                auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+                extra_roots: if trusted {
+                    vec![ca.ca_cert()]
+                } else {
+                    Vec::new()
+                },
+            }],
             verifier: None,
-            extra_roots: if trusted {
-                vec![ca.ca_cert()]
-            } else {
-                Vec::new()
-            },
             prompt_key: None,
             otlp_headers: HeaderMap::new(),
         };
@@ -179,11 +182,20 @@ impl Harness {
         resources: Resources,
         upstream_hits: Arc<AtomicUsize>,
     ) -> Self {
-        let config = Config::from_toml_str(&format!(
+        let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
              [upstream]\nbase_url = \"{base_url}\"\n{upstream_extra}"
-        ))
-        .unwrap();
+        );
+        Self::launch_config(&config, resources, upstream_hits).await
+    }
+
+    /// Gateway serving the whole TOML document `config`.
+    pub(crate) async fn launch_config(
+        config: &str,
+        resources: Resources,
+        upstream_hits: Arc<AtomicUsize>,
+    ) -> Self {
+        let config = Config::from_toml_str(config).unwrap();
         // Key files in test configs are absolute paths.
         let resources = Resources {
             verifier: wye::verifier(&config, Path::new("/")).unwrap(),

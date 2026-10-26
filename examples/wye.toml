@@ -37,6 +37,22 @@ api_key_env = "ANTHROPIC_API_KEY"
 # PEM file of extra trusted root certificates (e.g. a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
+# Several Anthropic accounts: replace [upstream] with [routes.claude]. Each
+# Claude Code session stays on one account (its prompt cache stays warm),
+# chosen from the session id the same way on every replica; weights share
+# sessions between accounts. Every [upstream] field above works per entry,
+# except forward_caller_credential.
+# [routes.claude]
+# [[routes.claude.upstreams]]
+# id = "team-a"
+# weight = 2
+# base_url = "https://api.anthropic.com"
+# api_key_env = "ANTHROPIC_KEY_TEAM_A"
+# [[routes.claude.upstreams]]
+# id = "team-b"
+# base_url = "https://api.anthropic.com"
+# api_key_env = "ANTHROPIC_KEY_TEAM_B"
+
 # Gateway credentials. Required to listen beyond loopback; incompatible with
 # forward_caller_credential. Create a signing key and credentials offline:
 #   wye token keygen --out issuer.key

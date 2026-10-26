@@ -13,7 +13,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 | M2: cost policy | Pricing done ([policy.md](policy.md#pricing-metadata)): cost, cost status, and pricing version in usage records, `wye.cost` in OTLP, dollars in `wye report`; cache-miss diagnostics done early (opt-in, sampled per session). Cost bound, provider-held budgets, `wye explain` cost output not started |
 | M2b: model aliases and upgrade checks | Done: `[[aliases]]` with per-subject rollout (stage A) and upgrade checks with a sourced rule table, sampled body scan, `upgrade_issues` in records and OTLP, `explain --target-model`, `wye report` by client (stage B) ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Exit check (a real alias move) open |
 | M3: Codex | Not started |
-| M4: Claude across providers and accounts | Designed ([architecture.md](architecture.md#claude-across-providers-planned-m4)); not started |
+| M4: Claude across providers and accounts | Stage 10 done: `[routes.claude]` with several Anthropic accounts, `cache_affine` (weighted rendezvous by session id, then subject), `upstream` in records, OTLP, `explain`, and `wye report` ([architecture.md](architecture.md#cache-affine-routing)). Stages 11–14 open; 12–13 need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
 | M5–M6 | Not started |
 
 ## Milestones
@@ -109,8 +109,8 @@ One Claude Code fleet served by several Claude providers and accounts, chosen pe
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| 10 | Routes with several upstreams of one provider (accounts), `ordered` and `cache_affine` selection by session, provider and account in telemetry | The same session reaches the same account from two replicas; shares follow configured weights |
-| 11 | Failover on `429`, `529`, or connection refusal before any response byte, with a bounded held body | Mock tests: failover happens only before output, never on ambiguous `5xx`, bodies above the bound go without failover, no gated metric worse without failover configured |
+| 10 (done) | Routes with several upstreams of one provider (accounts), `cache_affine` selection by session, the account in telemetry; `ordered` moved to stage 11, where it means something | The same session reaches the same account (a pure function, pinned by a test, so replicas agree); shares follow configured weights (property test on 40,000 keys) |
+| 11 | Failover on `429`, `529`, or connection refusal before any response byte, with a bounded held body; `ordered` selection | Mock tests: failover happens only before output, never on ambiguous `5xx`, bodies above the bound go without failover, no gated metric worse without failover configured |
 | 12 | Claude Platform on AWS and Amazon Bedrock (Messages endpoint): model-id mapping, API-key auth, then SigV4 | Contract tests per provider against recorded responses; one opt-in real smoke test each |
 | 13 | Google Vertex AI: model in the URL, `anthropic_version` splice, access tokens | Body rewrite property-tested (every other byte unchanged); opt-in real smoke test |
 | 14 | Agent-aware model routing within Claude ([research](research.md#1-agent-aware-routing)), once its quality impact is measured; Helm chart, `wye doctor` | Request-class policy tested; quality measurement recorded |

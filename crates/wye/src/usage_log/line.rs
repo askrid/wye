@@ -32,6 +32,9 @@ pub(super) struct Line<'a> {
     pub(super) duration_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) headers_ms: Option<f64>,
+    /// The route upstream, when the route names its upstreams.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) upstream: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) subject: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -128,6 +131,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         outcome: r.outcome.as_str(),
         duration_ms: ms(r.duration),
         headers_ms: r.headers_after.map(ms),
+        upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         // Client-supplied, like the agent ids: kept only as a bounded token.
         session_id: r

@@ -12,6 +12,7 @@ mod forwarding;
 mod harness;
 mod identity_providers;
 mod lifecycle;
+mod routes;
 mod streaming;
 mod tls;
 mod usage_log;

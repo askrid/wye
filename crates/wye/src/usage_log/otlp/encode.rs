@@ -71,6 +71,9 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     if let Some(ms) = line.headers_ms {
         attribute("wye.headers_ms", Value::Double(ms));
     }
+    if let Some(upstream) = line.upstream {
+        attribute("wye.upstream", Value::Str(upstream));
+    }
     if let Some(subject) = line.subject {
         attribute("enduser.id", Value::Str(subject));
     }
@@ -292,6 +295,7 @@ mod tests {
             outcome: "completed",
             duration_ms: 2_000.0,
             headers_ms: None,
+            upstream: None,
             subject: None,
             session_id: session,
             traceparent: None,

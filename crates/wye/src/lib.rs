@@ -32,5 +32,5 @@ mod usage_log;
 pub use cli::{ClaudeLaunch, Credential, Explanation, claude, explain, policy_test, probe, report};
 pub use gateway::Gateway;
 pub use server::serve;
-pub use startup::{Resources, StartupError, verifier};
+pub use startup::{Resources, StartupError, UpstreamResources, verifier};
 pub use upstream::UpstreamAuth;

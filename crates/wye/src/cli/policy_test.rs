@@ -9,6 +9,7 @@
 //! status = 403               # optional
 //! error = "permission_error" # optional
 //! model = "claude-opus-5-5"  # optional: the model it runs on, after aliases
+//! upstream = "team-a"        # optional: the [routes.claude] upstream it goes to
 //! path = "/v1/messages"      # optional, the default
 //! session = "s-1"            # optional Claude Code session id
 //!
@@ -34,6 +35,7 @@ struct Expect {
     status: Option<u16>,
     error: Option<String>,
     model: Option<String>,
+    upstream: Option<String>,
     path: Option<String>,
     session: Option<String>,
     credential: Option<Claims>,
@@ -149,6 +151,14 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
                 .unwrap_or("none (the body was not read)")
         ));
     }
+    if let Some(upstream) = &expect.upstream
+        && result.upstream.as_ref() != Some(upstream)
+    {
+        return Err(format!(
+            "expected upstream {upstream}, got {}",
+            result.upstream.as_deref().unwrap_or("none")
+        ));
+    }
     if let Some((status, kind, _)) = &result.refused {
         if expect.status.is_some_and(|s| s != *status) {
             return Err(format!(
@@ -230,6 +240,48 @@ mod tests {
             "{report}"
         );
         assert!(report.ends_with("3 passed, 2 failed\n"), "{report}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn checks_the_upstream_a_session_reaches() {
+        let dir = std::env::temp_dir().join(format!("wye-policy-route-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
+             [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"A\"\n\
+             [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"B\"\n",
+        )
+        .unwrap();
+        let route = &config.route;
+        let id = |session: &str| {
+            route.upstreams()[route.pick(session.as_bytes())]
+                .id
+                .clone()
+                .unwrap()
+        };
+        let (right, wrong) = if &*id("s-1") == "team-a" {
+            ("team-a", "team-b")
+        } else {
+            ("team-b", "team-a")
+        };
+        for (name, upstream) in [("a-right", right), ("b-wrong", wrong)] {
+            std::fs::write(dir.join(format!("{name}.json")), "{}").unwrap();
+            std::fs::write(
+                dir.join(format!("{name}.expect.toml")),
+                format!("decision = \"forward\"\nsession = \"s-1\"\nupstream = \"{upstream}\""),
+            )
+            .unwrap();
+        }
+        let (report, passed) = policy_test(&config, &dir, 0).unwrap();
+        assert!(!passed, "{report}");
+        assert!(report.contains("ok    a-right"), "{report}");
+        assert!(
+            report.contains(&format!(
+                "FAIL  b-wrong: expected upstream {wrong}, got {right}"
+            )),
+            "{report}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
