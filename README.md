@@ -27,6 +27,8 @@ wye claude
 wye report usage.jsonl                  # sessions, request classes, cache misses, cost
 ```
 
+Without the repository's examples, `wye init` writes a minimal config (`--subscription`, `--openai-key-env OPENAI_API_KEY`) and prints the next commands.
+
 SDK apps point their client's base URL at the gateway (`http://127.0.0.1:8080` for Anthropic, `http://127.0.0.1:8080/v1` for OpenAI). Codex: add `[routes.openai]` to the config and run `wye codex`.
 
 ## Documentation

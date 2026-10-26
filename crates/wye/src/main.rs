@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   wye check-config <path>
   wye probe <url>
   wye doctor --config <path>
+  wye init [--subscription] [--anthropic-key-env <name>] [--openai-key-env <name>] [--out <path>]
   wye policy-test --config <path> <dir>
   wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
@@ -58,6 +59,10 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             if !passed {
                 std::process::exit(3);
             }
+            Ok(())
+        }
+        ["init", rest @ ..] => {
+            print!("{}", wye::init(&wye::InitOptions::from_args(rest)?)?);
             Ok(())
         }
         ["doctor", "--config", path] => {
