@@ -75,7 +75,7 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
                     hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
                         .await
                         .unwrap();
-                assert_eq!(held.splice_model(&Bytes::from(to)), Some(want_delta));
+                assert_eq!(held.splice_model(Bytes::from(to)), Some(want_delta));
                 let got = collect(RequestBody::after_hold(held, client))
                     .await
                     .unwrap();
