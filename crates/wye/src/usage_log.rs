@@ -25,6 +25,7 @@ use std::{
 
 use gateway_core::{
     credential::Identity,
+    pricing::Pricing,
     prompt::HashKey,
     usage::{ToolCalls, Usage},
 };
@@ -110,6 +111,8 @@ pub(crate) struct Sinks {
     pub(crate) otlp: Option<Arc<OtlpTarget>>,
     /// Requests in flight, reported as `wye.requests.active`.
     pub(crate) active: Gauge,
+    /// Prices each record's usage, when `[pricing]` is configured.
+    pub(crate) pricing: Option<Arc<Pricing>>,
 }
 
 /// Cloneable handle that queues records for the writer task.
@@ -171,6 +174,7 @@ async fn write_records<W>(
 {
     let mut buf = Vec::with_capacity(4096);
     let key = sinks.prompt_key.as_deref();
+    let pricing = sinks.pricing.as_deref();
     // The exporter task is owned here and finishes its queue after the loop.
     let (mut otlp, exporter) = match sinks.otlp {
         Some(target) => {
@@ -219,7 +223,7 @@ async fn write_records<W>(
         let mut record = Some(record);
         // Batch whatever else is queued into one write.
         while let Some(r) = record.take().or_else(|| rx.try_recv().ok()) {
-            let line = line(&r, key);
+            let line = line(&r, key, pricing);
             push_line(&mut buf, &line);
             if let Some((batch, metrics)) = otlp.as_mut() {
                 metrics.record(&line);

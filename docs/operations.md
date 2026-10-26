@@ -49,7 +49,7 @@ policy-tests/
 
 With routing and cost ceilings, expectations will also name the route and bound a cost (`route = "claude"`, `max_cost_usd <= "0.05"`).
 
-**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
+**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), cost (with `[pricing]`: summed exactly from `cost_usd`, `+` when it includes partial or unknown costs), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 
 `token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models, and `--max-output-tokens <n>` lowers its `max_tokens` ceiling.
 
@@ -201,6 +201,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `session_id` | Claude Code session | Kept only as a bounded token (below) |
 | `requested_model` | the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named | Only when an alias was resolved |
 | `model`, `usage_status` | reported model; `complete` \| `partial` \| `unknown` \| `not_observed` | Non-streaming responses: `not_observed` |
+| `cost_usd`, `cost_status`, `pricing_version` | exact decimal string; `complete` \| `partial` \| `unknown`; `pricing.version` | With [`[pricing]`](policy.md#pricing-metadata); `cost_usd` only when a cost was computed |
 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them |
 | `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Hint header |
 | `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` |
@@ -210,9 +211,9 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `cache_miss` | `compaction` \| `after_compaction` \| `unexplained` | A cache write with no cache read; a session's first request also reads `unexplained` |
 | `prompt` | keyed prompt hashes | With [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags |
 
-Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `requested_model` (M2b), `provider` and account (M4), `cost_usd`, `cost_status`, `pricing_version` (M2, [format](policy.md#pricing-metadata)), `upgrade_issues` (M2b), `ttft_ms`, `config_version`.
+Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` and account (M4), `upgrade_issues` (M2b), `ttft_ms`, `config_version`.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.tool_calls` and `wye.prompt` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls` and `wye.prompt` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 
@@ -221,6 +222,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 | `wye.requests` | sum | `http.route`, `http.response.status_code`, `wye.outcome` |
 | `wye.request.duration` | histogram, ms (5 ms to 300 s) | route, outcome |
 | `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `claude_code.request_class` |
+| `wye.cost` | sum, USD | `gen_ai.response.model`, `claude_code.request_class`; complete and partial costs, with `[pricing]` |
 | `wye.tool.calls` | sum | `claude_code.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |

@@ -8,7 +8,12 @@
 //! HTTP chunk boundaries are not SSE boundaries: lines may be split anywhere,
 //! including inside UTF-8.
 
-use serde::Deserialize;
+use std::{borrow::Cow, fmt};
+
+use serde::{
+    Deserialize, Deserializer,
+    de::{IgnoredAny, MapAccess, SeqAccess, Visitor},
+};
 
 /// Longest usage-bearing data line kept. Larger events mark usage unknown
 /// instead of growing memory.
@@ -30,6 +35,13 @@ pub struct Usage {
     pub output_tokens: Option<u64>,
     pub cache_creation_input_tokens: Option<u64>,
     pub cache_read_input_tokens: Option<u64>,
+    /// Cache writes by TTL (`usage.cache_creation`), when reported.
+    pub cache_creation_5m_tokens: Option<u64>,
+    pub cache_creation_1h_tokens: Option<u64>,
+    /// The response used something billed outside token prices: per-use
+    /// server tools (`server_tool_use`), or a service tier or speed other
+    /// than standard.
+    pub unpriced: bool,
 }
 
 /// How much of the usage a scan saw.
@@ -292,14 +304,16 @@ impl SseUsageScanner {
 }
 
 #[derive(Deserialize)]
-struct StartData {
-    message: StartMessage,
+struct StartData<'a> {
+    #[serde(borrow)]
+    message: StartMessage<'a>,
 }
 
 #[derive(Deserialize)]
-struct StartMessage {
+struct StartMessage<'a> {
     model: Option<String>,
-    usage: Option<RawUsage>,
+    #[serde(borrow)]
+    usage: Option<RawUsage<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -316,19 +330,100 @@ struct ContentBlock<'a> {
 }
 
 #[derive(Deserialize)]
-struct DeltaData {
-    usage: Option<RawUsage>,
+struct DeltaData<'a> {
+    #[serde(borrow)]
+    usage: Option<RawUsage<'a>>,
 }
 
 #[derive(Deserialize)]
-struct RawUsage {
+struct RawUsage<'a> {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     cache_creation_input_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
+    cache_creation: Option<RawCacheCreation>,
+    server_tool_use: Option<AnyCount>,
+    #[serde(borrow)]
+    service_tier: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    speed: Option<Cow<'a, str>>,
 }
 
-impl RawUsage {
+#[derive(Deserialize)]
+struct RawCacheCreation {
+    ephemeral_5m_input_tokens: Option<u64>,
+    ephemeral_1h_input_tokens: Option<u64>,
+}
+
+/// Whether any value in an object is a positive count; other values are
+/// skipped, so a new field cannot fail the usage read. Allocates nothing.
+struct AnyCount(bool);
+
+impl<'de> Deserialize<'de> for AnyCount {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(AnyCountVisitor)
+    }
+}
+
+/// A count, or zero for anything that is not a non-negative integer.
+struct Count(u64);
+
+impl<'de> Deserialize<'de> for Count {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer
+            .deserialize_any(AnyCountVisitor)
+            .map(|any| Count(u64::from(any.0)))
+    }
+}
+
+struct AnyCountVisitor;
+
+impl<'de> Visitor<'de> for AnyCountVisitor {
+    type Value = AnyCount;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a count or an object of counts")
+    }
+
+    fn visit_u64<E>(self, n: u64) -> Result<AnyCount, E> {
+        Ok(AnyCount(n > 0))
+    }
+
+    fn visit_i64<E>(self, n: i64) -> Result<AnyCount, E> {
+        Ok(AnyCount(n > 0))
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<AnyCount, E> {
+        Ok(AnyCount(false))
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<AnyCount, E> {
+        Ok(AnyCount(false))
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<AnyCount, E> {
+        Ok(AnyCount(false))
+    }
+
+    fn visit_unit<E>(self) -> Result<AnyCount, E> {
+        Ok(AnyCount(false))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<AnyCount, A::Error> {
+        while seq.next_element::<IgnoredAny>()?.is_some() {}
+        Ok(AnyCount(false))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<AnyCount, A::Error> {
+        let mut any = false;
+        while let Some((_, Count(n))) = map.next_entry::<IgnoredAny, Count>()? {
+            any |= n > 0;
+        }
+        Ok(AnyCount(any))
+    }
+}
+
+impl RawUsage<'_> {
     /// Later events replace earlier counts; `message_delta` output tokens are cumulative.
     fn merge_into(self, usage: &mut Usage) {
         let take = |field: &mut Option<u64>, value: Option<u64>| {
@@ -346,6 +441,20 @@ impl RawUsage {
             &mut usage.cache_read_input_tokens,
             self.cache_read_input_tokens,
         );
+        if let Some(split) = self.cache_creation {
+            take(
+                &mut usage.cache_creation_5m_tokens,
+                split.ephemeral_5m_input_tokens,
+            );
+            take(
+                &mut usage.cache_creation_1h_tokens,
+                split.ephemeral_1h_input_tokens,
+            );
+        }
+        let non_standard = |v: &Option<Cow<'_, str>>| v.as_deref().is_some_and(|v| v != "standard");
+        usage.unpriced |= self.server_tool_use.is_some_and(|tools| tools.0)
+            || non_standard(&self.service_tier)
+            || non_standard(&self.speed);
     }
 }
 

@@ -52,3 +52,28 @@ fn an_empty_log_reports_zeros() {
         "no hit rate without prompt tokens: {out}"
     );
 }
+
+#[test]
+fn sums_costs_exactly_and_marks_lower_bounds() {
+    let log = r#"{"event":"request","outcome":"completed","request_class":"main","cost_usd":"0.1","cost_status":"complete"}
+{"event":"request","outcome":"completed","request_class":"main","cost_usd":"0.2","cost_status":"complete"}
+{"event":"request","outcome":"completed","request_class":"subagent","cost_usd":"0.05","cost_status":"partial"}
+{"event":"request","outcome":"gateway_error","request_class":"subagent","cost_status":"unknown"}
+"#;
+    let out = report(log.as_bytes()).unwrap();
+    let cost = |name: &str| {
+        out.lines()
+            .find(|l| l.trim_start().starts_with(name))
+            .unwrap()
+            .split_whitespace()
+            .nth(7)
+            .unwrap()
+            .to_owned()
+    };
+    // 0.1 + 0.2 is exact: no floating-point 0.30000000000000004.
+    assert_eq!(cost("main"), "$0.3000");
+    assert_eq!(cost("subagent"), "$0.0500+");
+    assert_eq!(cost("all"), "$0.3500+");
+    let unpriced = report(LOG.as_bytes()).unwrap();
+    assert!(!unpriced.contains('$'), "{unpriced}");
+}

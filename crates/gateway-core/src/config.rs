@@ -13,10 +13,10 @@ use http::{
 
 mod validate;
 
-use crate::{alias::Aliases, policy::ModelPattern};
+use crate::{alias::Aliases, policy::ModelPattern, pricing::Pricing};
 use validate::{
-    RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_server,
-    validate_telemetry, validate_upstream,
+    RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_pricing,
+    validate_server, validate_telemetry, validate_upstream,
 };
 
 /// Request bytes held process-wide while reading `model` for permissions.
@@ -49,6 +49,8 @@ pub struct Config {
     pub discovery: Option<Discovery>,
     /// `[[aliases]]`: names clients send, resolved to the model that runs.
     pub aliases: Option<Aliases>,
+    /// `[pricing]`: the cost of each request in its usage record.
+    pub pricing: Option<Pricing>,
 }
 
 /// Most catalog entries: Claude Code asks for `limit=1000`, and Wye serves
@@ -346,6 +348,7 @@ impl Config {
         let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
         let discovery = raw.discovery.map(validate_discovery).transpose()?;
         let aliases = validate_aliases(raw.aliases)?;
+        let pricing = raw.pricing.map(validate_pricing).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
@@ -354,6 +357,7 @@ impl Config {
             telemetry,
             discovery,
             aliases,
+            pricing,
         })
     }
 }

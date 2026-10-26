@@ -42,6 +42,13 @@ struct TokenSeries {
     count: u64,
 }
 
+/// Priced cost, in pico-USD, exported as USD.
+struct CostSeries {
+    model: Box<str>,
+    request_class: Option<&'static str>,
+    pico: u64,
+}
+
 /// Cache-miss reasons, in [`CACHE_MISS_REASONS`] order.
 const CACHE_MISS_REASONS: [&str; 3] = ["compaction", "after_compaction", "unexplained"];
 
@@ -51,6 +58,7 @@ pub(super) struct Metrics {
     requests: Vec<RequestSeries>,
     durations: Vec<DurationSeries>,
     tokens: Vec<TokenSeries>,
+    costs: Vec<CostSeries>,
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<(Box<str>, u64)>,
     /// Requests that wrote the prompt cache without reading it, by reason.
@@ -65,6 +73,7 @@ impl Metrics {
             requests: Vec::new(),
             durations: Vec::new(),
             tokens: Vec::new(),
+            costs: Vec::new(),
             tool_calls: Vec::new(),
             cache_misses: [0; CACHE_MISS_REASONS.len()],
             overflow: 0,
@@ -139,6 +148,23 @@ impl Metrics {
             }
         }
         let Some(model) = line.model else { return };
+        if let Some(pico) = line.cost.filter(|&c| c > 0) {
+            let found = self
+                .costs
+                .iter()
+                .position(|s| &*s.model == model && s.request_class == line.request_class);
+            if let Some(series) = found.and_then(|i| self.costs.get_mut(i)) {
+                series.pico = series.pico.saturating_add(pico);
+            } else if self.costs.len() < MAX_SERIES {
+                self.costs.push(CostSeries {
+                    model: model.into(),
+                    request_class: line.request_class,
+                    pico,
+                });
+            } else {
+                self.overflow += 1;
+            }
+        }
         for (kind, count) in [
             ("input", line.input_tokens),
             ("output", line.output_tokens),
@@ -245,6 +271,31 @@ impl Metrics {
                     ],
                 ),
                 None => attributes(&mut buf, &[kind, model]),
+            }
+        }
+        buf.extend_from_slice(b"]}},");
+
+        // Costs are exact integers here; the export is for display, in USD.
+        sum_header(
+            &mut buf,
+            "wye.cost",
+            "USD",
+            "Priced cost of requests (complete and partial costs), by model and Claude Code request class",
+        );
+        for (i, s) in self.costs.iter().enumerate() {
+            if i > 0 {
+                buf.push(b',');
+            }
+            let _ = write!(buf, r#"{{{times},"asDouble":"#);
+            let _ = serde_json::to_writer(&mut buf, &(s.pico as f64 / 1e12));
+            buf.push(b',');
+            let model = ("gen_ai.response.model", Value::Str(&s.model));
+            match s.request_class {
+                Some(class) => attributes(
+                    &mut buf,
+                    &[model, ("claude_code.request_class", Value::Str(class))],
+                ),
+                None => attributes(&mut buf, &[model]),
             }
         }
         buf.extend_from_slice(b"]}},");
