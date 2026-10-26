@@ -35,6 +35,10 @@ pub enum Gateway<'a> {
     /// Wye with a Claude route of two accounts and failover: every request
     /// body is kept for resending until the response arrives.
     WyeFailover(&'a str),
+    /// [`Self::WyeFailover`] whose first account (tried first) refuses every
+    /// fourth request with `429` before reading it: each refused request
+    /// moves to the second account.
+    WyeRefused(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
@@ -51,6 +55,7 @@ impl Gateway<'_> {
             Self::WyeOpenai(_) => "wye-openai",
             Self::WyeBedrock(_) => "wye-bedrock",
             Self::WyeFailover(_) => "wye-failover",
+            Self::WyeRefused(_) => "wye-refused",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
@@ -68,6 +73,7 @@ impl Gateway<'_> {
             Self::WyeOpenai(_) => "openai_",
             Self::WyeBedrock(_) => "bedrock_",
             Self::WyeFailover(_) => "failover_",
+            Self::WyeRefused(_) => "refused_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",
@@ -82,6 +88,9 @@ impl Gateway<'_> {
         !matches!(self, Self::KrakenD(_))
     }
 }
+
+/// [`Gateway::WyeRefused`]'s first account refuses one request in this many.
+const REFUSE_EVERY: u64 = 4;
 
 /// How to launch one gateway in front of an upstream.
 struct Launch {
@@ -139,6 +148,14 @@ impl GatewayProcess {
             path.display().to_string()
         };
         let addr = format!("127.0.0.1:{port}").parse().unwrap();
+        // The refusing first account, spawned for this process only.
+        let refusing = match gateway {
+            Gateway::WyeRefused(_) => Some(format!(
+                "http://{}",
+                crate::mock::spawn_refusing(REFUSE_EVERY).await
+            )),
+            _ => None,
+        };
         let launch = match gateway {
             Gateway::Wye(program)
             | Gateway::WyeAuth(program)
@@ -147,7 +164,8 @@ impl GatewayProcess {
             | Gateway::WyeOtlp(program)
             | Gateway::WyeOpenai(program)
             | Gateway::WyeBedrock(program)
-            | Gateway::WyeFailover(program) => {
+            | Gateway::WyeFailover(program)
+            | Gateway::WyeRefused(program) => {
                 let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
                 // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
@@ -164,7 +182,8 @@ impl GatewayProcess {
                         .then_some(upstream_base_url),
                     openai: matches!(gateway, Gateway::WyeOpenai(_)),
                     bedrock: matches!(gateway, Gateway::WyeBedrock(_)),
-                    failover: matches!(gateway, Gateway::WyeFailover(_)),
+                    failover: matches!(gateway, Gateway::WyeFailover(_) | Gateway::WyeRefused(_)),
+                    refusing_upstream: refusing.as_deref(),
                 };
                 let mut env = Vec::new();
                 if authenticated || options.openai || options.bedrock || options.failover {

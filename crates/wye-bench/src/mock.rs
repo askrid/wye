@@ -10,6 +10,9 @@
 //! (`response.created`, `response.output_text.delta` events, then
 //! `response.completed` with usage).
 //!
+//! [`spawn_refusing`] answers every n-th request with `429` before reading
+//! its body, like a rate-limited provider, for failover under load.
+//!
 //! With [`use_anthropic_frames`], streams are valid Anthropic Messages streams
 //! (`message_start` first, deltas as `text_delta`, `message_stop` last), for
 //! gateways that parse events and drop what is not Anthropic-shaped.
@@ -19,8 +22,8 @@ use std::{
     net::SocketAddr,
     pin::Pin,
     sync::{
-        Mutex, OnceLock,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -76,6 +79,28 @@ const MAX_STREAMS: u32 = 1_000;
 
 pub async fn spawn(tls: Option<&TestCa>) -> SocketAddr {
     wye_testkit::spawn_upstream(handle, tls, Some(MAX_STREAMS)).await
+}
+
+/// A plain-HTTP mock that refuses every `every`-th request (the first
+/// included) with an Anthropic `429`, without reading its body.
+pub async fn spawn_refusing(every: u64) -> SocketAddr {
+    let count = Arc::new(AtomicU64::new(0));
+    let handler = move |req: Request<Incoming>| {
+        let refuse = count.fetch_add(1, Ordering::Relaxed).is_multiple_of(every);
+        async move {
+            if refuse {
+                let mut res = Response::new(Either::Left(Full::new(Bytes::from_static(
+                    br#"{"type":"error","error":{"type":"rate_limit_error","message":"bench refusal"}}"#,
+                ))));
+                *res.status_mut() = http::StatusCode::TOO_MANY_REQUESTS;
+                res.headers_mut()
+                    .insert("content-type", "application/json".parse().unwrap());
+                return res;
+            }
+            handle(req).await
+        }
+    };
+    wye_testkit::spawn_upstream(handler, None, Some(MAX_STREAMS)).await
 }
 
 async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>> {
