@@ -167,7 +167,7 @@ impl Gateway {
     fn route(&self, api: Api) -> Option<&ApiRoute> {
         match api {
             Api::Messages => self.claude.as_ref(),
-            Api::Responses => self.openai.as_ref(),
+            Api::Responses | Api::ChatCompletions => self.openai.as_ref(),
         }
     }
 
@@ -244,11 +244,15 @@ impl Gateway {
         let api = endpoint.api;
         let mut info = RequestInfo {
             endpoint,
-            session_id: req.headers().get(api.session_header()).cloned(),
+            session_id: api
+                .session_header()
+                .and_then(|name| req.headers().get(name))
+                .cloned(),
             traceparent: req.headers().get(TRACEPARENT).cloned(),
             agent: match api {
                 Api::Messages => AgentHeaders::from_headers(req.headers()),
                 Api::Responses => AgentHeaders::from_codex_headers(req.headers()),
+                Api::ChatCompletions => AgentHeaders::default(),
             },
             identity: None,
             prompt: None,

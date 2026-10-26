@@ -9,11 +9,13 @@
 //! HTTP chunk boundaries are not SSE boundaries: lines may be split anywhere,
 //! including inside UTF-8.
 
+mod chat;
 mod fields;
 mod json;
 mod raw;
 mod responses;
 
+pub use chat::ChatUsageScanner;
 pub use json::JsonUsageScanner;
 use raw::{BlockStartData, DeltaData, StartData};
 pub use responses::ResponsesUsageScanner;
@@ -148,6 +150,7 @@ impl ToolCalls {
 pub enum UsageScanner {
     Messages(SseUsageScanner),
     Responses(Box<ResponsesUsageScanner>),
+    Chat(Box<ChatUsageScanner>),
     Json(Box<JsonUsageScanner>),
 }
 
@@ -157,6 +160,7 @@ impl UsageScanner {
         match api {
             Api::Messages => Self::Messages(SseUsageScanner::new()),
             Api::Responses => Self::Responses(Box::default()),
+            Api::ChatCompletions => Self::Chat(Box::default()),
         }
     }
 
@@ -170,6 +174,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.feed(chunk),
             Self::Responses(s) => s.feed(chunk),
+            Self::Chat(s) => s.feed(chunk),
             Self::Json(s) => s.feed(chunk),
         }
     }
@@ -178,6 +183,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.usage(),
             Self::Responses(s) => s.usage(),
+            Self::Chat(s) => s.usage(),
             Self::Json(s) => s.usage(),
         }
     }
@@ -186,6 +192,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.model(),
             Self::Responses(s) => s.model(),
+            Self::Chat(s) => s.model(),
             Self::Json(s) => s.model(),
         }
     }
@@ -194,6 +201,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.status(),
             Self::Responses(s) => s.status(),
+            Self::Chat(s) => s.status(),
             Self::Json(s) => s.status(),
         }
     }
@@ -203,6 +211,7 @@ impl UsageScanner {
         match self {
             Self::Messages(s) => s.take_tool_calls(),
             Self::Responses(s) => s.take_tool_calls(),
+            Self::Chat(s) => s.take_tool_calls(),
             Self::Json(s) => s.take_tool_calls(),
         }
     }

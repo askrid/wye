@@ -90,7 +90,7 @@ client = Anthropic(
 )
 ```
 
-The OpenAI SDK connects the same way to `/v1/responses` when the config has `[routes.openai]` (`base_url="https://gateway.example.com/v1"`, the gateway credential as `api_key`). Claude Code connects through environment variables:
+The OpenAI SDK connects the same way to `/v1/responses` and `/v1/chat/completions` when the config has `[routes.openai]` (`base_url="https://gateway.example.com/v1"`, the gateway credential as `api_key`). Streamed chat completions report usage only with `stream_options={"include_usage": True}`; Wye does not add it. Claude Code connects through environment variables:
 
 ```bash
 export ANTHROPIC_BASE_URL=https://gateway.example.com
