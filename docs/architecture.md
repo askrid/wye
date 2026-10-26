@@ -241,6 +241,8 @@ Some requests reference state stored by a specific provider account: Responses `
 - A request that references upstream-held state is pinned to the provider and credential that can resolve it, or rejected with an explicit error. It is never routed elsewhere.
 - Determining that provider and credential must be stateless: from the route configuration (a route with a single eligible account) or the gateway credential. If neither identifies it, reject.
 
+**As built** (M3 stage 8): a route with one upstream resolves every stored response. With several OpenAI accounts, [`cache_affine`](#cache-affine-routing) already sends every request of a session (or, without a session id, of a credential subject) to the same account, so a `previous_response_id` reaches the account that stored the response as long as the route's upstreams and weights do not change; after a change, a moved session's next reference fails with OpenAI's own `404`, not a misrouted success. Response ids do not name their account, so Wye cannot reject such a request itself. Codex over HTTP sends no `previous_response_id` (it replays the input; [Codex integration](#codex-integration)).
+
 ### Cache-affine routing
 
 Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Cost routing that spreads one conversation across accounts or providers forfeits that discount.
