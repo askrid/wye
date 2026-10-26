@@ -26,7 +26,7 @@ struct UpstreamPath<'a> {
     /// path: over HTTP/1.1 every stream opens its own connections, and
     /// repeated runs exhaust the laptop's ephemeral ports.
     paced: bool,
-    /// Also measures the Wye variants (`auth_`, `models_`, `diag_`, `otlp_`, `openai_`, `bedrock_`, `failover_`).
+    /// Also measures the Wye variants (`auth_`, `models_`, `diag_`, `otlp_`, `openai_`, `bedrock_`, `failover_`, `refused_`).
     variants: bool,
 }
 
@@ -111,6 +111,7 @@ pub async fn run(
                 Gateway::WyeOpenai(wye),
                 Gateway::WyeBedrock(wye),
                 Gateway::WyeFailover(wye),
+                Gateway::WyeRefused(wye),
             ];
             let variants = if path.variants { &variants[..] } else { &[] };
             for &gateway in gateways.iter().chain(variants) {
@@ -136,10 +137,14 @@ pub async fn run(
                             | Gateway::WyeOpenai(_)
                             | Gateway::WyeBedrock(_)
                             | Gateway::WyeFailover(_)
+                            | Gateway::WyeRefused(_)
                     ),
                     uploads: matches!(
                         gateway,
-                        Gateway::WyeModels(_) | Gateway::WyeDiag(_) | Gateway::WyeFailover(_)
+                        Gateway::WyeModels(_)
+                            | Gateway::WyeDiag(_)
+                            | Gateway::WyeFailover(_)
+                            | Gateway::WyeRefused(_)
                     ),
                     event_cpu: matches!(gateway, Gateway::WyeOpenai(_)),
                 };

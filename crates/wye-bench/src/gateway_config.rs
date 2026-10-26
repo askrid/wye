@@ -77,6 +77,9 @@ pub(crate) struct WyeOptions<'a> {
     /// `[routes.claude]` with two accounts (both the mock) and failover:
     /// every request body is kept for resending.
     pub(crate) failover: bool,
+    /// With `failover`: the first account is this upstream instead, tried
+    /// first (`select = "ordered"`).
+    pub(crate) refusing_upstream: Option<&'a str>,
 }
 
 /// Wye's config in front of `upstream_base_url`.
@@ -101,9 +104,13 @@ pub(crate) fn wye_config(
         "[routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\""
             .to_owned()
     } else if options.failover {
+        let (select, first) = match options.refusing_upstream {
+            Some(url) => ("select = \"ordered\"\n", url),
+            None => ("", upstream_base_url),
+        };
         format!(
-            "[routes.claude]\nfailover = [\"429\", \"529\", \"connect\"]\n\
-             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{upstream_base_url}\"\n{credential}\n\
+            "[routes.claude]\n{select}failover = [\"429\", \"529\", \"connect\"]\n\
+             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{first}\"\n{credential}\n\
              [[routes.claude.upstreams]]\nid = \"b\""
         )
     } else {

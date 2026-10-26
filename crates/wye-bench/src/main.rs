@@ -23,7 +23,7 @@
 //! wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]
 //! wye-bench compare <baseline.json> <results.json>
 //! wye-bench adopt-new <baseline.json> <results.json>
-//! wye-bench load (--wye | --wye-openai | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N
+//! wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N
 //! ```
 
 // Development tool, not on the request path: panics abort a benchmark run.
@@ -103,6 +103,7 @@ fn main() -> ExitCode {
             let gateway = match *kind {
                 "--wye" => gateway_process::Gateway::Wye(binary),
                 "--wye-openai" => gateway_process::Gateway::WyeOpenai(binary),
+                "--wye-refused" => gateway_process::Gateway::WyeRefused(binary),
                 "--krakend" => gateway_process::Gateway::KrakenD(binary),
                 _ => return usage(),
             };
@@ -130,7 +131,7 @@ fn usage() -> ExitCode {
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]\n  \
          wye-bench compare <baseline.json> <results.json>\n  \
          wye-bench adopt-new <baseline.json> <results.json>\n  \
-         wye-bench load (--wye | --wye-openai | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"
+         wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"
     );
     ExitCode::from(2)
 }
