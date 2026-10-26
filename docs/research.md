@@ -334,6 +334,7 @@ Each is a hypothesis until `wye-bench` measures it.
 | Lazy idle deadline | **Rejected**: no gain |
 | SWAR string-end search | **Rejected**: no gain over a byte loop |
 | mimalloc | **Rejected**: idle memory +9%, RSS +12%, CPU per MB +4% |
+| Failover: copy kept bodies into one buffer per request | **Rejected** (2026-10-26, `failover_` variant, two runs): keeping hyper's chunks costs allocations because hyper cannot reuse its read buffer (99.5 per agent upload vs 40.5 without failover), so copying into one buffer reserved from the declared length was tried. Allocations fell to 58.5, but CPU per MB rose 1.86 → 2.08 ms (agent upload) and 1.81 → 1.97 ms (1 MiB upload), heap bytes 1.12 → 1.55 MB per agent upload, and +1 allocation per unary request. The kept chunks stay; failover's upload cost (+25% CPU per MB over plain) is the price of resending without a copy |
 | Fat LTO, one codegen unit | **Not adopted**: CPU per MB −6–8%, worse event p99 in both A/B runs, 2× build time |
 | One h2 lock per frame | **Candidate**: A/B inconclusive (−5%, +12%) |
 | Fewer runtime threads | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises. 2026-10-25, TLS, single runs, 16 / 4 / 2 workers: per-event delay p50 318 / 266 / 305 µs, CPU per paced event 38 / 25 / 18 µs, but unary added p50 237 / 690 / 823 µs |
