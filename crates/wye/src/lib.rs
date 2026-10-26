@@ -20,6 +20,7 @@ mod auth;
 pub mod cli;
 mod diagnostics;
 mod discovery;
+mod failover;
 mod gateway;
 mod gauge;
 mod permissions;

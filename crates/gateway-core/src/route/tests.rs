@@ -96,3 +96,88 @@ fn choice_is_pinned_across_versions() {
     assert_eq!(got, PINNED);
 }
 const PINNED: [usize; 7] = [0, 2, 2, 2, 2, 2, 2];
+
+fn route_with(extra: &str, upstreams: &[&str]) -> Route {
+    let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
+    for id in upstreams {
+        toml.push_str(&format!(
+            "[[routes.claude.upstreams]]\nid = \"{id}\"\n\
+             base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n"
+        ));
+    }
+    Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
+}
+
+#[test]
+fn the_ranking_starts_with_the_pick_and_holds_every_upstream() {
+    let route = route(&[("a", 1), ("b", 2), ("c", 1), ("d", 1)]);
+    for i in 0..500 {
+        let key = format!("session-{i}");
+        let ranking: Vec<usize> = route.rank(key.as_bytes()).iter().collect();
+        assert_eq!(ranking[0], route.pick(key.as_bytes()));
+        let mut sorted = ranking.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, [0, 1, 2, 3]);
+    }
+}
+
+#[test]
+fn failover_moves_to_the_next_ranked_upstream_not_the_next_in_config() {
+    // Without a's share, its keys spread over b and c by their weights.
+    let all = route(&[("a", 1), ("b", 1), ("c", 1)]);
+    let without_a = route(&[("b", 1), ("c", 1)]);
+    for i in 0..500 {
+        let key = format!("session-{i}");
+        let ranking: Vec<usize> = all.rank(key.as_bytes()).iter().collect();
+        if ranking[0] == 0 {
+            // The second choice is where the key would go if a left.
+            assert_eq!(ranking[1] - 1, without_a.pick(key.as_bytes()), "{key}");
+        }
+    }
+}
+
+#[test]
+fn ordered_selection_goes_in_config_order() {
+    let route = route_with("select = \"ordered\"", &["first", "second", "third"]);
+    assert_eq!(route.select(), Select::Ordered);
+    for key in ["", "s-1", "alice"] {
+        assert_eq!(
+            route.rank(key.as_bytes()).iter().collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+    }
+}
+
+#[test]
+fn failover_settings_are_validated() {
+    let ok = route_with("failover = [\"429\", \"connect\"]", &["a", "b"]);
+    let f = ok.failover().unwrap();
+    assert!(f.retries_status(429) && !f.retries_status(529) && !f.retries_status(500));
+    assert!(f.on_connect);
+    assert_eq!(f.max_body_bytes, DEFAULT_FAILOVER_MAX_BODY_BYTES);
+    assert_eq!(f.max_held_bytes, DEFAULT_FAILOVER_MAX_HELD_BYTES);
+    let parse = |extra: &str, ids: &[&str]| {
+        let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
+        for id in ids {
+            toml.push_str(&format!(
+                "[[routes.claude.upstreams]]\nid = \"{id}\"\nbase_url = \"https://x.example\"\napi_key_env = \"K\"\n"
+            ));
+        }
+        Config::from_toml_str(&toml)
+            .map(|_| ())
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(parse("failover = [\"500\"]", &["a", "b"]).contains("may already have been processed"));
+    assert!(parse("failover = [\"429\"]", &["a"]).contains("at least two upstreams"));
+    assert!(parse("failover = []", &["a", "b"]).contains("at least one reason"));
+    assert!(parse("failover_max_body_bytes = 10", &["a", "b"]).contains("need failover"));
+    assert!(
+        parse(
+            "failover = [\"429\"]\nfailover_max_held_bytes = 0",
+            &["a", "b"]
+        )
+        .contains("greater than zero")
+    );
+    assert!(parse("select = \"random\"", &["a", "b"]).contains("ordered"));
+}

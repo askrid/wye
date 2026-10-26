@@ -37,12 +37,18 @@ use gateway_core::policy::PolicyError;
 use crate::{
     StartupError,
     diagnostics::{PromptBody, PromptSlot},
+    failover::FailoverBody,
     permissions::{RequestBody, TokenLimitError},
     upgrade_check::{UpgradeBody, UpgradeSlot},
 };
 
+/// The request body as hyper sends it: the client's (checked for
+/// permissions, kept for failover), bounded, and read for upgrade checks and
+/// prompt hashes in passing.
+pub(crate) type SendBody = FailoverBody<RequestBody<Incoming>>;
+
 type UpstreamClient =
-    Client<HttpsConnector<HttpConnector>, PromptBody<UpgradeBody<Limited<RequestBody<Incoming>>>>>;
+    Client<HttpsConnector<HttpConnector>, PromptBody<UpgradeBody<Limited<SendBody>>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 /// Asked of the upstream instead of the caller's `accept-encoding`: Wye
@@ -107,7 +113,10 @@ impl fmt::Debug for UpstreamAuth {
 pub(crate) enum ForwardError {
     /// No response headers within the configured timeout.
     HeaderTimeout,
-    /// Connection, TLS, protocol, or request-body failure.
+    /// The connection could not be made: the request never reached the
+    /// provider.
+    Connect,
+    /// TLS, protocol, or request-body failure, or a connection lost.
     Upstream,
     /// The request body broke the policy after forwarding began; the
     /// upstream request was aborted.
@@ -188,7 +197,7 @@ impl Upstream {
     /// with an `upgrade` slot, its upgrade-check findings.
     pub(crate) async fn forward(
         &self,
-        req: Request<RequestBody<Incoming>>,
+        req: Request<SendBody>,
         max_body_bytes: usize,
         prompt: Option<PromptSlot>,
         upgrade: Option<UpgradeSlot>,
@@ -226,7 +235,11 @@ impl Upstream {
         let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
             .await
             .map_err(|_| ForwardError::HeaderTimeout)?
-            .map_err(|e| policy_refusal(&e).map_or(ForwardError::Upstream, ForwardError::Policy))?;
+            .map_err(|e| match policy_refusal(&e) {
+                Some(refusal) => ForwardError::Policy(refusal),
+                None if e.is_connect() => ForwardError::Connect,
+                None => ForwardError::Upstream,
+            })?;
 
         let (mut parts, body) = res.into_parts();
         strip_hop_by_hop(&mut parts.headers);

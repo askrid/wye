@@ -52,7 +52,7 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "api_error",
             "upstream did not respond in time",
         ),
-        ForwardError::Upstream => error(
+        ForwardError::Connect | ForwardError::Upstream => error(
             api,
             StatusCode::BAD_GATEWAY,
             "api_error",

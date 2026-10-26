@@ -6,7 +6,10 @@ use std::net::IpAddr;
 use serde::Deserialize;
 
 use super::*;
-use crate::route::{MAX_UPSTREAMS, MAX_WEIGHT};
+use crate::route::{
+    DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_HELD_BYTES, Failover, MAX_UPSTREAMS,
+    MAX_WEIGHT, Select,
+};
 
 /// `[routes]`: one route per native API.
 #[derive(Deserialize)]
@@ -20,6 +23,9 @@ pub(crate) struct RawRoutes {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRoute {
     pub(crate) select: Option<String>,
+    pub(crate) failover: Option<Vec<String>>,
+    pub(crate) failover_max_body_bytes: Option<u64>,
+    pub(crate) failover_max_held_bytes: Option<u64>,
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
@@ -57,12 +63,13 @@ pub(crate) fn validate_routes(
                     "upstream: id, provider, and weight belong in [[routes.claude.upstreams]]",
                 ));
             }
-            Some(Route::new(vec![validate_upstream(
-                raw,
-                Provider::Anthropic,
-            )?]))
+            Some(Route::new(
+                vec![validate_upstream(raw, Provider::Anthropic)?],
+                Select::CacheAffine,
+                None,
+            ))
         }
-        (None, Some(route)) => Some(Route::new(validate_route_upstreams(route, Api::Messages)?)),
+        (None, Some(route)) => Some(validate_route(route, Api::Messages)?),
         (None, None) => None,
         (Some(_), Some(_)) => {
             return Err(ConfigError::Invalid(
@@ -71,7 +78,7 @@ pub(crate) fn validate_routes(
         }
     };
     let openai = openai
-        .map(|route| validate_route_upstreams(route, Api::Responses).map(Route::new))
+        .map(|route| validate_route(route, Api::Responses))
         .transpose()?;
     if claude.is_none() && openai.is_none() {
         return Err(ConfigError::Invalid(
@@ -81,26 +88,89 @@ pub(crate) fn validate_routes(
     Ok(Routes { claude, openai })
 }
 
-fn validate_route_upstreams(raw: RawRoute, api: Api) -> Result<Vec<Upstream>, ConfigError> {
+/// One `[routes.<route>]`: its upstreams, selection, and failover.
+fn validate_route(raw: RawRoute, api: Api) -> Result<Route, ConfigError> {
+    let select = match raw.select.as_deref() {
+        None | Some("cache_affine") => Select::CacheAffine,
+        Some("ordered") => Select::Ordered,
+        Some(_) => {
+            return Err(ConfigError::Invalid(
+                "routes select must be \"cache_affine\" or \"ordered\"",
+            ));
+        }
+    };
+    let failover = match raw.failover {
+        None => {
+            if raw.failover_max_body_bytes.is_some() || raw.failover_max_held_bytes.is_some() {
+                return Err(ConfigError::Invalid(
+                    "failover_max_body_bytes and failover_max_held_bytes need failover",
+                ));
+            }
+            None
+        }
+        Some(on) => {
+            let mut failover = Failover {
+                on_429: false,
+                on_529: false,
+                on_connect: false,
+                max_body_bytes: nonzero(
+                    raw.failover_max_body_bytes
+                        .unwrap_or(DEFAULT_FAILOVER_MAX_BODY_BYTES),
+                    "failover_max_body_bytes",
+                )?,
+                max_held_bytes: nonzero(
+                    raw.failover_max_held_bytes
+                        .unwrap_or(DEFAULT_FAILOVER_MAX_HELD_BYTES),
+                    "failover_max_held_bytes",
+                )?,
+            };
+            for reason in &on {
+                // Only refusals that prove the request was not processed:
+                // an ambiguous 5xx may already be billed.
+                match reason.as_str() {
+                    "429" => failover.on_429 = true,
+                    "529" => failover.on_529 = true,
+                    "connect" => failover.on_connect = true,
+                    _ => {
+                        return Err(ConfigError::Invalid(
+                            "failover takes \"429\", \"529\", and \"connect\" only: other \
+                             failures may already have been processed and billed",
+                        ));
+                    }
+                }
+            }
+            if on.is_empty() {
+                return Err(ConfigError::Invalid(
+                    "failover must name at least one reason",
+                ));
+            }
+            if raw.upstreams.len() < 2 {
+                return Err(ConfigError::Invalid(
+                    "failover needs at least two upstreams",
+                ));
+            }
+            Some(failover)
+        }
+    };
+    let upstreams = validate_route_upstreams(raw.upstreams, api)?;
+    Ok(Route::new(upstreams, select, failover))
+}
+
+fn validate_route_upstreams(
+    raw_upstreams: Vec<RawUpstream>,
+    api: Api,
+) -> Result<Vec<Upstream>, ConfigError> {
     let (route, provider) = match api {
         Api::Messages => ("claude", Provider::Anthropic),
         Api::Responses | Api::ChatCompletions => ("openai", Provider::OpenAi),
     };
-    match raw.select.as_deref() {
-        None | Some("cache_affine") => {}
-        Some(_) => {
-            return Err(ConfigError::Invalid(
-                "routes select must be \"cache_affine\"",
-            ));
-        }
-    }
-    if raw.upstreams.is_empty() || raw.upstreams.len() > MAX_UPSTREAMS {
+    if raw_upstreams.is_empty() || raw_upstreams.len() > MAX_UPSTREAMS {
         return Err(ConfigError::Invalid(
             "a route's upstreams must have between 1 and 16 entries",
         ));
     }
-    let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw.upstreams.len());
-    for mut entry in raw.upstreams {
+    let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw_upstreams.len());
+    for mut entry in raw_upstreams {
         let Some(id) = entry.id.take() else {
             return Err(ConfigError::Invalid(
                 "every [[routes.<route>.upstreams]] entry needs an id",
