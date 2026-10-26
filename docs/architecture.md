@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages and OpenAI Responses: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 4 (aliases, the route per endpoint, `cache_affine` among a route's upstreams), 5 for aliases, 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, provider model ids and agent-aware routing in step 5, and failover in step 8.
+**Implemented** for Anthropic Messages and OpenAI Responses: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 4 (aliases, the route per endpoint, `cache_affine` among a route's upstreams), 5 for aliases, 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Step 8 includes failover before output on routes that configure it. Not built: cost ceilings in step 3, provider model ids and agent-aware routing in step 5.
 
 ## Repository and workspace
 
