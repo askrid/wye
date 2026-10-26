@@ -222,3 +222,58 @@ async fn a_refusal_during_the_upload_resends_the_whole_body() {
         serde_json::json!([{"upstream": "a", "status": 429}])
     );
 }
+
+#[tokio::test]
+async fn an_upload_cut_off_by_the_upstream_moves_on() {
+    use tokio::io::AsyncReadExt;
+
+    // Reads the request head and a little of the body, then resets the
+    // connection, like a provider that refuses early and closes: the body
+    // was not delivered whole, so the request cannot have been processed.
+    let cutting = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cut_addr = cutting.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = cutting.accept().await else {
+                return;
+            };
+            let mut buf = vec![0u8; 16 * 1024];
+            let _ = socket.read(&mut buf).await;
+            // Closing with unread data resets the connection.
+            drop(socket);
+        }
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 8388608\n\
+         [routes.claude]\nselect = \"ordered\"\nfailover = [\"connect\"]\n\
+         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"http://{cut_addr}\"\napi_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![
+            UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
+            UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+        ],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
+    let body: &'static str = Box::leak(
+        format!(
+            r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
+            "x".repeat(4 << 20)
+        )
+        .into_boxed_str(),
+    );
+    let res = h.send(messages(), body).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
+    assert_eq!(seen_b.recv().await.unwrap(), body, "the whole body, resent");
+    assert_eq!(
+        h.usage_record().await["failovers"],
+        serde_json::json!([{"upstream": "a", "error": "connect"}])
+    );
+}
