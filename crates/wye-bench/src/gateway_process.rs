@@ -29,6 +29,9 @@ pub enum Gateway<'a> {
     /// Wye with `[routes.openai]`: OpenAI Responses requests, framed as
     /// Responses streams by the mock, through the Responses usage scanner.
     WyeOpenai(&'a str),
+    /// Wye with a Claude route to a Bedrock upstream: every request is held
+    /// until its `model` is read, and the model re-spelled for Bedrock.
+    WyeBedrock(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
@@ -43,6 +46,7 @@ impl Gateway<'_> {
             Self::WyeOtlp(_) => "wye-otlp",
             Self::WyeModels(_) => "wye-models",
             Self::WyeOpenai(_) => "wye-openai",
+            Self::WyeBedrock(_) => "wye-bedrock",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
@@ -58,6 +62,7 @@ impl Gateway<'_> {
             Self::WyeOtlp(_) => "otlp_",
             Self::WyeModels(_) => "models_",
             Self::WyeOpenai(_) => "openai_",
+            Self::WyeBedrock(_) => "bedrock_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",
@@ -135,7 +140,8 @@ impl GatewayProcess {
             | Gateway::WyeModels(program)
             | Gateway::WyeDiag(program)
             | Gateway::WyeOtlp(program)
-            | Gateway::WyeOpenai(program) => {
+            | Gateway::WyeOpenai(program)
+            | Gateway::WyeBedrock(program) => {
                 let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
                 // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
@@ -151,9 +157,10 @@ impl GatewayProcess {
                     otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_))
                         .then_some(upstream_base_url),
                     openai: matches!(gateway, Gateway::WyeOpenai(_)),
+                    bedrock: matches!(gateway, Gateway::WyeBedrock(_)),
                 };
                 let mut env = Vec::new();
-                if authenticated || options.openai {
+                if authenticated || options.openai || options.bedrock {
                     // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
                     env.push((BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".to_owned()));
                 }

@@ -71,6 +71,9 @@ pub(crate) struct WyeOptions<'a> {
     /// `[routes.openai]` instead of `[upstream]`: requests go to
     /// `/v1/responses`, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) openai: bool,
+    /// `[routes.claude]` with one Bedrock upstream instead of `[upstream]`:
+    /// model ids are re-spelled, with the key from [`BENCH_PROVIDER_KEY_ENV`].
+    pub(crate) bedrock: bool,
 }
 
 /// Wye's config in front of `upstream_base_url`.
@@ -80,12 +83,15 @@ pub(crate) fn wye_config(
     ca_file: Option<&Path>,
     options: &WyeOptions<'_>,
 ) -> String {
-    let credential = match (options.auth_public_key, options.openai) {
-        (Some(_), _) | (None, true) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
-        (None, false) => "forward_caller_credential = true".to_owned(),
+    let credential = if options.auth_public_key.is_some() || options.openai || options.bedrock {
+        format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\"")
+    } else {
+        "forward_caller_credential = true".to_owned()
     };
     let upstream = if options.openai {
         "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\""
+    } else if options.bedrock {
+        "[routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\""
     } else {
         "[upstream]"
     };
