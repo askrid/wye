@@ -241,17 +241,30 @@ when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 - **Cost**, measured with every benchmark request aliased: one allocation per request for the hold (as with model permissions), one more when the name's length changes (the new `content-length`), CPU per request within noise. With aliases alone the rest of the body is not lexed: the repeated-`model` check protects permissions, which do not apply (Claude Code-shaped uploads 1.64 vs 1.49 ms per MB, within noise; with the check, 2.16).
 - An alias names one model. Mapping one name to several providers of that model is [M4](#claude-across-providers-planned-m4)'s route, not a second alias mechanism.
 
-**Upgrade checks (M2b stage B, planned).** Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye knows each model's breaking request changes as a rule table shipped with Wye and tested per rule, for example on Anthropic models of 2026: `thinking.budget_tokens` (rejected on Opus 4.7 and later, Sonnet 5, Haiku 5.5), non-default sampling parameters, assistant prefill (a last message with role `assistant`), forced `tool_choice` (`any` or `tool`, rejected on Opus 5.5 and Sonnet 5.5), and the deprecated `output_format`.
+**Implemented: upgrade checks (M2b stage B).** Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye ships a rule table of each model's breaking request changes, every rule citing the provider's migration notes and covered by its own test (`gateway-core/src/upgrade.rs`):
+
+| Rule | Request field | Rejected by (dated ids included) |
+|---|---|---|
+| `thinking_disabled` | `thinking.type` `disabled` | Opus 5.5 |
+| `budget_tokens` | `thinking.type` `enabled` (manual budget) | Opus 4.7, 4.8, 5, 5.5; Sonnet 5, 5.5; Fable 5, 5.1 |
+| `forced_tool_choice` | `tool_choice.type` `any` or `tool` | Opus 5.5 |
+| `computer_tool` | `tools[].type` `computer_20250124` or `computer_20251124` | Opus 5.5 (Claude API) |
+| `prefill` | the last `messages[]` entry is an assistant turn | Opus 4.6 and later; Sonnet 5 |
+| `sampling` | `temperature`, `top_p`, or `top_k` | Sonnet 5; Opus 5.5 |
+| `system_role` | a `messages[]` entry with role `system` | Opus 4.7 |
+
+Source: Anthropic's [Opus 5.5 migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide), read 2026-10-26, and its API reference for Sonnet 5.5 and Fable (`budget_tokens`). The deprecated `output_format` is rejected without a beta header on every model, so it is not an upgrade rule.
 
 ```toml
 [upgrade_check]
-targets = ["claude-opus-5-5"]          # models an alias may move to
-sample_percent = 10                    # share of sessions or clients checked
+targets = ["claude-opus-5-5"]          # models an alias or a client may move to; up to 16
+sample_percent = 10                    # share of sessions (or, without one, clients) checked; default 100
 ```
 
-- For sampled requests, a scanner on the forwarded request body (the same constant-memory structure scanner as cache diagnostics, reading only the fields the rules name) records which rules each target would break: `upgrade_issues` in the usage record (`{"claude-opus-5-5": ["budget_tokens", "prefill"]}`), and `wye.upgrade.issues` by target, rule, and subject in OTLP. The backend shows which clients would fail before the switch.
-- `wye explain --target-model claude-opus-5-5 request.json` checks one request offline; `wye report` lists issues by client.
-- Report only: the request is forwarded unchanged ([non-goal](product.md#non-goals)). The rule table is versioned with Wye; a rule names its source (the provider's migration notes) and its test.
+- **Scan:** for sampled requests, a constant-memory structure scanner on the forwarded body reads only the fields the rules name (keys at the first three levels; `thinking.type`, `tool_choice.type`, `tools[].type`, `messages[].role`) and records which rules each target breaks. Sampling is by Claude Code session id, or by the credential's subject for SDK callers without one, alike on every replica. Cost: on a Claude Code-shaped 1 MiB body it scans in 0.77× the time of the model-permission scan and half that of cache diagnostics (same machine, same body), so about 0.5 ms per MB in the gateway.
+- **Records:** `upgrade_issues` in the usage record (`{"claude-opus-5-5": ["budget_tokens", "prefill"]}`; `{}` for a checked request no target rejects), `wye.upgrade_issues` in OTLP logs, and the `wye.upgrade.issues` metric by target, rule, and subject. The backend shows which clients would fail before the switch.
+- **Offline:** `wye explain --target-model claude-opus-5-5 request.json` (repeatable; without it, the configured targets) prints each issue with the fix and its source; `wye report` lists issues by target, rule, and client.
+- Report only: the request is forwarded unchanged ([non-goal](product.md#non-goals)). The rule table is versioned with Wye.
 
 ### Claude across providers (planned, M4)
 
@@ -365,11 +378,15 @@ models = ["claude-opus-5-5"]
 input = "4.00"                         # USD per million tokens, at most 6 decimals
 output = "20.00"
 cache_read = "0.20"                    # optional, like cache_write_5m and cache_write_1h
+
+[upgrade_check]                        # optional: which requests each target model would reject
+targets = ["claude-opus-5-5"]          # up to 16 model names
+sample_percent = 100                   # share of sessions (or clients) checked
 ```
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, and `[pricing]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand.
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, `[pricing]`, and `[upgrade_check]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand.
 
 ```toml
 # A route serves one native API; a request goes to the route for its endpoint.
@@ -404,10 +421,6 @@ api = "openai"                         # /v1/responses, /v1/chat/completions (M3
 id = "openai"
 provider = "openai"
 api_key_env = "OPENAI_API_KEY"
-
-# Upgrade checks (M2b stage B): see "Model aliases and upgrade checks".
-[upgrade_check]
-targets = ["claude-opus-5-5"]
 
 # Agent-aware model routing within a provider: the allowlisted `model` rewrite.
 [[routing.rules]]

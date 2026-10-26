@@ -129,3 +129,12 @@ api_key_env = "ANTHROPIC_API_KEY"
 # cache_read = "0.20"
 # cache_write_5m = "5.00"
 # cache_write_1h = "8.00"
+
+# Upgrade checks: before an alias or a client moves to a newer model, report
+# which requests that model would reject (a manual thinking budget, forced
+# tool_choice, prefill, ...). Report only; requests are never changed.
+# Results: upgrade_issues in usage records, wye.upgrade.issues in OTLP,
+# `wye report`, and `wye explain --target-model <model> request.json`.
+# [upgrade_check]
+# targets = ["claude-opus-5-5"]
+# sample_percent = 10

@@ -20,7 +20,7 @@ Only the OCI image is built so far; everything else in this list is planned.
 ```bash
 wye serve --config wye.toml
 wye check-config wye.toml
-wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] request.json
+wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] [--target-model <model>]... request.json
 wye token keygen --out issuer.key
 wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --subject team-research --ttl-secs 3600
 wye policy-test --config wye.toml policy-tests/
@@ -35,7 +35,7 @@ Implemented: `serve`, `check-config` (parses the config and reads the identity p
 
 `doctor` (planned) checks local config, resolved environment variables, DNS/TLS/provider connectivity, model availability, and compatibility warnings, without an admin API.
 
-**Implemented: `wye explain`.** Prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, `max_tokens` ceiling, upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. Run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With aliases, routing, and cost ceilings it will also print the resolved alias, the selected route and candidate with rejected ones and why, rewritten fields, and the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
+**Implemented: `wye explain`.** Prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, `max_tokens` ceiling, upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it; with `--target-model` (or `[upgrade_check]`), what each target model would reject, the fix, and the source. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. Run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With aliases, routing, and cost ceilings it will also print the resolved alias, the selected route and candidate with rejected ones and why, rewritten fields, and the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
 
 **Implemented: `wye policy-test --config wye.toml <dir>`.** Each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused, an alias resolved by a canary rollout rule), and the test suite runs them.
 
@@ -49,7 +49,7 @@ policy-tests/
 
 With routing and cost ceilings, expectations will also name the route and bound a cost (`route = "claude"`, `max_cost_usd <= "0.05"`).
 
-**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), cost (with `[pricing]`: summed exactly from `cost_usd`, `+` when it includes partial or unknown costs), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
+**Implemented: `wye report [<usage.jsonl>]`.** Summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), cost (with `[pricing]`: summed exactly from `cost_usd`, `+` when it includes partial or unknown costs), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first request is an expected miss that one request cannot recognize, but the whole log can); tool calls the model requested, and calls and time Claude Code reported, by tool; upgrade issues by target, rule, and client; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 
 `token issue` signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models, and `--max-output-tokens <n>` lowers its `max_tokens` ceiling.
 
@@ -201,6 +201,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `session_id` | Claude Code session | Kept only as a bounded token (below) |
 | `requested_model` | the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named | Only when an alias was resolved |
 | `model`, `usage_status` | reported model; `complete` \| `partial` \| `unknown` \| `not_observed` | Non-streaming responses: `not_observed` |
+| `upgrade_issues` | target model → rules it would reject | Checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none |
 | `cost_usd`, `cost_status`, `pricing_version` | exact decimal string; `complete` \| `partial` \| `unknown`; `pricing.version` | With [`[pricing]`](policy.md#pricing-metadata); `cost_usd` only when a cost was computed |
 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them |
 | `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Hint header |
@@ -211,9 +212,9 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `cache_miss` | `compaction` \| `after_compaction` \| `unexplained` | A cache write with no cache read; a session's first request also reads `unexplained` |
 | `prompt` | keyed prompt hashes | With [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags |
 
-Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` and account (M4), `upgrade_issues` (M2b), `ttft_ms`, `config_version`.
+Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` and account (M4), `ttft_ms`, `config_version`.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls` and `wye.prompt` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 
@@ -223,6 +224,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 | `wye.request.duration` | histogram, ms (5 ms to 300 s) | route, outcome |
 | `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `claude_code.request_class` |
 | `wye.cost` | sum, USD | `gen_ai.response.model`, `claude_code.request_class`; complete and partial costs, with `[pricing]` |
+| `wye.upgrade.issues` | sum | `wye.upgrade.target`, `wye.upgrade.rule`, `enduser.id`; checked requests a target would reject |
 | `wye.tool.calls` | sum | `claude_code.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |

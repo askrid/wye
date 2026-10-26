@@ -497,3 +497,29 @@ fn documented_pricing_example_parses() {
             .is_err()
     );
 }
+
+#[test]
+fn upgrade_check_targets_are_unique_model_names() {
+    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+    let check = |body: &str| parse(&format!("{base}[upgrade_check]\n{body}"));
+    let ok = check("targets = [\"claude-opus-5-5\"]\nsample_percent = 10").unwrap();
+    let ok = ok.upgrade_check.unwrap();
+    assert_eq!(&*ok.targets[0], "claude-opus-5-5");
+    assert_eq!(ok.sample_percent, 10);
+    assert_eq!(
+        check("targets = [\"claude-opus-5-5\"]")
+            .unwrap()
+            .upgrade_check
+            .unwrap()
+            .sample_percent,
+        100
+    );
+    for bad in [
+        "targets = []",
+        "targets = [\"claude-*\"]",
+        "targets = [\"a\", \"a\"]",
+        "targets = [\"a\"]\nsample_percent = 0",
+    ] {
+        assert!(check(bad).is_err(), "{bad}");
+    }
+}

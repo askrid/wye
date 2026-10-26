@@ -12,7 +12,7 @@ use std::{
 use bytes::Bytes;
 use gateway_core::{
     alias::Aliases,
-    config::Config,
+    config::{Config, UpgradeCheck},
     credential::Verifier,
     policy::{self, ModelPattern},
     pricing::Pricing,
@@ -32,6 +32,7 @@ use crate::{
     discovery::ModelCatalog,
     gauge::Gauge,
     permissions::{OverTokenLimit, RequestBody, hold_until_model},
+    upgrade_check::UpgradeSlot,
     upstream::{Upstream, UpstreamBody},
     usage_log::{AgentHeaders, Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
 };
@@ -73,6 +74,8 @@ pub struct Gateway {
     otlp: Option<Arc<OtlpTarget>>,
     /// Prices usage records in the writer task, when `[pricing]` is configured.
     pricing: Option<Arc<Pricing>>,
+    /// `[upgrade_check]`: target models and the share of sessions checked.
+    upgrade_check: Option<Arc<UpgradeCheck>>,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -117,6 +120,7 @@ impl Gateway {
             },
             prompt_key: resources.prompt_key.map(Arc::new),
             pricing: config.pricing.clone().map(Arc::new),
+            upgrade_check: config.upgrade_check.clone().map(Arc::new),
             prompt_sample_percent: config
                 .cache_diagnostics
                 .as_ref()
@@ -168,6 +172,10 @@ impl Gateway {
             otlp: self.otlp.clone(),
             active: self.in_flight.clone(),
             pricing: self.pricing.clone(),
+            upgrade_targets: self
+                .upgrade_check
+                .as_ref()
+                .map(|check| Arc::from(&*check.targets)),
         }
     }
 
@@ -201,6 +209,7 @@ impl Gateway {
             identity: None,
             prompt: None,
             requested_model: None,
+            upgrade: None,
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
@@ -283,9 +292,26 @@ impl Gateway {
         {
             info.prompt = Some(PromptSlot::default());
         }
+        // Sampled by session, or by client for SDK callers without one.
+        if let Some(check) = &self.upgrade_check
+            && prompt::session_sampled(
+                info.session_id
+                    .as_ref()
+                    .map(HeaderValue::as_bytes)
+                    .or(info.identity.as_ref().map(|i| i.subject.as_bytes())),
+                check.sample_percent,
+            )
+        {
+            info.upgrade = Some(UpgradeSlot::default());
+        }
         match self
             .upstream
-            .forward(req, self.max_request_body_bytes, info.prompt.clone())
+            .forward(
+                req,
+                self.max_request_body_bytes,
+                info.prompt.clone(),
+                info.upgrade.clone(),
+            )
             .await
         {
             Ok(res) => {

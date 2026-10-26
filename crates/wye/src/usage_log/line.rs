@@ -11,7 +11,14 @@ use gateway_core::{
 use serde::{Serialize, Serializer};
 
 use super::{Record, agent::ToolDurations};
-use crate::diagnostics::PromptRecord;
+use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
+
+/// What the writer adds to every record: keys, prices, upgrade targets.
+pub(super) struct Context<'a> {
+    pub(super) prompt_key: Option<&'a HashKey>,
+    pub(super) pricing: Option<&'a Pricing>,
+    pub(super) upgrade_targets: Option<&'a [Box<str>]>,
+}
 
 /// One JSON line, serialized from borrowed fields: no per-record allocation
 /// beyond growing the writer's reused buffer.
@@ -83,6 +90,9 @@ pub(super) struct Line<'a> {
     pub(super) cache_miss: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) prompt: Option<PromptRecord>,
+    /// For a checked request, the target models that would reject it and why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) upgrade_issues: Option<UpgradeIssues<'a>>,
 }
 
 /// A cost as an exact decimal string, written without an intermediate String.
@@ -93,11 +103,8 @@ fn usd<S: Serializer>(cost: &Option<Pico>, serializer: S) -> Result<S::Ok, S::Er
 /// The record as borrowed fields, written as a JSON line and as OTLP. With
 /// `pricing`, every record carries a cost status: a record without usage
 /// (an error, a non-streaming response) is `unknown`, never $0.
-pub(super) fn line<'a>(
-    r: &'a Record,
-    prompt_key: Option<&HashKey>,
-    pricing: Option<&'a Pricing>,
-) -> Line<'a> {
+pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
+    let pricing = context.pricing;
     let usage = r
         .usage
         .as_ref()
@@ -162,8 +169,15 @@ pub(super) fn line<'a>(
             .info
             .prompt
             .as_ref()
-            .zip(prompt_key)
+            .zip(context.prompt_key)
             .map(|(slot, key)| PromptRecord::new(slot, key)),
+        upgrade_issues: r
+            .info
+            .upgrade
+            .as_ref()
+            .and_then(|slot| slot.get().copied())
+            .zip(context.upgrade_targets)
+            .map(|(findings, targets)| UpgradeIssues { findings, targets }),
     }
 }
 

@@ -49,7 +49,7 @@ In this order ([roadmap.md](roadmap.md)):
 
 1. **Cost (M2):** pricing in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report` (built); next, the provable per-request cost ceiling and provider-held budgets.
 2. **Packaging:** published binaries and images, a Compose example.
-3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks)).
+3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why (built; [design](architecture.md#model-aliases-and-upgrade-checks)).
 4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)).
 
 ### Later

@@ -13,7 +13,7 @@ const USAGE: &str = "usage:
   wye probe <url>
   wye policy-test --config <path> <dir>
   wye report [<usage.jsonl>]           (default: standard input)
-  wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] <request.json>
+  wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
@@ -81,6 +81,7 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
 /// Prints the decision; exits 3 when the request would be refused.
 fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
     let (mut config, mut credential, mut session, mut path) = (None, None, None, "/v1/messages");
+    let mut targets = Vec::new();
     let mut rest = args;
     let request = loop {
         match rest {
@@ -88,6 +89,10 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
             ["--credential", value, tail @ ..] => (credential, rest) = (Some(*value), tail),
             ["--session", value, tail @ ..] => (session, rest) = (Some(*value), tail),
             ["--path", value, tail @ ..] => (path, rest) = (*value, tail),
+            ["--target-model", value, tail @ ..] => {
+                targets.push(*value);
+                rest = tail;
+            }
             [request] => break *request,
             _ => return Err(USAGE.into()),
         }
@@ -106,7 +111,7 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
         (Some(token), Some(verifier)) => wye::Credential::Token(token.trim(), verifier),
         _ => wye::Credential::None,
     };
-    let explanation = wye::explain(&config, path, credential, session, &body, now);
+    let explanation = wye::explain(&config, path, credential, session, &body, now, &targets);
     print!("{}", explanation.report());
     if explanation.refused.is_some() {
         std::process::exit(3);

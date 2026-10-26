@@ -36,7 +36,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{diagnostics::PromptSlot, gauge::Gauge};
+use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
 
 pub(crate) use agent::AgentHeaders;
 use line::{Line, line, push_line};
@@ -87,6 +87,8 @@ pub(crate) struct RequestInfo {
     pub prompt: Option<PromptSlot>,
     /// The alias the request named, when one was resolved.
     pub requested_model: Option<Arc<str>>,
+    /// Filled with the request body's upgrade-check findings when sampled.
+    pub upgrade: Option<UpgradeSlot>,
     pub started: Instant,
 }
 
@@ -113,6 +115,8 @@ pub(crate) struct Sinks {
     pub(crate) active: Gauge,
     /// Prices each record's usage, when `[pricing]` is configured.
     pub(crate) pricing: Option<Arc<Pricing>>,
+    /// Upgrade-check targets, when `[upgrade_check]` is configured.
+    pub(crate) upgrade_targets: Option<Arc<[Box<str>]>>,
 }
 
 /// Cloneable handle that queues records for the writer task.
@@ -173,8 +177,11 @@ async fn write_records<W>(
     W: AsyncWrite + Unpin,
 {
     let mut buf = Vec::with_capacity(4096);
-    let key = sinks.prompt_key.as_deref();
-    let pricing = sinks.pricing.as_deref();
+    let context = line::Context {
+        prompt_key: sinks.prompt_key.as_deref(),
+        pricing: sinks.pricing.as_deref(),
+        upgrade_targets: sinks.upgrade_targets.as_deref(),
+    };
     // The exporter task is owned here and finishes its queue after the loop.
     let (mut otlp, exporter) = match sinks.otlp {
         Some(target) => {
@@ -223,7 +230,7 @@ async fn write_records<W>(
         let mut record = Some(record);
         // Batch whatever else is queued into one write.
         while let Some(r) = record.take().or_else(|| rx.try_recv().ok()) {
-            let line = line(&r, key, pricing);
+            let line = line(&r, &context);
             push_line(&mut buf, &line);
             if let Some((batch, metrics)) = otlp.as_mut() {
                 metrics.record(&line);

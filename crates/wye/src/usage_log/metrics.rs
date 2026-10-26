@@ -49,6 +49,14 @@ struct CostSeries {
     pico: u64,
 }
 
+/// Checked requests a target model would reject, by rule and subject.
+struct UpgradeSeries {
+    target: Box<str>,
+    rule: &'static str,
+    subject: Option<Box<str>>,
+    count: u64,
+}
+
 /// Cache-miss reasons, in [`CACHE_MISS_REASONS`] order.
 const CACHE_MISS_REASONS: [&str; 3] = ["compaction", "after_compaction", "unexplained"];
 
@@ -59,6 +67,7 @@ pub(super) struct Metrics {
     durations: Vec<DurationSeries>,
     tokens: Vec<TokenSeries>,
     costs: Vec<CostSeries>,
+    upgrades: Vec<UpgradeSeries>,
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<(Box<str>, u64)>,
     /// Requests that wrote the prompt cache without reading it, by reason.
@@ -74,6 +83,7 @@ impl Metrics {
             durations: Vec::new(),
             tokens: Vec::new(),
             costs: Vec::new(),
+            upgrades: Vec::new(),
             tool_calls: Vec::new(),
             cache_misses: [0; CACHE_MISS_REASONS.len()],
             overflow: 0,
@@ -143,6 +153,23 @@ impl Metrics {
                 series.1 = series.1.saturating_add(count);
             } else if self.tool_calls.len() < MAX_SERIES {
                 self.tool_calls.push((name.into(), count));
+            } else {
+                self.overflow += 1;
+            }
+        }
+        for (target, rule) in line.upgrade_issues.iter().flat_map(|i| i.iter()) {
+            let found = self.upgrades.iter().position(|s| {
+                &*s.target == target && s.rule == rule && s.subject.as_deref() == line.subject
+            });
+            if let Some(series) = found.and_then(|i| self.upgrades.get_mut(i)) {
+                series.count += 1;
+            } else if self.upgrades.len() < MAX_SERIES {
+                self.upgrades.push(UpgradeSeries {
+                    target: target.into(),
+                    rule,
+                    subject: line.subject.map(Into::into),
+                    count: 1,
+                });
             } else {
                 self.overflow += 1;
             }
@@ -296,6 +323,26 @@ impl Metrics {
                     &[model, ("claude_code.request_class", Value::Str(class))],
                 ),
                 None => attributes(&mut buf, &[model]),
+            }
+        }
+        buf.extend_from_slice(b"]}},");
+
+        sum_header(
+            &mut buf,
+            "wye.upgrade.issues",
+            "{request}",
+            "Checked requests a target model would reject, by target, rule, and subject",
+        );
+        for (i, s) in self.upgrades.iter().enumerate() {
+            point_start(&mut buf, i, &times, s.count);
+            let target = ("wye.upgrade.target", Value::Str(&s.target));
+            let rule = ("wye.upgrade.rule", Value::Str(s.rule));
+            match &s.subject {
+                Some(subject) => attributes(
+                    &mut buf,
+                    &[target, rule, ("enduser.id", Value::Str(subject))],
+                ),
+                None => attributes(&mut buf, &[target, rule]),
             }
         }
         buf.extend_from_slice(b"]}},");
