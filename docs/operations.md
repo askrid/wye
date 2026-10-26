@@ -226,8 +226,8 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `upgrade_issues` | target model → rules it would reject | Checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none |
 | `cost_usd`, `cost_status`, `pricing_version` | exact decimal string; `complete` \| `partial` \| `unknown`; `pricing.version` | With [`[pricing]`](policy.md#pricing-metadata); `cost_usd` only when a cost was computed |
 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them, except that on `/v1/responses` the cached share of OpenAI's `input_tokens` is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on both APIs |
-| `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Hint header |
-| `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` |
+| `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Claude Code's hint header; for Codex, from `x-openai-subagent` ([mapping](architecture.md#codex-integration)) |
+| `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | Claude Code: `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`. Codex: thread ids as agent ids, the subagent kind as `agent_type`; no prompt id |
 | `compaction`, `context_compacted` | `auto` \| `manual` \| `reactive` \| `other` | Hint headers |
 | `tool_durations` | `[{"name": "Bash", "ms": 742}]` | Tool calls since the agent's previous request; at most 32 |
 | `tool_calls` | `{"Bash": 2, "Read": 1}` | `tool_use` blocks the response started; at most 8 names, the rest under `(other)`; inputs never read |
@@ -236,7 +236,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` (with a second provider, M4), `ttft_ms`, `config_version`.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields (Codex's mapped values too, under the same names for now) and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 

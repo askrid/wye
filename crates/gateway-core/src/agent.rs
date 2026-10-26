@@ -1,5 +1,6 @@
-//! Claude Code's per-request agent signals: the session's agent structure and
-//! the gateway hint headers (request class, agent type, compaction, prompt id).
+//! Coding agents' per-request signals: Claude Code's agent structure and
+//! gateway hint headers (request class, agent type, compaction, prompt id),
+//! and Codex's subagent and thread headers, mapped onto the same fields.
 //!
 //! Values are client-supplied. They only ever label telemetry, never
 //! authorize anything, and are parsed into closed vocabularies or bounded
@@ -39,6 +40,22 @@ impl RequestClass {
             b"auxiliary" => Self::Auxiliary,
             _ => Self::Other,
         })
+    }
+
+    /// The class of a Codex request from its `x-openai-subagent` value.
+    /// Codex sends the header for every subagent request (review,
+    /// compaction, memory consolidation, spawned threads) and never for the
+    /// main thread, so its absence means `main`, but only from Codex
+    /// (`is_codex`: its `originator` header): other OpenAI clients send
+    /// neither.
+    pub fn from_codex_subagent(value: Option<&[u8]>, is_codex: bool) -> Option<Self> {
+        match value {
+            Some(b"collab_spawn") => Some(Self::Subagent),
+            Some(b"compact") => Some(Self::Compaction),
+            Some(b"review" | b"memory_consolidation") => Some(Self::Auxiliary),
+            Some(_) => Some(Self::Other),
+            None => is_codex.then_some(Self::Main),
+        }
     }
 
     pub fn as_str(self) -> &'static str {
@@ -216,6 +233,30 @@ mod tests {
             Compaction::parse(Some(b"x".repeat(5000).as_slice())),
             Some(Compaction::Other)
         );
+    }
+
+    #[test]
+    fn codex_subagent_kinds_map_to_request_classes() {
+        let class = RequestClass::from_codex_subagent;
+        assert_eq!(
+            class(Some(b"collab_spawn"), true),
+            Some(RequestClass::Subagent)
+        );
+        assert_eq!(
+            class(Some(b"compact"), true),
+            Some(RequestClass::Compaction)
+        );
+        assert_eq!(class(Some(b"review"), true), Some(RequestClass::Auxiliary));
+        assert_eq!(
+            class(Some(b"memory_consolidation"), false),
+            Some(RequestClass::Auxiliary)
+        );
+        assert_eq!(
+            class(Some(b"something-new"), true),
+            Some(RequestClass::Other)
+        );
+        assert_eq!(class(None, true), Some(RequestClass::Main));
+        assert_eq!(class(None, false), None, "not Codex: no inference");
     }
 
     #[test]

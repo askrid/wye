@@ -250,10 +250,9 @@ impl Gateway {
             endpoint,
             session_id: req.headers().get(api.session_header()).cloned(),
             traceparent: req.headers().get(TRACEPARENT).cloned(),
-            // Claude Code's agent headers; Codex's are not read yet.
             agent: match api {
                 Api::Messages => AgentHeaders::from_headers(req.headers()),
-                Api::Responses => AgentHeaders::default(),
+                Api::Responses => AgentHeaders::from_codex_headers(req.headers()),
             },
             identity: None,
             prompt: None,

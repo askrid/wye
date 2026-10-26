@@ -69,6 +69,21 @@ async fn responses_reach_openai_with_the_provider_key() {
     assert_eq!(record["path"], "/v1/responses");
     assert_eq!(record["session_id"], "codex-session-1");
     assert_eq!(record["upstream"], "openai");
+    // The main thread of a Codex session.
+    assert_eq!(record["request_class"], "main");
+
+    // A spawned thread: a subagent with its parent.
+    let spawned = responses()
+        .header("thread-id", "thread-2")
+        .header("x-codex-parent-thread-id", "thread-1")
+        .header("x-openai-subagent", "collab_spawn");
+    read_body(h.send(spawned, BODY).await).await;
+    seen.recv().await.unwrap();
+    let record = h.usage_record().await;
+    assert_eq!(record["request_class"], "subagent");
+    assert_eq!(record["agent_type"], "collab_spawn");
+    assert_eq!(record["agent_id"], "thread-2");
+    assert_eq!(record["parent_agent_id"], "thread-1");
 
     // No Claude route configured: Messages is not proxied.
     let res = h.send(messages(), "{}").await;
