@@ -81,13 +81,13 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         attribute("session.id", Value::Str(session));
     }
     for (key, value) in [
-        ("claude_code.request_class", line.request_class),
-        ("claude_code.agent_type", line.agent_type),
-        ("claude_code.agent_id", line.agent_id),
-        ("claude_code.parent_agent_id", line.parent_agent_id),
-        ("claude_code.prompt_id", line.prompt_id),
-        ("claude_code.compaction", line.compaction),
-        ("claude_code.context_compacted", line.context_compacted),
+        ("wye.request_class", line.request_class),
+        ("gen_ai.agent.name", line.agent_type),
+        ("gen_ai.agent.id", line.agent_id),
+        ("wye.parent_agent_id", line.parent_agent_id),
+        ("wye.prompt_id", line.prompt_id),
+        ("wye.compaction", line.compaction),
+        ("wye.context_compacted", line.context_compacted),
     ] {
         if let Some(value) = value {
             attribute(key, Value::Str(value));
@@ -212,13 +212,13 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
             buf,
             r#","kind":1,"startTimeUnixNano":"{tool_start}","endTimeUnixNano":"{start_ns}","attributes":["#
         );
-        write_attribute(buf, "claude_code.tool.name", Value::Str(&name));
+        write_attribute(buf, "gen_ai.tool.name", Value::Str(&name));
         buf.push(b',');
-        write_attribute(buf, "claude_code.tool.duration_ms", Value::Int(ms));
+        write_attribute(buf, "wye.tool.duration_ms", Value::Int(ms));
         for (key, value) in [
             ("session.id", line.session_id),
-            ("claude_code.agent_id", line.agent_id),
-            ("claude_code.prompt_id", line.prompt_id),
+            ("gen_ai.agent.id", line.agent_id),
+            ("wye.prompt_id", line.prompt_id),
         ] {
             if let Some(value) = value {
                 buf.push(b',');
