@@ -127,7 +127,9 @@ impl Resources {
             };
             let auth = match (key, upstream.provider) {
                 (Some(key), Provider::Anthropic) => UpstreamAuth::api_key(&key)?,
-                (Some(key), Provider::OpenAi) => UpstreamAuth::bearer(&key)?,
+                (Some(key), Provider::OpenAi | Provider::ClaudePlatformAws) => {
+                    UpstreamAuth::bearer(&key)?
+                }
                 (None, _) => UpstreamAuth::ForwardCaller,
             };
             let extra_roots = match &upstream.ca_file {
