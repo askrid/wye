@@ -96,7 +96,7 @@ Takes model choice and model upgrades out of client code ([design](architecture.
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
 | 7 | Responses forwarding to OpenAI through the same transport path (**done**), `wye codex` (**done**), usage extraction (**done**), tool-related event fixtures | A real Codex workflow streams and calls tools through Wye; endpoint fixtures pass |
-| 8 | Upstream-held state pinning for `previous_response_id` | Requests referencing stored responses reach the owning account or are rejected |
+| 8 (done, by affinity) | Upstream-held state pinning for `previous_response_id` | Requests referencing stored responses reach the owning account (session or subject affinity; [as built](architecture.md#upstream-held-state)) or fail with the provider's `404` after the route's upstreams change |
 | 9 | Chat Completions passthrough to OpenAI for OpenAI-compatible agents and SDKs (**done**: forwarding, usage when the client asks for it, token ceilings on either field); `include_usage` policy (open) | The OpenAI SDK uses Wye with equivalent unary and streaming behavior |
 
 Agent-aware telemetry for Codex uses whatever signals Codex sends; the usage record, metrics, and `wye report` stay one model across agents.
