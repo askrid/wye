@@ -11,6 +11,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         outcome: "completed",
         duration_ms: ms,
         headers_ms: None,
+        upstream: None,
         subject: None,
         session_id: None,
         traceparent: None,
@@ -178,4 +179,47 @@ fn tool_calls_are_summed_by_name() {
     assert_eq!(&*metrics.tool_calls[0].0, "Bash");
     assert_eq!(metrics.tool_calls[0].1, 4);
     assert_eq!(metrics.tool_calls[1].1, 2);
+}
+
+#[test]
+fn route_upstreams_split_requests_tokens_and_costs() {
+    let mut metrics = Metrics::new(1);
+    for upstream in [Some("team-a"), Some("team-b"), Some("team-a")] {
+        metrics.record(&Line {
+            upstream,
+            cost: Some(1_000_000),
+            ..line("/v1/messages", 200, 3.0, Some("m"))
+        });
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 9, 0, 0)).unwrap();
+    let list = json["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap()
+        .clone();
+    for name in ["wye.requests", "wye.tokens", "wye.cost"] {
+        let points = list.iter().find(|m| m["name"] == name).unwrap()["sum"]["dataPoints"]
+            .as_array()
+            .unwrap()
+            .clone();
+        let upstreams: Vec<String> = points
+            .iter()
+            .map(|p| {
+                let attributes = p["attributes"].as_array().unwrap();
+                let a = attributes
+                    .iter()
+                    .find(|a| a["key"] == "wye.upstream")
+                    .unwrap();
+                a["value"]["stringValue"].as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert!(
+            upstreams.contains(&"team-a".to_owned()),
+            "{name}: {upstreams:?}"
+        );
+        assert!(
+            upstreams.contains(&"team-b".to_owned()),
+            "{name}: {upstreams:?}"
+        );
+    }
 }
