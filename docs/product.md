@@ -4,7 +4,7 @@
 
 **Primary users:**
 
-- **Teams running coding agents** (Claude Code first, Codex next) who need service and CI credentials, reviewed policy, and visibility into what their agents do and spend.
+- **Teams running coding agents** (Claude Code first, Codex now through its native Responses API) who need service and CI credentials, reviewed policy, and visibility into what their agents do and spend.
 - **Teams building agents or AI-native apps** on the provider APIs, who are tired of hard-coded model ids, per-model breaking changes, and the same plumbing (keys, retries, usage logging, cost) rebuilt in every service.
 
 Secondary: individual developers, with the same setup locally.
@@ -111,7 +111,7 @@ Landscape as of 2026-10; competitor features change quickly and should be re-che
 
 **Weaknesses**
 
-- **One API, one upstream so far.** Anthropic Messages to one Anthropic account; no OpenAI, no multi-provider Claude, no failover yet.
+- **Narrow provider coverage so far.** Anthropic Messages (one or several Anthropic accounts) and OpenAI Responses; no Chat Completions, no Claude through Bedrock, Vertex, or Claude Platform on AWS, no failover yet. Codex support is built from its source and tests, not yet from a real Codex session.
 - **Not packaged.** Build from source; no published binaries or images. This works against "easy to use" more than any missing feature.
 - **No cumulative limits by design:** budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - **Thin real-world validation.** One partial real Claude Code session; no production deployment; numbers from one laptop against a mock.

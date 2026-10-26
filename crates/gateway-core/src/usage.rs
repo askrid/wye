@@ -9,6 +9,7 @@
 //! HTTP chunk boundaries are not SSE boundaries: lines may be split anywhere,
 //! including inside UTF-8.
 
+mod fields;
 mod raw;
 mod responses;
 
