@@ -7,10 +7,12 @@
 //! - `wrapper`: `wye claude` and `wye codex`, an agent pointed at a gateway
 //! - `probe`: a one-shot health check client
 //! - `doctor`: a config's secrets, files, and endpoints checked before serving
+//! - `init`: a minimal working config
 //! - `token`: offline key generation and credential issuance
 
 mod doctor;
 mod explain;
+mod init;
 mod policy_test;
 mod probe;
 mod report;
@@ -19,6 +21,7 @@ mod wrapper;
 
 pub use doctor::doctor;
 pub use explain::{Credential, Explanation, explain};
+pub use init::{InitOptions, init};
 pub use policy_test::policy_test;
 pub use probe::probe;
 pub use report::report;

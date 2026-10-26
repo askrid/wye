@@ -18,6 +18,7 @@ Only the OCI image is built so far; everything else in this list is planned.
 ### Server
 
 ```bash
+wye init [--subscription] [--openai-key-env OPENAI_API_KEY] [--out wye.toml]
 wye serve --config wye.toml
 wye check-config wye.toml
 wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] [--target-model <model>]... request.json
@@ -29,7 +30,7 @@ wye probe http://127.0.0.1:8080/readyz
 wye doctor --config wye.toml
 ```
 
-Implemented: `serve`, `check-config` (parses the config and reads the identity providers' key sets; environment secrets are not checked), `token`, `policy-test`, `report`, `probe`, `doctor`, and a first `explain`.
+Implemented: `init` (writes a minimal validated config for an API key or a claude.ai subscription, optionally with `[routes.openai]`, never over an existing file, and prints the next commands), `serve`, `check-config` (parses the config and reads the identity providers' key sets; environment secrets are not checked), `token`, `policy-test`, `report`, `probe`, `doctor`, and a first `explain`.
 
 `probe` sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
