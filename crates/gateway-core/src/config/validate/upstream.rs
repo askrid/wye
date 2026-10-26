@@ -199,6 +199,7 @@ fn validate_route_upstreams(
             (default, None) => default,
             (Provider::Anthropic, Some("anthropic")) => Provider::Anthropic,
             (Provider::Anthropic, Some("claude-platform-aws")) => Provider::ClaudePlatformAws,
+            (Provider::Anthropic, Some("bedrock")) => Provider::Bedrock,
             (Provider::OpenAi, Some("openai")) => Provider::OpenAi,
             (Provider::OpenAi, Some(_)) => {
                 return Err(in_entry(ConfigError::Invalid(
@@ -207,8 +208,8 @@ fn validate_route_upstreams(
             }
             (_, Some(_)) => {
                 return Err(in_entry(ConfigError::Invalid(
-                    "provider must be \"anthropic\" or \"claude-platform-aws\" (Bedrock and \
-                     Vertex are planned)",
+                    "provider must be \"anthropic\", \"claude-platform-aws\", or \"bedrock\" \
+                     (Vertex is planned)",
                 )));
             }
         };

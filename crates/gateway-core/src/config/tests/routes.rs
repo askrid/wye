@@ -160,7 +160,11 @@ fn claude_platform_on_aws_needs_a_workspace() {
             "wrkspc_ followed by",
         ),
         ("workspace_id = \"wrkspc_1\"", "claude-platform-aws\" only"),
-        ("provider = \"bedrock\"", "Bedrock and Vertex are planned"),
+        ("provider = \"vertex\"", "Vertex is planned"),
+        (
+            "provider = \"bedrock\"\nworkspace_id = \"wrkspc_1\"",
+            "claude-platform-aws\" only",
+        ),
     ];
     for (extra, expected) in refused {
         let err = parse_route(&entry(extra))
@@ -169,6 +173,20 @@ fn claude_platform_on_aws_needs_a_workspace() {
             .to_string();
         assert!(err.contains(expected), "{extra}: {err}");
     }
+}
+
+#[test]
+fn bedrock_takes_an_api_key_and_spells_model_ids_its_own_way() {
+    let route = parse_route(
+        "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"K\"\n",
+    )
+    .unwrap();
+    let upstream = &claude(&route).upstreams()[0];
+    assert_eq!(upstream.provider, Provider::Bedrock);
+    assert_eq!(upstream.path_prefix, "/anthropic");
+    assert!(!upstream.provider.bearer_key());
+    assert_eq!(upstream.provider.model_prefix(), Some("anthropic."));
 }
 
 #[test]

@@ -23,11 +23,22 @@ async fn upstream(
 }
 
 async fn gateway(route: &str, a: &str, b: &str) -> Harness {
+    gateway_with(route, (a, "anthropic"), (b, "anthropic")).await
+}
+
+/// Two upstreams, each a base URL and a provider, tried in order.
+async fn gateway_with(
+    route: &str,
+    (a, a_provider): (&str, &str),
+    (b, b_provider): (&str, &str),
+) -> Harness {
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
          [routes.claude]\nselect = \"ordered\"\n{route}\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{a}\"\napi_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"{b}\"\napi_key_env = \"UNUSED\"\n"
+         [[routes.claude.upstreams]]\nid = \"a\"\nprovider = \"{a_provider}\"\n\
+         base_url = \"{a}\"\napi_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\nprovider = \"{b_provider}\"\n\
+         base_url = \"{b}\"\napi_key_env = \"UNUSED\"\n"
     );
     let resources = Resources {
         upstreams: vec![
@@ -122,4 +133,31 @@ async fn other_failures_and_large_bodies_are_answered_as_they_are() {
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     read_body(res).await;
     assert_eq!(hits.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn failover_respells_the_model_for_each_provider() {
+    let bedrock_body = BODY.replace("claude-opus-5-5", "anthropic.claude-opus-5-5");
+    for (providers, expect) in [
+        // Anthropic refuses: Bedrock gets its own model id.
+        (("anthropic", "bedrock"), (BODY, bedrock_body.as_str())),
+        // Bedrock refuses: Anthropic gets the id the client sent.
+        (("bedrock", "anthropic"), (bedrock_body.as_str(), BODY)),
+    ] {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+        let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+        let h = gateway_with(
+            "failover = [\"429\"]",
+            (&format!("http://{a}"), providers.0),
+            (&format!("http://{b}"), providers.1),
+        )
+        .await;
+        let res = h.send(messages(), BODY).await;
+        assert_eq!(res.status(), StatusCode::OK, "{providers:?}");
+        read_body(res).await;
+        assert_eq!(seen_a.recv().await.unwrap(), expect.0, "{providers:?}");
+        assert_eq!(seen_b.recv().await.unwrap(), expect.1, "{providers:?}");
+        assert_eq!(h.usage_record().await["upstream"], "b");
+    }
 }

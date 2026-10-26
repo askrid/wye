@@ -301,6 +301,9 @@ pub enum Provider {
     /// AWS; the key goes in `Authorization: Bearer`, and every request names
     /// the workspace (`anthropic-workspace-id`).
     ClaudePlatformAws,
+    /// Amazon Bedrock's Anthropic Messages endpoint: the Bedrock API key goes
+    /// in `x-api-key`, and model ids carry the `anthropic.` prefix.
+    Bedrock,
     /// OpenAI's API: the key goes in `Authorization: Bearer`.
     OpenAi,
 }
@@ -318,6 +321,15 @@ impl Provider {
             "Authorization: Bearer"
         } else {
             "x-api-key"
+        }
+    }
+
+    /// The prefix this provider's model ids carry: `model` is re-spelled
+    /// with it for requests that go there (the allowlisted model rewrite).
+    pub fn model_prefix(self) -> Option<&'static str> {
+        match self {
+            Self::Bedrock => Some("anthropic."),
+            Self::Anthropic | Self::ClaudePlatformAws | Self::OpenAi => None,
         }
     }
 }

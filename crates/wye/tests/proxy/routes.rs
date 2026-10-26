@@ -108,3 +108,54 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
     assert_eq!(headers["anthropic-workspace-id"], "wrkspc_01AbCd");
     assert!(headers.get("x-api-key").is_none());
 }
+
+#[tokio::test]
+async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
+    let (tx, mut rx) = mpsc::channel(4);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send((seen.headers, seen.body)).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\n\
+         provider = \"bedrock\"\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![UpstreamResources::new(
+            UpstreamAuth::api_key("bedrock-key").unwrap(),
+        )],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h = Harness::launch_config(&config, resources, hits).await;
+    for (sent, received) in [
+        (
+            r#"{"model":"claude-opus-5-5","max_tokens":1}"#,
+            r#"{"model":"anthropic.claude-opus-5-5","max_tokens":1}"#,
+        ),
+        // Already a Bedrock id: kept.
+        (
+            r#"{"model":"anthropic.claude-opus-5-5","max_tokens":1}"#,
+            r#"{"model":"anthropic.claude-opus-5-5","max_tokens":1}"#,
+        ),
+    ] {
+        let res = h.send(messages(), sent).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        read_body(res).await;
+        let (headers, body) = rx.recv().await.unwrap();
+        assert_eq!(body, received);
+        assert_eq!(
+            headers["content-length"],
+            received.len().to_string().as_str()
+        );
+        assert_eq!(headers["x-api-key"], "bedrock-key");
+        assert!(headers.get("authorization").is_none());
+    }
+}

@@ -93,6 +93,9 @@ pub struct Gateway {
 struct ApiRoute {
     route: Route,
     upstreams: Box<[Upstream]>,
+    /// An upstream's provider spells model ids its own way (Bedrock): the
+    /// model is held and re-spelled per attempt.
+    respells: bool,
 }
 
 impl Gateway {
@@ -111,6 +114,10 @@ impl Gateway {
                 .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
                 .collect::<Result<_, _>>()?;
             Ok(ApiRoute {
+                respells: route
+                    .upstreams()
+                    .iter()
+                    .any(|u| u.provider.model_prefix().is_some()),
                 route: route.clone(),
                 upstreams,
             })

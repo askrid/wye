@@ -186,7 +186,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 | Field | When | Why |
 |---|---|---|
-| `model` | [Model alias](#model-aliases-and-upgrade-checks) (M2b); agent-aware routing and a Claude provider's model id (M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
+| `model` | [Model alias](#model-aliases-and-upgrade-checks) (M2b); a Claude provider's model id (Bedrock, **implemented**); agent-aware routing (M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
 | `model` → URL, `anthropic_version` | Vertex AI (M4) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting (planned, off: see open decisions) | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)); until the default is decided, clients that want usage set it themselves |
@@ -229,7 +229,7 @@ Keep request IDs and trace linkage. Do not claim exactly-once execution.
 
 ## Providers
 
-A provider is a concrete module for one way of reaching a native API: Anthropic and OpenAI (`/v1/responses`) today; Claude Platform on AWS, Bedrock, and Vertex for the same Messages API (M4); OpenAI `/v1/chat/completions` (M3). A closed `Provider` enum (`config::Provider`) selects how Wye authenticates (`x-api-key` or `Authorization: Bearer`), and a closed `Api` enum (`gateway-core/src/api.rs`) holds what differs per native API: the output-token field, the session header, the error shape; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: endpoint and credential, model id, the usage events (for the usage observer and cost), and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted. Passing provider-native options through does not mean Wye interprets or enforces them.
+A provider is a concrete module for one way of reaching a native API: Anthropic, Claude Platform on AWS, and Bedrock for the Messages API, and OpenAI for `/v1/responses` and `/v1/chat/completions`, today; Vertex for the Messages API (M4). A closed `Provider` enum (`config::Provider`) selects how Wye authenticates (`x-api-key` or `Authorization: Bearer`), and a closed `Api` enum (`gateway-core/src/api.rs`) holds what differs per native API: the output-token field, the session header, the error shape; there is no trait with one implementation and no translation layer. What differs per provider is only what Wye reads and replaces: endpoint and credential, model id, the usage events (for the usage observer and cost), and the error shape of gateway-generated responses. A request for an endpoint no configured provider serves is rejected, never converted. Passing provider-native options through does not mean Wye interprets or enforces them.
 
 ### Upstream connections
 
@@ -313,7 +313,9 @@ Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on 
 
 **Failover within a request** (**implemented**, stage 11), only where it cannot duplicate billing: when a candidate answers `429`, `529`, or refuses the connection, before any response byte reached the client, Wye sends the same request to the next candidate in the request's ranking (the next-highest rendezvous score, or config order with `select = "ordered"`), so a failed-over session lands on the same second account from every replica. A `5xx` after the provider may have accepted the request is not retried ([retries](#retries-and-fallback)); config refuses any other reason. Resending needs the request body, which hyper consumes: `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies) up to `failover_max_body_bytes` per request (default 8 MiB) and `failover_max_held_bytes` across the process (default 256 MiB, separate from `server.max_held_request_bytes`, so kept bodies never starve the model-permission hold), and when the attempt is dropped hands back the sent chunks plus the unread rest of the client's body through a oneshot channel. A body over either bound, or a refusal that arrives while the upload still runs (the body is not handed back within 100 ms), is answered as it is: never refused, never resent partly. Records carry `failovers` (`[{"upstream":"a","status":429}]`), OTLP `wye.failovers`, and the `wye.failovers` metric counts by refusing upstream and reason. Claude Code still retries on its own, so failover is a latency and availability improvement, not a correctness requirement. A failover costs that turn its prompt-cache discount at the new provider; affinity brings the next turn back.
 
-**Claude Platform on AWS** (**implemented**, API keys only): `provider = "claude-platform-aws"` with `base_url = "https://aws-external-anthropic.{region}.api.aws"` and the required `workspace_id`; Wye sends the key as `Authorization: Bearer` and `anthropic-workspace-id` on every request. Requests, responses, and model ids are the first-party API's, so nothing else changes (platform.claude.com, "Claude Platform on AWS", read 2026-10-26). Its short-term API keys last at most 12 hours and Wye reads keys at startup, so a deployment on them restarts (or rolls) within that window until a key refresher lands; SigV4 (service `aws-external-anthropic`) is the open decision below. Bedrock is not built: its Messages endpoint needs the `anthropic.` model-id prefix, a per-upstream rewrite of `model`, and Anthropic's and AWS's pages disagree on whether its API key goes in `x-api-key` or `Authorization`, to settle with one live request.
+**Claude Platform on AWS** (**implemented**, API keys only): `provider = "claude-platform-aws"` with `base_url = "https://aws-external-anthropic.{region}.api.aws"` and the required `workspace_id`; Wye sends the key as `Authorization: Bearer` and `anthropic-workspace-id` on every request. Requests, responses, and model ids are the first-party API's, so nothing else changes (platform.claude.com, "Claude Platform on AWS", read 2026-10-26). Its short-term API keys last at most 12 hours and Wye reads keys at startup, so a deployment on them restarts (or rolls) within that window until a key refresher lands; SigV4 (service `aws-external-anthropic`) is the open decision below.
+
+**Amazon Bedrock** (**implemented**, API keys only, not yet checked against the live service): `provider = "bedrock"` with `base_url = "https://bedrock-mantle.{region}.api.aws/anthropic"`; Wye sends the Bedrock API key as `x-api-key`, as Anthropic's page says for the standard SDK pointed at this endpoint (AWS's page shows `Authorization: Bearer`; [one live request](research.md#verification-needed) settles it). Model ids carry the `anthropic.` prefix, so on a route with a Bedrock upstream Wye holds each request until its `model` (as it does for model permissions) and spells it for the upstream each attempt goes to: `claude-opus-5-5` becomes `anthropic.claude-opus-5-5` for Bedrock and stays as the client sent it for the others, with `content-length` adjusted; a client that already sent a Bedrock id keeps it. Records, OTLP, and pricing keep the client's spelling. On failover the resent body is re-spelled where the value is: in the bytes already sent, or in the client's unread rest; a value split between the two, which needs a refusal in the middle of the first chunk, is answered as it is rather than resent. Routes without a Bedrock upstream are unchanged.
 
 **Auth without state.** Each provider credential is resolved at startup like `api_key_env`. SigV4 signs each request on the request path (an HMAC chain, microseconds) with an unsigned payload hash if the service accepts it, since hashing a streamed multi-MB body before sending would mean buffering it; if not, Bedrock and AWS API keys avoid signing. Vertex access tokens expire after about an hour: either Wye exchanges a service-account key for tokens itself (an RS256-signed JWT and one HTTPS call per hour, cached in memory per process), or an external refresher writes a token file Wye re-reads. Both are open decisions below.
 
@@ -379,7 +381,8 @@ http_version = "auto"                  # HTTP/2 via ALPN when offered; "1.1": no
 # failover_max_held_bytes = 268435456   # kept for resending, across the process
 # [[routes.claude.upstreams]]          # up to 16; each takes every [upstream] field above
 # id = "team-a"                        # required, unique; in usage records and OTLP
-# provider = "anthropic"               # or "claude-platform-aws" (with workspace_id = "wrkspc_..."; the key goes as a bearer token)
+# provider = "anthropic"               # or "claude-platform-aws" (with workspace_id = "wrkspc_..."; the key goes as a bearer token),
+#                                      # or "bedrock" (base_url ".../anthropic"; model ids get the anthropic. prefix)
 # weight = 2                           # share of sessions, 1-1000
 # base_url = "https://api.anthropic.com"
 # api_key_env = "ANTHROPIC_KEY_TEAM_A" # forward_caller_credential is not allowed here
@@ -439,7 +442,7 @@ sample_percent = 100                   # share of sessions (or clients) checked
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, `[pricing]`, and `[upgrade_check]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. `[routes.claude]` with `provider = "anthropic"` upstreams and `cache_affine` exists (above); the rest of this block does not.
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, `[pricing]`, and `[upgrade_check]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. `[routes.claude]` with `anthropic`, `claude-platform-aws`, and `bedrock` upstreams (API keys) and `cache_affine` exists (above); the rest of this block does not.
 
 ```toml
 # A route serves one native API, named by the route: claude for /v1/messages
@@ -458,8 +461,8 @@ weight = 2
 [[routes.claude.upstreams]]
 id = "bedrock-us"
 provider = "bedrock"                   # Messages endpoint; model ids get the anthropic. prefix
-region = "us-east-1"
-api_key_env = "BEDROCK_API_KEY"        # or aws_credentials = "environment" for SigV4
+base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
+api_key_env = "BEDROCK_API_KEY"        # or aws_credentials = "environment" for SigV4 (planned)
 
 [[routes.claude.upstreams]]
 id = "vertex-global"

@@ -2,8 +2,9 @@
 //! sampling, the upstream choice and failover, and the response or gateway
 //! error.
 
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 
+use bytes::Bytes;
 use gateway_core::{api::Api, prompt, route};
 use http::{
     HeaderValue, Request, Response, StatusCode,
@@ -14,13 +15,14 @@ use hyper::body::Incoming;
 
 use super::{
     Gateway, ResBody,
+    admit::ModelAt,
     responses::{error, forward_error, overloaded},
 };
 use crate::{
     diagnostics::PromptSlot,
     failover::{Bounds, FailoverBody},
     upgrade_check::UpgradeSlot,
-    upstream::ForwardError,
+    upstream::{ForwardError, Upstream},
     usage_log::{BodyKind, Failover, Observed, RequestInfo, UsageLog},
 };
 
@@ -57,8 +59,8 @@ impl Gateway {
             return res;
         }
         let (mut parts, body) = req.into_parts();
-        let body = match self.admit_body(body, &mut info, &mut parts.headers).await {
-            Ok(body) => body,
+        let (body, model_at) = match self.admit_body(body, &mut info, &mut parts.headers).await {
+            Ok(admitted) => admitted,
             Err(res) => {
                 log.gateway_error(info, res.status());
                 return *res;
@@ -106,7 +108,17 @@ impl Gateway {
             .failover()
             .filter(|f| declared_len.is_none_or(|len| len <= f.max_body_bytes))
             .copied();
-        let (parts, body) = req.into_parts();
+        let (parts, mut body) = req.into_parts();
+        // The model as the first upstream's provider spells it.
+        let base_len = content_length(&parts.headers);
+        // The provider prefix the body's model carries now.
+        let mut spelled = None;
+        if let (Some(at), Some(upstream)) = (&model_at, route.upstreams.get(ranking.first()))
+            && let Some((prefix, value)) = respelling(at, upstream, spelled)
+            && body.respell(&at.span, &value).is_some()
+        {
+            spelled = prefix;
+        }
         let (mut body, mut handback) = match &failover {
             Some(f) => {
                 let (body, handback) = FailoverBody::kept(body, &self.failover_held, bounds(f));
@@ -129,6 +141,12 @@ impl Gateway {
             let Some(upstream) = route.upstreams.get(index) else {
                 unreachable!("the route and its upstreams have the same length")
             };
+            let mut attempt = attempt;
+            if let (Some(prefix), Some(len)) = (spelled, base_len) {
+                attempt
+                    .headers
+                    .insert(CONTENT_LENGTH, HeaderValue::from(len + prefix.len() as u64));
+            }
             info.upstream = upstream.id.clone();
             // Prompt hashes and upgrade checks read the body once, on the first attempt.
             let first = info.failovers.is_empty();
@@ -162,6 +180,24 @@ impl Gateway {
                         .await
                         .ok()
                         .and_then(Result::ok),
+                };
+                // The next upstream's provider may spell the model differently.
+                let next = order.peek().and_then(|&i| route.upstreams.get(i));
+                let unsent = match (unsent, &model_at, next) {
+                    (Some(mut unsent), Some(at), Some(next)) => {
+                        match respelling(at, next, spelled) {
+                            None => Some(unsent),
+                            // A value split between the sent bytes and the
+                            // unread rest cannot be re-spelled: answer as is.
+                            Some((prefix, value)) => {
+                                unsent.respell(&spelled_span(at, spelled), &value).then(|| {
+                                    spelled = prefix;
+                                    unsent
+                                })
+                            }
+                        }
+                    }
+                    (unsent, _, _) => unsent,
                 };
                 if let Some(unsent) = unsent {
                     drop(result);
@@ -211,4 +247,36 @@ fn copy_parts(parts: &http::request::Parts) -> http::request::Parts {
     copy.version = parts.version;
     copy.headers = parts.headers.clone();
     copy
+}
+
+/// The prefix and value the body's model needs for `upstream`, when it now
+/// carries `spelled` and that differs. A client that sent a provider-spelled
+/// id keeps it.
+fn respelling(
+    at: &ModelAt,
+    upstream: &Upstream,
+    spelled: Option<&'static str>,
+) -> Option<(Option<&'static str>, Bytes)> {
+    let wanted = upstream
+        .model_prefix
+        .filter(|prefix| !at.model.starts_with(prefix));
+    (wanted != spelled).then(|| {
+        let value = match wanted {
+            Some(prefix) => Bytes::from(format!("{prefix}{}", at.model)),
+            None => Bytes::copy_from_slice(at.model.as_bytes()),
+        };
+        (wanted, value)
+    })
+}
+
+/// Where the model's value is in the body while it carries `spelled`.
+fn spelled_span(at: &ModelAt, spelled: Option<&'static str>) -> Range<u64> {
+    at.span.start..at.span.end + spelled.map_or(0, |p| p.len() as u64)
+}
+
+fn content_length(headers: &http::HeaderMap) -> Option<u64> {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
 }

@@ -1,7 +1,8 @@
 //! Body admission: model aliases, model permissions, and the output-token
-//! ceiling, decided while the request body's `model` is held.
+//! ceiling, decided while the request body's `model` is held; and where the
+//! model's value is, for providers that spell model ids their own way.
 
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use gateway_core::policy;
 use http::{HeaderMap, HeaderValue, Response, StatusCode, header::CONTENT_LENGTH};
@@ -16,6 +17,13 @@ use crate::{
     usage_log::RequestInfo,
 };
 
+/// Where the `model` value is in the body as forwarded, and what it says:
+/// the model that runs (an alias already resolved).
+pub(super) struct ModelAt {
+    pub(super) span: Range<u64>,
+    pub(super) model: Arc<str>,
+}
+
 impl Gateway {
     /// Resolves model aliases and checks the request body against model
     /// permissions and the output-token ceiling. Without any of them, the
@@ -27,7 +35,7 @@ impl Gateway {
         mut body: Incoming,
         info: &mut RequestInfo,
         headers: &mut HeaderMap,
-    ) -> Result<RequestBody<Incoming>, Box<Response<ResBody>>> {
+    ) -> Result<(RequestBody<Incoming>, Option<ModelAt>), Box<Response<ResBody>>> {
         let api = info.endpoint.api;
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
         // The ceiling bounds generation; count_tokens generates nothing.
@@ -41,12 +49,16 @@ impl Gateway {
                 )
             })
             .flatten();
+        // A route with a provider that spells model ids its own way needs
+        // to know where the model is.
+        let respells = self.route(api).is_some_and(|r| r.respells);
         if self.models.is_none()
             && credential_models.is_none()
             && token_limit.is_none()
             && self.aliases.is_none()
+            && !respells
         {
-            return Ok(RequestBody::new(body));
+            return Ok((RequestBody::new(body), None));
         }
         let mut held = hold_until_model(
             &mut body,
@@ -116,7 +128,20 @@ impl Gateway {
                 &message,
             )));
         }
-        Ok(RequestBody::after_hold(held, body))
+        let model_at = respells
+            .then(|| {
+                let start = held.model_span()?.start;
+                let model: Arc<str> = match &resolved {
+                    Some((_, model)) => Arc::clone(model),
+                    None => Arc::from(held.model()?),
+                };
+                Some(ModelAt {
+                    span: start..start + model.len() as u64,
+                    model,
+                })
+            })
+            .flatten();
+        Ok((RequestBody::after_hold(held, body), model_at))
     }
 }
 
