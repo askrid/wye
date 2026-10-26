@@ -143,9 +143,11 @@ impl Gateway {
                 handback.as_mut(),
                 order.peek().is_some(),
             ) {
-                // Resend only a body handed back whole. A refusal that came
-                // while the upload still runs is answered as it is: dropping
-                // it first could lose both the body and the answer.
+                // Resend only a body handed back: the bytes sent plus the
+                // unread rest, so a refusal during the upload moves on when
+                // hyper drops the body. If the attempt still holds it (hyper
+                // still writing), the refusal is answered as it is: dropping
+                // the answer first could lose both it and the body.
                 let unsent = match handback.try_recv() {
                     Ok(unsent) => Some(unsent),
                     Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
