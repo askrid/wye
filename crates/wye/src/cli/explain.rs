@@ -11,6 +11,7 @@ use gateway_core::{
     config::{Config, UpstreamCredential},
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
+    pricing::{Pico, PricedModels, Usd},
     prompt,
     route::Select,
     upgrade::{self, UpgradeScanner},
@@ -153,10 +154,17 @@ pub fn explain(
             )
         })
         .flatten();
+    // A route with a provider that spells model ids its own way reads the model.
+    let respells = config.routes.get(api).is_some_and(|r| {
+        r.upstreams()
+            .iter()
+            .any(|u| u.provider.model_prefix().is_some())
+    });
     if configured.is_none()
         && granted.is_none()
         && token_limit.is_none()
         && config.aliases.is_none()
+        && !respells
     {
         out.step(
             "model aliases, permissions, and token ceiling: none apply; the body is not read"
@@ -269,18 +277,33 @@ pub fn explain(
         }
         UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
     });
-    if let Some(prefix) = upstream.provider.model_prefix() {
-        // The gateway reads the model for such a route even when no policy does.
-        let model = out.model.clone().or_else(|| {
-            let mut scanner = PolicyScanner::for_api(api);
-            scanner.feed(body);
-            scanner.finish().ok().map(str::to_owned)
+    // The gateway reads the model on a route that re-spells it even when no
+    // policy does; explain reads it for the price too.
+    let model = out.model.clone().or_else(|| {
+        let mut scanner = PolicyScanner::for_api(api);
+        scanner.feed(body);
+        scanner.finish().ok().map(str::to_owned)
+    });
+    if let (Some(prefix), Some(model)) = (upstream.provider.model_prefix(), &model)
+        && !model.starts_with(prefix)
+    {
+        out.step(format!(
+            "model id: the body names {prefix}{model} upstream (the provider's spelling)"
+        ));
+    }
+    if let (Some(pricing), Some(model)) = (&config.pricing, &model) {
+        let at = upstream
+            .id
+            .as_deref()
+            .map_or(String::new(), |id| format!(" at {id}"));
+        out.step(match pricing.entry(model, upstream.id.as_deref()) {
+            Some(entry) => format!(
+                "price: {model}{at}: {} (pricing version {})",
+                prices(entry),
+                pricing.version
+            ),
+            None => format!("price: none for {model}{at}; its cost is recorded as unknown"),
         });
-        if let Some(model) = model.filter(|m| !m.starts_with(prefix)) {
-            out.step(format!(
-                "model id: the body names {prefix}{model} upstream (the provider's spelling)"
-            ));
-        }
     }
     // Prompt hashes and upgrade checks read Anthropic request bodies.
     if api != Api::Messages {
@@ -335,3 +358,32 @@ pub fn explain(
 
 #[cfg(test)]
 mod tests;
+
+/// An entry's prices per million tokens, as `[pricing]` writes them.
+fn prices(entry: &PricedModels) -> String {
+    let per_mtok = |p: Pico| Usd(p.saturating_mul(1_000_000));
+    let p = &entry.prices;
+    let mut text = format!(
+        "input ${}, output ${}",
+        per_mtok(p.input),
+        per_mtok(p.output)
+    );
+    for (name, price) in [
+        ("cache read", p.cache_read),
+        ("cache write 5m", p.cache_write_5m),
+        ("cache write 1h", p.cache_write_1h),
+    ] {
+        if let Some(price) = price {
+            text.push_str(&format!(", {name} ${}", per_mtok(price)));
+        }
+    }
+    text.push_str(" per million tokens");
+    if let Some(first) = entry.tiers.first() {
+        text.push_str(&format!(
+            "; {} tier(s), the first above {} prompt tokens",
+            entry.tiers.len(),
+            first.above_prompt_tokens
+        ));
+    }
+    text
+}
