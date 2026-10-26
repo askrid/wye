@@ -102,3 +102,40 @@ async fn a_body_sent_once_hands_nothing_back() {
     assert_eq!(body.size_hint().lower(), 0);
     assert_eq!(collect(body).await, "ab");
 }
+
+proptest::proptest! {
+    /// Wherever the body is split into chunks and wherever an attempt stops
+    /// reading, the next attempt sends exactly the client's bytes, once.
+    #[test]
+    fn a_resumed_body_is_the_original(
+        body in proptest::collection::vec(proptest::num::u8::ANY, 0..300),
+        cuts in proptest::collection::vec(0usize..300, 0..8),
+        stop_after in 0usize..10,
+    ) {
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (body.len() + 1)).collect();
+            cuts.sort_unstable();
+            let mut chunks = VecDeque::new();
+            let mut at = 0;
+            for cut in cuts.into_iter().chain([body.len()]) {
+                if cut > at {
+                    chunks.push_back(Bytes::copy_from_slice(&body[at..cut]));
+                    at = cut;
+                }
+            }
+            let held = Gauge::default();
+            let (mut first, handback) = FailoverBody::kept(Client(chunks), &held, ROOMY);
+            for _ in 0..stop_after {
+                if first.frame().await.is_none() {
+                    break;
+                }
+            }
+            drop(first);
+            let (again, next) = FailoverBody::resume(handback.await.unwrap(), ROOMY);
+            assert_eq!(collect(again).await, body);
+            drop(next);
+            assert_eq!(held.current(), 0);
+        });
+    }
+}
