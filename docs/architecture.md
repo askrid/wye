@@ -1,6 +1,6 @@
 # Architecture
 
-One process per replica, passing each client's native API through to a provider that serves it: the Anthropic Messages API for Claude Code and Anthropic SDK clients today, the OpenAI APIs for Codex and OpenAI SDK clients later. Wye never translates between provider APIs ([product.md](product.md#non-goals)).
+One process per replica, passing each client's native API through to a provider that serves it: the Anthropic Messages API for Claude Code and Anthropic SDK clients, and the OpenAI Responses API for Codex and OpenAI SDK clients (Chat Completions later). Wye never translates between provider APIs ([product.md](product.md#non-goals)).
 
 ## System view
 
@@ -45,7 +45,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply the retry policy, release request resources.
 9. Extract reported usage, or estimate it or mark it unknown; export telemetry asynchronously.
 
-**Implemented** for Anthropic Messages: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, and steps 4–5 (one upstream and one account today).
+**Implemented** for Anthropic Messages and OpenAI Responses: steps 1, 2, 3 (model permissions and output-token ceilings; cost ceilings are not built), 4 (aliases, the route per endpoint, `cache_affine` among a route's upstreams), 5 for aliases, 6–8, and 9 as usage records in a JSON-lines log and as OTLP logs, metrics, and spans. Not built: cost ceilings in step 3, provider model ids and agent-aware routing in step 5, and failover in step 8.
 
 ## Repository and workspace
 
@@ -68,7 +68,7 @@ wye/
 │   │   ├── upgrade.rs           upgrade-check rules and their request-body scanner
 │   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
 │   │   ├── json.rs              byte-level JSON lexing shared by the scanners
-│   │   └── usage.rs             SSE usage and tool-call scanner (usage/raw.rs: the events' shapes)
+│   │   └── usage.rs             SSE usage and tool-call scanners: Messages (usage/raw.rs: the events' shapes) and Responses (usage/responses.rs, its data-line lexer in usage/fields.rs)
 │   ├── wye/src/                 the binary
 │   │   ├── main.rs              command-line entry
 │   │   ├── startup.rs           secrets and files the config references
@@ -76,6 +76,7 @@ wye/
 │   │   ├── server/write_timeout.rs  closes connections whose writes stall
 │   │   ├── gateway.rs           routing, forwarding, gateway errors
 │   │   ├── gateway/admit.rs     body admission: aliases, permissions, token ceilings
+│   │   ├── gateway/forward.rs   a proxied request: permit, admission, sampling, upstream choice
 │   │   ├── auth.rs              credential checks, cached per connection
 │   │   ├── permissions.rs       model permissions and token ceilings on the request body
 │   │   ├── discovery.rs         GET /v1/models
@@ -86,7 +87,7 @@ wye/
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
-│   │   ├── cli/                 explain, policy-test, report, claude, probe, token
+│   │   ├── cli/                 explain, policy-test, report, claude and codex, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA, mock upstream, test signing keys and IdP tokens
