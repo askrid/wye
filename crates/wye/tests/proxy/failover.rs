@@ -161,3 +161,64 @@ async fn failover_respells_the_model_for_each_provider() {
         assert_eq!(h.usage_record().await["upstream"], "b");
     }
 }
+
+#[tokio::test]
+async fn a_refusal_during_the_upload_resends_the_whole_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Refuses at once, without reading the body.
+    let refusing = wye_testkit::spawn_upstream(
+        |_req: Request<Incoming>| async {
+            let mut res = Response::new(Full::new(Bytes::from_static(
+                br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
+            )));
+            *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+            res
+        },
+        None,
+        None,
+    )
+    .await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let h = gateway(
+        "failover = [\"429\"]",
+        &format!("http://{refusing}"),
+        &format!("http://{b}"),
+    )
+    .await;
+
+    // The refusal arrives while the client is still uploading: hyper drops
+    // the attempt's body, which hands back the bytes sent and the unread
+    // rest, so the next upstream gets the whole body as the client finishes.
+    let body = format!(
+        r#"{{"model":"claude-opus-5-5","messages":[],"pad":"{}"}}"#,
+        "x".repeat(900)
+    );
+    let (start, rest) = body.split_at(40);
+    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    client
+        .write_all(
+            format!(
+                "POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-type: application/json\r\n\
+                 anthropic-version: 2023-06-01\r\ncontent-length: {}\r\n\r\n{start}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    client.write_all(rest.as_bytes()).await.unwrap();
+    let mut head = [0u8; 12];
+    tokio::time::timeout(WAIT, client.read_exact(&mut head))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&head, b"HTTP/1.1 200");
+    assert_eq!(seen_b.recv().await.unwrap(), body.as_str());
+    assert_eq!(
+        h.usage_record().await["failovers"],
+        serde_json::json!([{"upstream": "a", "status": 429}])
+    );
+}
