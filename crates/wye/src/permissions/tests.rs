@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::collections::VecDeque;
+
 use gateway_core::api::Api;
 
 use super::*;
