@@ -75,7 +75,7 @@ The usage log goes to the gateway's stderr, so redirecting it keeps it; `wye rep
 
 **Implemented: `wye codex`.** Same flags and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway credential (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after the flags go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a credential without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
-Proposals, not built: `wye codex` (with M3), and profiles that select a gateway and credential by name.
+Proposal, not built: profiles that select a gateway and credential by name.
 
 ### SDK integration
 
