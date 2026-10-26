@@ -43,6 +43,9 @@ pub struct Tier {
 #[derive(Debug, Clone)]
 pub struct PricedModels {
     pub models: Box<[ModelPattern]>,
+    /// Route upstream ids the entry is limited to; empty: every upstream.
+    /// Providers and regions can price the same model differently.
+    pub upstreams: Box<[Box<str>]>,
     pub prices: Prices,
     /// Sorted by threshold, ascending.
     pub tiers: Box<[Tier]>,
@@ -93,14 +96,31 @@ impl Cost {
 }
 
 impl Pricing {
-    /// The cost of a response from `model` that reported `usage`;
-    /// `usage_complete` is false when the stream ended before its final usage.
-    pub fn cost(&self, model: &str, usage: &Usage, usage_complete: bool) -> Cost {
-        let Some(entry) = self
+    /// The cost of a response from `model`, served by `upstream` (a route
+    /// upstream's id), that reported `usage`; `usage_complete` is false when
+    /// the stream ended before its final usage. An entry scoped to the
+    /// upstream prices it before any unscoped one; within each, the first
+    /// match.
+    pub fn cost(
+        &self,
+        model: &str,
+        upstream: Option<&str>,
+        usage: &Usage,
+        usage_complete: bool,
+    ) -> Cost {
+        let for_model = |e: &&PricedModels| e.models.iter().any(|p| p.matches(model));
+        let scoped = self
             .entries
             .iter()
-            .find(|e| e.models.iter().any(|p| p.matches(model)))
-        else {
+            .filter(for_model)
+            .find(|e| upstream.is_some_and(|u| e.upstreams.iter().any(|id| &**id == u)));
+        let unscoped = || {
+            self.entries
+                .iter()
+                .filter(for_model)
+                .find(|e| e.upstreams.is_empty())
+        };
+        let Some(entry) = scoped.or_else(unscoped) else {
             return Cost::UNKNOWN;
         };
         let (Some(input), Some(output)) = (usage.input_tokens, usage.output_tokens) else {

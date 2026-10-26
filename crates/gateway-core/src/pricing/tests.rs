@@ -19,6 +19,7 @@ fn table(entry_prices: Prices, tiers: Vec<Tier>) -> Pricing {
         version: "test".into(),
         entries: vec![PricedModels {
             models: vec![ModelPattern::parse("claude-opus-*").unwrap()].into(),
+            upstreams: Box::new([]),
             prices: entry_prices,
             tiers: tiers.into(),
         }]
@@ -78,7 +79,7 @@ fn prices_tokens_cache_reads_and_writes_by_ttl() {
         ..usage(1_000_000, 1_000_000)
     };
     // 4 + 20 + 0.20 + 5 + 2 x 8 USD.
-    let cost = t.cost("claude-opus-5-5", &u, true);
+    let cost = t.cost("claude-opus-5-5", None, &u, true);
     assert_eq!(cost.status, CostStatus::Complete);
     assert_eq!(Usd(cost.pico.unwrap()).to_string(), "45.2");
 }
@@ -90,7 +91,7 @@ fn an_unknown_ttl_split_prices_writes_high_and_is_partial() {
         cache_creation_input_tokens: Some(1_000_000),
         ..usage(0, 0)
     };
-    let cost = t.cost("claude-opus-5-5", &u, true);
+    let cost = t.cost("claude-opus-5-5", None, &u, true);
     assert_eq!(cost.status, CostStatus::Partial);
     assert_eq!(Usd(cost.pico.unwrap()).to_string(), "8");
 }
@@ -105,7 +106,7 @@ fn missing_prices_and_extras_make_it_partial_never_zero() {
         ..usage(10, 10)
     };
     assert_eq!(
-        t.cost("claude-opus-5-5", &read, true).status,
+        t.cost("claude-opus-5-5", None, &read, true).status,
         CostStatus::Partial
     );
     let tools = Usage {
@@ -113,20 +114,21 @@ fn missing_prices_and_extras_make_it_partial_never_zero() {
         ..usage(10, 10)
     };
     assert_eq!(
-        t.cost("claude-opus-5-5", &tools, true).status,
+        t.cost("claude-opus-5-5", None, &tools, true).status,
         CostStatus::Partial
     );
     assert_eq!(
-        t.cost("claude-opus-5-5", &usage(10, 10), false).status,
+        t.cost("claude-opus-5-5", None, &usage(10, 10), false)
+            .status,
         CostStatus::Partial
     );
     // No price for the model, or no usage: unknown, not $0.
     assert_eq!(
-        t.cost("claude-haiku-5-5", &usage(10, 10), true),
+        t.cost("claude-haiku-5-5", None, &usage(10, 10), true),
         Cost::UNKNOWN
     );
     assert_eq!(
-        t.cost("claude-opus-5-5", &Usage::default(), true),
+        t.cost("claude-opus-5-5", None, &Usage::default(), true),
         Cost::UNKNOWN
     );
 }
@@ -146,7 +148,7 @@ fn the_highest_tier_reached_prices_the_whole_request() {
         vec![tier(100, "3.00"), tier(200, "5.00")],
     );
     let pico = |input| {
-        t.cost("claude-opus-5-5", &usage(input, 0), true)
+        t.cost("claude-opus-5-5", None, &usage(input, 0), true)
             .pico
             .unwrap()
     };
@@ -159,7 +161,7 @@ fn the_highest_tier_reached_prices_the_whole_request() {
 fn overflow_fails_closed() {
     let t = table(prices("1000000", "1000000"), vec![]);
     assert_eq!(
-        t.cost("claude-opus-5-5", &usage(u64::MAX / 2, 1), true),
+        t.cost("claude-opus-5-5", None, &usage(u64::MAX / 2, 1), true),
         Cost::UNKNOWN
     );
 }
@@ -203,7 +205,7 @@ proptest! {
         .iter()
         .map(|&(n, price)| u128::from(n) * u128::from(price))
         .sum::<u128>();
-        let cost = t.cost("claude-opus-5-5", &u, true);
+        let cost = t.cost("claude-opus-5-5", None, &u, true);
         match u64::try_from(want) {
             Ok(want) => {
                 prop_assert_eq!(cost.pico, Some(want));
@@ -212,4 +214,28 @@ proptest! {
             Err(_) => prop_assert_eq!(cost, Cost::UNKNOWN),
         }
     }
+}
+
+#[test]
+fn an_entry_scoped_to_upstreams_prices_only_their_requests() {
+    let entry = |upstreams: &[&str], input: &str| PricedModels {
+        models: vec![ModelPattern::parse("claude-opus-*").unwrap()].into(),
+        upstreams: upstreams.iter().map(|u| Box::from(*u)).collect(),
+        prices: prices(input, "0"),
+        tiers: Box::new([]),
+    };
+    let table = Pricing {
+        version: "test".into(),
+        // The unscoped entry first: the scoped one still wins for its upstream.
+        entries: vec![entry(&[], "4.00"), entry(&["aws-east"], "4.40")].into(),
+    };
+    let one_million = usage(1_000_000, 0);
+    let pico = |upstream| {
+        table
+            .cost("claude-opus-5-5", upstream, &one_million, true)
+            .pico
+    };
+    assert_eq!(pico(Some("aws-east")), Some(4_400_000_000_000));
+    assert_eq!(pico(Some("team-a")), Some(4_000_000_000_000));
+    assert_eq!(pico(None), Some(4_000_000_000_000));
 }
