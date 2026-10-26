@@ -27,8 +27,9 @@ pub struct PolicyScanner {
     expect_key: bool,
     capture: Capture,
     key: [u8; KEY_CAP],
-    /// The API's output-token field: `max_tokens` or `max_output_tokens`.
-    token_key: &'static [u8],
+    /// The API's output-token fields (`max_tokens`, `max_output_tokens`,
+    /// `max_completion_tokens`).
+    token_keys: &'static [&'static str],
     key_len: usize,
     key_long: bool,
     escaped: bool,
@@ -74,7 +75,7 @@ impl PolicyScanner {
             expect_key: false,
             capture: Capture::None,
             key: [0; KEY_CAP],
-            token_key: api.token_field().as_bytes(),
+            token_keys: api.token_fields(),
             key_len: 0,
             key_long: false,
             escaped: false,
@@ -313,7 +314,10 @@ impl PolicyScanner {
                         self.error = Some(PolicyError::Repeated);
                     }
                     self.model_next = true;
-                } else if !self.key_long && self.key.get(..self.key_len) == Some(self.token_key) {
+                } else if !self.key_long
+                    && let Some(key) = self.key.get(..self.key_len)
+                    && self.token_keys.iter().any(|k| k.as_bytes() == key)
+                {
                     if self.tokens_seen {
                         self.error = Some(PolicyError::RepeatedMaxTokens);
                     }

@@ -84,7 +84,7 @@ pub(crate) fn validate_routes(
 fn validate_route_upstreams(raw: RawRoute, api: Api) -> Result<Vec<Upstream>, ConfigError> {
     let (route, provider) = match api {
         Api::Messages => ("claude", Provider::Anthropic),
-        Api::Responses => ("openai", Provider::OpenAi),
+        Api::Responses | Api::ChatCompletions => ("openai", Provider::OpenAi),
     };
     match raw.select.as_deref() {
         None | Some("cache_affine") => {}

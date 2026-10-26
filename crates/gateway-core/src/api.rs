@@ -9,6 +9,9 @@ pub enum Api {
     Messages,
     /// OpenAI Responses (`[routes.openai]`): Codex and the OpenAI SDKs.
     Responses,
+    /// OpenAI Chat Completions (`[routes.openai]`): OpenAI SDK clients and
+    /// OpenAI-compatible agents.
+    ChatCompletions,
 }
 
 /// A proxied endpoint.
@@ -28,6 +31,7 @@ pub fn endpoint(path: &str) -> Option<Endpoint> {
         "/v1/messages" => (Api::Messages, "/v1/messages", true),
         "/v1/messages/count_tokens" => (Api::Messages, "/v1/messages/count_tokens", false),
         "/v1/responses" => (Api::Responses, "/v1/responses", true),
+        "/v1/chat/completions" => (Api::ChatCompletions, "/v1/chat/completions", true),
         _ => return None,
     };
     Some(Endpoint {
@@ -38,27 +42,37 @@ pub fn endpoint(path: &str) -> Option<Endpoint> {
 }
 
 impl Api {
-    /// The top-level request field that bounds generated tokens.
+    /// The top-level request field that bounds generated tokens, as named
+    /// in messages.
     pub fn token_field(self) -> &'static str {
+        self.token_fields().first().copied().unwrap_or_default()
+    }
+
+    /// Every top-level field that bounds generated tokens: Chat Completions
+    /// keeps the older `max_tokens` beside `max_completion_tokens`. A body
+    /// naming two of them is refused, as one naming the same twice.
+    pub fn token_fields(self) -> &'static [&'static str] {
         match self {
-            Self::Messages => "max_tokens",
-            Self::Responses => "max_output_tokens",
+            Self::Messages => &["max_tokens"],
+            Self::Responses => &["max_output_tokens"],
+            Self::ChatCompletions => &["max_completion_tokens", "max_tokens"],
         }
     }
 
     /// Whether a request without the token field may pass a token ceiling.
     /// Anthropic requires `max_tokens`, so the provider rejects such a
-    /// request itself; on Responses the field is optional and its absence
-    /// means the model's maximum, so a ceiling refuses it.
+    /// request itself; on OpenAI's APIs the field is optional and its
+    /// absence means the model's maximum, so a ceiling refuses it.
     pub fn token_field_required(self) -> bool {
-        self == Self::Responses
+        self != Self::Messages
     }
 
     /// The header with the client's session id: Claude Code's or Codex's.
-    pub fn session_header(self) -> &'static str {
+    pub fn session_header(self) -> Option<&'static str> {
         match self {
-            Self::Messages => "x-claude-code-session-id",
-            Self::Responses => "session-id",
+            Self::Messages => Some("x-claude-code-session-id"),
+            Self::Responses => Some("session-id"),
+            Self::ChatCompletions => None,
         }
     }
 
@@ -66,7 +80,7 @@ impl Api {
     pub fn system(self) -> &'static str {
         match self {
             Self::Messages => "anthropic",
-            Self::Responses => "openai",
+            Self::Responses | Self::ChatCompletions => "openai",
         }
     }
 
@@ -74,7 +88,7 @@ impl Api {
     pub fn route_name(self) -> &'static str {
         match self {
             Self::Messages => "claude",
-            Self::Responses => "openai",
+            Self::Responses | Self::ChatCompletions => "openai",
         }
     }
 }
@@ -91,12 +105,10 @@ mod tests {
         assert_eq!((count.api, count.generates), (Api::Messages, false));
         let responses = endpoint("/v1/responses").unwrap();
         assert_eq!((responses.api, responses.generates), (Api::Responses, true));
-        for other in [
-            "/v1/chat/completions",
-            "/v1/models",
-            "/v1/responses/abc",
-            "/",
-        ] {
+        let chat = endpoint("/v1/chat/completions").unwrap();
+        assert_eq!((chat.api, chat.generates), (Api::ChatCompletions, true));
+        assert_eq!(Api::ChatCompletions.token_field(), "max_completion_tokens");
+        for other in ["/v1/completions", "/v1/models", "/v1/responses/abc", "/"] {
             assert_eq!(endpoint(other), None, "{other}");
         }
     }

@@ -232,3 +232,58 @@ async fn responses_usage_and_cost_are_recorded() {
     assert_eq!(record["cost_usd"], "0.0007375");
     assert_eq!(record["cost_status"], "complete");
 }
+
+#[tokio::test]
+async fn chat_completions_pass_through_with_usage() {
+    const CHAT: &str = "data: {\"model\":\"gpt-5.5\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\n\
+data: {\"model\":\"gpt-5.5\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":10}}}\n\n\
+data: [DONE]\n\n";
+    let (tx, mut rx) = mpsc::channel(4);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send(seen).await.unwrap();
+            let mut res = full(StatusCode::OK, CHAT);
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
+         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![UpstreamResources::new(
+            UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+        )],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h = Harness::launch_config(&config, resources, hits).await;
+    let body = r#"{"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true},"messages":[]}"#;
+    let req = Request::post("/v1/chat/completions").header("content-type", "application/json");
+    let res = h.send(req, body).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(read_body(res).await, CHAT);
+    let seen = rx.recv().await.unwrap();
+    assert_eq!(seen.uri.path(), "/v1/chat/completions");
+    assert_eq!(
+        seen.headers["authorization"],
+        format!("Bearer {OPENAI_KEY}")
+    );
+    assert_eq!(
+        seen.body, body,
+        "forwarded unchanged: no include_usage rewrite"
+    );
+    let record = h.usage_record().await;
+    assert_eq!(record["path"], "/v1/chat/completions");
+    assert_eq!(record["usage_status"], "complete");
+    assert_eq!(record["input_tokens"], 20);
+    assert_eq!(record["cache_read_input_tokens"], 10);
+    assert_eq!(record["output_tokens"], 3);
+}
