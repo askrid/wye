@@ -50,7 +50,7 @@ In this order ([roadmap.md](roadmap.md)):
 1. **Cost (M2):** pricing in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report` (built); next, the provable per-request cost ceiling and provider-held budgets.
 2. **Packaging:** published binaries and images, a Compose example.
 3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why (built; [design](architecture.md#model-aliases-and-upgrade-checks)).
-4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)). Built: several Anthropic and Claude Platform on AWS accounts with session affinity and failover before output; Bedrock and Vertex are next.
+4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)). Built: several Anthropic, Claude Platform on AWS, and Bedrock accounts with session affinity and failover before output, Bedrock's model ids spelled per attempt; Vertex is next.
 
 ### Later
 
@@ -61,7 +61,7 @@ More clients on their native APIs: Codex through the OpenAI Responses API (M3), 
 | P0 | Claude Code, Anthropic SDK apps and agents | Anthropic Messages | Anthropic | **Built** |
 | P1 | Codex | OpenAI Responses | OpenAI | Started (M3): passthrough, usage and cost, `wye codex` |
 | P2 | OpenAI SDK apps and agents | OpenAI Chat Completions | OpenAI | Built (M3): passthrough, usage when the client asks for it |
-| P3 | Same as P0, across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Planned (M4) |
+| P3 | Same as P0, across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Started (M4): Anthropic, Claude Platform on AWS, Bedrock with API keys |
 | Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |
 
 A route is supported only when its request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, and cancellation are tested. **Fail explicitly rather than silently drop semantics.**
@@ -111,7 +111,7 @@ Landscape as of 2026-10; competitor features change quickly and should be re-che
 
 **Weaknesses**
 
-- **Narrow provider coverage so far.** Anthropic and Claude Platform on AWS (several accounts, failover between them), OpenAI Responses and Chat Completions; no Claude through Bedrock or Vertex yet. Codex support is built from its source and tests, not yet from a real Codex session.
+- **Narrow provider coverage so far.** Anthropic, Claude Platform on AWS, and Bedrock (several accounts, failover between them; API keys only, Bedrock not yet checked live), OpenAI Responses and Chat Completions; no Vertex yet. Codex support is built from its source and tests, not yet from a real Codex session.
 - **Not packaged.** Build from source; no published binaries or images. This works against "easy to use" more than any missing feature.
 - **No cumulative limits by design:** budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - **Thin real-world validation.** One partial real Claude Code session; no production deployment; numbers from one laptop against a mock.

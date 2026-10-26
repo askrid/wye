@@ -297,6 +297,45 @@ fn shows_the_upstream_a_session_goes_to() {
 }
 
 #[test]
+fn shows_the_model_id_a_provider_spells_its_own_way() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
+         [[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"B\"\n",
+    )
+    .unwrap();
+    for (body, step) in [
+        (
+            &br#"{"model":"claude-opus-5-5"}"#[..],
+            Some("model id: the body names anthropic.claude-opus-5-5 upstream"),
+        ),
+        (&br#"{"model":"anthropic.claude-opus-5-5"}"#[..], None),
+    ] {
+        let report = explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            None,
+            body,
+            NOW,
+            &[],
+        )
+        .report();
+        assert!(
+            report.contains(
+                "upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages"
+            ),
+            "{report}"
+        );
+        assert!(report.contains("x-api-key from $B"), "{report}");
+        assert_eq!(report.contains("model id:"), step.is_some(), "{report}");
+        if let Some(step) = step {
+            assert!(report.contains(step), "{report}");
+        }
+    }
+}
+
+#[test]
 fn explains_responses_on_the_openai_route() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\n\

@@ -139,3 +139,62 @@ proptest::proptest! {
         });
     }
 }
+
+/// Every way to cut the body into up to three chunks, handed back after
+/// every number of sent frames: re-spelling the model either yields the
+/// body with only the model changed, or, when the value straddles the sent
+/// bytes and the unread rest, declines.
+#[tokio::test]
+async fn a_handed_back_body_respells_its_model_wherever_it_is() {
+    use gateway_core::api::Api;
+
+    use crate::permissions::hold_until_model;
+
+    const BODY: &str = r#"{"model":"claude-opus-5-5","messages":[]}"#;
+    let start = BODY.find("claude").unwrap() as u64;
+    let span = start..start + "claude-opus-5-5".len() as u64;
+    let value = Bytes::from_static(b"anthropic.claude-opus-5-5");
+    let want = BODY.replace("claude-opus", "anthropic.claude-opus");
+    let mut respelled = 0;
+    for i in 0..=BODY.len() {
+        for j in i..=BODY.len() {
+            let parts = [&BODY[..i], &BODY[i..j], &BODY[j..]];
+            let parts: VecDeque<Bytes> = parts
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .map(|p| Bytes::copy_from_slice(p.as_bytes()))
+                .collect();
+            for sent_frames in 0..=parts.len() {
+                let gauge = Gauge::default();
+                let mut client = Client(parts.clone());
+                let held =
+                    hold_until_model(&mut client, Api::Messages, &gauge, 1 << 20, 1 << 20, None)
+                        .await
+                        .unwrap();
+                let body = RequestBody::after_hold(held, client);
+                let (mut body, handback) = FailoverBody::kept(body, &gauge, ROOMY);
+                let mut sent = 0u64;
+                for _ in 0..sent_frames {
+                    if let Some(frame) = body.frame().await {
+                        sent += frame.unwrap().into_data().unwrap().len() as u64;
+                    }
+                }
+                drop(body);
+                let mut unsent = handback.await.unwrap();
+                let straddles = span.start < sent && sent < span.end;
+                assert_eq!(unsent.respell(&span, &value), !straddles, "{parts:?}");
+                let (again, next) = FailoverBody::resume(unsent, ROOMY);
+                let got = collect(again).await;
+                drop(next);
+                assert_eq!(gauge.current(), 0, "every kept byte released");
+                if straddles {
+                    assert_eq!(got, BODY);
+                } else {
+                    assert_eq!(got, want, "{parts:?} after {sent_frames} frames");
+                    respelled += 1;
+                }
+            }
+        }
+    }
+    assert!(respelled > 0);
+}
