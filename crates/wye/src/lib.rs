@@ -6,7 +6,7 @@
 //! - `discovery`: `GET /v1/models`, the model catalog filtered by permissions
 //! - `gateway`: routing and gateway-generated responses
 //! - `cli`: the commands besides `serve` (`explain`, `policy-test`, `report`,
-//!   `claude`, `probe`, `token`)
+//!   `claude`, `codex`, `probe`, `token`)
 //! - `permissions`: model permissions and token ceilings, checked before forwarding
 //! - `upstream`: forwarding to the provider
 //! - `usage_log`: per-request usage records
@@ -29,7 +29,9 @@ mod upgrade_check;
 mod upstream;
 mod usage_log;
 
-pub use cli::{ClaudeLaunch, Credential, Explanation, claude, explain, policy_test, probe, report};
+pub use cli::{
+    Agent, Credential, Explanation, Launch, claude, codex, explain, policy_test, probe, report,
+};
 pub use gateway::Gateway;
 pub use server::serve;
 pub use startup::{Resources, StartupError, UpstreamResources, verifier};

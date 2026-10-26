@@ -27,7 +27,7 @@ Every feature obeys these; a feature that cannot is not built.
 - **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it; it never silently changes what the client asked for.
 - **Request-local and stateless.** A decision uses only the request, its credential, and the immutable config; correlation across requests happens in the user's telemetry backend. No authoritative cross-request state; nothing moves between replicas ([policy.md](policy.md#state-boundary)).
 - **Fast and light.** Header reads on the request path; hashing, encoding, and aggregation in the telemetry writer task. Zero allocations per streamed event. Every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they fit the gate on their own.
-- **Easy to use.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a credential for any SDK; one command per agent (`wye claude`, later `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
+- **Easy to use.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a credential for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
 - **One responsibility.** Inference traffic only: no agent loop, tool execution, dashboard, or stored usage history.
 
 ## Scope
@@ -50,7 +50,7 @@ In this order ([roadmap.md](roadmap.md)):
 1. **Cost (M2):** pricing in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report` (built); next, the provable per-request cost ceiling and provider-held budgets.
 2. **Packaging:** published binaries and images, a Compose example.
 3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why (built; [design](architecture.md#model-aliases-and-upgrade-checks)).
-4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)).
+4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-planned-m4)). Several Anthropic accounts with session affinity are built.
 
 ### Later
 
@@ -59,7 +59,7 @@ More clients on their native APIs: Codex through the OpenAI Responses API (M3), 
 | Phase | Clients | Client-facing API | Upstream | Status |
 |---|---|---|---|---|
 | P0 | Claude Code, Anthropic SDK apps and agents | Anthropic Messages | Anthropic | **Built** |
-| P1 | Codex | OpenAI Responses | OpenAI | Planned (M3) |
+| P1 | Codex | OpenAI Responses | OpenAI | Started (M3): passthrough and `wye codex`; usage next |
 | P2 | OpenAI SDK apps and agents | OpenAI Chat Completions | OpenAI | Planned (M3) |
 | P3 | Same as P0, across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Planned (M4) |
 | Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |

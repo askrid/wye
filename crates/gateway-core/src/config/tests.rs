@@ -1,5 +1,9 @@
 use super::*;
 
+fn claude(config: &Config) -> &Route {
+    config.routes.claude.as_ref().unwrap()
+}
+
 fn parse(upstream: &str) -> Result<Config, ConfigError> {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\n[upstream]\n{upstream}"
@@ -15,18 +19,18 @@ fn minimal_config_gets_defaults() {
         config.server.max_request_body_bytes,
         DEFAULT_MAX_REQUEST_BODY_BYTES
     );
-    assert_eq!(config.route.upstreams()[0].scheme, Scheme::HTTPS);
+    assert_eq!(claude(&config).upstreams()[0].scheme, Scheme::HTTPS);
     assert_eq!(
-        config.route.upstreams()[0].authority.as_str(),
+        claude(&config).upstreams()[0].authority.as_str(),
         "api.anthropic.com"
     );
-    assert_eq!(config.route.upstreams()[0].path_prefix, "");
+    assert_eq!(claude(&config).upstreams()[0].path_prefix, "");
     assert_eq!(
-        config.route.upstreams()[0].credential,
+        claude(&config).upstreams()[0].credential,
         UpstreamCredential::ApiKeyEnv("ANTHROPIC_API_KEY".into())
     );
     assert_eq!(
-        config.route.upstreams()[0].response_header_timeout,
+        claude(&config).upstreams()[0].response_header_timeout,
         Duration::from_secs(600)
     );
 }
@@ -36,9 +40,9 @@ fn base_path_keeps_prefix_without_trailing_slash() {
     let config =
         parse("base_url = \"https://gw.example.com/anthropic/\"\nforward_caller_credential = true")
             .unwrap();
-    assert_eq!(config.route.upstreams()[0].path_prefix, "/anthropic");
+    assert_eq!(claude(&config).upstreams()[0].path_prefix, "/anthropic");
     assert_eq!(
-        config.route.upstreams()[0].credential,
+        claude(&config).upstreams()[0].credential,
         UpstreamCredential::ForwardCaller
     );
 }
@@ -182,10 +186,10 @@ fn ca_file_is_kept_as_written() {
     let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
     let config = parse(&format!("{ok}ca_file = \"certs/ca.pem\"")).unwrap();
     assert_eq!(
-        config.route.upstreams()[0].ca_file,
+        claude(&config).upstreams()[0].ca_file,
         Some(PathBuf::from("certs/ca.pem"))
     );
-    assert_eq!(parse(ok).unwrap().route.upstreams()[0].ca_file, None);
+    assert_eq!(claude(&parse(ok).unwrap()).upstreams()[0].ca_file, None);
     assert_eq!(
         parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
         ConfigError::EmptyPath("upstream.ca_file")
@@ -321,7 +325,7 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
     let config =
         parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"secrets/key\"").unwrap();
     assert_eq!(
-        config.route.upstreams()[0].credential,
+        claude(&config).upstreams()[0].credential,
         UpstreamCredential::ApiKeyFile(PathBuf::from("secrets/key"))
     );
     for both in [
@@ -343,15 +347,11 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
 fn http_version_is_auto_unless_pinned_to_1_1() {
     let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
     assert_eq!(
-        parse(ok).unwrap().route.upstreams()[0].http_version,
+        claude(&parse(ok).unwrap()).upstreams()[0].http_version,
         UpstreamHttpVersion::Auto
     );
     assert_eq!(
-        parse(&format!("{ok}http_version = \"1.1\""))
-            .unwrap()
-            .route
-            .upstreams()[0]
-            .http_version,
+        claude(&parse(&format!("{ok}http_version = \"1.1\"")).unwrap()).upstreams()[0].http_version,
         UpstreamHttpVersion::Http1
     );
     assert!(matches!(
@@ -548,7 +548,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
          base_url = \"https://api.anthropic.com\"\napi_key_file = \"b.key\"\n"
     ))
     .unwrap();
-    let upstreams = config.route.upstreams();
+    let upstreams = claude(&config).upstreams();
     assert_eq!(upstreams.len(), 2);
     assert_eq!(upstreams[0].id.as_deref(), Some("team-a"));
     assert_eq!(upstreams[0].weight, 3);
@@ -560,7 +560,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
     );
     // The single [upstream] has no id.
     let single = parse(ACCOUNT).unwrap();
-    assert_eq!(single.route.upstreams()[0].id, None);
+    assert_eq!(claude(&single).upstreams()[0].id, None);
 }
 
 #[test]
@@ -614,4 +614,52 @@ fn upstream_and_routes_are_exclusive() {
         id_in_single.to_string().contains("belong in"),
         "{id_in_single}"
     );
+}
+
+#[test]
+fn openai_route_alone_or_beside_claude() {
+    let openai = "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
+                  base_url = \"https://api.openai.com\"\napi_key_env = \"OPENAI_API_KEY\"\n";
+    let alone =
+        Config::from_toml_str(&format!("[server]\nlisten = \"127.0.0.1:8080\"\n{openai}")).unwrap();
+    assert!(alone.routes.claude.is_none());
+    let route = alone.routes.openai.as_ref().unwrap();
+    assert_eq!(route.upstreams()[0].provider, Provider::OpenAi);
+    assert_eq!(
+        alone.routes.get(Api::Responses).unwrap().upstreams().len(),
+        1
+    );
+    assert!(alone.routes.get(Api::Messages).is_none());
+
+    let both = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n{ACCOUNT}{openai}"
+    ))
+    .unwrap();
+    assert_eq!(claude(&both).upstreams()[0].provider, Provider::Anthropic);
+    let ids: Vec<_> = both.routes.upstreams().map(|u| u.id.as_deref()).collect();
+    assert_eq!(ids, [None, Some("oa")]);
+
+    let wrong_provider = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n{}",
+        openai.replace("id = \"oa\"", "id = \"oa\"\nprovider = \"anthropic\"")
+    ))
+    .unwrap_err();
+    assert!(
+        wrong_provider
+            .to_string()
+            .contains("routes.openai.upstreams \"oa\": provider must be \"openai\""),
+        "{wrong_provider}"
+    );
+}
+
+#[test]
+fn base_url_ending_in_v1_is_refused() {
+    for url in [
+        "https://api.openai.com/v1",
+        "https://gw.example.com/anthropic/v1/",
+    ] {
+        let err = parse(&format!("base_url = \"{url}\"\napi_key_env = \"K\"")).unwrap_err();
+        assert!(err.to_string().contains("drop the trailing /v1"), "{err}");
+    }
+    assert!(parse("base_url = \"https://gw.example.com/v1beta\"\napi_key_env = \"K\"").is_ok());
 }

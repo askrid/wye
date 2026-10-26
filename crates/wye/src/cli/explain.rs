@@ -7,12 +7,15 @@
 //! replica would do.
 
 use gateway_core::{
-    config::{Config, UpstreamCredential},
+    api::{self, Api},
+    config::{Config, Provider, UpstreamCredential},
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
     prompt,
     upgrade::{self, UpgradeScanner},
 };
+
+use crate::permissions::TokenLimitError;
 
 /// The gateway credential a request carries.
 pub enum Credential<'a> {
@@ -74,9 +77,20 @@ pub fn explain(
         upgrade_issues: Vec::new(),
         upstream: None,
     };
-    if !matches!(path, "/v1/messages" | "/v1/messages/count_tokens") {
+    let Some(endpoint) = api::endpoint(path) else {
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
-    }
+    };
+    let Some(route) = config.routes.get(endpoint.api) else {
+        return out.refuse(
+            404,
+            "not_found_error",
+            format!(
+                "{path} is not proxied: no [routes.{}]",
+                endpoint.api.route_name()
+            ),
+        );
+    };
+    let api = endpoint.api;
     out.step(format!("endpoint: POST {path}"));
 
     let mut identity = None;
@@ -129,7 +143,8 @@ pub fn explain(
             .join(", "),
     };
     // The server reads the body once, for every check, whenever one applies.
-    let token_limit = (path == "/v1/messages")
+    let token_limit = endpoint
+        .generates
         .then(|| {
             policy::token_limit(
                 config.auth.as_ref().and_then(|a| a.max_output_tokens),
@@ -147,7 +162,7 @@ pub fn explain(
                 .into(),
         );
     } else {
-        let mut scanner = PolicyScanner::new();
+        let mut scanner = PolicyScanner::for_api(api);
         scanner.feed(body);
         let mut requested = match scanner.finish() {
             Ok(m) => m.to_owned(),
@@ -176,21 +191,15 @@ pub fn explain(
             );
         }
         if let Some(limit) = token_limit {
-            match scanner.max_tokens() {
-                Some(requested) if requested > limit => {
-                    return out.refuse(
-                        403,
-                        "permission_error",
-                        format!(
-                            "max_tokens {requested} exceeds this credential's limit of {limit}"
-                        ),
-                    );
-                }
-                Some(requested) => out.step(format!("max_tokens: {requested} (limit {limit})")),
-                None => out.step(format!(
-                    "max_tokens: absent (limit {limit}; the provider requires it)"
-                )),
+            let requested = scanner.max_output_tokens();
+            if let Some(refusal) = TokenLimitError::check(api, limit, requested) {
+                return out.refuse(403, "permission_error", refusal.to_string());
             }
+            let field = api.token_field();
+            out.step(match requested {
+                Some(requested) => format!("{field}: {requested} (limit {limit})"),
+                None => format!("{field}: absent (limit {limit}; the provider requires it)"),
+            });
         }
     }
 
@@ -199,8 +208,8 @@ pub fn explain(
         .map(str::as_bytes)
         .or(identity.as_ref().map(|i| i.subject.as_bytes()))
         .unwrap_or_default();
-    let upstreams = config.route.upstreams();
-    let Some(upstream) = upstreams.get(config.route.pick(key)) else {
+    let upstreams = route.upstreams();
+    let Some(upstream) = upstreams.get(route.pick(key)) else {
         unreachable!("a route has at least one upstream")
     };
     if let Some(id) = &upstream.id {
@@ -219,15 +228,24 @@ pub fn explain(
         "upstream: POST {}://{}{}{path}",
         upstream.scheme, upstream.authority, upstream.path_prefix
     ));
+    let header = match upstream.provider {
+        Provider::Anthropic => "x-api-key",
+        Provider::OpenAi => "Authorization: Bearer",
+    };
     out.step(match &upstream.credential {
         UpstreamCredential::ApiKeyEnv(name) => {
-            format!("provider credential: x-api-key from ${name}")
+            format!("provider credential: {header} from ${name}")
         }
         UpstreamCredential::ApiKeyFile(path) => {
-            format!("provider credential: x-api-key from {}", path.display())
+            format!("provider credential: {header} from {}", path.display())
         }
         UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
     });
+    // Prompt hashes and upgrade checks read Anthropic request bodies.
+    if api != Api::Messages {
+        out.step("decision: forward".into());
+        return out;
+    }
     if let Some(diagnostics) = &config.cache_diagnostics {
         let sampled =
             prompt::session_sampled(session.map(str::as_bytes), diagnostics.sample_percent);

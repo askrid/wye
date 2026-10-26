@@ -15,6 +15,7 @@ const USAGE: &str = "usage:
   wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
+  wye codex [--gateway <url>] [--credential-file <path>] [--] [codex args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
 --subject <sub> --ttl-secs <n> [--models <name,prefix*,...>] [--max-output-tokens <n>]";
@@ -40,6 +41,10 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         ["token", "issue", flags @ ..] => wye::cli::token::issue(flags),
         ["claude", rest @ ..] => {
             let code = wye::claude(rest)?;
+            std::process::exit(code);
+        }
+        ["codex", rest @ ..] => {
+            let code = wye::codex(rest)?;
             std::process::exit(code);
         }
         ["explain", rest @ ..] => explain(rest),
