@@ -200,6 +200,11 @@ impl HeldStart {
         let span = self.0.scanner.model_span()?;
         Some(self.0.splice(&span, model))
     }
+
+    /// Where the client's `model` value is in the body as received.
+    pub(crate) fn model_span(&self) -> Option<Range<u64>> {
+        self.0.scanner.model_span()
+    }
 }
 
 impl Hold {
@@ -322,6 +327,13 @@ impl<B> RequestBody<B> {
             inner: Some(inner),
             hold: None,
         }
+    }
+
+    /// Replaces the bytes at `span` (the model's value) with `value` before
+    /// anything was sent; `None` when the body was not held, so the model's
+    /// position is unknown. Returns the change in length.
+    pub(crate) fn respell(&mut self, span: &Range<u64>, value: &Bytes) -> Option<i64> {
+        Some(self.hold.as_mut()?.splice(span, value))
     }
 
     /// `held` followed by the rest of `inner`.

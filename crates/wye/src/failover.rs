@@ -13,6 +13,7 @@
 
 use std::{
     collections::VecDeque,
+    ops::Range,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -21,7 +22,10 @@ use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 use tokio::sync::oneshot;
 
-use crate::gauge::{Gauge, Held};
+use crate::{
+    gauge::{Gauge, Held},
+    permissions::{RequestBody, splice_chunks},
+};
 
 /// What a dropped attempt hands back: the bytes it sent, in order, then the
 /// client's body from where it stopped reading.
@@ -31,6 +35,41 @@ pub(crate) struct Unsent<B> {
     /// The kept bytes, counted against the process-wide bound.
     budget: Held,
     bytes: usize,
+}
+
+impl<B> Unsent<RequestBody<B>> {
+    /// Replaces the bytes at `span` (the model's value, in body offsets)
+    /// with `value`, wherever they are: in what was sent, or still in the
+    /// unread rest. `false` when the value straddles the two, so the body
+    /// cannot be re-spelled.
+    pub(crate) fn respell(&mut self, span: &Range<u64>, value: &Bytes) -> bool {
+        let sent: u64 = self.chunks.iter().map(|c| c.len() as u64).sum();
+        let delta = value.len() as i64 - (span.end - span.start) as i64;
+        if span.end <= sent {
+            let mut out = VecDeque::with_capacity(self.chunks.len() + 2);
+            splice_chunks(self.chunks.drain(..), span, value, |c| out.push_back(c));
+            self.chunks = out;
+            // At most a model name's length: the bound is not re-checked.
+            if delta > 0 {
+                self.budget
+                    .try_grow(delta.unsigned_abs() as usize, usize::MAX);
+                self.bytes += delta.unsigned_abs() as usize;
+            } else {
+                self.budget.release(delta.unsigned_abs() as usize);
+                self.bytes = self.bytes.saturating_sub(delta.unsigned_abs() as usize);
+            }
+            true
+        } else if span.start >= sent {
+            // The rest's held chunks start where the sent ones end.
+            let shifted = span.start - sent..span.end - sent;
+            self.rest
+                .as_mut()
+                .and_then(|rest| rest.respell(&shifted, value))
+                .is_some()
+        } else {
+            false
+        }
+    }
 }
 
 /// The bounds a kept body stays within.

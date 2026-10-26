@@ -269,6 +269,19 @@ pub fn explain(
         }
         UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
     });
+    if let Some(prefix) = upstream.provider.model_prefix() {
+        // The gateway reads the model for such a route even when no policy does.
+        let model = out.model.clone().or_else(|| {
+            let mut scanner = PolicyScanner::for_api(api);
+            scanner.feed(body);
+            scanner.finish().ok().map(str::to_owned)
+        });
+        if let Some(model) = model.filter(|m| !m.starts_with(prefix)) {
+            out.step(format!(
+                "model id: the body names {prefix}{model} upstream (the provider's spelling)"
+            ));
+        }
+    }
     // Prompt hashes and upgrade checks read Anthropic request bodies.
     if api != Api::Messages {
         out.step("decision: forward".into());
