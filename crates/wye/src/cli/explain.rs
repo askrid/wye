@@ -256,8 +256,13 @@ pub fn explain(
     ));
     let header = match upstream.provider {
         Provider::Anthropic => "x-api-key",
-        Provider::OpenAi => "Authorization: Bearer",
+        Provider::OpenAi | Provider::ClaudePlatformAws => "Authorization: Bearer",
     };
+    if let Some(workspace) = &upstream.workspace_id {
+        out.step(format!(
+            "workspace: anthropic-workspace-id {workspace} (Claude Platform on AWS)"
+        ));
+    }
     out.step(match &upstream.credential {
         UpstreamCredential::ApiKeyEnv(name) => {
             format!("provider credential: {header} from ${name}")
