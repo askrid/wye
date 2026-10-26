@@ -236,7 +236,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` (with a second provider, M4), `ttft_ms`, `config_version`.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then `claude_code.*` for the agent fields (Codex's mapped values too, under the same names for now) and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then the agent fields of either client (`gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.context_compacted`) and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 
@@ -244,10 +244,10 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 |---|---|---|
 | `wye.requests` | sum | `http.route`, `wye.upstream`, `http.response.status_code`, `wye.outcome` |
 | `wye.request.duration` | histogram, ms (5 ms to 300 s) | route, outcome |
-| `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `claude_code.request_class`, `wye.upstream` |
-| `wye.cost` | sum, USD | `gen_ai.response.model`, `claude_code.request_class`, `wye.upstream`; complete and partial costs, with `[pricing]` |
+| `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `wye.request_class`, `wye.upstream` |
+| `wye.cost` | sum, USD | `gen_ai.response.model`, `wye.request_class`, `wye.upstream`; complete and partial costs, with `[pricing]` |
 | `wye.upgrade.issues` | sum | `wye.upgrade.target`, `wye.upgrade.rule`, `enduser.id`; checked requests a target would reject |
-| `wye.tool.calls` | sum | `claude_code.tool.name` |
+| `wye.tool.calls` | sum | `gen_ai.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |
 | `wye.telemetry.lost` | sum | records lost to full queues, failed exports, or the series cap |
