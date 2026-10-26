@@ -165,3 +165,55 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     read_body(res).await;
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 2);
 }
+
+/// A Responses stream as OpenAI sends it, ending with usage.
+const COMPLETED: &str = "event: response.created\n\
+data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-5.5-codex\",\"usage\":null}}\n\n\
+event: response.output_item.added\n\
+data: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"name\":\"shell\",\"arguments\":\"\"}}\n\n\
+event: response.completed\n\
+data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.5-codex\",\"output\":[],\"service_tier\":\"default\",\
+\"usage\":{\"input_tokens\":1000,\"input_tokens_details\":{\"cached_tokens\":900},\"output_tokens\":50}}}\n\n";
+
+#[tokio::test]
+async fn responses_usage_and_cost_are_recorded() {
+    let handler: Handler = Arc::new(|_seen: Seen| {
+        Box::pin(async {
+            let mut res = full(StatusCode::OK, COMPLETED);
+            res.headers_mut()
+                .insert("content-type", "text/event-stream".parse().unwrap());
+            res
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
+         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n\
+         [pricing]\nversion = \"openai-test\"\n[[pricing.models]]\nmodels = [\"gpt-5.5-*\"]\n\
+         input = \"1.25\"\noutput = \"10.00\"\ncache_read = \"0.125\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![UpstreamResources::new(
+            UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+        )],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h = Harness::launch_config(&config, resources, hits).await;
+    let res = h.send(responses(), BODY).await;
+    assert_eq!(read_body(res).await, COMPLETED);
+    let record = h.usage_record().await;
+    assert_eq!(record["model"], "gpt-5.5-codex");
+    assert_eq!(record["usage_status"], "complete");
+    // Cached tokens are split out of OpenAI's input count.
+    assert_eq!(record["input_tokens"], 100);
+    assert_eq!(record["cache_read_input_tokens"], 900);
+    assert_eq!(record["output_tokens"], 50);
+    assert_eq!(record["tool_calls"]["shell"], 1);
+    // 100 x 1.25 + 900 x 0.125 + 50 x 10.00 per million tokens.
+    assert_eq!(record["cost_usd"], "0.0007375");
+    assert_eq!(record["cost_status"], "complete");
+}

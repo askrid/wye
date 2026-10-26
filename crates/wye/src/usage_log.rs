@@ -1,7 +1,7 @@
 //! Per-request usage records, written off the request path.
 //!
 //! The response body is wrapped in [`Observed`], which feeds the forwarded
-//! bytes to a [`SseUsageScanner`](gateway_core::usage::SseUsageScanner)
+//! bytes to the API's [`UsageScanner`](gateway_core::usage::UsageScanner)
 //! without changing or delaying them and emits one [`Record`] when the body is
 //! dropped: after completion, error, or client disconnect. Records go through
 //! a bounded channel to one writer task, which writes them as JSON lines and,

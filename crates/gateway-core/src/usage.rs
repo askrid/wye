@@ -1,4 +1,5 @@
-//! Token usage extraction from an Anthropic Messages SSE stream.
+//! Token usage extraction from response streams: Anthropic Messages here,
+//! OpenAI Responses in [`responses`]; [`UsageScanner`] picks one per API.
 //!
 //! [`SseUsageScanner`] reads the forwarded bytes without changing, delaying, or
 //! copying them. It keeps at most one partial line, parses JSON only for the two
@@ -9,8 +10,12 @@
 //! including inside UTF-8.
 
 mod raw;
+mod responses;
 
 use raw::{BlockStartData, DeltaData, StartData};
+pub use responses::ResponsesUsageScanner;
+
+use crate::api::Api;
 
 /// Longest usage-bearing data line kept. Larger events mark usage unknown
 /// instead of growing memory.
@@ -132,7 +137,62 @@ impl ToolCalls {
     }
 }
 
-/// Incremental usage scanner for one response stream.
+/// The usage scanner for one response stream of either API: an enum, so
+/// the per-chunk call is a match, not a virtual call. The Responses scanner
+/// is boxed, so Messages streams keep their size.
+#[derive(Debug)]
+pub enum UsageScanner {
+    Messages(SseUsageScanner),
+    Responses(Box<ResponsesUsageScanner>),
+}
+
+impl UsageScanner {
+    pub fn new(api: Api) -> Self {
+        match api {
+            Api::Messages => Self::Messages(SseUsageScanner::new()),
+            Api::Responses => Self::Responses(Box::default()),
+        }
+    }
+
+    /// Feeds the next chunk of response bytes.
+    pub fn feed(&mut self, chunk: &[u8]) {
+        match self {
+            Self::Messages(s) => s.feed(chunk),
+            Self::Responses(s) => s.feed(chunk),
+        }
+    }
+
+    pub fn usage(&self) -> Usage {
+        match self {
+            Self::Messages(s) => s.usage(),
+            Self::Responses(s) => s.usage(),
+        }
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            Self::Messages(s) => s.model(),
+            Self::Responses(s) => s.model(),
+        }
+    }
+
+    pub fn status(&self) -> UsageStatus {
+        match self {
+            Self::Messages(s) => s.status(),
+            Self::Responses(s) => s.status(),
+        }
+    }
+
+    /// Moves the tool calls out, keeping their allocation.
+    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
+        match self {
+            Self::Messages(s) => s.take_tool_calls(),
+            Self::Responses(s) => s.take_tool_calls(),
+        }
+    }
+}
+
+/// Incremental usage scanner for one Anthropic Messages stream.
 #[derive(Debug)]
 pub struct SseUsageScanner {
     /// Partial line carried over from the previous chunk.

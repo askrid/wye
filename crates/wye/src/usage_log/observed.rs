@@ -7,24 +7,26 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::usage::SseUsageScanner;
+use gateway_core::usage::UsageScanner;
 use http::StatusCode;
 use hyper::body::{Body, Frame, SizeHint};
 
 use super::{Outcome, Record, RequestInfo, UsageLog, unix_ms};
 use crate::gauge::Held;
 
-/// Sent when a successful event stream fails at an event boundary (an idle
-/// timeout or a broken upstream body), so the client sees a retryable API
-/// error instead of a dropped connection. Anthropic's streams report
-/// mid-stream overload the same way.
+/// Sent when a successful Messages event stream fails at an event boundary
+/// (an idle timeout or a broken upstream body), so the client sees a
+/// retryable API error instead of a dropped connection. Anthropic's streams
+/// report mid-stream overload the same way. A Responses stream just ends:
+/// Codex and the OpenAI SDKs retry a stream that ends before its terminal
+/// event.
 const STALLED_EVENT: &[u8] = b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"upstream stream stalled or broke; retry the request\"}}\n\n";
 
 /// Response body wrapper that observes usage and emits a record on drop.
 pub(crate) struct Observed<B> {
     inner: B,
     /// Present for successful SSE responses only.
-    scanner: Option<SseUsageScanner>,
+    scanner: Option<UsageScanner>,
     /// The bytes forwarded so far end at an SSE event boundary.
     at_boundary: bool,
     /// The stream was closed with [`STALLED_EVENT`].
@@ -48,9 +50,10 @@ impl<B> Observed<B> {
         permit: Held,
     ) -> Self {
         let headers_after = info.started.elapsed();
+        let api = info.endpoint.api;
         Self {
             inner,
-            scanner: (status.is_success() && is_event_stream).then(SseUsageScanner::new),
+            scanner: (status.is_success() && is_event_stream).then(|| UsageScanner::new(api)),
             at_boundary: true,
             closed: false,
             info: Some(info),
@@ -95,7 +98,7 @@ where
             }
             Poll::Ready(Some(Err(_))) => {
                 this.outcome = Outcome::Failed;
-                if this.scanner.is_some() && this.at_boundary {
+                if matches!(this.scanner, Some(UsageScanner::Messages(_))) && this.at_boundary {
                     this.closed = true;
                     return Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(STALLED_EVENT)))));
                 }
