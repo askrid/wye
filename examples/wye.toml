@@ -46,7 +46,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "https://api.openai.com"
 # api_key_env = "OPENAI_API_KEY"
 
-# Several Anthropic accounts: replace [upstream] with [routes.claude]. Each
+# Several accounts or providers: replace [upstream] with [routes.claude]. Each
 # Claude Code session stays on one account (its prompt cache stays warm),
 # chosen from the session id the same way on every replica; weights share
 # sessions between accounts. Every [upstream] field above works per entry,
@@ -64,6 +64,18 @@ api_key_env = "ANTHROPIC_API_KEY"
 # id = "team-b"
 # base_url = "https://api.anthropic.com"
 # api_key_env = "ANTHROPIC_KEY_TEAM_B"
+# The same models from other providers (API keys; SigV4 is planned):
+# [[routes.claude.upstreams]]
+# id = "aws-us-west-2"
+# provider = "claude-platform-aws"     # key sent as a bearer token
+# workspace_id = "wrkspc_01AbCdEf23GhIj"
+# base_url = "https://aws-external-anthropic.us-west-2.api.aws"
+# api_key_env = "CLAUDE_PLATFORM_AWS_KEY"
+# [[routes.claude.upstreams]]
+# id = "bedrock-us-east-1"
+# provider = "bedrock"                 # model ids sent as anthropic.<model>
+# base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
+# api_key_env = "BEDROCK_API_KEY"
 
 # Gateway credentials. Required to listen beyond loopback; incompatible with
 # forward_caller_credential. Create a signing key and credentials offline:
