@@ -74,6 +74,9 @@ pub(crate) struct WyeOptions<'a> {
     /// `[routes.claude]` with one Bedrock upstream instead of `[upstream]`:
     /// model ids are re-spelled, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) bedrock: bool,
+    /// `[routes.claude]` with two accounts (both the mock) and failover:
+    /// every request body is kept for resending.
+    pub(crate) failover: bool,
 }
 
 /// Wye's config in front of `upstream_base_url`.
@@ -83,17 +86,28 @@ pub(crate) fn wye_config(
     ca_file: Option<&Path>,
     options: &WyeOptions<'_>,
 ) -> String {
-    let credential = if options.auth_public_key.is_some() || options.openai || options.bedrock {
+    let credential = if options.auth_public_key.is_some()
+        || options.openai
+        || options.bedrock
+        || options.failover
+    {
         format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\"")
     } else {
         "forward_caller_credential = true".to_owned()
     };
     let upstream = if options.openai {
-        "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\""
+        "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"".to_owned()
     } else if options.bedrock {
         "[routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\""
+            .to_owned()
+    } else if options.failover {
+        format!(
+            "[routes.claude]\nfailover = [\"429\", \"529\", \"connect\"]\n\
+             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{upstream_base_url}\"\n{credential}\n\
+             [[routes.claude.upstreams]]\nid = \"b\""
+        )
     } else {
-        "[upstream]"
+        "[upstream]".to_owned()
     };
     let mut config = format!(
         "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
