@@ -119,6 +119,14 @@ const GATES: &[(&str, f64, f64)] = &[
     ("failover_unary_failed_requests", 0.0, 0.0),
     ("failover_upload_failed_requests", 0.0, 0.0),
     ("failover_agent_upload_failed_requests", 0.0, 0.0),
+    // The first account refuses every fourth request before reading it:
+    // refused requests move on. An upload refused after its body was
+    // delivered whole is ambiguous and answered as it is, which happens
+    // rarely (8 in 19,264 in a 10 s load), hence the allowance on uploads;
+    // before the hand-back distinguished an upload cut short, 5% failed.
+    ("refused_unary_failed_requests", 0.0, 0.0),
+    ("refused_upload_failed_requests", 0.0, 3.0),
+    ("refused_agent_upload_failed_requests", 0.0, 3.0),
     // OTLP export runs off the data path, so it must cost no request time.
     ("otlp_unary_cpu_us_per_request", 0.20, 10.0),
     ("otlp_unary_added_p50_us", 0.20, 40.0),
