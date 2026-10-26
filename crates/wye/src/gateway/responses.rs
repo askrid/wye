@@ -77,7 +77,7 @@ pub(super) fn overloaded(api: Api, message: &str) -> Response<ResBody> {
         Api::Messages => {
             StatusCode::from_u16(OVERLOADED).unwrap_or(StatusCode::SERVICE_UNAVAILABLE)
         }
-        Api::Responses => StatusCode::SERVICE_UNAVAILABLE,
+        Api::Responses | Api::ChatCompletions => StatusCode::SERVICE_UNAVAILABLE,
     };
     let mut res = error(api, status, "overloaded_error", message);
     let headers = res.headers_mut();
@@ -105,7 +105,7 @@ pub(super) fn unauthorized(api: Api) -> Response<ResBody> {
 
 /// Gateway-generated errors use the provider's error shape, so clients
 /// handle them like upstream errors. `kind` is Anthropic's error type; on
-/// Responses it is the `code`, under OpenAI's broader `type`.
+/// OpenAI's APIs it is the `code`, under OpenAI's broader `type`.
 pub(super) fn error(
     api: Api,
     status: StatusCode,
@@ -117,7 +117,7 @@ pub(super) fn error(
         Api::Messages => {
             format!(r#"{{"type":"error","error":{{"type":"{kind}","message":{message}}}}}"#)
         }
-        Api::Responses => {
+        Api::Responses | Api::ChatCompletions => {
             let class = if status.is_server_error() {
                 "server_error"
             } else {

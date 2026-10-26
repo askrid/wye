@@ -70,7 +70,7 @@ impl Routes {
     pub fn get(&self, api: Api) -> Option<&Route> {
         match api {
             Api::Messages => self.claude.as_ref(),
-            Api::Responses => self.openai.as_ref(),
+            Api::Responses | Api::ChatCompletions => self.openai.as_ref(),
         }
     }
 

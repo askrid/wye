@@ -253,3 +253,25 @@ fn reads_max_tokens_and_rejects_bad_values() {
     assert_eq!(token_limit(Some(8000), Some(32000)), Some(8000));
     assert_eq!(token_limit(None, Some(4000)), Some(4000));
 }
+
+#[test]
+fn chat_completions_take_either_token_field_but_not_both() {
+    let scan = |body: &[u8]| {
+        let mut s = PolicyScanner::for_api(crate::api::Api::ChatCompletions);
+        s.feed(body);
+        (s.max_output_tokens(), s.error())
+    };
+    assert_eq!(
+        scan(br#"{"model":"m","max_completion_tokens":50}"#),
+        (Some(50), None)
+    );
+    assert_eq!(scan(br#"{"model":"m","max_tokens":60}"#), (Some(60), None));
+    assert_eq!(
+        scan(br#"{"model":"m","max_tokens":60,"max_completion_tokens":9000}"#).1,
+        Some(PolicyError::RepeatedMaxTokens)
+    );
+    // Messages reads only its own field.
+    let mut s = PolicyScanner::new();
+    s.feed(br#"{"model":"m","max_completion_tokens":50}"#);
+    assert_eq!(s.max_output_tokens(), None);
+}

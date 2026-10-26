@@ -60,7 +60,7 @@ More clients on their native APIs: Codex through the OpenAI Responses API (M3), 
 |---|---|---|---|---|
 | P0 | Claude Code, Anthropic SDK apps and agents | Anthropic Messages | Anthropic | **Built** |
 | P1 | Codex | OpenAI Responses | OpenAI | Started (M3): passthrough, usage and cost, `wye codex` |
-| P2 | OpenAI SDK apps and agents | OpenAI Chat Completions | OpenAI | Planned (M3) |
+| P2 | OpenAI SDK apps and agents | OpenAI Chat Completions | OpenAI | Built (M3): passthrough, usage when the client asks for it |
 | P3 | Same as P0, across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Planned (M4) |
 | Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |
 

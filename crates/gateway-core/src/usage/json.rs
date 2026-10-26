@@ -1,10 +1,12 @@
 //! Token usage from a non-streaming JSON response: the top-level `model`,
-//! `usage`, and tool calls of a Messages or Responses body, read as the
+//! `usage`, and tool calls of a Messages, Responses, or Chat Completions
+//! body (Chat's tool calls sit in `choices` and are not counted), read as the
 //! body streams with constant memory. A long completion makes the body
 //! large; only the small `usage` object is kept.
 
 use super::{
     ToolCalls, Usage, UsageStatus,
+    chat::ChatUsage,
     fields::{Items, ResponseFields},
     raw::RawUsage,
 };
@@ -22,6 +24,7 @@ impl JsonUsageScanner {
         let items = match api {
             Api::Messages => Items::Content,
             Api::Responses => Items::Output,
+            Api::ChatCompletions => Items::None,
         };
         Self {
             api,
@@ -46,11 +49,14 @@ impl JsonUsageScanner {
             Api::Messages => serde_json::from_slice::<RawUsage<'_>>(bytes)
                 .ok()?
                 .merge_into(&mut usage),
-            Api::Responses => {
-                self.fields.openai_usage().ok()??.merge_into(&mut usage);
-                // The tier that served the request; others are priced differently.
-                usage.unpriced |= self.fields.service_tier().is_some_and(|t| t != "default");
-            }
+            Api::Responses => self.fields.openai_usage().ok()??.merge_into(&mut usage),
+            Api::ChatCompletions => serde_json::from_slice::<ChatUsage>(bytes)
+                .ok()?
+                .merge_into(&mut usage),
+        }
+        // The tier that served an OpenAI request; others are priced differently.
+        if self.api != Api::Messages {
+            usage.unpriced |= self.fields.service_tier().is_some_and(|t| t != "default");
         }
         usage.unpriced |= self.fields.hosted_tool;
         Some(usage)

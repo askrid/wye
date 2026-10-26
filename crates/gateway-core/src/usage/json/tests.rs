@@ -91,3 +91,15 @@ proptest! {
         prop_assert_eq!(s.fields.tools.as_deref(), whole.fields.tools.as_deref());
     }
 }
+
+#[test]
+fn reads_a_chat_completion_body() {
+    let body = r#"{"id":"c1","object":"chat.completion","model":"gpt-5.5","choices":[{"index":0,"message":{"role":"assistant","content":"x","tool_calls":[{"id":"t","type":"function","function":{"name":"f","arguments":"{}"}}]}}],"service_tier":"default","usage":{"prompt_tokens":50,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":10}}}"#;
+    let s = scan(Api::ChatCompletions, body);
+    assert_eq!(s.status(), UsageStatus::Complete);
+    assert_eq!(s.model(), Some("gpt-5.5"));
+    let usage = s.usage();
+    assert_eq!(usage.input_tokens, Some(40));
+    assert_eq!(usage.cache_read_input_tokens, Some(10));
+    assert_eq!(usage.output_tokens, Some(7));
+}
