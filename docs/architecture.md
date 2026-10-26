@@ -56,24 +56,29 @@ wye/
 ├── crates/
 │   ├── gateway-core/src/        portable policy, no I/O
 │   │   ├── config.rs            wye.toml parsing and validation (config/validate/)
+│   │   ├── alias.rs             model aliases and per-subject rollout
 │   │   ├── credential.rs        gateway credential verification (own and identity-provider) and issuance
 │   │   ├── credential/keys.rs   Ed25519, ES256, RS256 keys; JWKS parsing
 │   │   ├── credential/provider.rs  identity-provider claims and grants
 │   │   ├── policy.rs            model permissions, output-token ceilings, request-body scanner
+│   │   ├── pricing.rs           price table, exact integer cost
 │   │   ├── prompt.rs            prompt hashes for cache-miss diagnostics
+│   │   ├── upgrade.rs           upgrade-check rules and their request-body scanner
 │   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
 │   │   ├── json.rs              byte-level JSON lexing shared by the scanners
-│   │   └── usage.rs             SSE usage and tool-call scanner
+│   │   └── usage.rs             SSE usage and tool-call scanner (usage/raw.rs: the events' shapes)
 │   ├── wye/src/                 the binary
 │   │   ├── main.rs              command-line entry
 │   │   ├── startup.rs           secrets and files the config references
 │   │   ├── server.rs            listener, connections, two-phase shutdown
 │   │   ├── server/write_timeout.rs  closes connections whose writes stall
-│   │   ├── gateway.rs           routing, admission, gateway errors
+│   │   ├── gateway.rs           routing, forwarding, gateway errors
+│   │   ├── gateway/admit.rs     body admission: aliases, permissions, token ceilings
 │   │   ├── auth.rs              credential checks, cached per connection
 │   │   ├── permissions.rs       model permissions and token ceilings on the request body
 │   │   ├── discovery.rs         GET /v1/models
 │   │   ├── diagnostics.rs       prompt hashes of forwarded request bodies
+│   │   ├── upgrade_check.rs     upgrade-check findings of forwarded request bodies
 │   │   ├── upstream.rs          forwarding, TLS client
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
