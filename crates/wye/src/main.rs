@@ -11,6 +11,7 @@ const USAGE: &str = "usage:
   wye serve --config <path>
   wye check-config <path>
   wye probe <url>
+  wye doctor --config <path>
   wye policy-test --config <path> <dir>
   wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
@@ -55,6 +56,18 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             let (report, passed) = wye::policy_test(&load(path)?, Path::new(dir), now)?;
             print!("{report}");
             if !passed {
+                std::process::exit(3);
+            }
+            Ok(())
+        }
+        ["doctor", "--config", path] => {
+            let config = load(path)?;
+            let (report, ok) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(wye::doctor(&config, config_dir(path)));
+            print!("{report}");
+            if !ok {
                 std::process::exit(3);
             }
             Ok(())
