@@ -26,6 +26,8 @@ pub(crate) struct RawPricing {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawPricedModels {
     pub(crate) models: Vec<String>,
+    #[serde(default)]
+    pub(crate) upstreams: Vec<String>,
     pub(crate) input: String,
     pub(crate) output: String,
     pub(crate) cache_read: Option<String>,
@@ -131,6 +133,7 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
         }
         entries.push(PricedModels {
             models,
+            upstreams: entry.upstreams.into_iter().map(Into::into).collect(),
             prices: Prices {
                 input: price(&entry.input)?,
                 output: price(&entry.output)?,

@@ -120,9 +120,12 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
     let cost = pricing.map(|pricing| match (&r.model, &r.usage) {
-        (Some(model), Some((usage, status))) if *status != "unknown" => {
-            pricing.cost(model, usage, *status == "complete")
-        }
+        (Some(model), Some((usage, status))) if *status != "unknown" => pricing.cost(
+            model,
+            r.info.upstream.as_deref(),
+            usage,
+            *status == "complete",
+        ),
         _ => gateway_core::pricing::Cost {
             pico: None,
             status: CostStatus::Unknown,
