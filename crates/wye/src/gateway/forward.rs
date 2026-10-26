@@ -115,7 +115,7 @@ impl Gateway {
         let mut spelled = None;
         if let (Some(at), Some(upstream)) = (&model_at, route.upstreams.get(ranking.first()))
             && let Some((prefix, value)) = respelling(at, upstream, spelled)
-            && body.respell(&at.span, &value).is_some()
+            && body.respell(&at.span, value).is_some()
         {
             spelled = prefix;
         }
@@ -190,7 +190,7 @@ impl Gateway {
                             // A value split between the sent bytes and the
                             // unread rest cannot be re-spelled: answer as is.
                             Some((prefix, value)) => {
-                                unsent.respell(&spelled_span(at, spelled), &value).then(|| {
+                                unsent.respell(&spelled_span(at, spelled), value).then(|| {
                                     spelled = prefix;
                                     unsent
                                 })
@@ -262,7 +262,8 @@ fn respelling(
         .filter(|prefix| !at.model.starts_with(prefix));
     (wanted != spelled).then(|| {
         let value = match wanted {
-            Some(prefix) => Bytes::from(format!("{prefix}{}", at.model)),
+            // Exact capacity: the Vec becomes the Bytes without another allocation.
+            Some(prefix) => Bytes::from([prefix.as_bytes(), at.model.as_bytes()].concat()),
             None => Bytes::copy_from_slice(at.model.as_bytes()),
         };
         (wanted, value)

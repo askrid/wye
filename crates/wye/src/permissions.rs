@@ -196,7 +196,7 @@ impl HeldStart {
     /// every other byte, and returns how many bytes longer the body became
     /// (negative when shorter). Chunks are sliced, not copied, and `model` is
     /// shared. `None` if the model's position is unknown.
-    pub(crate) fn splice_model(&mut self, model: &Bytes) -> Option<i64> {
+    pub(crate) fn splice_model(&mut self, model: Bytes) -> Option<i64> {
         let span = self.0.scanner.model_span()?;
         Some(self.0.splice(&span, model))
     }
@@ -211,13 +211,13 @@ impl Hold {
     /// Replaces the held bytes at `span` with `value`; returns the change in
     /// length. The hold covers every byte of `span`: it stopped right after
     /// the model's value.
-    fn splice(&mut self, span: &Range<u64>, value: &Bytes) -> i64 {
+    fn splice(&mut self, span: &Range<u64>, value: Bytes) -> i64 {
+        let delta = value.len() as i64 - (span.end - span.start) as i64;
         let mut out = Chunks::default();
         splice_chunks(std::iter::from_fn(|| self.chunks.pop()), span, value, |c| {
             out.push(c);
         });
         self.chunks = out;
-        let delta = value.len() as i64 - (span.end - span.start) as i64;
         let grown = delta.unsigned_abs() as usize;
         if delta > 0 {
             // At most MAX_MODEL_BYTES per request, so the hold limit is not
@@ -232,13 +232,15 @@ impl Hold {
 
 /// Replaces the bytes at `span` of a body, given as its chunks in order from
 /// offset 0, with `value`, passing the result to `push`: every other byte is
-/// kept, and chunks are sliced, not copied.
+/// kept, and chunks are sliced, not copied. `value` is moved in, not cloned:
+/// the first clone of a freshly built `Bytes` allocates.
 pub(crate) fn splice_chunks(
     chunks: impl Iterator<Item = Bytes>,
     span: &Range<u64>,
-    value: &Bytes,
+    value: Bytes,
     mut push: impl FnMut(Bytes),
 ) {
+    let mut value = Some(value);
     let mut start = 0u64;
     for chunk in chunks {
         let end = start + chunk.len() as u64;
@@ -249,8 +251,10 @@ pub(crate) fn splice_chunks(
             if head > 0 {
                 push(chunk.slice(..head));
             }
-            if span.start >= start {
-                push(value.clone());
+            if span.start >= start
+                && let Some(value) = value.take()
+            {
+                push(value);
             }
             let tail = (span.end.min(end) - start) as usize;
             if tail < chunk.len() {
@@ -332,7 +336,7 @@ impl<B> RequestBody<B> {
     /// Replaces the bytes at `span` (the model's value) with `value` before
     /// anything was sent; `None` when the body was not held, so the model's
     /// position is unknown. Returns the change in length.
-    pub(crate) fn respell(&mut self, span: &Range<u64>, value: &Bytes) -> Option<i64> {
+    pub(crate) fn respell(&mut self, span: &Range<u64>, value: Bytes) -> Option<i64> {
         Some(self.hold.as_mut()?.splice(span, value))
     }
 

@@ -87,7 +87,7 @@ impl Gateway {
             let spliced = self
                 .alias_models
                 .get(model)
-                .and_then(|bytes| held.splice_model(bytes));
+                .and_then(|bytes| held.splice_model(bytes.clone()));
             let Some(delta) = spliced else {
                 return Err(Box::new(error(
                     api,
