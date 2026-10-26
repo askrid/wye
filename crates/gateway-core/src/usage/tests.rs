@@ -24,6 +24,9 @@ const EXPECTED: Usage = Usage {
     output_tokens: Some(57),
     cache_creation_input_tokens: Some(300),
     cache_read_input_tokens: Some(4000),
+    cache_creation_5m_tokens: None,
+    cache_creation_1h_tokens: None,
+    unpriced: false,
 };
 
 fn scan(chunks: &[&[u8]]) -> SseUsageScanner {
@@ -197,4 +200,34 @@ fn tool_names_are_bounded() {
     );
     let s = scan(&[STREAM.as_bytes(), big.as_bytes()]);
     assert_eq!(s.status(), UsageStatus::Complete);
+}
+
+#[test]
+fn reads_cache_write_ttls_and_flags_unpriced_extras() {
+    let start = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5\",\
+                 \"usage\":{\"input_tokens\":10,\"output_tokens\":1,\"cache_creation_input_tokens\":30,\
+                 \"cache_creation\":{\"ephemeral_5m_input_tokens\":10,\"ephemeral_1h_input_tokens\":20},\
+                 \"service_tier\":\"standard\"}}}\n\n";
+    let usage = scan(&[start.as_bytes()]).usage();
+    assert_eq!(usage.cache_creation_5m_tokens, Some(10));
+    assert_eq!(usage.cache_creation_1h_tokens, Some(20));
+    assert!(!usage.unpriced);
+
+    for extra in [
+        r#""server_tool_use":{"web_search_requests":2,"note":"x","nested":{"a":1}}"#,
+        r#""service_tier":"priority""#,
+        r#""speed":"fast""#,
+    ] {
+        let delta = format!(
+            "event: message_delta\ndata: {{\"type\":\"message_delta\",\"usage\":{{\"output_tokens\":5,{extra}}}}}\n\n"
+        );
+        let usage = scan(&[start.as_bytes(), delta.as_bytes()]).usage();
+        assert!(usage.unpriced, "{extra}");
+        assert_eq!(usage.output_tokens, Some(5), "{extra}");
+    }
+    // Zero counts and unexpected values are not per-use charges.
+    let delta = "event: message_delta\ndata: {\"type\":\"message_delta\",\
+                 \"usage\":{\"output_tokens\":5,\"server_tool_use\":{\"web_search_requests\":0,\"x\":[1]}}}\n\n";
+    let usage = scan(&[start.as_bytes(), delta.as_bytes()]).usage();
+    assert!(!usage.unpriced);
 }

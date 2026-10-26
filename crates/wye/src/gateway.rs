@@ -15,6 +15,7 @@ use gateway_core::{
     config::Config,
     credential::Verifier,
     policy::{self, ModelPattern},
+    pricing::Pricing,
     prompt::{self, HashKey},
 };
 use http::{
@@ -70,6 +71,8 @@ pub struct Gateway {
     prompt_sample_percent: u8,
     /// OTLP export of usage records, when `[telemetry]` is configured.
     otlp: Option<Arc<OtlpTarget>>,
+    /// Prices usage records in the writer task, when `[pricing]` is configured.
+    pricing: Option<Arc<Pricing>>,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -113,6 +116,7 @@ impl Gateway {
                 None => None,
             },
             prompt_key: resources.prompt_key.map(Arc::new),
+            pricing: config.pricing.clone().map(Arc::new),
             prompt_sample_percent: config
                 .cache_diagnostics
                 .as_ref()
@@ -163,6 +167,7 @@ impl Gateway {
             prompt_key: self.prompt_key.clone(),
             otlp: self.otlp.clone(),
             active: self.in_flight.clone(),
+            pricing: self.pricing.clone(),
         }
     }
 

@@ -8,6 +8,7 @@
 
 use std::{collections::HashMap, fmt::Write as _, io::BufRead};
 
+use gateway_core::pricing::parse_usd;
 use serde::Deserialize;
 
 /// Rows shown in the session and prompt rankings.
@@ -32,6 +33,8 @@ struct Record {
     output_tokens: Option<u64>,
     cache_creation_input_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
+    cost_usd: Option<String>,
+    cost_status: Option<String>,
     #[serde(default)]
     tool_durations: Vec<Tool>,
     #[serde(default)]
@@ -75,10 +78,41 @@ impl Tokens {
     }
 }
 
+/// Summed cost, exact in pico-USD.
+#[derive(Default, Clone, Copy)]
+struct Cost {
+    pico: u64,
+    /// Records with a cost status.
+    priced: u64,
+    /// Some summed record was partial or unknown: the sum is a lower bound.
+    lower_bound: bool,
+}
+
+impl Cost {
+    fn add(&mut self, r: &Record) {
+        let Some(status) = &r.cost_status else { return };
+        self.priced += 1;
+        self.lower_bound |= status != "complete";
+        if let Some(pico) = r.cost_usd.as_deref().and_then(parse_usd) {
+            self.pico = self.pico.saturating_add(pico);
+        }
+    }
+
+    /// Dollars to four decimals (display only); `+` marks a lower bound.
+    fn show(self) -> String {
+        if self.priced == 0 {
+            return "-".into();
+        }
+        let usd = self.pico as f64 / 1e12;
+        format!("${usd:.4}{}", if self.lower_bound { "+" } else { "" })
+    }
+}
+
 #[derive(Default)]
 struct Group {
     requests: u64,
     tokens: Tokens,
+    cost: Cost,
     model_ms: f64,
     tool_ms: u64,
 }
@@ -87,6 +121,7 @@ impl Group {
     fn add(&mut self, r: &Record) {
         self.requests += 1;
         self.tokens.add(r);
+        self.cost.add(r);
         self.model_ms += r.duration_ms;
         self.tool_ms += r.tool_durations.iter().map(|t| t.ms).sum::<u64>();
     }
@@ -282,8 +317,8 @@ fn render(s: &Summary) -> String {
 fn table_header(out: &mut String, first: &str) {
     let _ = writeln!(
         out,
-        "  {first:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>10} {:>10}",
-        "reqs", "input", "output", "cache read", "cache write", "hit", "time", "tools"
+        "  {first:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>11} {:>10} {:>10}",
+        "reqs", "input", "output", "cache read", "cache write", "hit", "cost", "time", "tools"
     );
 }
 
@@ -291,13 +326,14 @@ fn table_row(out: &mut String, name: &str, g: &Group) {
     let t = g.tokens;
     let _ = writeln!(
         out,
-        "  {name:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>10} {:>10}",
+        "  {name:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>11} {:>10} {:>10}",
         g.requests,
         t.input,
         t.output,
         t.cache_read,
         t.cache_write,
         t.hit_rate(),
+        g.cost.show(),
         seconds(g.model_ms),
         seconds(g.tool_ms as f64),
     );

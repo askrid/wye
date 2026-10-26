@@ -29,6 +29,9 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         output_tokens: Some(5),
         cache_creation_input_tokens: None,
         cache_read_input_tokens: Some(0),
+        cost: None,
+        cost_status: None,
+        pricing_version: None,
         tool_calls: None,
         cache_miss: None,
         prompt: None,
@@ -39,7 +42,11 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
 fn totals_are_cumulative_and_encode_as_otlp_json() {
     let mut metrics = Metrics::new(1);
     metrics.record(&line("/v1/messages", 200, 3.0, Some("m")));
-    metrics.record(&line("/v1/messages", 200, 700.0, Some("m")));
+    let priced = Line {
+        cost: Some(1_500_000_000_000),
+        ..line("/v1/messages", 200, 700.0, Some("m"))
+    };
+    metrics.record(&priced);
     metrics.record(&line("/v1/messages", 529, 1.0, None));
     let json: serde_json::Value =
         serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 9, 4, 2)).unwrap();
@@ -72,6 +79,11 @@ fn totals_are_cumulative_and_encode_as_otlp_json() {
     assert_eq!(tokens.as_array().unwrap().len(), 2);
     assert_eq!(tokens[0]["asInt"], "20");
     assert_eq!(tokens[0]["attributes"][2]["value"]["stringValue"], "main");
+
+    let cost = metric("wye.cost")["sum"]["dataPoints"].clone();
+    assert_eq!(cost.as_array().unwrap().len(), 1);
+    assert_eq!(cost[0]["asDouble"], 1.5);
+    assert_eq!(metric("wye.cost")["unit"], "USD");
 
     assert_eq!(
         metric("wye.telemetry.lost")["sum"]["dataPoints"][0]["asInt"],

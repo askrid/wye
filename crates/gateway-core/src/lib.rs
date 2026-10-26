@@ -13,5 +13,6 @@ pub mod config;
 pub mod credential;
 mod json;
 pub mod policy;
+pub mod pricing;
 pub mod prompt;
 pub mod usage;

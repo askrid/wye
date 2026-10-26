@@ -467,3 +467,33 @@ fn aliases_parse_and_reject_duplicates() {
         .is_err()
     );
 }
+
+/// The pricing example in docs/policy.md parses, so the documented format
+/// and the parser cannot drift apart.
+#[test]
+fn documented_pricing_example_parses() {
+    let doc = include_str!("../../../../docs/policy.md");
+    let start = doc.find("```toml\n[pricing]").unwrap() + "```toml\n".len();
+    let example = &doc[start..start + doc[start..].find("```").unwrap()];
+    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+    let pricing = parse(&format!("{base}{example}")).unwrap().pricing.unwrap();
+    assert_eq!(&*pricing.version, "anthropic-2026-10-06");
+    assert_eq!(pricing.entries.len(), 3);
+    assert_eq!(pricing.entries[0].prices.input, 4_000_000);
+    assert_eq!(pricing.entries[2].prices.cache_read, None);
+    assert_eq!(pricing.entries[2].tiers[0].above_prompt_tokens, 100_000);
+
+    let one = |extra: &str| {
+        parse(&format!(
+            "{base}[pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
+        ))
+    };
+    assert!(one("").is_ok());
+    assert!(one("cache_read = \"0.1234567\"").is_err());
+    assert!(one("cache_read = \"-1\"").is_err());
+    assert!(one("upstreams = [\"x\"]").is_err());
+    assert!(
+        one("[[pricing.models.tiers]]\nabove_prompt_tokens = 5\n[[pricing.models.tiers]]\nabove_prompt_tokens = 5\n")
+            .is_err()
+    );
+}
