@@ -75,7 +75,7 @@ Turns the signals Claude Code sends gateways into attribution and explanations (
 - Pricing in config ([format](policy.md#pricing-metadata)): cost, cost status, and pricing version in every usage record, `wye.cost` in OTLP, dollars in `wye report`, cache writes priced by TTL. **Done.**
 - The [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
 - [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
-- `wye explain` and policy tests report the cost decision.
+- `wye explain` and policy tests report the cost decision. `wye explain` prints the price entry that applies (**done**); the cost bound follows the ceiling.
 - [Cache-miss diagnostics](research.md#2-cache-miss-diagnostics): per-block prompt hashes in usage telemetry. **Done** (usage log and OTLP logs).
 
 **Exit:** a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.

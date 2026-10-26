@@ -96,11 +96,27 @@ impl Cost {
 }
 
 impl Pricing {
-    /// The cost of a response from `model`, served by `upstream` (a route
-    /// upstream's id), that reported `usage`; `usage_complete` is false when
-    /// the stream ended before its final usage. An entry scoped to the
-    /// upstream prices it before any unscoped one; within each, the first
-    /// match.
+    /// The entry that prices `model` served by `upstream` (a route
+    /// upstream's id): one scoped to the upstream before any unscoped one;
+    /// within each, the first match.
+    pub fn entry(&self, model: &str, upstream: Option<&str>) -> Option<&PricedModels> {
+        let for_model = |e: &&PricedModels| e.models.iter().any(|p| p.matches(model));
+        let scoped = self
+            .entries
+            .iter()
+            .filter(for_model)
+            .find(|e| upstream.is_some_and(|u| e.upstreams.iter().any(|id| &**id == u)));
+        scoped.or_else(|| {
+            self.entries
+                .iter()
+                .filter(for_model)
+                .find(|e| e.upstreams.is_empty())
+        })
+    }
+
+    /// The cost of a response from `model`, served by `upstream`, that
+    /// reported `usage`, priced by [`Self::entry`]; `usage_complete` is false
+    /// when the stream ended before its final usage.
     pub fn cost(
         &self,
         model: &str,
@@ -108,19 +124,7 @@ impl Pricing {
         usage: &Usage,
         usage_complete: bool,
     ) -> Cost {
-        let for_model = |e: &&PricedModels| e.models.iter().any(|p| p.matches(model));
-        let scoped = self
-            .entries
-            .iter()
-            .filter(for_model)
-            .find(|e| upstream.is_some_and(|u| e.upstreams.iter().any(|id| &**id == u)));
-        let unscoped = || {
-            self.entries
-                .iter()
-                .filter(for_model)
-                .find(|e| e.upstreams.is_empty())
-        };
-        let Some(entry) = scoped.or_else(unscoped) else {
+        let Some(entry) = self.entry(model, upstream) else {
             return Cost::UNKNOWN;
         };
         let (Some(input), Some(output)) = (usage.input_tokens, usage.output_tokens) else {
