@@ -43,11 +43,7 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         };
-        let declared_len = req
-            .headers()
-            .get(CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok());
+        let declared_len = content_length(req.headers());
         if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
             let res = error(
                 api,
@@ -59,38 +55,15 @@ impl Gateway {
             return res;
         }
         let (mut parts, body) = req.into_parts();
-        let (body, model_at) = match self.admit_body(body, &mut info, &mut parts.headers).await {
+        let (mut body, model_at) = match self.admit_body(body, &mut info, &mut parts.headers).await
+        {
             Ok(admitted) => admitted,
             Err(res) => {
                 log.gateway_error(info, res.status());
                 return *res;
             }
         };
-        let req = Request::from_parts(parts, body);
-        // Prompt hashes and upgrade checks read Anthropic request bodies.
-        let messages = api == Api::Messages;
-        if messages
-            && self.prompt_key.is_some()
-            && prompt::session_sampled(
-                info.session_id.as_ref().map(HeaderValue::as_bytes),
-                self.prompt_sample_percent,
-            )
-        {
-            info.prompt = Some(PromptSlot::default());
-        }
-        // Sampled by session, or by client for SDK callers without one.
-        if messages
-            && let Some(check) = &self.upgrade_check
-            && prompt::session_sampled(
-                info.session_id
-                    .as_ref()
-                    .map(HeaderValue::as_bytes)
-                    .or(info.identity.as_ref().map(|i| i.subject.as_bytes())),
-                check.sample_percent,
-            )
-        {
-            info.upgrade = Some(UpgradeSlot::default());
-        }
+        self.sample(&mut info);
         // Session affinity: prompt caches are per provider account.
         let key = info
             .session_id
@@ -108,7 +81,6 @@ impl Gateway {
             .failover()
             .filter(|f| declared_len.is_none_or(|len| len <= f.max_body_bytes))
             .copied();
-        let (parts, mut body) = req.into_parts();
         // The model as the first upstream's provider spells it.
         let base_len = content_length(&parts.headers);
         // The provider prefix the body's model carries now.
@@ -227,6 +199,30 @@ impl Gateway {
                     res
                 }
             };
+        }
+    }
+}
+
+impl Gateway {
+    /// Whether this request's body is hashed for cache diagnostics and
+    /// scanned by upgrade checks: both read Anthropic request bodies, sampled
+    /// by session (upgrade checks: by client for SDK callers without one).
+    fn sample(&self, info: &mut RequestInfo) {
+        if info.endpoint.api != Api::Messages {
+            return;
+        }
+        let session = info.session_id.as_ref().map(HeaderValue::as_bytes);
+        if self.prompt_key.is_some() && prompt::session_sampled(session, self.prompt_sample_percent)
+        {
+            info.prompt = Some(PromptSlot::default());
+        }
+        if let Some(check) = &self.upgrade_check
+            && prompt::session_sampled(
+                session.or(info.identity.as_ref().map(|i| i.subject.as_bytes())),
+                check.sample_percent,
+            )
+        {
+            info.upgrade = Some(UpgradeSlot::default());
         }
     }
 }
