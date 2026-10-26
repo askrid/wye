@@ -225,7 +225,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `model`, `usage_status` | reported model; `complete` \| `partial` \| `unknown` \| `not_observed` | Non-streaming responses: `not_observed` |
 | `upgrade_issues` | target model → rules it would reject | Checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none |
 | `cost_usd`, `cost_status`, `pricing_version` | exact decimal string; `complete` \| `partial` \| `unknown`; `pricing.version` | With [`[pricing]`](policy.md#pricing-metadata); `cost_usd` only when a cost was computed |
-| `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them |
+| `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them, except that on `/v1/responses` the cached share of OpenAI's `input_tokens` is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on both APIs |
 | `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Hint header |
 | `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` |
 | `compaction`, `context_compacted` | `auto` \| `manual` \| `reactive` \| `other` | Hint headers |
