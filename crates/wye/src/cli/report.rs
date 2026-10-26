@@ -23,6 +23,7 @@ struct Record {
     #[serde(default)]
     duration_ms: f64,
     outcome: Option<String>,
+    upstream: Option<String>,
     subject: Option<String>,
     session_id: Option<String>,
     request_class: Option<String>,
@@ -145,6 +146,8 @@ struct Summary {
     skipped: u64,
     outcomes: HashMap<String, u64>,
     classes: HashMap<String, Group>,
+    /// Route upstreams, when the log names them.
+    upstreams: HashMap<String, Group>,
     sessions: HashMap<String, Session>,
     prompts: HashMap<String, Group>,
     /// Per tool: calls with a reported duration, their total ms, and calls
@@ -164,6 +167,9 @@ impl Summary {
             .or_default() += 1;
         let class = r.request_class.as_deref().unwrap_or("(no hint)");
         self.classes.entry(class.to_owned()).or_default().add(&r);
+        if let Some(upstream) = &r.upstream {
+            self.upstreams.entry(upstream.clone()).or_default().add(&r);
+        }
         if let Some(miss) = &r.cache_miss {
             *self.misses.entry(miss.clone()).or_default() += 1;
         }
@@ -255,6 +261,16 @@ fn render(s: &Summary) -> String {
     });
     for (name, group) in classes {
         table_row(&mut out, name, group);
+    }
+
+    if !s.upstreams.is_empty() {
+        let _ = writeln!(out, "\nBy upstream");
+        table_header(&mut out, "upstream");
+        let mut upstreams: Vec<_> = s.upstreams.iter().collect();
+        upstreams.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, group) in upstreams {
+            table_row(&mut out, name, group);
+        }
     }
 
     let starts = s.session_starts();

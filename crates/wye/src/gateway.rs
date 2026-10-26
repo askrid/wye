@@ -17,6 +17,7 @@ use gateway_core::{
     policy::ModelPattern,
     pricing::Pricing,
     prompt::{self, HashKey},
+    route::Route,
 };
 use http::{
     HeaderName, HeaderValue, Method, Request, Response, StatusCode,
@@ -52,7 +53,9 @@ const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 pub struct Gateway {
     /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
-    upstream: Upstream,
+    /// Picks an upstream per request; the same order as `upstreams`.
+    route: Route,
+    upstreams: Box<[Upstream]>,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
     /// Largest `max_tokens` any credential may request.
@@ -87,9 +90,21 @@ pub struct Gateway {
 
 impl Gateway {
     pub fn new(config: &Config, resources: Resources) -> Result<Self, StartupError> {
+        if resources.upstreams.len() != config.route.upstreams().len() {
+            return Err(StartupError::UpstreamCount);
+        }
+        let otlp_roots = resources.all_extra_roots();
+        let upstreams = config
+            .route
+            .upstreams()
+            .iter()
+            .zip(resources.upstreams)
+            .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
+            .collect::<Result<_, _>>()?;
         Ok(Self {
             verifier: resources.verifier,
-            upstream: Upstream::new(&config.upstream, resources.auth, &resources.extra_roots)?,
+            route: config.route.clone(),
+            upstreams,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
             max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),
             catalog: config.discovery.as_ref().map(|discovery| {
@@ -113,7 +128,7 @@ impl Gateway {
             otlp: match &config.telemetry {
                 Some(telemetry) => Some(Arc::new(otlp_target(
                     telemetry,
-                    &resources.extra_roots,
+                    &otlp_roots,
                     resources.otlp_headers.clone(),
                 )?)),
                 None => None,
@@ -210,6 +225,7 @@ impl Gateway {
             prompt: None,
             requested_model: None,
             upgrade: None,
+            upstream: None,
             started: Instant::now(),
         };
         if let Some(verifier) = &self.verifier {
@@ -304,8 +320,18 @@ impl Gateway {
         {
             info.upgrade = Some(UpgradeSlot::default());
         }
-        match self
-            .upstream
+        // Session affinity: prompt caches are per provider account.
+        let key = info
+            .session_id
+            .as_ref()
+            .map(HeaderValue::as_bytes)
+            .or(info.identity.as_ref().map(|i| i.subject.as_bytes()))
+            .unwrap_or_default();
+        let Some(upstream) = self.upstreams.get(self.route.pick(key)) else {
+            unreachable!("the route and its upstreams have the same length")
+        };
+        info.upstream = upstream.id.clone();
+        match upstream
             .forward(
                 req,
                 self.max_request_body_bytes,

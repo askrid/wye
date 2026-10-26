@@ -99,3 +99,27 @@ fn lists_upgrade_issues_by_target_rule_and_client() {
     );
     assert_eq!(line("sampling"), "claude-opus-5-5 sampling 1 svc-a");
 }
+
+#[test]
+fn splits_cost_by_upstream_when_records_name_one() {
+    let log = r#"{"event":"request","outcome":"completed","upstream":"team-a","cost_usd":"0.1","cost_status":"complete"}
+{"event":"request","outcome":"completed","upstream":"team-b","cost_usd":"0.2","cost_status":"complete"}
+{"event":"request","outcome":"completed","upstream":"team-a","cost_usd":"0.3","cost_status":"complete"}
+"#;
+    let out = report(log.as_bytes()).unwrap();
+    let section = out.split("\nBy upstream\n").nth(1).unwrap();
+    let cost = |name: &str| {
+        section
+            .lines()
+            .find(|l| l.trim_start().starts_with(name))
+            .unwrap()
+            .split_whitespace()
+            .nth(7)
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(cost("team-a"), "$0.4000");
+    assert_eq!(cost("team-b"), "$0.2000");
+    // Without upstream names, no section.
+    assert!(!report(LOG.as_bytes()).unwrap().contains("By upstream"));
+}

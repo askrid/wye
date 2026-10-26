@@ -1,4 +1,4 @@
-//! Forwarding to the configured upstream.
+//! Forwarding to an upstream of the route.
 //!
 //! Request and response bodies stream through without buffering or changes;
 //! the request body is read in passing for model permissions and token
@@ -123,6 +123,8 @@ const STREAM_WINDOW: u32 = 256 * 1024;
 const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
 
 pub(crate) struct Upstream {
+    /// The route's name for it, in usage records; `None` for `[upstream]`.
+    pub(crate) id: Option<Arc<str>>,
     clients: ClientPool,
     scheme: Scheme,
     authority: Authority,
@@ -152,6 +154,7 @@ impl Upstream {
             config::UpstreamHttpVersion::Http1 => protocols.wrap_connector(http),
         };
         Ok(Self {
+            id: config.id.as_deref().map(Arc::from),
             clients: ClientPool::new(|| {
                 Client::builder(TokioExecutor::new())
                     .http2_initial_stream_window_size(STREAM_WINDOW)

@@ -253,3 +253,44 @@ fn explains_upgrade_issues_per_target_without_refusing() {
             .contains("upgrade check: claude-opus-4-6 accepts this request")
     );
 }
+
+#[test]
+fn shows_the_upstream_a_session_goes_to() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
+         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://a.example\"\napi_key_env = \"A\"\n\
+         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://b.example\"\napi_key_env = \"B\"\n",
+    )
+    .unwrap();
+    for session in ["s-1", "s-2", "s-3", "s-4"] {
+        let picked = &config.route.upstreams()[config.route.pick(session.as_bytes())];
+        let id = picked.id.as_deref().unwrap();
+        let out = explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            Some(session),
+            b"{}",
+            NOW,
+            &[],
+        );
+        let report = out.report();
+        assert!(
+            report.contains(&format!(
+                "route: upstream {id} of 2 (cache_affine by session id)"
+            )),
+            "{report}"
+        );
+        assert!(
+            report.contains(&format!(
+                "upstream: POST https://{}/v1/messages",
+                picked.authority
+            )),
+            "{report}"
+        );
+        assert!(report.contains(&format!(
+            "x-api-key from ${}",
+            if id == "team-a" { "A" } else { "B" }
+        )));
+    }
+}

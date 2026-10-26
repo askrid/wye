@@ -15,15 +15,18 @@ fn minimal_config_gets_defaults() {
         config.server.max_request_body_bytes,
         DEFAULT_MAX_REQUEST_BODY_BYTES
     );
-    assert_eq!(config.upstream.scheme, Scheme::HTTPS);
-    assert_eq!(config.upstream.authority.as_str(), "api.anthropic.com");
-    assert_eq!(config.upstream.path_prefix, "");
+    assert_eq!(config.route.upstreams()[0].scheme, Scheme::HTTPS);
     assert_eq!(
-        config.upstream.credential,
+        config.route.upstreams()[0].authority.as_str(),
+        "api.anthropic.com"
+    );
+    assert_eq!(config.route.upstreams()[0].path_prefix, "");
+    assert_eq!(
+        config.route.upstreams()[0].credential,
         UpstreamCredential::ApiKeyEnv("ANTHROPIC_API_KEY".into())
     );
     assert_eq!(
-        config.upstream.response_header_timeout,
+        config.route.upstreams()[0].response_header_timeout,
         Duration::from_secs(600)
     );
 }
@@ -33,9 +36,9 @@ fn base_path_keeps_prefix_without_trailing_slash() {
     let config =
         parse("base_url = \"https://gw.example.com/anthropic/\"\nforward_caller_credential = true")
             .unwrap();
-    assert_eq!(config.upstream.path_prefix, "/anthropic");
+    assert_eq!(config.route.upstreams()[0].path_prefix, "/anthropic");
     assert_eq!(
-        config.upstream.credential,
+        config.route.upstreams()[0].credential,
         UpstreamCredential::ForwardCaller
     );
 }
@@ -178,8 +181,11 @@ fn base_url_rules() {
 fn ca_file_is_kept_as_written() {
     let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
     let config = parse(&format!("{ok}ca_file = \"certs/ca.pem\"")).unwrap();
-    assert_eq!(config.upstream.ca_file, Some(PathBuf::from("certs/ca.pem")));
-    assert_eq!(parse(ok).unwrap().upstream.ca_file, None);
+    assert_eq!(
+        config.route.upstreams()[0].ca_file,
+        Some(PathBuf::from("certs/ca.pem"))
+    );
+    assert_eq!(parse(ok).unwrap().route.upstreams()[0].ca_file, None);
     assert_eq!(
         parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
         ConfigError::EmptyPath("upstream.ca_file")
@@ -315,7 +321,7 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
     let config =
         parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"secrets/key\"").unwrap();
     assert_eq!(
-        config.upstream.credential,
+        config.route.upstreams()[0].credential,
         UpstreamCredential::ApiKeyFile(PathBuf::from("secrets/key"))
     );
     for both in [
@@ -337,13 +343,14 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
 fn http_version_is_auto_unless_pinned_to_1_1() {
     let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
     assert_eq!(
-        parse(ok).unwrap().upstream.http_version,
+        parse(ok).unwrap().route.upstreams()[0].http_version,
         UpstreamHttpVersion::Auto
     );
     assert_eq!(
         parse(&format!("{ok}http_version = \"1.1\""))
             .unwrap()
-            .upstream
+            .route
+            .upstreams()[0]
             .http_version,
         UpstreamHttpVersion::Http1
     );
@@ -522,4 +529,89 @@ fn upgrade_check_targets_are_unique_model_names() {
     ] {
         assert!(check(bad).is_err(), "{bad}");
     }
+}
+
+fn parse_route(route: &str) -> Result<Config, ConfigError> {
+    Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\n[routes.claude]\n{route}"
+    ))
+}
+
+const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+
+#[test]
+fn route_upstreams_parse_with_ids_and_weights() {
+    let config = parse_route(&format!(
+        "select = \"cache_affine\"\n\
+         [[routes.claude.upstreams]]\nid = \"team-a\"\nweight = 3\n{ACCOUNT}\
+         [[routes.claude.upstreams]]\nid = \"team-b\"\nprovider = \"anthropic\"\n\
+         base_url = \"https://api.anthropic.com\"\napi_key_file = \"b.key\"\n"
+    ))
+    .unwrap();
+    let upstreams = config.route.upstreams();
+    assert_eq!(upstreams.len(), 2);
+    assert_eq!(upstreams[0].id.as_deref(), Some("team-a"));
+    assert_eq!(upstreams[0].weight, 3);
+    assert_eq!(upstreams[1].id.as_deref(), Some("team-b"));
+    assert_eq!(upstreams[1].weight, 1);
+    assert_eq!(
+        upstreams[1].credential,
+        UpstreamCredential::ApiKeyFile("b.key".into())
+    );
+    // The single [upstream] has no id.
+    let single = parse(ACCOUNT).unwrap();
+    assert_eq!(single.route.upstreams()[0].id, None);
+}
+
+#[test]
+fn route_upstreams_are_validated() {
+    let entry = |extra: &str| format!("[[routes.claude.upstreams]]\n{extra}\n{ACCOUNT}");
+    let rejected = [
+        (String::new(), "missing field `upstreams`"),
+        ("upstreams = []".into(), "between 1 and 16"),
+        (entry(""), "needs an id"),
+        (entry("id = \"a b\""), "letters, digits"),
+        (entry("id = \"\""), "letters, digits"),
+        (entry("id = \"a\"") + &entry("id = \"a\""), "used twice"),
+        (entry("id = \"a\"\nweight = 0"), "between 1 and 1000"),
+        (entry("id = \"a\"\nweight = 1001"), "between 1 and 1000"),
+        (entry("id = \"a\"\nprovider = \"vertex\""), "provider"),
+        (
+            format!("select = \"random\"\n{}", entry("id = \"a\"")),
+            "cache_affine",
+        ),
+        (
+            "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\n\
+             forward_caller_credential = true"
+                .into(),
+            "single [upstream]",
+        ),
+        (
+            entry("id = \"a\"").replace("api_key_env = \"K\"", "api_key_env = \"1K\""),
+            "routes.claude.upstreams \"a\": upstream.api_key_env",
+        ),
+    ];
+    for (route, expected) in rejected {
+        let err = parse_route(&route).map(|_| ()).unwrap_err().to_string();
+        assert!(err.contains(expected), "{route:?}: {err}");
+    }
+    let many: String = (0..17).map(|i| entry(&format!("id = \"a{i}\""))).collect();
+    assert!(parse_route(&many).is_err());
+}
+
+#[test]
+fn upstream_and_routes_are_exclusive() {
+    let both = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n{ACCOUNT}\
+         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n{ACCOUNT}"
+    ))
+    .unwrap_err();
+    assert!(both.to_string().contains("not both"), "{both}");
+    let neither = Config::from_toml_str("[server]\nlisten = \"127.0.0.1:8080\"\n").unwrap_err();
+    assert!(neither.to_string().contains("set [upstream]"), "{neither}");
+    let id_in_single = parse(&format!("id = \"a\"\n{ACCOUNT}")).unwrap_err();
+    assert!(
+        id_in_single.to_string().contains("belong in"),
+        "{id_in_single}"
+    );
 }

@@ -89,6 +89,8 @@ pub(crate) struct RequestInfo {
     pub requested_model: Option<Arc<str>>,
     /// Filled with the request body's upgrade-check findings when sampled.
     pub upgrade: Option<UpgradeSlot>,
+    /// The route upstream the request went to, when the route names them.
+    pub upstream: Option<Arc<str>>,
     pub started: Instant,
 }
 

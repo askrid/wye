@@ -21,6 +21,7 @@ const DURATION_BOUNDS_MS: [f64; 14] = [
 
 struct RequestSeries {
     route: Box<str>,
+    upstream: Option<Box<str>>,
     status: u16,
     outcome: &'static str,
     count: u64,
@@ -37,6 +38,7 @@ struct DurationSeries {
 struct TokenSeries {
     kind: &'static str,
     model: Box<str>,
+    upstream: Option<Box<str>>,
     /// Claude Code's request class, when hint headers are on.
     request_class: Option<&'static str>,
     count: u64,
@@ -45,6 +47,7 @@ struct TokenSeries {
 /// Priced cost, in pico-USD, exported as USD.
 struct CostSeries {
     model: Box<str>,
+    upstream: Option<Box<str>>,
     request_class: Option<&'static str>,
     pico: u64,
 }
@@ -94,13 +97,17 @@ impl Metrics {
     /// models × token kinds), so a linear search beats hashing here.
     pub(super) fn record(&mut self, line: &Line<'_>) {
         let found = self.requests.iter().position(|s| {
-            &*s.route == line.path && s.status == line.status && s.outcome == line.outcome
+            &*s.route == line.path
+                && s.upstream.as_deref() == line.upstream
+                && s.status == line.status
+                && s.outcome == line.outcome
         });
         if let Some(series) = found.and_then(|i| self.requests.get_mut(i)) {
             series.count += 1;
         } else if self.requests.len() < MAX_SERIES {
             self.requests.push(RequestSeries {
                 route: line.path.into(),
+                upstream: line.upstream.map(Into::into),
                 status: line.status,
                 outcome: line.outcome,
                 count: 1,
@@ -176,15 +183,17 @@ impl Metrics {
         }
         let Some(model) = line.model else { return };
         if let Some(pico) = line.cost.filter(|&c| c > 0) {
-            let found = self
-                .costs
-                .iter()
-                .position(|s| &*s.model == model && s.request_class == line.request_class);
+            let found = self.costs.iter().position(|s| {
+                &*s.model == model
+                    && s.request_class == line.request_class
+                    && s.upstream.as_deref() == line.upstream
+            });
             if let Some(series) = found.and_then(|i| self.costs.get_mut(i)) {
                 series.pico = series.pico.saturating_add(pico);
             } else if self.costs.len() < MAX_SERIES {
                 self.costs.push(CostSeries {
                     model: model.into(),
+                    upstream: line.upstream.map(Into::into),
                     request_class: line.request_class,
                     pico,
                 });
@@ -202,7 +211,10 @@ impl Metrics {
                 continue;
             };
             let found = self.tokens.iter().position(|s| {
-                s.kind == kind && &*s.model == model && s.request_class == line.request_class
+                s.kind == kind
+                    && &*s.model == model
+                    && s.request_class == line.request_class
+                    && s.upstream.as_deref() == line.upstream
             });
             if let Some(series) = found.and_then(|i| self.tokens.get_mut(i)) {
                 series.count = series.count.saturating_add(count);
@@ -210,6 +222,7 @@ impl Metrics {
                 self.tokens.push(TokenSeries {
                     kind,
                     model: model.into(),
+                    upstream: line.upstream.map(Into::into),
                     request_class: line.request_class,
                     count,
                 });
@@ -241,9 +254,13 @@ impl Metrics {
             attributes(
                 &mut buf,
                 &[
-                    ("http.route", Value::Str(&s.route)),
-                    ("http.response.status_code", Value::Int(u64::from(s.status))),
-                    ("wye.outcome", Value::Str(s.outcome)),
+                    ("http.route", Some(Value::Str(&s.route))),
+                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                    (
+                        "http.response.status_code",
+                        Some(Value::Int(u64::from(s.status))),
+                    ),
+                    ("wye.outcome", Some(Value::Str(s.outcome))),
                 ],
             );
         }
@@ -271,8 +288,8 @@ impl Metrics {
             attributes(
                 &mut buf,
                 &[
-                    ("http.route", Value::Str(&s.route)),
-                    ("wye.outcome", Value::Str(s.outcome)),
+                    ("http.route", Some(Value::Str(&s.route))),
+                    ("wye.outcome", Some(Value::Str(s.outcome))),
                 ],
             );
         }
@@ -286,19 +303,15 @@ impl Metrics {
         );
         for (i, s) in self.tokens.iter().enumerate() {
             point_start(&mut buf, i, &times, s.count);
-            let kind = ("gen_ai.token.type", Value::Str(s.kind));
-            let model = ("gen_ai.response.model", Value::Str(&s.model));
-            match s.request_class {
-                Some(class) => attributes(
-                    &mut buf,
-                    &[
-                        kind,
-                        model,
-                        ("claude_code.request_class", Value::Str(class)),
-                    ],
-                ),
-                None => attributes(&mut buf, &[kind, model]),
-            }
+            attributes(
+                &mut buf,
+                &[
+                    ("gen_ai.token.type", Some(Value::Str(s.kind))),
+                    ("gen_ai.response.model", Some(Value::Str(&s.model))),
+                    ("claude_code.request_class", s.request_class.map(Value::Str)),
+                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                ],
+            );
         }
         buf.extend_from_slice(b"]}},");
 
@@ -316,14 +329,14 @@ impl Metrics {
             let _ = write!(buf, r#"{{{times},"asDouble":"#);
             let _ = serde_json::to_writer(&mut buf, &(s.pico as f64 / 1e12));
             buf.push(b',');
-            let model = ("gen_ai.response.model", Value::Str(&s.model));
-            match s.request_class {
-                Some(class) => attributes(
-                    &mut buf,
-                    &[model, ("claude_code.request_class", Value::Str(class))],
-                ),
-                None => attributes(&mut buf, &[model]),
-            }
+            attributes(
+                &mut buf,
+                &[
+                    ("gen_ai.response.model", Some(Value::Str(&s.model))),
+                    ("claude_code.request_class", s.request_class.map(Value::Str)),
+                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                ],
+            );
         }
         buf.extend_from_slice(b"]}},");
 
@@ -335,15 +348,14 @@ impl Metrics {
         );
         for (i, s) in self.upgrades.iter().enumerate() {
             point_start(&mut buf, i, &times, s.count);
-            let target = ("wye.upgrade.target", Value::Str(&s.target));
-            let rule = ("wye.upgrade.rule", Value::Str(s.rule));
-            match &s.subject {
-                Some(subject) => attributes(
-                    &mut buf,
-                    &[target, rule, ("enduser.id", Value::Str(subject))],
-                ),
-                None => attributes(&mut buf, &[target, rule]),
-            }
+            attributes(
+                &mut buf,
+                &[
+                    ("wye.upgrade.target", Some(Value::Str(&s.target))),
+                    ("wye.upgrade.rule", Some(Value::Str(s.rule))),
+                    ("enduser.id", s.subject.as_deref().map(Value::Str)),
+                ],
+            );
         }
         buf.extend_from_slice(b"]}},");
 
@@ -355,7 +367,10 @@ impl Metrics {
         );
         for (i, (name, count)) in self.tool_calls.iter().enumerate() {
             point_start(&mut buf, i, &times, *count);
-            attributes(&mut buf, &[("claude_code.tool.name", Value::Str(name))]);
+            attributes(
+                &mut buf,
+                &[("claude_code.tool.name", Some(Value::Str(name)))],
+            );
         }
         buf.extend_from_slice(b"]}},");
 
@@ -367,7 +382,7 @@ impl Metrics {
         );
         for (i, (reason, count)) in CACHE_MISS_REASONS.iter().zip(self.cache_misses).enumerate() {
             point_start(&mut buf, i, &times, count);
-            attributes(&mut buf, &[("wye.cache_miss", Value::Str(reason))]);
+            attributes(&mut buf, &[("wye.cache_miss", Some(Value::Str(reason)))]);
         }
         buf.extend_from_slice(b"]}},");
 
@@ -408,13 +423,17 @@ fn point_start(buf: &mut Vec<u8>, index: usize, times: &str, value: u64) {
     let _ = write!(buf, r#"{{{times},"asInt":"{value}","#);
 }
 
-fn attributes(buf: &mut Vec<u8>, list: &[(&str, Value<'_>)]) {
+/// Writes the present attributes and closes the data point.
+fn attributes(buf: &mut Vec<u8>, list: &[(&str, Option<Value<'_>>)]) {
     buf.extend_from_slice(br#""attributes":["#);
-    for (i, (key, value)) in list.iter().enumerate() {
+    let present = list
+        .iter()
+        .filter_map(|(key, value)| value.map(|v| (key, v)));
+    for (i, (key, value)) in present.enumerate() {
         if i > 0 {
             buf.push(b',');
         }
-        write_attribute(buf, key, *value);
+        write_attribute(buf, key, value);
     }
     buf.extend_from_slice(b"]}");
 }

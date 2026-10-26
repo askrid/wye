@@ -63,6 +63,7 @@ wye/
 │   │   ├── policy.rs            model permissions, output-token ceilings, request-body scanner
 │   │   ├── pricing.rs           price table, exact integer cost
 │   │   ├── prompt.rs            prompt hashes for cache-miss diagnostics
+│   │   ├── route.rs             the upstream for a request: weighted rendezvous by session
 │   │   ├── upgrade.rs           upgrade-check rules and their request-body scanner
 │   │   ├── agent.rs             Claude Code agent and hint headers, bounded and validated
 │   │   ├── json.rs              byte-level JSON lexing shared by the scanners
@@ -223,9 +224,9 @@ Some requests reference state stored by a specific provider account: Responses `
 
 Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Cost routing that spreads one conversation across accounts or providers forfeits that discount.
 
-When a route has several eligible candidates, Wye chooses deterministically by rendezvous hashing over them, keyed by the Claude Code session id when the request carries one, and otherwise by the credential subject plus a hash of a stable request prefix (system prompt and tool definitions). The same workload then reaches the same candidate from any replica, with no shared state, and moves only when the candidate set changes. Strategy name: `cache_affine` (planned for [M4](#claude-across-providers-planned-m4)). Its cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
+When a route has several upstreams, Wye chooses deterministically by weighted rendezvous hashing over them (`gateway-core/src/route.rs`), keyed by the Claude Code session id when the request carries one, otherwise by the credential subject, otherwise by nothing (every such request picks the same upstream: without `[auth]` Wye serves one loopback user). Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key seeded by the upstream's id; the highest score wins, so a key lands on an upstream with probability proportional to its weight. The same session then reaches the same upstream from any replica, with no shared state, and moves only when its upstream leaves the route or the weights change; adding an upstream moves only the keys it now wins. Ids, not positions, seed the hash, so reordering the config moves nothing. A test pins the choice for fixed keys, since a change of hash or scoring would move every session during a rolling update. Strategy name: `cache_affine` (**implemented**, M4 stage 10). Hashing a stable request prefix (system prompt and tools) for SDK callers without a session id is not implemented: it would need the body before choosing. The cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
 
-Pure affinity can overload one candidate when a few prefixes dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The strategy therefore needs a load bound that stays stateless: a static share per candidate in config (consistent hashing with bounded loads applied to configured weights), or a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
+Pure affinity can overload one candidate when a few keys dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one very heavy session still stays on one account. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
 ### Model aliases and upgrade checks
 
@@ -284,13 +285,13 @@ The same Claude models are sold by four providers. Wye can serve one Claude Code
 
 Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
 
-**Selection.** Candidates are configured per route (`[[routes.<name>.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affine-routing) by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares, with `ordered` as the simple alternative (first candidate unless it is excluded by the request's model or a feature it is known not to support). No health state is shared or remembered between requests.
+**Selection** (**implemented** for Anthropic accounts, stage 10). Candidates are configured per route (`[[routes.claude.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affine-routing) by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares. Planned with failover: `ordered`, the simple alternative (first candidate unless it is excluded by the request's model or a feature it is known not to support); without failover it would send everything to the first upstream. No health state is shared or remembered between requests. Each upstream keeps its own connection lanes and credential; `forward_caller_credential` stays a single-`[upstream]` mode.
 
 **Failover within a request**, only where it cannot duplicate billing: when a candidate answers `429`, `529`, or a connection refusal before any response byte reached the client, Wye sends the same request to the next candidate. A `5xx` after the provider may have accepted the request is not retried ([retries](#retries-and-fallback)). Resending needs the request body, so a route with failover holds the body up to `failover_max_body_bytes`, counted against `server.max_held_request_bytes`; larger bodies are forwarded without failover. Claude Code still retries on its own, so failover is a latency and availability improvement, not a correctness requirement. A failover costs that turn its prompt-cache discount at the new provider; affinity brings the next turn back.
 
 **Auth without state.** Each provider credential is resolved at startup like `api_key_env`. SigV4 signs each request on the request path (an HMAC chain, microseconds) with an unsigned payload hash if the service accepts it, since hashing a streamed multi-MB body before sending would mean buffering it; if not, Bedrock and AWS API keys avoid signing. Vertex access tokens expire after about an hour: either Wye exchanges a service-account key for tokens itself (an RS256-signed JWT and one HTTPS call per hour, cached in memory per process), or an external refresher writes a token file Wye re-reads. Both are open decisions below.
 
-**Telemetry and cost.** Usage records and OTLP gain `wye.provider` and the account id; pricing entries can be scoped to a provider, since partner and regional prices differ ([policy.md](policy.md#pricing-metadata)).
+**Telemetry and cost.** Usage records carry the upstream's `id` (`upstream`), and OTLP logs, spans, and the request, token, and cost metrics carry `wye.upstream` (**implemented**); `wye report` splits requests, tokens, and cost by upstream. `wye.provider` joins when a second provider exists. Planned: pricing entries scoped to a provider, since partner and regional prices differ ([policy.md](policy.md#pricing-metadata)).
 
 ### Tools and MCP
 
@@ -314,7 +315,7 @@ No hot reload; changes require a restart (or rolling deploy). A config snapshot 
 
 ### Current schema (implemented)
 
-Every field except `listen`, `base_url`, and one credential mode is optional; values shown are defaults. `examples/wye.toml` is the annotated version.
+Every field except `listen`, `base_url`, and one credential mode is optional; values shown are defaults. `examples/wye.toml` is the annotated version. `[upstream]` and `[routes.claude]` are alternatives: one Anthropic upstream, or several.
 
 ```toml
 [server]
@@ -335,6 +336,16 @@ connect_timeout_secs = 10
 response_header_timeout_secs = 600
 stream_idle_timeout_secs = 120
 http_version = "auto"                  # HTTP/2 via ALPN when offered; "1.1": no HTTP/2 flow control on uploads
+
+# Instead of [upstream]: several Anthropic accounts, chosen per session.
+# [routes.claude]
+# select = "cache_affine"              # the only strategy until failover (M4 stage 11)
+# [[routes.claude.upstreams]]          # up to 16; each takes every [upstream] field above
+# id = "team-a"                        # required, unique; in usage records and OTLP
+# provider = "anthropic"               # the only provider so far
+# weight = 2                           # share of sessions, 1-1000
+# base_url = "https://api.anthropic.com"
+# api_key_env = "ANTHROPIC_KEY_TEAM_A" # forward_caller_credential is not allowed here
 
 [auth]                                 # optional
 issuer = "wye"
@@ -391,12 +402,12 @@ sample_percent = 100                   # share of sessions (or clients) checked
 
 ### Target schema (illustrative, not implemented)
 
-Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, `[pricing]`, and `[upgrade_check]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand.
+Extends the current schema; `[server]`, `[auth]`, `[telemetry]`, `[cache_diagnostics]`, `[discovery]`, `[[aliases]]`, `[pricing]`, and `[upgrade_check]` keep their fields, and `[upstream]` stays valid as the single-Anthropic-upstream shorthand. `[routes.claude]` with `provider = "anthropic"` upstreams and `cache_affine` exists (above); the rest of this block does not.
 
 ```toml
-# A route serves one native API; a request goes to the route for its endpoint.
+# A route serves one native API, named by the route: claude for /v1/messages
+# and /v1/messages/count_tokens, openai for the OpenAI endpoints.
 [routes.claude]
-api = "anthropic-messages"             # /v1/messages, /v1/messages/count_tokens
 select = "cache_affine"                # by session id; stateless, same choice on every replica
 failover = ["429", "529", "connect"]   # before any response byte; never on ambiguous 5xx
 failover_max_body_bytes = 8388608      # bodies held for resending, within max_held_request_bytes
@@ -420,8 +431,7 @@ project = "acme-ml"
 location = "global"
 service_account_file = "vertex-sa.json"  # open decision: token exchange in Wye, or token_file
 
-[routes.openai]
-api = "openai"                         # /v1/responses, /v1/chat/completions (M3)
+[routes.openai]                        # /v1/responses, /v1/chat/completions (M3)
 [[routes.openai.upstreams]]
 id = "openai"
 provider = "openai"

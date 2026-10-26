@@ -34,6 +34,8 @@ pub struct Explanation {
     pub model: Option<String>,
     /// `(target model, rule)` for each upgrade-check issue.
     pub upgrade_issues: Vec<(String, &'static str)>,
+    /// The route upstream's id, with `[routes.claude]`.
+    pub upstream: Option<String>,
 }
 
 impl Explanation {
@@ -70,6 +72,7 @@ pub fn explain(
         refused: None,
         model: None,
         upgrade_issues: Vec::new(),
+        upstream: None,
     };
     if !matches!(path, "/v1/messages" | "/v1/messages/count_tokens") {
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
@@ -191,7 +194,27 @@ pub fn explain(
         }
     }
 
-    let upstream = &config.upstream;
+    // The server's affinity key: the session id, else the credential subject.
+    let key = session
+        .map(str::as_bytes)
+        .or(identity.as_ref().map(|i| i.subject.as_bytes()))
+        .unwrap_or_default();
+    let upstreams = config.route.upstreams();
+    let Some(upstream) = upstreams.get(config.route.pick(key)) else {
+        unreachable!("a route has at least one upstream")
+    };
+    if let Some(id) = &upstream.id {
+        out.upstream = Some(id.to_string());
+        out.step(format!(
+            "route: upstream {id} of {} (cache_affine by {})",
+            upstreams.len(),
+            match (session, &identity) {
+                (Some(_), _) => "session id",
+                (None, Some(_)) => "credential subject",
+                (None, None) => "nothing: no session id or credential",
+            }
+        ));
+    }
     out.step(format!(
         "upstream: POST {}://{}{}{path}",
         upstream.scheme, upstream.authority, upstream.path_prefix

@@ -52,7 +52,7 @@ fn ca_file_resolves_relative_to_the_config_directory() {
     .unwrap();
 
     let resources = Resources::resolve(&config, &dir).unwrap();
-    assert_eq!(resources.extra_roots, vec![ca.ca_cert()]);
+    assert_eq!(resources.upstreams[0].extra_roots, vec![ca.ca_cert()]);
 
     std::fs::write(dir.join("certs/ca.pem"), "not a certificate").unwrap();
     let err = Resources::resolve(&config, &dir).unwrap_err().to_string();

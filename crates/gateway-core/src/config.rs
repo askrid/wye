@@ -13,10 +13,10 @@ use http::{
 
 mod validate;
 
-use crate::{alias::Aliases, policy::ModelPattern, pricing::Pricing};
+use crate::{alias::Aliases, policy::ModelPattern, pricing::Pricing, route::Route};
 use validate::{
     RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_pricing,
-    validate_server, validate_telemetry, validate_upgrade_check, validate_upstream,
+    validate_route, validate_server, validate_telemetry, validate_upgrade_check,
 };
 
 /// Request bytes held process-wide while reading `model` for permissions.
@@ -37,7 +37,9 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub server: Server,
-    pub upstream: Upstream,
+    /// Where `/v1/messages` goes: `[upstream]`, or the upstreams of
+    /// `[routes.claude]`.
+    pub route: Route,
     /// Gateway credentials callers must present. Without it, Wye listens on
     /// loopback only.
     pub auth: Option<Auth>,
@@ -233,6 +235,11 @@ pub struct Server {
 
 #[derive(Debug, Clone)]
 pub struct Upstream {
+    /// Names the upstream in telemetry and `wye explain`; `None` for the
+    /// single `[upstream]`.
+    pub id: Option<Box<str>>,
+    /// Share of affinity keys, relative to the route's other upstreams.
+    pub weight: u32,
     pub scheme: Scheme,
     pub authority: Authority,
     /// Base path without a trailing slash; empty for a bare origin.
@@ -294,6 +301,11 @@ pub enum ConfigError {
     Zero(&'static str),
     Percent(&'static str),
     Invalid(&'static str),
+    /// A problem in one `[[routes.claude.upstreams]]` entry.
+    RouteUpstream {
+        id: String,
+        error: Box<ConfigError>,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -323,6 +335,9 @@ impl fmt::Display for ConfigError {
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
+            Self::RouteUpstream { id, error } => {
+                write!(f, "routes.claude.upstreams {id:?}: {error}")
+            }
         }
     }
 }
@@ -335,8 +350,13 @@ impl Config {
         let raw: RawConfig =
             toml::from_str(source).map_err(|e| ConfigError::Parse(e.to_string()))?;
         let auth = raw.auth.map(validate_auth).transpose()?;
-        let upstream = validate_upstream(raw.upstream)?;
-        if auth.is_some() && upstream.credential == UpstreamCredential::ForwardCaller {
+        let route = validate_route(raw.upstream, raw.routes)?;
+        if auth.is_some()
+            && route
+                .upstreams()
+                .iter()
+                .any(|u| u.credential == UpstreamCredential::ForwardCaller)
+        {
             return Err(ConfigError::Auth(
                 "cannot be combined with upstream.forward_caller_credential: the caller's \
                  credential would be the gateway credential, not a provider credential"
@@ -366,7 +386,7 @@ impl Config {
         let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
-            upstream,
+            route,
             auth,
             cache_diagnostics,
             telemetry,
