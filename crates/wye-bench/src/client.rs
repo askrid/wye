@@ -39,6 +39,8 @@ pub struct Target {
     control_prefix: &'static str,
     /// Whether requests carry `anthropic-version` (a gateway may add it itself).
     anthropic_version: bool,
+    /// Requests go to `/v1/responses` with an OpenAI Responses body.
+    responses: bool,
     root: Option<CertificateDer<'static>>,
     clients: Arc<[HttpClient]>,
     next: Arc<AtomicUsize>,
@@ -78,6 +80,15 @@ impl Target {
         }
     }
 
+    /// Sends OpenAI Responses requests to `/v1/responses` instead.
+    pub fn with_responses(self) -> Self {
+        Self {
+            responses: true,
+            anthropic_version: false,
+            ..self
+        }
+    }
+
     fn new(origin: String, root: Option<CertificateDer<'static>>) -> Self {
         Self {
             origin: origin.into(),
@@ -85,6 +96,7 @@ impl Target {
             extra_headers: Arc::new([]),
             control_prefix: "",
             anthropic_version: true,
+            responses: false,
             clients: (0..POOLS).map(|_| build_client(root.as_ref())).collect(),
             root,
             next: Arc::default(),
@@ -98,6 +110,7 @@ impl Target {
             extra_headers: Arc::clone(&self.extra_headers),
             control_prefix: self.control_prefix,
             anthropic_version: self.anthropic_version,
+            responses: self.responses,
             ..Self::new(self.origin.to_string(), self.root.clone())
         }
     }
@@ -112,7 +125,13 @@ impl Target {
     /// as a real client would, since gateways that parse requests honor it.
     pub fn messages(&self, headers: &[(&'static str, String)]) -> Request<Full<Bytes>> {
         let unary = headers.iter().any(|(name, _)| *name == "x-bench-unary");
-        let body: &'static [u8] = if unary {
+        let body: &'static [u8] = if self.responses {
+            if unary {
+                br#"{"model":"openai/bench","input":"x"}"#
+            } else {
+                br#"{"model":"openai/bench","stream":true,"input":"x"}"#
+            }
+        } else if unary {
             br#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":"x"}]}"#
         } else {
             br#"{"model":"anthropic/bench","max_tokens":1,"stream":true,"messages":[{"role":"user","content":"x"}]}"#
@@ -126,7 +145,12 @@ impl Target {
         headers: &[(&'static str, String)],
         body: Bytes,
     ) -> Request<Full<Bytes>> {
-        let url = format!("{}{}/v1/messages?beta=true", self.origin, self.api_prefix);
+        let path = if self.responses {
+            "/v1/responses"
+        } else {
+            "/v1/messages?beta=true"
+        };
+        let url = format!("{}{}{path}", self.origin, self.api_prefix);
         let mut req = Request::post(url).header("content-type", "application/json");
         if self.anthropic_version {
             req = req.header("anthropic-version", "2023-06-01");

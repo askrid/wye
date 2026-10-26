@@ -26,6 +26,9 @@ pub enum Gateway<'a> {
     /// Wye with `[auth]` and model permissions in config and credential:
     /// every request is held until its `model` is read, and its body checked.
     WyeModels(&'a str),
+    /// Wye with `[routes.openai]`: OpenAI Responses requests, framed as
+    /// Responses streams by the mock, through the Responses usage scanner.
+    WyeOpenai(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
@@ -39,6 +42,7 @@ impl Gateway<'_> {
             Self::WyeDiag(_) => "wye-diag",
             Self::WyeOtlp(_) => "wye-otlp",
             Self::WyeModels(_) => "wye-models",
+            Self::WyeOpenai(_) => "wye-openai",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
@@ -53,6 +57,7 @@ impl Gateway<'_> {
             Self::WyeDiag(_) => "diag_",
             Self::WyeOtlp(_) => "otlp_",
             Self::WyeModels(_) => "models_",
+            Self::WyeOpenai(_) => "openai_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",
@@ -129,7 +134,8 @@ impl GatewayProcess {
             | Gateway::WyeAuth(program)
             | Gateway::WyeModels(program)
             | Gateway::WyeDiag(program)
-            | Gateway::WyeOtlp(program) => {
+            | Gateway::WyeOtlp(program)
+            | Gateway::WyeOpenai(program) => {
                 let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
                 // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
@@ -144,9 +150,10 @@ impl GatewayProcess {
                     // The mock answers the export POSTs like any request.
                     otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_))
                         .then_some(upstream_base_url),
+                    openai: matches!(gateway, Gateway::WyeOpenai(_)),
                 };
                 let mut env = Vec::new();
-                if authenticated {
+                if authenticated || options.openai {
                     // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
                     env.push((BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".to_owned()));
                 }
@@ -165,13 +172,14 @@ impl GatewayProcess {
                     ],
                     env,
                     health: "/healthz",
-                    target: match &credentials {
-                        Some(c) => Target::gateway(
+                    target: match (&credentials, options.openai) {
+                        (Some(c), _) => Target::gateway(
                             addr,
                             "",
                             vec![("authorization", format!("Bearer {}", c.token))],
                         ),
-                        None => Target::plain(addr),
+                        (None, true) => Target::plain(addr).with_responses(),
+                        (None, false) => Target::plain(addr),
                     },
                 }
             }

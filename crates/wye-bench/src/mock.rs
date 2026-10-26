@@ -6,6 +6,10 @@
 //!   process start), so the client can measure per-event delay.
 //! - `x-bench-report-drop`: report when the stream is dropped (cancel scenario).
 //!
+//! A request to `/v1/responses` gets an OpenAI Responses JSON body or stream
+//! (`response.created`, `response.output_text.delta` events, then
+//! `response.completed` with usage).
+//!
 //! With [`use_anthropic_frames`], streams are valid Anthropic Messages streams
 //! (`message_start` first, deltas as `text_delta`, `message_stop` last), for
 //! gateways that parse events and drop what is not Anthropic-shaped.
@@ -45,6 +49,9 @@ const STREAM_END: &[u8] = b"event: content_block_stop\ndata: {\"type\":\"content
 event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n\
 event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
+const RESPONSES_START: &[u8] = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_bench\",\"model\":\"openai/bench\",\"output\":[],\"usage\":null}}\n\n";
+const RESPONSES_END: &[u8] = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_bench\",\"model\":\"openai/bench\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n";
+
 /// Receives drop times of streams that asked for it; installed by the cancel scenario.
 static BODY_DROPPED: Mutex<Option<mpsc::UnboundedSender<u64>>> = Mutex::new(None);
 
@@ -73,8 +80,20 @@ pub async fn spawn(tls: Option<&TestCa>) -> SocketAddr {
 
 async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>> {
     let headers = req.headers().clone();
+    let responses = req.uri().path() == "/v1/responses";
     // Drain the request body like a real upstream would.
     let _ = req.into_body().collect().await;
+    if let (true, Some(size)) = (responses, header_u64(&headers, "x-bench-unary")) {
+        let body = padded_json(
+            r#"{"id":"resp_bench","object":"response","model":"openai/bench","output":[{"type":"message","content":[{"type":"output_text","text":""#,
+            r#""}]}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+            size as usize,
+        );
+        let mut res = Response::new(Either::Left(Full::new(body)));
+        res.headers_mut()
+            .insert("content-type", "application/json".parse().unwrap());
+        return res;
+    }
     if let Some(size) = header_u64(&headers, "x-bench-unary") {
         let body = padded_json(
             r#"{"id":"msg_bench","type":"message","role":"assistant","content":[{"type":"text","text":""#,
@@ -91,6 +110,7 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
         sleep: None,
         report_drop: headers.contains_key("x-bench-report-drop"),
         started: false,
+        responses,
     }));
     res.headers_mut()
         .insert("content-type", "text/event-stream".parse().unwrap());
@@ -159,6 +179,8 @@ struct SseBody {
     sleep: Option<Pin<Box<Sleep>>>,
     report_drop: bool,
     started: bool,
+    /// Framed as an OpenAI Responses stream.
+    responses: bool,
 }
 
 impl Body for SseBody {
@@ -183,10 +205,25 @@ impl Body for SseBody {
         }
         let frames = ANTHROPIC_FRAMES.load(Ordering::Relaxed);
         let mut event = Vec::with_capacity(self.payload.len() + 512);
-        if frames && !std::mem::replace(&mut self.started, true) {
+        let first = !std::mem::replace(&mut self.started, true);
+        let sent = now_nanos();
+        if self.responses {
+            if first {
+                event.extend_from_slice(RESPONSES_START);
+            }
+            event.extend_from_slice(
+                format!("event: response.output_text.delta\ndata: {{\"type\":\"response.output_text.delta\",\"t\":{sent},\"delta\":\"").as_bytes(),
+            );
+            event.extend_from_slice(&self.payload);
+            event.extend_from_slice(b"\"}\n\n");
+            if self.remaining == 0 {
+                event.extend_from_slice(RESPONSES_END);
+            }
+            return Poll::Ready(Some(Ok(Frame::data(Bytes::from(event)))));
+        }
+        if frames && first {
             event.extend_from_slice(STREAM_START);
         }
-        let sent = now_nanos();
         if frames {
             // A valid `text_delta`; the send time rides in an extra field.
             event.extend_from_slice(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"");

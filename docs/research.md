@@ -36,7 +36,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 
 ## Benchmarks
 
-**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`. An allocation-counting build adds `alloc_`. The commit gate compares every commit with `bench/baseline.json` ([development.md](development.md#commit-gate)). Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
+**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, and `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses). An allocation-counting build adds `alloc_`. The commit gate compares every commit with `bench/baseline.json` ([development.md](development.md#commit-gate)). Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
@@ -227,7 +227,7 @@ The gate's mock upstream speaks Anthropic only, so the Responses and Chat Comple
 | Chat, first version (searchers built per line) | 180 B content chunk | 106 |
 | Chat, searchers built once per stream | same | 40 |
 
-Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56–0.61 ms per MiB, at 16 or 64 KiB chunks. A full OpenAI mock in `wye-bench` (per-event CPU through the binary) is still missing.
+Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56–0.61 ms per MiB, at 16 or 64 KiB chunks. Through the binary, the `openai_` benchmark variant gates the Responses path (CPU per event and per request). First runs (64-byte events, unpaced, plain path, two runs): 18.5–19.5 µs of CPU per event through Messages, 25.2–25.9 µs through Responses; the scanners explain ~30 ns of that gap, the rest is not yet explained (open).
 
 **Coverage gap: unary JSON responses.** The mock's unary replies carry no `content-type`, so the gate never runs the non-streaming usage scanner that real `application/json` replies get. With the mock sending `application/json` (a full `wye-bench run` per binary, idle machine, 2026-10-26), Wye before JSON usage scanning (3fe2d4c) against Wye with it, one allocation per response: `alloc_unary_per_request` 20.6 → 21.6, `alloc_unary_bytes_per_request` 21.8 → 24.4 KB (the boxed scanner with its inline 2 KiB usage buffer), `unary_cpu_us_per_request` 120 → 124.5 (within noise), unary latency unchanged within noise. Making the mock realistic moves those gated values, so it waits for a baseline decision.
 ## Related work
