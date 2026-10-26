@@ -35,6 +35,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         tool_calls: None,
         cache_miss: None,
         prompt: None,
+        upgrade_issues: None,
     }
 }
 

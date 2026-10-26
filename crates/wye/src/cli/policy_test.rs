@@ -124,6 +124,7 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
         expect.session.as_deref(),
         &body,
         now,
+        &[],
     );
     let got = match &result.refused {
         Some(_) => Decision::Refuse,

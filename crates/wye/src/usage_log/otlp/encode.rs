@@ -128,6 +128,10 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         let json = serde_json::to_string(tools).unwrap_or_default();
         attribute("wye.tool_calls", Value::Str(&json));
     }
+    if let Some(issues) = &line.upgrade_issues {
+        let json = serde_json::to_string(issues).unwrap_or_default();
+        attribute("wye.upgrade_issues", Value::Str(&json));
+    }
     if let Some(miss) = line.cache_miss {
         attribute("wye.cache_miss", Value::Str(miss));
     }
@@ -312,6 +316,7 @@ mod tests {
             cache_read_input_tokens: None,
             cache_miss: None,
             prompt: None,
+            upgrade_issues: None,
         }
     }
 

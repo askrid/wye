@@ -38,10 +38,11 @@ use crate::{
     StartupError,
     diagnostics::{PromptBody, PromptSlot},
     permissions::{OverTokenLimit, RequestBody},
+    upgrade_check::{UpgradeBody, UpgradeSlot},
 };
 
 type UpstreamClient =
-    Client<HttpsConnector<HttpConnector>, PromptBody<Limited<RequestBody<Incoming>>>>;
+    Client<HttpsConnector<HttpConnector>, PromptBody<UpgradeBody<Limited<RequestBody<Incoming>>>>>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 /// Asked of the upstream instead of the caller's `accept-encoding`: Wye
@@ -167,12 +168,14 @@ impl Upstream {
     }
 
     /// Forwards `req` and returns the upstream response with a streaming body.
-    /// With a `prompt` slot, the request body's prompt hashes land there.
+    /// With a `prompt` slot, the request body's prompt hashes land there;
+    /// with an `upgrade` slot, its upgrade-check findings.
     pub(crate) async fn forward(
         &self,
         req: Request<RequestBody<Incoming>>,
         max_body_bytes: usize,
         prompt: Option<PromptSlot>,
+        upgrade: Option<UpgradeSlot>,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         let (mut parts, body) = req.into_parts();
         parts.uri = self.upstream_uri(parts.uri.path_and_query())?;
@@ -188,7 +191,10 @@ impl Upstream {
             parts.headers.remove(AUTHORIZATION);
             parts.headers.insert(X_API_KEY, key.clone());
         }
-        let body = PromptBody::new(Limited::new(body, max_body_bytes), prompt);
+        let body = PromptBody::new(
+            UpgradeBody::new(Limited::new(body, max_body_bytes), upgrade),
+            prompt,
+        );
         let req = Request::from_parts(parts, body);
 
         let (client, slot) = self.clients.acquire();

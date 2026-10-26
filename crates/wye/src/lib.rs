@@ -25,6 +25,7 @@ mod gauge;
 mod permissions;
 mod server;
 mod startup;
+mod upgrade_check;
 mod upstream;
 mod usage_log;
 

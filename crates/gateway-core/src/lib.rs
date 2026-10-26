@@ -15,4 +15,5 @@ mod json;
 pub mod policy;
 pub mod pricing;
 pub mod prompt;
+pub mod upgrade;
 pub mod usage;
