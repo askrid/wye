@@ -31,8 +31,8 @@ mod upstream;
 mod usage_log;
 
 pub use cli::{
-    Agent, Credential, Explanation, Launch, claude, codex, doctor, explain, policy_test, probe,
-    report,
+    Agent, Credential, Explanation, InitOptions, Launch, claude, codex, doctor, explain, init,
+    policy_test, probe, report,
 };
 pub use gateway::Gateway;
 pub use server::serve;
