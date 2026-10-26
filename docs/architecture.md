@@ -83,6 +83,7 @@ wye/
 │   │   ├── diagnostics.rs       prompt hashes of forwarded request bodies
 │   │   ├── upgrade_check.rs     upgrade-check findings of forwarded request bodies
 │   │   ├── upstream.rs          forwarding, TLS client
+│   │   ├── failover.rs          request bodies kept and handed back for failover
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── usage_log.rs         per-request records, bounded writer
@@ -316,7 +317,7 @@ Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on 
 
 **Auth without state.** Each provider credential is resolved at startup like `api_key_env`. SigV4 signs each request on the request path (an HMAC chain, microseconds) with an unsigned payload hash if the service accepts it, since hashing a streamed multi-MB body before sending would mean buffering it; if not, Bedrock and AWS API keys avoid signing. Vertex access tokens expire after about an hour: either Wye exchanges a service-account key for tokens itself (an RS256-signed JWT and one HTTPS call per hour, cached in memory per process), or an external refresher writes a token file Wye re-reads. Both are open decisions below.
 
-**Telemetry and cost.** Usage records carry the upstream's `id` (`upstream`), and OTLP logs, spans, and the request, token, and cost metrics carry `wye.upstream` (**implemented**); `wye report` splits requests, tokens, and cost by upstream. `wye.provider` joins when a second provider exists. Planned: pricing entries scoped to a provider, since partner and regional prices differ ([policy.md](policy.md#pricing-metadata)).
+**Telemetry and cost.** Usage records carry the upstream's `id` (`upstream`), and OTLP logs, spans, and the request, token, and cost metrics carry `wye.upstream` (**implemented**); `wye report` splits requests, tokens, and cost by upstream. A separate `wye.provider` is not recorded: the upstream's `id` names the account, and config maps it to its provider. Planned: pricing entries scoped to a provider, since partner and regional prices differ ([policy.md](policy.md#pricing-metadata)).
 
 ### Tools and MCP
 
