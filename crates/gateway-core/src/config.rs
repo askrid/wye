@@ -16,7 +16,7 @@ mod validate;
 use crate::{alias::Aliases, policy::ModelPattern, pricing::Pricing};
 use validate::{
     RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_pricing,
-    validate_server, validate_telemetry, validate_upstream,
+    validate_server, validate_telemetry, validate_upgrade_check, validate_upstream,
 };
 
 /// Request bytes held process-wide while reading `model` for permissions.
@@ -51,6 +51,20 @@ pub struct Config {
     pub aliases: Option<Aliases>,
     /// `[pricing]`: the cost of each request in its usage record.
     pub pricing: Option<Pricing>,
+    /// `[upgrade_check]`: which requests each target model would reject.
+    pub upgrade_check: Option<UpgradeCheck>,
+}
+
+/// Most `upgrade_check.targets`.
+pub const MAX_UPGRADE_TARGETS: usize = 16;
+
+/// Upgrade checks on a sample of requests.
+#[derive(Debug, Clone)]
+pub struct UpgradeCheck {
+    /// Models an alias or a client may move to; unique.
+    pub targets: Box<[Box<str>]>,
+    /// Share of Claude Code sessions checked, every request of each.
+    pub sample_percent: u8,
 }
 
 /// Most catalog entries: Claude Code asks for `limit=1000`, and Wye serves
@@ -349,6 +363,7 @@ impl Config {
         let discovery = raw.discovery.map(validate_discovery).transpose()?;
         let aliases = validate_aliases(raw.aliases)?;
         let pricing = raw.pricing.map(validate_pricing).transpose()?;
+        let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;
         Ok(Self {
             server: validate_server(raw.server, auth.is_some())?,
             upstream,
@@ -358,6 +373,7 @@ impl Config {
             discovery,
             aliases,
             pricing,
+            upgrade_check,
         })
     }
 }

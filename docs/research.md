@@ -31,7 +31,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-planned-m4)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |
 | `429`/`529` from each Claude provider means the request was not processed | Failover without duplicate billing | Provider docs; billing records |
-| Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks) | Migration notes; one opt-in request per rule |
+| Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks) | Built from Anthropic's migration guide (2026-10-26); one opt-in live request per rule still open |
 
 ## Benchmarks
 

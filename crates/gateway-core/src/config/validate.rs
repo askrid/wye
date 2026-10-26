@@ -30,6 +30,14 @@ pub(super) struct RawConfig {
     #[serde(default)]
     pub(super) aliases: Vec<RawAlias>,
     pub(super) pricing: Option<RawPricing>,
+    pub(super) upgrade_check: Option<RawUpgradeCheck>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawUpgradeCheck {
+    pub(super) targets: Vec<String>,
+    pub(super) sample_percent: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -370,6 +378,37 @@ pub(super) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
     Ok(Pricing {
         version: raw.version.into(),
         entries: entries.into(),
+    })
+}
+
+pub(super) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeCheck, ConfigError> {
+    if raw.targets.is_empty() || raw.targets.len() > MAX_UPGRADE_TARGETS {
+        return Err(ConfigError::Invalid(
+            "upgrade_check.targets: 1-16 model names; omit [upgrade_check] to disable",
+        ));
+    }
+    let mut targets: Vec<Box<str>> = Vec::with_capacity(raw.targets.len());
+    for target in raw.targets {
+        if target.contains('*') || ModelPattern::parse(&target).is_none() {
+            return Err(ConfigError::Invalid(
+                "upgrade_check.targets: a target is a model name of 1-256 bytes without *",
+            ));
+        }
+        if targets.iter().any(|t| **t == *target) {
+            return Err(ConfigError::Invalid(
+                "upgrade_check.targets: duplicate model",
+            ));
+        }
+        targets.push(target.into());
+    }
+    let sample_percent = match raw.sample_percent {
+        None => 100,
+        Some(p @ 1..=100) => p,
+        Some(_) => return Err(ConfigError::Percent("upgrade_check.sample_percent")),
+    };
+    Ok(UpgradeCheck {
+        targets: targets.into(),
+        sample_percent,
     })
 }
 

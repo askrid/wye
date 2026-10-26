@@ -35,6 +35,9 @@ struct Record {
     cache_read_input_tokens: Option<u64>,
     cost_usd: Option<String>,
     cost_status: Option<String>,
+    /// Target model to the rules it would break.
+    #[serde(default)]
+    upgrade_issues: HashMap<String, Vec<String>>,
     #[serde(default)]
     tool_durations: Vec<Tool>,
     #[serde(default)]
@@ -148,6 +151,8 @@ struct Summary {
     /// responses requested.
     tools: HashMap<String, (u64, u64, u64)>,
     misses: HashMap<String, u64>,
+    /// Per (target, rule): requests and the clients (subjects) that sent them.
+    upgrades: HashMap<(String, String), (u64, Vec<String>)>,
 }
 
 impl Summary {
@@ -161,6 +166,19 @@ impl Summary {
         self.classes.entry(class.to_owned()).or_default().add(&r);
         if let Some(miss) = &r.cache_miss {
             *self.misses.entry(miss.clone()).or_default() += 1;
+        }
+        for (target, rules) in &r.upgrade_issues {
+            for rule in rules {
+                let entry = self
+                    .upgrades
+                    .entry((target.clone(), rule.clone()))
+                    .or_default();
+                entry.0 += 1;
+                let client = r.subject.as_deref().unwrap_or("(no credential)");
+                if !entry.1.iter().any(|c| c == client) {
+                    entry.1.push(client.to_owned());
+                }
+            }
         }
         for tool in &r.tool_durations {
             let entry = self.tools.entry(tool.name.clone()).or_default();
@@ -250,6 +268,24 @@ fn render(s: &Summary) -> String {
         count("compaction"),
         count("after_compaction"),
     );
+
+    if !s.upgrades.is_empty() {
+        let _ = writeln!(
+            out,
+            "\nUpgrade issues: requests a target model would reject, and the clients that sent them"
+        );
+        let mut upgrades: Vec<_> = s.upgrades.iter().collect();
+        upgrades.sort_by(|a, b| (b.1).0.cmp(&(a.1).0).then(a.0.cmp(b.0)));
+        for ((target, rule), (requests, clients)) in upgrades {
+            let mut clients = clients.clone();
+            clients.sort();
+            let _ = writeln!(
+                out,
+                "  {target:<24} {rule:<20} {requests:>7}  {}",
+                clients.join(", ")
+            );
+        }
+    }
 
     if !s.tools.is_empty() {
         let _ = writeln!(

@@ -77,3 +77,25 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
     let unpriced = report(LOG.as_bytes()).unwrap();
     assert!(!unpriced.contains('$'), "{unpriced}");
 }
+
+#[test]
+fn lists_upgrade_issues_by_target_rule_and_client() {
+    let log = r#"{"event":"request","subject":"svc-a","upgrade_issues":{"claude-opus-5-5":["budget_tokens","sampling"]}}
+{"event":"request","subject":"svc-b","upgrade_issues":{"claude-opus-5-5":["budget_tokens"]}}
+{"event":"request","subject":"svc-a","upgrade_issues":{}}
+"#;
+    let out = report(log.as_bytes()).unwrap();
+    let line = |rule: &str| {
+        out.lines()
+            .find(|l| l.contains(rule))
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert_eq!(
+        line("budget_tokens"),
+        "claude-opus-5-5 budget_tokens 2 svc-a, svc-b"
+    );
+    assert_eq!(line("sampling"), "claude-opus-5-5 sampling 1 svc-a");
+}

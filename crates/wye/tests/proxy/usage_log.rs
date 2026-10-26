@@ -438,3 +438,29 @@ async fn priced_records_carry_cost_status_and_version() {
     assert!(refused.get("cost_usd").is_none());
     assert_eq!(refused["cost_status"], "unknown");
 }
+
+#[tokio::test]
+async fn checked_requests_record_what_each_target_would_reject() {
+    let h = Harness::start(
+        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        "api_key_env = \"UNUSED\"\n\n[upgrade_check]\ntargets = [\"claude-opus-5-5\", \"claude-opus-4-7\"]\n",
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )
+    .await;
+    let body = r#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":2048},"tool_choice":{"type":"any"},"messages":[{"role":"user","content":"x"}]}"#;
+    read_body(h.send(messages(), body).await).await;
+    let record = h.usage_record().await;
+    assert_eq!(
+        record["upgrade_issues"],
+        serde_json::json!({
+            "claude-opus-5-5": ["budget_tokens", "forced_tool_choice"],
+            "claude-opus-4-7": ["budget_tokens"],
+        })
+    );
+
+    read_body(h.send(messages(), r#"{"model":"m","messages":[]}"#).await).await;
+    assert_eq!(
+        h.usage_record().await["upgrade_issues"],
+        serde_json::json!({})
+    );
+}

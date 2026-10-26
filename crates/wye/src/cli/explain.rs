@@ -11,6 +11,7 @@ use gateway_core::{
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
     prompt,
+    upgrade::{self, UpgradeScanner},
 };
 
 /// The gateway credential a request carries.
@@ -31,6 +32,8 @@ pub struct Explanation {
     /// The model the request runs on, after alias resolution, when the body
     /// was read.
     pub model: Option<String>,
+    /// `(target model, rule)` for each upgrade-check issue.
+    pub upgrade_issues: Vec<(String, &'static str)>,
 }
 
 impl Explanation {
@@ -51,7 +54,8 @@ impl Explanation {
 }
 
 /// Explains `POST path` with `body`, `credential`, and the Claude Code
-/// `session` id, at Unix time `now`.
+/// `session` id, at Unix time `now`. Upgrade checks run against `targets`,
+/// or, when empty, against `[upgrade_check] targets`.
 pub fn explain(
     config: &Config,
     path: &str,
@@ -59,11 +63,13 @@ pub fn explain(
     session: Option<&str>,
     body: &[u8],
     now: u64,
+    targets: &[&str],
 ) -> Explanation {
     let mut out = Explanation {
         steps: Vec::new(),
         refused: None,
         model: None,
+        upgrade_issues: Vec::new(),
     };
     if !matches!(path, "/v1/messages" | "/v1/messages/count_tokens") {
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
@@ -212,6 +218,35 @@ pub fn explain(
             diagnostics.sample_percent
         ));
     }
+    let configured_targets = config
+        .upgrade_check
+        .as_ref()
+        .map_or(&[][..], |c| &c.targets[..]);
+    let targets: Vec<&str> = if targets.is_empty() {
+        configured_targets.iter().map(|t| &**t).collect()
+    } else {
+        targets.to_vec()
+    };
+    if !targets.is_empty() {
+        let mut scanner = UpgradeScanner::new();
+        scanner.feed(body);
+        let findings = scanner.findings();
+        for target in targets {
+            let rules: Vec<upgrade::Rule> = upgrade::issues(&findings, target).collect();
+            if rules.is_empty() {
+                out.step(format!("upgrade check: {target} accepts this request"));
+            }
+            for rule in rules {
+                out.step(format!(
+                    "upgrade check: {target} would reject it: {} ({}; {})",
+                    rule.name(),
+                    rule.fix(),
+                    rule.source()
+                ));
+                out.upgrade_issues.push((target.to_owned(), rule.name()));
+            }
+        }
+    }
     out.step("decision: forward".into());
     out
 }
@@ -273,6 +308,7 @@ mod tests {
             Some("s-1"),
             haiku,
             NOW,
+            &[],
         );
         assert!(ok.refused.is_none(), "{}", ok.report());
         let report = ok.report();
@@ -293,7 +329,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 sonnet,
-                NOW
+                NOW,
+                &[]
             )),
             Some((403, "permission_error"))
         );
@@ -304,7 +341,8 @@ mod tests {
                 Credential::None,
                 None,
                 haiku,
-                NOW
+                NOW,
+                &[]
             )),
             Some((401, "authentication_error"))
         );
@@ -315,7 +353,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 haiku,
-                NOW + 601
+                NOW + 601,
+                &[]
             )),
             Some((401, "authentication_error"))
         );
@@ -326,7 +365,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 &[b' '; 201],
-                NOW
+                NOW,
+                &[]
             )),
             Some((413, "request_too_large"))
         );
@@ -337,7 +377,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 b"{}",
-                NOW
+                NOW,
+                &[]
             )),
             Some((400, "invalid_request_error"))
         );
@@ -348,7 +389,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 haiku,
-                NOW
+                NOW,
+                &[]
             )),
             Some((404, "not_found_error"))
         );
@@ -362,7 +404,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&config)),
                 None,
                 over,
-                NOW
+                NOW,
+                &[]
             )),
             Some((403, "permission_error"))
         );
@@ -373,6 +416,7 @@ mod tests {
             None,
             br#"{"model":"claude-haiku-4-5","max_tokens":100}"#,
             NOW,
+            &[],
         )
         .report();
         assert!(report.contains("max_tokens: 100 (limit 100)"), "{report}");
@@ -389,7 +433,8 @@ mod tests {
                 Credential::Token(&t, &verifier(&only_ceiling)),
                 None,
                 br#"{"max_tokens":10}"#,
-                NOW
+                NOW,
+                &[]
             )),
             Some((400, "invalid_request_error"))
         );
@@ -410,6 +455,7 @@ mod tests {
             None,
             br#"{"model":"coding"}"#,
             NOW,
+            &[],
         )
         .report();
         assert!(
@@ -418,5 +464,48 @@ mod tests {
         );
         assert!(report.contains("model: claude-opus-5-5;"), "{report}");
         assert!(report.ends_with("decision: forward\n"), "{report}");
+    }
+
+    #[test]
+    fn explains_upgrade_issues_per_target_without_refusing() {
+        let config = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+             [upgrade_check]\ntargets = [\"claude-opus-4-7\"]\n",
+        )
+        .unwrap();
+        let body = br#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":9},"messages":[{"role":"system","content":"x"}]}"#;
+        let configured = explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            None,
+            body,
+            NOW,
+            &[],
+        );
+        assert!(configured.refused.is_none(), "report only");
+        assert_eq!(
+            configured.upgrade_issues,
+            [
+                ("claude-opus-4-7".to_owned(), "budget_tokens"),
+                ("claude-opus-4-7".to_owned(), "system_role")
+            ]
+        );
+        let named = explain(
+            &config,
+            "/v1/messages",
+            Credential::None,
+            None,
+            body,
+            NOW,
+            &["claude-opus-4-6"],
+        );
+        assert!(named.upgrade_issues.is_empty());
+        assert!(
+            named
+                .report()
+                .contains("upgrade check: claude-opus-4-6 accepts this request")
+        );
     }
 }
