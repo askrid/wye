@@ -200,7 +200,7 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
 
 /// A secret file's contents without surrounding whitespace (mounted secrets
 /// often end in a newline).
-fn read_secret(path: &Path) -> Result<String, StartupError> {
+pub(crate) fn read_secret(path: &Path) -> Result<String, StartupError> {
     let error = |reason: String| StartupError::KeyFile {
         path: path.to_owned(),
         reason,
@@ -213,11 +213,11 @@ fn read_secret(path: &Path) -> Result<String, StartupError> {
     Ok(secret.to_owned())
 }
 
-fn env(name: &str) -> Result<String, StartupError> {
+pub(crate) fn env(name: &str) -> Result<String, StartupError> {
     std::env::var(name).map_err(|_| StartupError::MissingEnv(name.to_owned()))
 }
 
-fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {
+pub(crate) fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {
     let error = |reason: String| StartupError::CaFile {
         path: path.to_owned(),
         reason,

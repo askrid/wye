@@ -26,14 +26,14 @@ wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --sub
 wye policy-test --config wye.toml policy-tests/
 wye report usage.jsonl
 wye probe http://127.0.0.1:8080/readyz
-wye doctor
+wye doctor --config wye.toml
 ```
 
-Implemented: `serve`, `check-config` (parses the config and reads the identity providers' key sets; environment secrets are not checked), `token`, `policy-test`, `report`, `probe`, and a first `explain`; `doctor` is planned.
+Implemented: `serve`, `check-config` (parses the config and reads the identity providers' key sets; environment secrets are not checked), `token`, `policy-test`, `report`, `probe`, `doctor`, and a first `explain`.
 
 `probe` sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
-`doctor` (planned) checks local config, resolved environment variables, DNS/TLS/provider connectivity, model availability, and compatibility warnings, without an admin API.
+**Implemented: `wye doctor --config wye.toml`.** Checks what `serve` will need and says what to change, one line per check: each upstream's provider key is present (environment variable or file; never printed) and how it will be sent; each upstream answers at its base URL (one unauthenticated `HEAD`, trusting its `ca_file`, so DNS, TCP, TLS, and HTTP are proven while no model request is made and nothing is billed); the identity providers' key sets; the cache-diagnostics hash key's length; the OTLP header variable and endpoint. Every check runs, so one pass lists every problem; exit 3 if any failed. Not checked yet: model availability per upstream.
 
 **Implemented: `wye explain`.** Prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, `max_tokens` ceiling, the route upstream with `[routes.claude]` (and whether the session id or the credential subject chose it), upstream URL and provider credential (by name, never value), and whether cache diagnostics would hash it; with `--target-model` (or `[upgrade_check]`), what each target model would reject, the fix, and the source. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. Run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With failover and cost ceilings it will also print rejected candidates and why, and the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
 

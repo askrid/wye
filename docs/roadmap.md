@@ -113,7 +113,7 @@ One Claude Code fleet served by several Claude providers and accounts, chosen pe
 | 11 (done) | Failover on `429`, `529`, or connection refusal before any response byte, with a bounded held body; `ordered` selection | Mock tests: failover happens only before output, never on ambiguous `5xx`, bodies above the bound go without failover, no gated metric worse without failover configured |
 | 12 | Claude Platform on AWS (**done** with API keys: bearer key, workspace header) and Amazon Bedrock (Messages endpoint): model-id mapping, API-key auth, then SigV4 | Contract tests per provider against recorded responses; one opt-in real smoke test each |
 | 13 | Google Vertex AI: model in the URL, `anthropic_version` splice, access tokens | Body rewrite property-tested (every other byte unchanged); opt-in real smoke test |
-| 14 | Agent-aware model routing within Claude ([research](research.md#1-agent-aware-routing)), once its quality impact is measured; Helm chart, `wye doctor` | Request-class policy tested; quality measurement recorded |
+| 14 | Agent-aware model routing within Claude ([research](research.md#1-agent-aware-routing)), once its quality impact is measured; Helm chart, `wye doctor` (**done**) | Request-class policy tested; quality measurement recorded |
 
 **Exit:** a team serves Claude Code from at least two providers, keeps prompt-cache hit rates within a few points of a single provider, rides out one provider's overload without failed turns, and sees cost per provider.
 
