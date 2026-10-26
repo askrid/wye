@@ -37,6 +37,12 @@ const IDLE_STREAMS: usize = 1_000;
 const CANCEL_ROUNDS: usize = 20;
 /// Requests whose total gateway CPU gives the per-request cost.
 const CPU_PER_REQUEST_TOTAL: usize = 20_000;
+/// Token-sized events, unpaced, whose total gateway CPU gives the cost per
+/// event: what the usage scanner of each API adds to every streamed event.
+const EVENT_CPU_CONCURRENCY: usize = 32;
+const EVENT_CPU_STREAMS: usize = 64;
+const EVENT_CPU_EVENTS: u32 = 2_000;
+const EVENT_CPU_BYTES: usize = 64;
 
 /// Scenario parameters, recorded in the report so results stay interpretable.
 pub(crate) fn scenario_report() -> Value {
@@ -44,6 +50,7 @@ pub(crate) fn scenario_report() -> Value {
         "unary": {"concurrency": UNARY_CONCURRENCY, "requests": UNARY_TOTAL, "response_bytes": 512},
         "sse": {"concurrency": SSE_CONCURRENCY, "streams": SSE_STREAMS, "events": SSE_EVENTS, "interval_us": SSE_INTERVAL_US},
         "throughput": {"concurrency": THROUGHPUT_CONCURRENCY, "streams": THROUGHPUT_STREAMS, "events": THROUGHPUT_EVENTS, "event_bytes": THROUGHPUT_EVENT_BYTES},
+        "event_cpu": {"concurrency": EVENT_CPU_CONCURRENCY, "streams": EVENT_CPU_STREAMS, "events": EVENT_CPU_EVENTS, "event_bytes": EVENT_CPU_BYTES},
         "idle": {"streams": IDLE_STREAMS},
         "cancel": {"rounds": CANCEL_ROUNDS},
         "upload": {"concurrency": UPLOAD_CONCURRENCY, "requests": UPLOAD_REQUESTS, "body_bytes": UPLOAD_BYTES},
@@ -111,6 +118,9 @@ pub(crate) struct Scope {
     /// The upload scenarios even with `per_request_only`: for variants whose
     /// cost grows with the request body, such as cache diagnostics.
     pub(crate) uploads: bool,
+    /// CPU per streamed event even with `per_request_only`: for variants
+    /// whose cost is per event, such as another API's usage scanner.
+    pub(crate) event_cpu: bool,
 }
 
 /// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
@@ -184,6 +194,30 @@ pub(crate) async fn measure(
             prefix,
             &format!("sse_event_added_{label}_us"),
             added(&via.event_delay, &base.event_delay),
+        );
+    }
+    if !scope.per_request_only || scope.event_cpu {
+        let cpu_before = process.cpu_secs();
+        let streams = phase(
+            format!("{prefix}cpu-per-event"),
+            scenarios::sse(
+                process.target(),
+                EVENT_CPU_CONCURRENCY,
+                EVENT_CPU_STREAMS,
+                EVENT_CPU_EVENTS,
+                EVENT_CPU_BYTES,
+                0,
+            ),
+        )
+        .await;
+        let cpu_after = process.cpu_secs();
+        let events: usize = streams.iter().map(|s| s.event_delays_us.len()).sum();
+        // `ps` reports CPU time in 10 ms steps; 128,000 events make that < 0.1 µs per event.
+        put(
+            metrics,
+            prefix,
+            "sse_cpu_us_per_event",
+            (cpu_after - cpu_before) * 1e6 / events.max(1) as f64,
         );
     }
     if scope.per_request_only {

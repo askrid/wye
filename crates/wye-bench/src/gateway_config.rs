@@ -68,6 +68,9 @@ pub(crate) struct WyeOptions<'a> {
     pub(crate) cache_diagnostics: bool,
     /// `[telemetry]` exporting to this OTLP endpoint.
     pub(crate) otlp_endpoint: Option<&'a str>,
+    /// `[routes.openai]` instead of `[upstream]`: requests go to
+    /// `/v1/responses`, with the key from [`BENCH_PROVIDER_KEY_ENV`].
+    pub(crate) openai: bool,
 }
 
 /// Wye's config in front of `upstream_base_url`.
@@ -77,13 +80,18 @@ pub(crate) fn wye_config(
     ca_file: Option<&Path>,
     options: &WyeOptions<'_>,
 ) -> String {
-    let credential = match options.auth_public_key {
-        Some(_) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
-        None => "forward_caller_credential = true".to_owned(),
+    let credential = match (options.auth_public_key, options.openai) {
+        (Some(_), _) | (None, true) => format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\""),
+        (None, false) => "forward_caller_credential = true".to_owned(),
+    };
+    let upstream = if options.openai {
+        "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\""
+    } else {
+        "[upstream]"
     };
     let mut config = format!(
         "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
-         [upstream]\nbase_url = \"{upstream_base_url}\"\n{credential}\n"
+         {upstream}\nbase_url = \"{upstream_base_url}\"\n{credential}\n"
     );
     if let Some(path) = ca_file {
         config.push_str(&format!("ca_file = {:?}\n", path.display().to_string()));
