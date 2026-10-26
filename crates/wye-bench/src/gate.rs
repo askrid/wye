@@ -107,6 +107,18 @@ const GATES: &[(&str, f64, f64)] = &[
     ("bedrock_unary_failed_requests", 0.0, 0.0),
     ("alloc_bedrock_unary_per_request", 0.02, 0.5),
     ("alloc_bedrock_unary_bytes_per_request", 0.02, 256.0),
+    // A Claude route with failover: every request body kept (shared chunks,
+    // not copies) until the response arrives. Gated like diag_, whose cost
+    // also grows with the body.
+    ("failover_unary_cpu_us_per_request", 0.20, 10.0),
+    ("failover_unary_added_p50_us", 0.20, 40.0),
+    ("failover_agent_upload_cpu_ms_per_mb", 0.25, 0.1),
+    ("alloc_failover_unary_per_request", 0.02, 0.5),
+    ("alloc_failover_unary_bytes_per_request", 0.02, 256.0),
+    ("alloc_failover_agent_upload_per_request", 0.15, 2.0),
+    ("failover_unary_failed_requests", 0.0, 0.0),
+    ("failover_upload_failed_requests", 0.0, 0.0),
+    ("failover_agent_upload_failed_requests", 0.0, 0.0),
     // OTLP export runs off the data path, so it must cost no request time.
     ("otlp_unary_cpu_us_per_request", 0.20, 10.0),
     ("otlp_unary_added_p50_us", 0.20, 40.0),

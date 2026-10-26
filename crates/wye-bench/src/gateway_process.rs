@@ -32,6 +32,9 @@ pub enum Gateway<'a> {
     /// Wye with a Claude route to a Bedrock upstream: every request is held
     /// until its `model` is read, and the model re-spelled for Bedrock.
     WyeBedrock(&'a str),
+    /// Wye with a Claude route of two accounts and failover: every request
+    /// body is kept for resending until the response arrives.
+    WyeFailover(&'a str),
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
@@ -47,6 +50,7 @@ impl Gateway<'_> {
             Self::WyeModels(_) => "wye-models",
             Self::WyeOpenai(_) => "wye-openai",
             Self::WyeBedrock(_) => "wye-bedrock",
+            Self::WyeFailover(_) => "wye-failover",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
@@ -63,6 +67,7 @@ impl Gateway<'_> {
             Self::WyeModels(_) => "models_",
             Self::WyeOpenai(_) => "openai_",
             Self::WyeBedrock(_) => "bedrock_",
+            Self::WyeFailover(_) => "failover_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",
@@ -141,7 +146,8 @@ impl GatewayProcess {
             | Gateway::WyeDiag(program)
             | Gateway::WyeOtlp(program)
             | Gateway::WyeOpenai(program)
-            | Gateway::WyeBedrock(program) => {
+            | Gateway::WyeBedrock(program)
+            | Gateway::WyeFailover(program) => {
                 let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
                 let models = matches!(gateway, Gateway::WyeModels(_));
                 // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
@@ -158,9 +164,10 @@ impl GatewayProcess {
                         .then_some(upstream_base_url),
                     openai: matches!(gateway, Gateway::WyeOpenai(_)),
                     bedrock: matches!(gateway, Gateway::WyeBedrock(_)),
+                    failover: matches!(gateway, Gateway::WyeFailover(_)),
                 };
                 let mut env = Vec::new();
-                if authenticated || options.openai || options.bedrock {
+                if authenticated || options.openai || options.bedrock || options.failover {
                     // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
                     env.push((BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".to_owned()));
                 }

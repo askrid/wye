@@ -303,6 +303,36 @@ pub async fn measure(
     );
     drop(bedrock);
 
+    let failover = GatewayProcess::start(
+        Gateway::WyeFailover(binary),
+        upstream_base_url,
+        None,
+        dir,
+        "alloc",
+    )
+    .await;
+    let t = failover.target();
+    scenarios::unary(t, CONCURRENCY, 2_000).await;
+    let (allocations, bytes) = delta(t, unary(t)).await;
+    put(
+        "alloc_failover_unary_per_request",
+        allocations / UNARY_REQUESTS as f64,
+    );
+    put(
+        "alloc_failover_unary_bytes_per_request",
+        bytes / UNARY_REQUESTS as f64,
+    );
+    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
+    put(
+        "alloc_failover_agent_upload_per_request",
+        allocations / UPLOAD_REQUESTS as f64,
+    );
+    put(
+        "alloc_failover_agent_upload_bytes_per_request",
+        bytes / UPLOAD_REQUESTS as f64,
+    );
+    drop(failover);
+
     let diag = GatewayProcess::start(
         Gateway::WyeDiag(binary),
         upstream_base_url,
