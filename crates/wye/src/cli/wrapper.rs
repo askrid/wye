@@ -141,12 +141,12 @@ fn toml_string(value: &str) -> String {
     out
 }
 
-/// Runs `claude` through the gateway; see [`run`].
+/// Runs `claude` through the gateway, as the module docs describe.
 pub fn claude(args: &[&str]) -> Result<i32, String> {
     run(Agent::Claude, args)
 }
 
-/// Runs `codex` through the gateway; see [`run`].
+/// Runs `codex` through the gateway, as the module docs describe.
 pub fn codex(args: &[&str]) -> Result<i32, String> {
     run(Agent::Codex, args)
 }

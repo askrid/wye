@@ -1,8 +1,9 @@
 //! Portable gateway policy: configuration types and validation, gateway
-//! credentials, model aliases, upstream selection, request policy (model
-//! permissions, output-token ceilings), Claude Code's agent headers, prompt
-//! hashes for cache-miss diagnostics, and usage extraction from provider
-//! responses.
+//! credentials, model aliases, upstream selection and failover order,
+//! request policy (model permissions, output-token ceilings), upgrade
+//! checks, agent headers (Claude Code's and Codex's), prompt hashes for
+//! cache-miss diagnostics, usage extraction from provider responses, and
+//! pricing.
 //!
 //! No Tokio, sockets, filesystem, or environment access, so the same policy can
 //! later back a WASM adapter.

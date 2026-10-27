@@ -1,10 +1,13 @@
 //! Forwarding to an upstream of the route.
 //!
-//! Request and response bodies stream through without buffering or changes;
-//! the request body is read in passing for model permissions and token
-//! ceilings and for cache diagnostics, when those are on. Only the URI,
-//! hop-by-hop headers, `accept-encoding` (always `identity`), and (in API-key
-//! mode) the credential headers are changed.
+//! Request and response bodies stream through without buffering. The one
+//! change a request body can carry is the allowlisted `model` rewrite (an
+//! alias, or the provider's own model id), made before forwarding; the body
+//! is read in passing for model permissions and token ceilings, cache
+//! diagnostics, and upgrade checks, when those are on. Of the headers, only
+//! the URI, hop-by-hop headers, `accept-encoding` (always `identity`), the
+//! credential headers (in API-key mode), and `anthropic-workspace-id` (Claude
+//! Platform on AWS) are changed.
 
 mod body;
 mod pool;

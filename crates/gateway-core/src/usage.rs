@@ -1,5 +1,7 @@
-//! Token usage extraction from response streams: Anthropic Messages here,
-//! OpenAI Responses in [`responses`]; [`UsageScanner`] picks one per API.
+//! Token usage extraction from responses: Anthropic Messages streams here,
+//! OpenAI Responses streams in `responses`, Chat Completions streams in
+//! `chat`, and non-streaming JSON bodies of all three in `json`;
+//! [`UsageScanner`] picks one per API and content type.
 //!
 //! [`SseUsageScanner`] reads the forwarded bytes without changing, delaying, or
 //! copying them. It keeps at most one partial line, parses JSON only for the two

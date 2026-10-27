@@ -1,5 +1,6 @@
 //! Resending a request to the route's next upstream after a refusal that
-//! proves the request was not processed (`429`, `529`, connection refused).
+//! proves the request was not processed: `429`, `529`, a connection refused,
+//! or one cut before the body was delivered whole ([`Unsent::sent_whole`]).
 //!
 //! hyper consumes the request body and drops it, so resending needs the
 //! bytes back. [`FailoverBody`] keeps every chunk it sends (shared `Bytes`,
