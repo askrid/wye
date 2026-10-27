@@ -1,5 +1,5 @@
 //! The upstreams: `[upstream]` or `[routes.claude]` for Anthropic Messages,
-//! and `[routes.openai]` for OpenAI Responses.
+//! and `[routes.openai]` for OpenAI Responses and Chat Completions.
 
 use std::net::IpAddr;
 
