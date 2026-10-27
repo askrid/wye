@@ -277,3 +277,74 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
         serde_json::json!([{"upstream": "a", "error": "connect"}])
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn early_refusals_over_http2_move_concurrent_uploads_on() {
+    // The production shape: TLS and HTTP/2 to the provider, which refuses
+    // each upload before reading it.
+    let ca = TestCa::generate();
+    let refusing = wye_testkit::spawn_upstream(
+        |_req: Request<Incoming>| async {
+            let mut res = Response::new(Full::new(Bytes::from_static(
+                br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
+            )));
+            *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+            res
+        },
+        Some(&ca),
+        None,
+    )
+    .await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 4194304\n\
+         [routes.claude]\nselect = \"ordered\"\nfailover = [\"429\", \"connect\"]\n\
+         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://{refusing}\"\napi_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = Resources {
+        upstreams: vec![
+            UpstreamResources {
+                auth: UpstreamAuth::api_key("key-a").unwrap(),
+                extra_roots: vec![ca.ca_cert()],
+            },
+            UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+        ],
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
+    };
+    let h =
+        Arc::new(Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await);
+    let body: &'static str = Box::leak(
+        format!(
+            r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
+            "x".repeat(1 << 20)
+        )
+        .into_boxed_str(),
+    );
+    // The recording upstream holds 8 bodies: read them as they arrive.
+    let received = tokio::spawn(async move {
+        let mut bodies = Vec::new();
+        while bodies.len() < 32 {
+            bodies.push(seen_b.recv().await.unwrap());
+        }
+        bodies
+    });
+    let mut uploads = tokio::task::JoinSet::new();
+    for _ in 0..32 {
+        let h = Arc::clone(&h);
+        uploads.spawn(async move {
+            let res = h.send(messages(), body).await;
+            let status = res.status();
+            read_body(res).await;
+            status
+        });
+    }
+    while let Some(status) = uploads.join_next().await {
+        assert_eq!(status.unwrap(), StatusCode::OK);
+    }
+    let bodies = tokio::time::timeout(WAIT, received).await.unwrap().unwrap();
+    assert!(bodies.iter().all(|b| *b == body), "every body resent whole");
+}
