@@ -431,11 +431,15 @@ when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]  # first 
 
 [pricing]                              # optional: cost in usage records; rules in policy.md
 version = "anthropic-2026-10-06"       # recorded with every cost
-[[pricing.models]]                     # up to 256; first match on the reported model wins
+[[pricing.models]]                     # up to 256; by the reported model, entries scoped to the serving upstream first
 models = ["claude-opus-5-5"]
+# upstreams = ["aws-east"]             # only for these route upstream ids (partner or regional prices)
 input = "4.00"                         # USD per million tokens, at most 6 decimals
 output = "20.00"
 cache_read = "0.20"                    # optional, like cache_write_5m and cache_write_1h
+# [[pricing.models.tiers]]             # up to 8: prices above a prompt length, the rest inherited
+# above_prompt_tokens = 200000
+# input = "8.00"
 
 [upgrade_check]                        # optional: which requests each target model would reject
 targets = ["claude-opus-5-5"]          # up to 16 model names

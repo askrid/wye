@@ -18,7 +18,7 @@ Only the OCI image is built so far; everything else in this list is planned.
 ### Server
 
 ```bash
-wye init [--subscription] [--openai-key-env OPENAI_API_KEY] [--out wye.toml]
+wye init [--subscription] [--anthropic-key-env ANTHROPIC_API_KEY] [--openai-key-env OPENAI_API_KEY] [--out wye.toml]
 wye serve --config wye.toml
 wye check-config wye.toml
 wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] [--target-model <model>]... request.json
@@ -223,6 +223,7 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `outcome` | `completed` \| `failed` \| `cancelled` \| `gateway_error` | Recorded when the response body is dropped, so every outcome is counted |
 | `duration_ms`, `headers_ms` | milliseconds | `headers_ms` = time to response headers |
 | `upstream` | the route upstream's `id` | With `[routes.claude]`; absent with `[upstream]` and for requests refused before routing |
+| `failovers` | `[{"upstream": "a", "status": 429}]`, or `"error": "connect"` | Attempts refused before the one that answered, in order ([failover](architecture.md#claude-across-providers-m4)); absent when none |
 | `subject` | credential subject | With `[auth]` |
 | `session_id` | Claude Code session | Kept only as a bounded token (below) |
 | `requested_model` | the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named | Only when an alias was resolved |
@@ -238,9 +239,9 @@ One usage record per proxied request, written as a JSON line to stderr and, with
 | `cache_miss` | `compaction` \| `after_compaction` \| `unexplained` | A cache write with no cache read; a session's first request also reads `unexplained` |
 | `prompt` | keyed prompt hashes | With [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags |
 
-Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `provider` (with a second provider, M4), `ttft_ms`, `config_version`.
+Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1–128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `ttft_ms`, `config_version`. No `provider`: the upstream's `id` names the account, and config maps it to its provider.
 
-**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then the agent fields of either client (`gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.context_compacted`) and `wye.*` for the rest (`wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`; `wye.tool_calls`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
+**OTLP logs:** each record as a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Attributes follow OpenTelemetry semantic conventions where they exist (`gen_ai.system`: `anthropic` or `openai` by endpoint, `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`), then the agent fields of either client (`gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.context_compacted`) and `wye.*` for the rest (`wye.outcome`, `wye.duration_ms`, `wye.headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings).
 
 **OTLP metrics:** cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the backend.
 
@@ -251,12 +252,13 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 | `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `wye.request_class`, `wye.upstream` |
 | `wye.cost` | sum, USD | `gen_ai.response.model`, `wye.request_class`, `wye.upstream`; complete and partial costs, with `[pricing]` |
 | `wye.upgrade.issues` | sum | `wye.upgrade.target`, `wye.upgrade.rule`, `enduser.id`; checked requests a target would reject |
+| `wye.failovers` | sum | `wye.upstream` (the refusing one), `wye.failover.reason` (a status or `connect`) |
 | `wye.tool.calls` | sum | `gen_ai.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |
 | `wye.telemetry.lost` | sum | records lost to full queues, failed exports, or the series cap |
 
-**OTLP traces:** one server span per request (`POST /v1/messages`) with the record's attributes, a `response headers` event, and `ERROR` status for failures and 5xx. Parent: a valid `traceparent` header; else, with a Claude Code session id, the session's trace (trace id = first 16 bytes of SHA-256 of the prefixed session id, the same on every replica, so a whole session is one timeline); else a new trace. Each reported tool call becomes a sibling span `tool <name>` ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
+**OTLP traces:** one server span per request (`POST /v1/messages`) with the record's attributes, a `response headers` event, and `ERROR` status for failures and 5xx. Parent: a valid `traceparent` header; else, with a Claude Code session id, the session's trace (trace id = first 16 bytes of SHA-256 of the prefixed session id, the same on every replica, so a whole session is one timeline); else a new trace. Each reported tool call becomes a sibling span `tool <name>` (`gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
 
 **Bounds:** records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to stderr at shutdown (`usage_log_dropped`, `otlp_dropped`). `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included. `wye.upstream` is present only with `[routes.claude]`.
 
