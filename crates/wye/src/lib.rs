@@ -5,10 +5,13 @@
 //! - `auth`: gateway credential checks, cached per connection
 //! - `discovery`: `GET /v1/models`, the model catalog filtered by permissions
 //! - `gateway`: routing and gateway-generated responses
-//! - `cli`: the commands besides `serve` (`explain`, `policy-test`, `report`,
-//!   `claude`, `codex`, `probe`, `token`)
+//! - `cli`: the commands besides `serve` (`explain`, `policy-test`,
+//!   `policy-diff`, `report`, `doctor`, `init`, `claude`, `codex`, `probe`,
+//!   `token`)
 //! - `permissions`: model permissions and token ceilings, checked before forwarding
+//! - `failover`: a request body kept for resending to the route's next upstream
 //! - `upstream`: forwarding to the provider
+//! - `upgrade_check`: sampled request scans for what a target model would reject
 //! - `usage_log`: per-request usage records
 //! - `diagnostics`: prompt hashes for cache-miss diagnostics
 //! - `gauge`: in-flight counters released on drop
