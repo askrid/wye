@@ -37,25 +37,31 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 
 ## Benchmarks
 
-**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, and `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses). An allocation-counting build adds `alloc_`. The commit gate compares every commit with `bench/baseline.json` ([development.md](development.md#commit-gate)). Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
+**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses), `bedrock_`, `failover_`, and `refused_` ([development.md](development.md#benchmark) lists what each runs). An allocation-counting build adds `alloc_`. The commit gate compares every commit with `bench/baseline.json` ([development.md](development.md#commit-gate)). Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
 ### Current harness and baseline
 
+From `bench/baseline.json` (recorded 2026-10-24 as a median of 7 on an idle machine, with the approved updates since; Intel i9-9880H, 8 cores, macOS):
+
 | Metric | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
-| Added unary latency p50 / p99 | 222 / 263 µs | 260 µs / not gated |
-| Added time to first byte p50 | 223 µs | 299 µs |
-| Added delay per SSE event p50 / p99 | 145 / 326 µs | 181 / 248 µs |
-| CPU per unary request | 112 µs | 156 µs |
-| CPU per streamed MB | 3.2 ms | 4.1 ms |
-| Memory per idle stream (RSS) | 28 KB | 5.6 KB |
-| Upstream release after disconnect, max | 157 µs | 99 µs |
-| 1 MiB upload: added p50, CPU per MB | 4.1 ms, 1.45 ms | 4.5 ms, 2.9 ms |
-| 2,000 token-paced streams: event delay p50 / p99 | | 1.8 / 4.9 ms |
-| 2,000 token-paced streams: CPU per event, memory per stream | | 36 µs, 9.5 KB |
-| Bulk throughput (direct 3.85 / 1.62 GB/s) | 1.26 GB/s | 1.09 GB/s |
+| Added unary latency p50 / p99 | 281 / 288 µs | 220 / 250 µs |
+| Added time to first byte p50 | 205 µs | 178 µs |
+| Added delay per SSE event p50 / p99 | 157 / 128 µs | 217 / 259 µs |
+| CPU per unary request | 120.5 µs | 161 µs |
+| CPU per token-sized event (64 B, unpaced) | 18.5 µs | |
+| CPU per streamed MB (bulk) | 3.1 ms | 4.1 ms |
+| Memory per idle stream (RSS) | 29 KB | 13 KB |
+| Upstream release after disconnect, max | 119 µs | 113 µs |
+| 1 MiB upload: added p50, CPU per MB | 3.1 ms, 1.30 ms | 2.9 ms, 2.61 ms |
+| Claude Code-shaped upload: added p50, CPU per MB | 3.2 ms, 1.49 ms | |
+| 2,000 token-paced streams: event delay p50 / p99 | | 1.4 / 4.0 ms |
+| 2,000 token-paced streams: CPU per event, memory per stream | | 37 µs, 9.3 KB |
+| Bulk throughput (direct 4.24 / 1.57 GB/s) | 1.30 GB/s | 1.07 GB/s |
+
+Each added percentile is the gateway's minus the direct run's, so a p99 can read below its p50.
 
 Heap allocations (`alloc_`, plain path; spread under 1%, uploads ~5%):
 
@@ -63,10 +69,11 @@ Heap allocations (`alloc_`, plain path; spread under 1%, uploads ~5%):
 |---|---|
 | Per streamed SSE event | 0 |
 | Per stream setup | 23 |
-| Per unary request, plain and authenticated | 20.6 (21.6 KB) |
-| Live heap per idle stream | 49 KB plain, 23 KB TLS |
-| Live heap per idle stream after a 512 KB request | 77 KB plain, 48 KB TLS (150 KB before the 32 KiB buffer cap) |
-| Per 1 MiB upload | 44 allocations, 0.43 MB (1.27 MB before the cap) |
+| Per unary request, plain and authenticated | 21.6 (24.5 KB, with the JSON usage scanner) |
+| Live heap per idle stream | 51 KB plain, 24 KB TLS |
+| Live heap per idle stream after a 512 KB request | 79 KB plain, 49 KB TLS (150 KB before the 32 KiB buffer cap) |
+| Per 1 MiB upload | 45 allocations, 0.45 MB (1.27 MB before the cap) |
+| Per Claude Code-shaped upload | 40.5 allocations, 0.38 MB |
 | Live heap per stalled stream, TLS | 0.56 MB with a 256 KiB upstream window, 2.2 MB with 1 MiB: about twice the window, independent of streams per connection |
 
 Variants (plain path):
@@ -77,6 +84,10 @@ Variants (plain path):
 | `models_`: model permissions | +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies |
 | `diag_`: cache diagnostics | +2 allocations per request; +48% upload CPU on Claude Code-shaped bodies (2.75 vs 1.86 ms/MB), hence per-session sampling |
 | `otlp_`: OTLP export | within noise (118.5 vs 120 µs CPU per request) |
+| `openai_`: OpenAI Responses | 25 µs CPU per event against 18.5 on Messages, from larger events ([below](#openai-stream-scanners-micro-benchmark)) |
+| `bedrock_`: a Claude route to Bedrock | +5 allocations per request (the hold, the model's copy, the prefixed id, the new `content-length`, one unattributed); CPU within noise (130.5 vs 120.5 µs, `models_` 124) |
+| `failover_`: a route with failover | +7 allocations per request; +25% CPU per MB on Claude Code-shaped uploads (1.86 vs 1.49 ms/MB) and 99.5 vs 40.5 allocations, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](#performance-techniques)) |
+| `refused_`: one account refuses one request in four | refused requests resent: 149.5 µs CPU per request; no failed requests |
 
 **Stress** (TLS path, median of 3, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.7 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +2.7 ms p99, 0.49 MB RSS per stalled stream with the 256 KiB upstream window (2.0 MB with 1 MiB), no failures; RSS stays at its peak after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +3.2 ms p50 ([pre-warming](#performance-techniques)).
 

@@ -110,8 +110,9 @@ The bound is deliberately loose. It is a guarantee, not an estimate. Telemetry r
 [pricing]
 version = "anthropic-2026-10-06"     # required; recorded with every cost
 
-# USD per million tokens, as decimal strings. The first entry whose
-# pattern matches the model the provider reported wins.
+# USD per million tokens, as decimal strings. Entries scoped to the
+# serving upstream (`upstreams = [...]`) are tried first; among the rest,
+# the first whose pattern matches the model the provider reported wins.
 [[pricing.models]]
 models = ["claude-opus-5-5"]         # same patterns as [auth] models
 input = "4.00"
