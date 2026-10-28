@@ -35,15 +35,10 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
         .routes
         .claude
         .unwrap();
-    let resources = Resources {
-        upstreams: vec![
-            UpstreamResources::new(UpstreamAuth::api_key("key-team-a").unwrap()),
-            UpstreamResources::new(UpstreamAuth::api_key("key-team-b").unwrap()),
-        ],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![
+        UpstreamResources::new(UpstreamAuth::api_key("key-team-a").unwrap()),
+        UpstreamResources::new(UpstreamAuth::api_key("key-team-b").unwrap()),
+    ]);
     let h = Harness::launch_config(&config, resources, hits).await;
 
     let mut used = [false; 2];
@@ -89,14 +84,9 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
          provider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCd\"\n\
          base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::bearer("aws-short-term-key").unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::bearer("aws-short-term-key").unwrap(),
+    )]);
     let h = Harness::launch_config(&config, resources, hits).await;
     let res = h
         .send(messages().header("x-api-key", "client-key"), "{}")
@@ -126,14 +116,9 @@ async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
          [routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\n\
          provider = \"bedrock\"\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::api_key("bedrock-key").unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::api_key("bedrock-key").unwrap(),
+    )]);
     let h = Harness::launch_config(&config, resources, hits).await;
     for (sent, received) in [
         (

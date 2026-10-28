@@ -5,12 +5,15 @@
 //! paths are measured: plain HTTP/1.1 (metric names without prefix) and TLS
 //! with HTTP/2, like the real provider (`tls_` prefix), which also runs the
 //! token-paced and stress scenarios (cold connections, mixed load, stalled
-//! clients). With `--krakend`, the
-//! same scenarios also run through KrakenD (`krakend_` prefix); with `--litellm`,
-//! through LiteLLM's pass-through endpoint (`litellm_` prefix); with `--bifrost`,
-//! through Bifrost's Anthropic route as Claude Code (`bifrost_` prefix).
-//! Wye also runs on the plain path with `[auth]` (`auth_`), model permissions
-//! (`models_`), cache diagnostics (`diag_`), and OTLP export (`otlp_`).
+//! clients). With `--krakend`, `--litellm`, or `--bifrost`, the same
+//! scenarios also run through KrakenD (`krakend_` prefix), LiteLLM's
+//! pass-through endpoint (`litellm_`), or Bifrost's Anthropic route as
+//! Claude Code (`bifrost_`).
+//! Wye also runs on the plain path in eight variants: `[auth]` (`auth_`),
+//! model permissions (`models_`), cache diagnostics (`diag_`), OTLP export
+//! (`otlp_`), OpenAI Responses (`openai_`), a route to Bedrock (`bedrock_`),
+//! a route with failover (`failover_`), and one whose first account refuses
+//! a share of requests (`refused_`).
 //! With `--wye-alloc`, a `--features alloc-stats` build of Wye adds heap allocation
 //! metrics (`alloc_` prefix).
 //! `WYE_BENCH_UPSTREAM` appends lines to Wye's `[upstream]` config, for tuning experiments.

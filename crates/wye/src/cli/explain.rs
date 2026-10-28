@@ -17,7 +17,7 @@ use gateway_core::{
     upgrade::{self, UpgradeScanner},
 };
 
-use crate::permissions::TokenLimitError;
+use crate::request_body::TokenLimitError;
 
 /// The gateway credential a request carries.
 pub enum Credential<'a> {
@@ -154,8 +154,8 @@ pub fn explain(
             )
         })
         .flatten();
-    // A route with a provider that spells model ids its own way reads the model.
-    let respells = config.routes.get(api).is_some_and(|r| {
+    // A provider with its own model ids on the route: the model is read.
+    let prefixes_model_ids = config.routes.get(api).is_some_and(|r| {
         r.upstreams()
             .iter()
             .any(|u| u.provider.model_prefix().is_some())
@@ -164,7 +164,7 @@ pub fn explain(
         && granted.is_none()
         && token_limit.is_none()
         && config.aliases.is_none()
-        && !respells
+        && !prefixes_model_ids
     {
         out.step(
             "model aliases, permissions, and token ceiling: none apply; the body is not read"
@@ -277,7 +277,7 @@ pub fn explain(
         }
         UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
     });
-    // The gateway reads the model on a route that re-spells it even when no
+    // The gateway reads the model on a route that rewrites its id even when no
     // policy does; explain reads it for the price too.
     let model = out.model.clone().or_else(|| {
         let mut scanner = PolicyScanner::for_api(api);

@@ -31,14 +31,9 @@ async fn harness(extra: &str) -> (Harness, mpsc::Receiver<Seen>) {
          [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
          base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+    )]);
     (Harness::launch_config(&config, resources, hits).await, rx)
 }
 
@@ -116,7 +111,7 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     );
     let (h, mut seen) = harness(&auth).await;
 
-    // Codex sends its env_key value as a bearer token: here, a Wye credential.
+    // Codex sends its env_key value as a bearer token: here, a gateway credential.
     let t = token(&key, Some(&["gpt-5.5-*"]), None);
     let res = h
         .send(
@@ -158,7 +153,7 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
         "permission_error"
     );
 
-    // Under a token ceiling, Responses must say max_output_tokens.
+    // Under an output-token ceiling, Responses must say max_output_tokens.
     let capped = token(&key, None, Some(1000));
     let res = h
         .send(
@@ -209,14 +204,9 @@ async fn responses_usage_and_cost_are_recorded() {
          [pricing]\nversion = \"openai-test\"\n[[pricing.models]]\nmodels = [\"gpt-5.5-*\"]\n\
          input = \"1.25\"\noutput = \"10.00\"\ncache_read = \"0.125\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+    )]);
     let h = Harness::launch_config(&config, resources, hits).await;
     let res = h.send(responses(), BODY).await;
     assert_eq!(read_body(res).await, COMPLETED);
@@ -256,14 +246,9 @@ data: [DONE]\n\n";
          [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
          base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+    )]);
     let h = Harness::launch_config(&config, resources, hits).await;
     let body = r#"{"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true},"messages":[]}"#;
     let req = Request::post("/v1/chat/completions").header("content-type", "application/json");

@@ -47,9 +47,6 @@ pub(crate) struct RawGrant {
     pub(crate) models: Vec<String>,
 }
 
-/// Default `max_credential_ttl_secs`: one week.
-const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
-
 pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     let err = |msg: String| ConfigError::Auth(msg);
     let own = match (raw.issuer, raw.audience, raw.keys.is_empty()) {

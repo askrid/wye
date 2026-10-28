@@ -1,6 +1,6 @@
 //! Body admission: model aliases, model permissions, and the output-token
 //! ceiling, decided while the request body's `model` is held; and where the
-//! model's value is, for providers that spell model ids their own way.
+//! model's value is, for providers with their own model ids.
 
 use std::{ops::Range, sync::Arc};
 
@@ -9,17 +9,17 @@ use http::{HeaderMap, HeaderValue, Response, StatusCode, header::CONTENT_LENGTH}
 use hyper::body::{Body, Incoming};
 
 use super::{
-    Gateway, ResBody,
+    Gateway, ResBody, content_length,
     responses::{error, hold_error},
 };
 use crate::{
-    permissions::{RequestBody, TokenLimitError, hold_until_model},
+    request_body::{RequestBody, TokenLimitError, hold_until_model},
     usage_log::RequestInfo,
 };
 
 /// Where the `model` value is in the body as forwarded, and what it says:
 /// the model that runs (an alias already resolved).
-pub(super) struct ModelAt {
+pub(super) struct ModelSpan {
     pub(super) span: Range<u64>,
     pub(super) model: Arc<str>,
 }
@@ -35,7 +35,7 @@ impl Gateway {
         mut body: Incoming,
         info: &mut RequestInfo,
         headers: &mut HeaderMap,
-    ) -> Result<(RequestBody<Incoming>, Option<ModelAt>), Box<Response<ResBody>>> {
+    ) -> Result<(RequestBody<Incoming>, Option<ModelSpan>), Box<Response<ResBody>>> {
         let api = info.endpoint.api;
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
         // The ceiling bounds generation; count_tokens generates nothing.
@@ -49,14 +49,14 @@ impl Gateway {
                 )
             })
             .flatten();
-        // A route with a provider that spells model ids its own way needs
-        // to know where the model is.
-        let respells = self.route(api).is_some_and(|r| r.respells);
+        // A provider with its own model ids on the route: the model's
+        // place in the body is needed.
+        let prefixes_model_ids = self.route(api).is_some_and(|r| r.prefixes_model_ids);
         if self.models.is_none()
             && credential_models.is_none()
             && token_limit.is_none()
             && self.aliases.is_none()
-            && !respells
+            && !prefixes_model_ids
         {
             return Ok((RequestBody::new(body), None));
         }
@@ -128,20 +128,20 @@ impl Gateway {
                 &message,
             )));
         }
-        let model_at = respells
+        let model_span = prefixes_model_ids
             .then(|| {
                 let start = held.model_span()?.start;
                 let model: Arc<str> = match &resolved {
                     Some((_, model)) => Arc::clone(model),
                     None => Arc::from(held.model()?),
                 };
-                Some(ModelAt {
+                Some(ModelSpan {
                     span: start..start + model.len() as u64,
                     model,
                 })
             })
             .flatten();
-        Ok((RequestBody::after_hold(held, body), model_at))
+        Ok((RequestBody::after_hold(held, body), model_span))
     }
 }
 
@@ -151,11 +151,7 @@ fn adjust_content_length(headers: &mut HeaderMap, delta: i64) {
     if delta == 0 {
         return;
     }
-    let Some(len) = headers
-        .get(CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-    else {
+    let Some(len) = content_length(headers) else {
         return;
     };
     if let Some(len) = len.checked_add_signed(delta) {

@@ -59,7 +59,7 @@ impl Api {
         }
     }
 
-    /// Whether a request without the token field may pass a token ceiling.
+    /// Whether a request without the token field may pass an output-token ceiling.
     /// Anthropic requires `max_tokens`, so the provider rejects such a
     /// request itself; on OpenAI's APIs the field is optional and its
     /// absence means the model's maximum, so a ceiling refuses it.

@@ -7,7 +7,7 @@ use http_body_util::{Either, Full};
 
 use super::ResBody;
 use crate::{
-    permissions::HoldError,
+    request_body::HoldError,
     upstream::{ForwardError, PolicyRefusal},
 };
 

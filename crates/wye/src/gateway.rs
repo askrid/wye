@@ -93,9 +93,9 @@ pub struct Gateway {
 struct ApiRoute {
     route: Route,
     upstreams: Box<[Upstream]>,
-    /// An upstream's provider spells model ids its own way (Bedrock): the
-    /// model is held and re-spelled per attempt.
-    respells: bool,
+    /// An upstream's provider has its own model ids (Bedrock): the
+    /// model is held and re-prefixed per attempt.
+    prefixes_model_ids: bool,
 }
 
 impl Gateway {
@@ -114,7 +114,7 @@ impl Gateway {
                 .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
                 .collect::<Result<_, _>>()?;
             Ok(ApiRoute {
-                respells: route
+                prefixes_model_ids: route
                     .upstreams()
                     .iter()
                     .any(|u| u.provider.model_prefix().is_some()),
@@ -334,6 +334,14 @@ fn otlp_target(
         client,
         &telemetry.service_name,
     ))
+}
+
+/// A request's declared `content-length`, if it has a valid one.
+fn content_length(headers: &http::HeaderMap) -> Option<u64> {
+    headers
+        .get(http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
 }
 
 #[cfg(test)]

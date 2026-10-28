@@ -47,9 +47,9 @@ async fn a_sent_body_comes_back_whole() {
     let held = Gauge::default();
     let (body, handback) = FailoverBody::kept(client(&["ab", "cd", "ef"]), &held, ROOMY);
     assert_eq!(collect(body).await, "abcdef");
-    let unsent = handback.await.unwrap();
+    let resend = handback.await.unwrap();
     assert_eq!(held.current(), 6);
-    let (again, next) = FailoverBody::resume(unsent, ROOMY);
+    let (again, next) = FailoverBody::resume(resend, ROOMY);
     assert_eq!(collect(again).await, "abcdef");
     // Once the request is answered, nothing waits for the hand-back: the
     // last attempt's kept bytes are released.
@@ -64,8 +64,8 @@ async fn a_partly_sent_body_resumes_where_it_stopped() {
     let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
     assert_eq!(first, "ab");
     drop(body);
-    let unsent = handback.await.unwrap();
-    let (again, _next) = FailoverBody::resume(unsent, ROOMY);
+    let resend = handback.await.unwrap();
+    let (again, _next) = FailoverBody::resume(resend, ROOMY);
     assert_eq!(collect(again).await, "abcdef", "replayed, then read on");
 }
 
@@ -141,21 +141,21 @@ proptest::proptest! {
 }
 
 /// Every way to cut the body into up to three chunks, handed back after
-/// every number of sent frames: re-spelling the model either yields the
+/// every number of sent frames: rewriting the model id either yields the
 /// body with only the model changed, or, when the value straddles the sent
 /// bytes and the unread rest, declines.
 #[tokio::test]
-async fn a_handed_back_body_respells_its_model_wherever_it_is() {
+async fn a_handed_back_body_takes_a_new_model_id_wherever_it_is() {
     use gateway_core::api::Api;
 
-    use crate::permissions::hold_until_model;
+    use crate::request_body::hold_until_model;
 
     const BODY: &str = r#"{"model":"claude-opus-5-5","messages":[]}"#;
     let start = BODY.find("claude").unwrap() as u64;
     let span = start..start + "claude-opus-5-5".len() as u64;
     let value = Bytes::from_static(b"anthropic.claude-opus-5-5");
     let want = BODY.replace("claude-opus", "anthropic.claude-opus");
-    let mut respelled = 0;
+    let mut rewritten = 0;
     for i in 0..=BODY.len() {
         for j in i..=BODY.len() {
             let parts = [&BODY[..i], &BODY[i..j], &BODY[j..]];
@@ -180,14 +180,10 @@ async fn a_handed_back_body_respells_its_model_wherever_it_is() {
                     }
                 }
                 drop(body);
-                let mut unsent = handback.await.unwrap();
+                let mut resend = handback.await.unwrap();
                 let straddles = span.start < sent && sent < span.end;
-                assert_eq!(
-                    unsent.respell(&span, value.clone()),
-                    !straddles,
-                    "{parts:?}"
-                );
-                let (again, next) = FailoverBody::resume(unsent, ROOMY);
+                assert_eq!(resend.splice(&span, value.clone()), !straddles, "{parts:?}");
+                let (again, next) = FailoverBody::resume(resend, ROOMY);
                 let got = collect(again).await;
                 drop(next);
                 assert_eq!(gauge.current(), 0, "every kept byte released");
@@ -195,12 +191,12 @@ async fn a_handed_back_body_respells_its_model_wherever_it_is() {
                     assert_eq!(got, BODY);
                 } else {
                     assert_eq!(got, want, "{parts:?} after {sent_frames} frames");
-                    respelled += 1;
+                    rewritten += 1;
                 }
             }
         }
     }
-    assert!(respelled > 0);
+    assert!(rewritten > 0);
 }
 
 #[tokio::test]
@@ -208,22 +204,22 @@ async fn a_hand_back_says_whether_the_whole_body_was_delivered() {
     let held = Gauge::default();
     let (body, handback) = FailoverBody::kept(client(&["ab", "cd"]), &held, ROOMY);
     assert_eq!(collect(body).await, "abcd");
-    let unsent = handback.await.unwrap();
-    assert!(unsent.sent_whole());
+    let resend = handback.await.unwrap();
+    assert!(resend.sent_whole());
 
     // Resent whole: the replay and the end both delivered.
-    let (again, handback) = FailoverBody::resume(unsent, ROOMY);
+    let (again, handback) = FailoverBody::resume(resend, ROOMY);
     assert_eq!(collect(again).await, "abcd");
     assert!(handback.await.unwrap().sent_whole());
 
     let (mut body, handback) = FailoverBody::kept(client(&["ab", "cd"]), &held, ROOMY);
     body.frame().await.unwrap().unwrap();
     drop(body);
-    let unsent = handback.await.unwrap();
-    assert!(!unsent.sent_whole(), "cut after the first chunk");
+    let resend = handback.await.unwrap();
+    assert!(!resend.sent_whole(), "cut after the first chunk");
 
     // A resend dropped during its replay did not deliver the whole body.
-    let (mut again, handback) = FailoverBody::resume(unsent, ROOMY);
+    let (mut again, handback) = FailoverBody::resume(resend, ROOMY);
     again.frame().await.unwrap().unwrap();
     drop(again);
     assert!(!handback.await.unwrap().sent_whole());

@@ -40,15 +40,10 @@ async fn gateway_with(
          [[routes.claude.upstreams]]\nid = \"b\"\nprovider = \"{b_provider}\"\n\
          base_url = \"{b}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![
-            UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
-            UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-        ],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![
+        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
+        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+    ]);
     Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await
 }
 
@@ -136,7 +131,7 @@ async fn other_failures_and_large_bodies_are_answered_as_they_are() {
 }
 
 #[tokio::test]
-async fn failover_respells_the_model_for_each_provider() {
+async fn failover_sends_each_provider_its_own_model_id() {
     let bedrock_body = BODY.replace("claude-opus-5-5", "anthropic.claude-opus-5-5");
     for (providers, expect) in [
         // Anthropic refuses: Bedrock gets its own model id.
@@ -251,15 +246,10 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
          [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"http://{cut_addr}\"\napi_key_env = \"UNUSED\"\n\
          [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![
-            UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
-            UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-        ],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![
+        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
+        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+    ]);
     let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
     let body: &'static str = Box::leak(
         format!(
@@ -303,18 +293,13 @@ async fn early_refusals_over_http2_move_concurrent_uploads_on() {
          [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://{refusing}\"\napi_key_env = \"UNUSED\"\n\
          [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
     );
-    let resources = Resources {
-        upstreams: vec![
-            UpstreamResources {
-                auth: UpstreamAuth::api_key("key-a").unwrap(),
-                extra_roots: vec![ca.ca_cert()],
-            },
-            UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-        ],
-        verifier: None,
-        prompt_key: None,
-        otlp_headers: HeaderMap::new(),
-    };
+    let resources = with_upstreams(vec![
+        UpstreamResources {
+            auth: UpstreamAuth::api_key("key-a").unwrap(),
+            extra_roots: vec![ca.ca_cert()],
+        },
+        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+    ]);
     let h =
         Arc::new(Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await);
     let body: &'static str = Box::leak(
