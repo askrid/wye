@@ -6,6 +6,8 @@ members = ["crates/gateway-core", "crates/wye", "crates/wye-bench", "crates/wye-
 edition = "2024"
 rust-version = "1.88"
 publish = false
+license = "WTFPL"
+repository = "https://github.com/askrid/wye"
 
 [workspace.dependencies]
 gateway-core = { path = "crates/gateway-core" }
@@ -42,3 +44,9 @@ await_holding_lock = "deny"
 
 [profile.release]
 debug = "line-tables-only"
+
+# Release archives are built with this profile. It is the benchmarked
+# release profile unchanged: LTO and other tuning land only with a measured
+# before/after (docs/research.md, "Performance techniques").
+[profile.dist]
+inherits = "release"

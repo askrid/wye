@@ -4,6 +4,8 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 wye-testkit.workspace = true
@@ -21,3 +23,7 @@ tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "tim
 
 [lints]
 workspace = true
+
+# Benchmark and test support: never released.
+[package.metadata.dist]
+dist = false

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A stateless gateway between coding agents or AI apps and the model providers"
 
 [features]
 # Benchmark builds only: counts heap allocations, served at GET /debug/alloc.
@@ -33,3 +36,7 @@ wye-testkit.workspace = true
 
 [lints]
 workspace = true
+
+# The released binary; every other crate is excluded from releases.
+[package.metadata.dist]
+dist = true
