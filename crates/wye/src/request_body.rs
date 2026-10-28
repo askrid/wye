@@ -1,6 +1,7 @@
-//! Model permissions and output-token ceilings: the request's `model` (and
-//! its output-token maximum, `max_tokens` or `max_output_tokens`, when it
-//! arrives in time) is checked before anything is sent upstream.
+//! The request body as forwarded, held until its `model` is read, so model
+//! permissions and the output-token ceiling (`max_tokens` or
+//! `max_output_tokens`, when it arrives in time) are checked before anything
+//! is sent upstream.
 //!
 //! [`hold_until_model`] reads the request body only until its top-level
 //! `model` value has been read. Claude Code sends `model` first, so usually
@@ -12,9 +13,9 @@
 //! is optional) none at all, fails the body, which aborts the upstream request
 //! before the provider sees a complete request.
 //!
-//! The same hold resolves model aliases (spliced in place) and records where
-//! `model` is for providers that spell model ids their own way (Bedrock), so
-//! each attempt can re-spell it ([`chunks`]).
+//! The same hold resolves model aliases (spliced in place) and finds where
+//! `model` is, so each attempt can send the provider's own model id
+//! (Bedrock's `anthropic.` prefix, [`chunks`]).
 
 use std::{
     ops::Range,
@@ -255,7 +256,7 @@ impl<B> RequestBody<B> {
     /// Replaces the bytes at `span` (the model's value) with `value` before
     /// anything was sent; `None` when the body was not held, so the model's
     /// position is unknown. Returns the change in length.
-    pub(crate) fn respell(&mut self, span: &Range<u64>, value: Bytes) -> Option<i64> {
+    pub(crate) fn splice(&mut self, span: &Range<u64>, value: Bytes) -> Option<i64> {
         Some(self.hold.as_mut()?.splice(span, value))
     }
 

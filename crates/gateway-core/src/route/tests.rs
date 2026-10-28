@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::Config;
+use crate::config::{Config, DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_HELD_BYTES};
 
 /// A route with one upstream per `(id, weight)`.
 fn route(upstreams: &[(&str, u32)]) -> Route {

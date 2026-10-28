@@ -102,7 +102,7 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
             value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
         },
-        drain_delay: Duration::from_secs(raw.drain_delay_secs.unwrap_or(0)),
+        drain_delay: Duration::from_secs(raw.drain_delay_secs.unwrap_or(DEFAULT_DRAIN_DELAY_SECS)),
         // Zero is valid: cancel active streams immediately on shutdown.
         shutdown_grace: Duration::from_secs(
             raw.shutdown_grace_secs

@@ -6,10 +6,7 @@ use std::net::IpAddr;
 use serde::Deserialize;
 
 use super::*;
-use crate::route::{
-    DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_HELD_BYTES, Failover, MAX_UPSTREAMS,
-    MAX_WEIGHT, Select,
-};
+use crate::route::{Failover, MAX_UPSTREAMS, MAX_WEIGHT, Select};
 
 /// `[routes]`: one route per native API.
 #[derive(Deserialize)]

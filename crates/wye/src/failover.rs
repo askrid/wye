@@ -1,12 +1,12 @@
 //! Resending a request to the route's next upstream after a refusal that
 //! proves the request was not processed: `429`, `529`, a connection refused,
-//! or one cut before the body was delivered whole ([`Unsent::sent_whole`]).
+//! or one cut before the body was delivered whole ([`Resend::sent_whole`]).
 //!
 //! hyper consumes the request body and drops it, so resending needs the
 //! bytes back. [`FailoverBody`] keeps every chunk it sends (shared `Bytes`,
 //! not copies) within a per-request and a process-wide bound, and when it is
 //! dropped hands back what it sent plus the part of the client's body not
-//! read yet ([`Unsent`]), through a oneshot channel: no lock, no shared
+//! read yet ([`Resend`]), through a oneshot channel: no lock, no shared
 //! state. The next attempt replays the sent chunks and then reads on, so a
 //! refusal that arrives before the upload finished can still move on.
 //! Beyond either bound the body stops keeping, hands nothing back, and the
@@ -25,12 +25,12 @@ use tokio::sync::oneshot;
 
 use crate::{
     gauge::{Gauge, Held},
-    permissions::{RequestBody, splice_chunks},
+    request_body::{RequestBody, splice_chunks},
 };
 
 /// What a dropped attempt hands back: the bytes it sent, in order, then the
 /// client's body from where it stopped reading.
-pub(crate) struct Unsent<B> {
+pub(crate) struct Resend<B> {
     chunks: VecDeque<Bytes>,
     rest: Option<B>,
     /// The kept bytes, counted against the process-wide bound.
@@ -41,7 +41,7 @@ pub(crate) struct Unsent<B> {
     whole: bool,
 }
 
-impl<B> Unsent<B> {
+impl<B> Resend<B> {
     /// Whether the attempt delivered the whole body. When it did not, the
     /// provider cannot have received a complete request.
     pub(crate) fn sent_whole(&self) -> bool {
@@ -49,12 +49,12 @@ impl<B> Unsent<B> {
     }
 }
 
-impl<B> Unsent<RequestBody<B>> {
+impl<B> Resend<RequestBody<B>> {
     /// Replaces the bytes at `span` (the model's value, in body offsets)
     /// with `value`, wherever they are: in what was sent, or still in the
     /// unread rest. `false` when the value straddles the two, so the body
-    /// cannot be re-spelled.
-    pub(crate) fn respell(&mut self, span: &Range<u64>, value: Bytes) -> bool {
+    /// cannot be re-prefixed.
+    pub(crate) fn splice(&mut self, span: &Range<u64>, value: Bytes) -> bool {
         let sent: u64 = self.chunks.iter().map(|c| c.len() as u64).sum();
         let delta = value.len() as i64 - (span.end - span.start) as i64;
         if span.end <= sent {
@@ -76,7 +76,7 @@ impl<B> Unsent<RequestBody<B>> {
             let shifted = span.start - sent..span.end - sent;
             self.rest
                 .as_mut()
-                .and_then(|rest| rest.respell(&shifted, value))
+                .and_then(|rest| rest.splice(&shifted, value))
                 .is_some()
         } else {
             false
@@ -104,7 +104,7 @@ struct Keep<B> {
     /// The client's body was read to its end in this attempt.
     ended: bool,
     bounds: Bounds,
-    back: oneshot::Sender<Unsent<B>>,
+    back: oneshot::Sender<Resend<B>>,
 }
 
 /// A request body that can be handed back for another attempt.
@@ -118,7 +118,7 @@ pub(crate) struct FailoverBody<B> {
 
 /// Receives what an attempt hands back when it is dropped; closed without
 /// a value when the attempt stopped keeping.
-pub(crate) type Handback<B> = oneshot::Receiver<Unsent<B>>;
+pub(crate) type Handback<B> = oneshot::Receiver<Resend<B>>;
 
 impl<B> FailoverBody<B> {
     /// The client's body, sent once: no failover.
@@ -132,7 +132,7 @@ impl<B> FailoverBody<B> {
     /// The client's body, kept within `bounds` for another attempt.
     pub(crate) fn kept(inner: B, held: &Gauge, bounds: Bounds) -> (Self, Handback<B>) {
         Self::resume(
-            Unsent {
+            Resend {
                 chunks: VecDeque::new(),
                 rest: Some(inner),
                 budget: held.hold_none(),
@@ -144,16 +144,16 @@ impl<B> FailoverBody<B> {
     }
 
     /// The body an earlier attempt handed back, kept again for the next.
-    pub(crate) fn resume(unsent: Unsent<B>, bounds: Bounds) -> (Self, Handback<B>) {
+    pub(crate) fn resume(resend: Resend<B>, bounds: Bounds) -> (Self, Handback<B>) {
         let (back, handback) = oneshot::channel();
         (
             Self {
-                rest: unsent.rest,
+                rest: resend.rest,
                 keep: Some(Box::new(Keep {
-                    replay: unsent.chunks,
+                    replay: resend.chunks,
                     sent: Vec::new(),
-                    budget: unsent.budget,
-                    bytes: unsent.bytes,
+                    budget: resend.budget,
+                    bytes: resend.bytes,
                     ended: false,
                     bounds,
                     back,
@@ -253,7 +253,7 @@ impl<B> Drop for FailoverBody<B> {
         let mut chunks: VecDeque<Bytes> = sent.into();
         chunks.extend(replay);
         // A receiver gone means the request is answered; the bytes are dropped.
-        let _ = back.send(Unsent {
+        let _ = back.send(Resend {
             chunks,
             rest: self.rest.take(),
             budget,

@@ -166,7 +166,7 @@ fn explains_forwarding_and_each_refusal() {
     .report();
     assert!(report.contains("max_tokens: 100 (limit 100)"), "{report}");
 
-    // A token ceiling alone still makes the server read the body, so a
+    // An output-token ceiling alone still makes the server read the body, so a
     // request without a model is refused, as `serve` refuses it.
     let mut only_ceiling = limited.clone();
     only_ceiling.auth.as_mut().unwrap().models = None;
@@ -297,7 +297,7 @@ fn shows_the_upstream_a_session_goes_to() {
 }
 
 #[test]
-fn shows_the_model_id_a_provider_spells_its_own_way() {
+fn shows_the_providers_own_model_id() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
          [[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\

@@ -72,7 +72,7 @@ pub(crate) struct WyeOptions<'a> {
     /// `/v1/responses`, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) openai: bool,
     /// `[routes.claude]` with one Bedrock upstream instead of `[upstream]`:
-    /// model ids are re-spelled, with the key from [`BENCH_PROVIDER_KEY_ENV`].
+    /// model ids get the provider's prefix, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) bedrock: bool,
     /// `[routes.claude]` with two accounts (both the mock) and failover:
     /// every request body is kept for resending.

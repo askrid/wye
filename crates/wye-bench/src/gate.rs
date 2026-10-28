@@ -101,7 +101,7 @@ const GATES: &[(&str, f64, f64)] = &[
     ("openai_sse_ttfb_added_p50_us", 0.40, 100.0),
     ("openai_unary_failed_requests", 0.0, 0.0),
     // A Claude route to Bedrock: every request held until its model and the
-    // model re-spelled (`anthropic.` prefix).
+    // model id rewritten (`anthropic.` prefix).
     ("bedrock_unary_cpu_us_per_request", 0.20, 10.0),
     ("bedrock_unary_added_p50_us", 0.20, 40.0),
     ("bedrock_unary_failed_requests", 0.0, 0.0),

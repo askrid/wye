@@ -30,7 +30,7 @@ pub enum Gateway<'a> {
     /// Responses streams by the mock, through the Responses usage scanner.
     WyeOpenai(&'a str),
     /// Wye with a Claude route to a Bedrock upstream: every request is held
-    /// until its `model` is read, and the model re-spelled for Bedrock.
+    /// until its `model` is read, and the model id rewritten for Bedrock.
     WyeBedrock(&'a str),
     /// Wye with a Claude route of two accounts and failover: every request
     /// body is kept for resending until the response arrives.

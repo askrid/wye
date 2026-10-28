@@ -18,11 +18,6 @@ pub const MAX_UPSTREAMS: usize = 16;
 /// Largest `weight`.
 pub const MAX_WEIGHT: u32 = 1000;
 
-/// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
-pub const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
-/// Default `failover_max_held_bytes`, across all requests of a process.
-pub const DEFAULT_FAILOVER_MAX_HELD_BYTES: u64 = 256 * 1024 * 1024;
-
 /// How a request picks its upstream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Select {

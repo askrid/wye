@@ -15,7 +15,8 @@ use hyper::body::Incoming;
 
 use super::{
     Gateway, ResBody,
-    admit::ModelAt,
+    admit::ModelSpan,
+    content_length,
     responses::{error, forward_error, overloaded},
 };
 use crate::{
@@ -23,7 +24,7 @@ use crate::{
     failover::{Bounds, FailoverBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream},
-    usage_log::{BodyKind, Failover, Observed, RequestInfo, UsageLog},
+    usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, UsageLog},
 };
 
 /// How long a refused attempt may take to hand its body back: hyper drops a
@@ -55,14 +56,14 @@ impl Gateway {
             return res;
         }
         let (mut parts, body) = req.into_parts();
-        let (mut body, model_at) = match self.admit_body(body, &mut info, &mut parts.headers).await
-        {
-            Ok(admitted) => admitted,
-            Err(res) => {
-                log.gateway_error(info, res.status());
-                return *res;
-            }
-        };
+        let (mut body, model_span) =
+            match self.admit_body(body, &mut info, &mut parts.headers).await {
+                Ok(admitted) => admitted,
+                Err(res) => {
+                    log.gateway_error(info, res.status());
+                    return *res;
+                }
+            };
         self.sample(&mut info);
         // Session affinity: prompt caches are per provider account.
         let key = info
@@ -81,15 +82,16 @@ impl Gateway {
             .failover()
             .filter(|f| declared_len.is_none_or(|len| len <= f.max_body_bytes))
             .copied();
-        // The model as the first upstream's provider spells it.
+        // The declared length before any provider prefix is added to `model`.
         let base_len = content_length(&parts.headers);
-        // The provider prefix the body's model carries now.
-        let mut spelled = None;
-        if let (Some(at), Some(upstream)) = (&model_at, route.upstreams.get(ranking.first()))
-            && let Some((prefix, value)) = respelling(at, upstream, spelled)
-            && body.respell(&at.span, value).is_some()
+        // The provider prefix the body's model carries now; the first
+        // attempt gets its upstream's model id.
+        let mut prefix_sent = None;
+        if let (Some(at), Some(upstream)) = (&model_span, route.upstreams.get(ranking.first()))
+            && let Some((prefix, value)) = model_id_for(at, upstream, prefix_sent)
+            && body.splice(&at.span, value).is_some()
         {
-            spelled = prefix;
+            prefix_sent = prefix;
         }
         let (mut body, mut handback) = match &failover {
             Some(f) => {
@@ -114,7 +116,7 @@ impl Gateway {
                 unreachable!("the route and its upstreams have the same length")
             };
             let mut attempt = attempt;
-            if let (Some(prefix), Some(len)) = (spelled, base_len) {
+            if let (Some(prefix), Some(len)) = (prefix_sent, base_len) {
                 attempt
                     .headers
                     .insert(CONTENT_LENGTH, HeaderValue::from(len + prefix.len() as u64));
@@ -155,39 +157,39 @@ impl Gateway {
                 // hyper drops the body. If the attempt still holds it (hyper
                 // still writing), the refusal is answered as it is: dropping
                 // the answer first could lose both it and the body.
-                let unsent = match handback.try_recv() {
-                    Ok(unsent) => Some(unsent),
+                let resend = match handback.try_recv() {
+                    Ok(resend) => Some(resend),
                     Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
                         .await
                         .ok()
                         .and_then(Result::ok),
                 }
-                .filter(|unsent| !cut || !unsent.sent_whole());
-                // The next upstream's provider may spell the model differently.
+                .filter(|resend| !cut || !resend.sent_whole());
+                // The next upstream's provider may have its own model id.
                 let next = order.peek().and_then(|&i| route.upstreams.get(i));
-                let unsent = match (unsent, &model_at, next) {
-                    (Some(mut unsent), Some(at), Some(next)) => {
-                        match respelling(at, next, spelled) {
-                            None => Some(unsent),
+                let resend = match (resend, &model_span, next) {
+                    (Some(mut resend), Some(at), Some(next)) => {
+                        match model_id_for(at, next, prefix_sent) {
+                            None => Some(resend),
                             // A value split between the sent bytes and the
-                            // unread rest cannot be re-spelled: answer as is.
-                            Some((prefix, value)) => {
-                                unsent.respell(&spelled_span(at, spelled), value).then(|| {
-                                    spelled = prefix;
-                                    unsent
-                                })
-                            }
+                            // unread rest cannot be re-prefixed: answer as is.
+                            Some((prefix, value)) => resend
+                                .splice(&model_id_span(at, prefix_sent), value)
+                                .then(|| {
+                                    prefix_sent = prefix;
+                                    resend
+                                }),
                         }
                     }
-                    (unsent, _, _) => unsent,
+                    (resend, _, _) => resend,
                 };
-                if let Some(unsent) = unsent {
+                if let Some(resend) = resend {
                     drop(result);
-                    info.failovers.push(Failover {
+                    info.failovers.push(RefusedAttempt {
                         upstream: upstream.id.clone(),
                         status,
                     });
-                    let (next, next_handback) = FailoverBody::resume(unsent, bounds(f));
+                    let (next, next_handback) = FailoverBody::resume(resend, bounds(f));
                     body = next;
                     *handback = next_handback;
                     continue;
@@ -256,17 +258,17 @@ fn copy_parts(parts: &http::request::Parts) -> http::request::Parts {
 }
 
 /// The prefix and value the body's model needs for `upstream`, when it now
-/// carries `spelled` and that differs. A client that sent a provider-spelled
-/// id keeps it.
-fn respelling(
-    at: &ModelAt,
+/// carries `prefix_sent` and that differs. A client that sent an
+/// already-prefixed id keeps it.
+fn model_id_for(
+    at: &ModelSpan,
     upstream: &Upstream,
-    spelled: Option<&'static str>,
+    prefix_sent: Option<&'static str>,
 ) -> Option<(Option<&'static str>, Bytes)> {
     let wanted = upstream
         .model_prefix
         .filter(|prefix| !at.model.starts_with(prefix));
-    (wanted != spelled).then(|| {
+    (wanted != prefix_sent).then(|| {
         let value = match wanted {
             // Exact capacity: the Vec becomes the Bytes without another allocation.
             Some(prefix) => Bytes::from([prefix.as_bytes(), at.model.as_bytes()].concat()),
@@ -276,14 +278,7 @@ fn respelling(
     })
 }
 
-/// Where the model's value is in the body while it carries `spelled`.
-fn spelled_span(at: &ModelAt, spelled: Option<&'static str>) -> Range<u64> {
-    at.span.start..at.span.end + spelled.map_or(0, |p| p.len() as u64)
-}
-
-fn content_length(headers: &http::HeaderMap) -> Option<u64> {
-    headers
-        .get(CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
+/// Where the model's value is in the body while it carries `prefix_sent`.
+fn model_id_span(at: &ModelSpan, prefix_sent: Option<&'static str>) -> Range<u64> {
+    at.span.start..at.span.end + prefix_sent.map_or(0, |p| p.len() as u64)
 }

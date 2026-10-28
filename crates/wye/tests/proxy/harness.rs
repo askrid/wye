@@ -79,12 +79,7 @@ impl Harness {
     pub(crate) async fn start(handler: Handler, upstream_extra: &str, auth: UpstreamAuth) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-        let resources = Resources {
-            upstreams: vec![UpstreamResources::new(auth)],
-            verifier: None,
-            prompt_key: None,
-            otlp_headers: HeaderMap::new(),
-        };
+        let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
         Self::launch(
             &format!("http://{upstream}"),
             "",
@@ -99,14 +94,9 @@ impl Harness {
     pub(crate) async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-        let resources = Resources {
-            upstreams: vec![UpstreamResources::new(
-                UpstreamAuth::api_key(API_KEY).unwrap(),
-            )],
-            verifier: None,
-            prompt_key: None,
-            otlp_headers: HeaderMap::new(),
-        };
+        let resources = with_upstreams(vec![UpstreamResources::new(
+            UpstreamAuth::api_key(API_KEY).unwrap(),
+        )]);
         let base_url = format!("http://{upstream}");
         Self::launch(
             &base_url,
@@ -262,6 +252,17 @@ impl Harness {
             .unwrap()
             .unwrap();
         serde_json::from_str(&line).unwrap()
+    }
+}
+
+/// What `wye serve` resolves at startup, for tests: the upstreams'
+/// credentials in config order, nothing else.
+pub(crate) fn with_upstreams(upstreams: Vec<UpstreamResources>) -> Resources {
+    Resources {
+        upstreams,
+        verifier: None,
+        prompt_key: None,
+        otlp_headers: HeaderMap::new(),
     }
 }
 

@@ -176,7 +176,7 @@ fn claude_platform_on_aws_needs_a_workspace() {
 }
 
 #[test]
-fn bedrock_takes_an_api_key_and_spells_model_ids_its_own_way() {
+fn bedrock_takes_an_api_key_and_prefixes_model_ids() {
     let route = parse_route(
         "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
          base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"K\"\n",

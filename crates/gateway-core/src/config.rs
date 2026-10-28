@@ -32,6 +32,15 @@ const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS: u64 = 600;
 /// Must exceed the provider's SSE `ping` interval during long thinking pauses.
 const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
+/// Local use needs no drain; behind a load balancer, set it above the
+/// health-check interval.
+const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
+/// Default `max_credential_ttl_secs`: one week.
+const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
+/// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
+pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
+/// Default `failover_max_held_bytes`, across all requests of a process.
+pub(crate) const DEFAULT_FAILOVER_MAX_HELD_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Validated gateway configuration.
 #[derive(Debug, Clone)]
@@ -324,7 +333,7 @@ impl Provider {
         }
     }
 
-    /// The prefix this provider's model ids carry: `model` is re-spelled
+    /// The prefix this provider's model ids carry: `model` is rewritten
     /// with it for requests that go there (the allowlisted model rewrite).
     pub fn model_prefix(self) -> Option<&'static str> {
         match self {

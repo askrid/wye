@@ -10,7 +10,7 @@ use gateway_core::{
 };
 use serde::{Serialize, Serializer};
 
-use super::{Failover, Record, agent::ToolDurations};
+use super::{Record, RefusedAttempt, agent::ToolDurations};
 use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
 
 /// What the writer adds to every record: keys, prices, upgrade targets.
@@ -101,7 +101,7 @@ pub(super) struct Line<'a> {
     pub(super) upgrade_issues: Option<UpgradeIssues<'a>>,
     /// Upstreams that refused the request before `upstream` answered.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    pub(super) failovers: &'a [Failover],
+    pub(super) failovers: &'a [RefusedAttempt],
 }
 
 /// A cost as an exact decimal string, written without an intermediate String.
@@ -228,7 +228,7 @@ fn ms(d: Duration) -> f64 {
     (d.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
 
-impl Serialize for Failover {
+impl Serialize for RefusedAttempt {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;
