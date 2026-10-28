@@ -12,10 +12,10 @@ It is one Rust binary with no database and no admin API. Every replica makes
 the same decision for the same request, so you can run as many as you like
 behind a load balancer.
 
-> **Status:** working prototype. It is tested and benchmarked on one machine,
-> has been used with Claude Code through a claude.ai subscription, and has not
-> been packaged or released. See [Status](#status) for what is and is not
-> checked against the real providers.
+> **Status:** working prototype, `0.x`. It is tested and benchmarked on one
+> machine and has been used with Claude Code through a claude.ai subscription.
+> See [Status](#status) for what is and is not checked against the real
+> providers.
 
 ## Why
 
@@ -41,11 +41,19 @@ Wye takes the opposite approach:
 
 ## Quick start
 
-Build from source (macOS or Linux; the toolchain is pinned in
-`rust-toolchain.toml`):
+Install a release (Linux and macOS, x86_64 and arm64):
 
 ```bash
-cargo install --path crates/wye --locked
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
+```
+
+Or take an archive from the [releases page](https://github.com/askrid/wye/releases)
+and check where it came from with
+`gh attestation verify wye-<target>.tar.xz --repo askrid/wye`. To build from
+source instead (the toolchain is pinned in `rust-toolchain.toml`):
+
+```bash
+cargo install --git https://github.com/askrid/wye wye --locked
 ```
 
 With an Anthropic API key:
@@ -274,7 +282,7 @@ Not checked against the real services yet:
   session.
 - Claude Code has been run through Wye in one real session, on a subscription.
 
-Not built yet: published binaries and images, Vertex AI, AWS SigV4 signing,
+Not built yet: a published container image, Vertex AI, AWS SigV4 signing,
 per-request cost ceilings, budgets held by the provider, and reloading
 short-lived provider keys without a restart.
 [docs/roadmap.md](docs/roadmap.md) tracks all of it.
@@ -306,12 +314,16 @@ without Kubernetes, telemetry, and credential renewal.
 ## Development
 
 ```bash
+git clone https://github.com/askrid/wye && cd wye
 git config core.hooksPath .githooks   # run the full check before each commit
 scripts/check.sh                      # fmt, clippy, tests, release build, benchmark vs baseline
 ```
 
 The check takes about four minutes, most of it the benchmark. Tests run
-against local mock upstreams and never call a paid API.
+against local mock upstreams and never call a paid API. Pull requests also
+run CI on GitHub: lints and tests on Linux and macOS, `cargo deny`, and the
+benchmark against the base branch, gating allocations and failed requests
+(shared runners are too noisy to gate latency).
 [docs/development.md](docs/development.md) explains the benchmark gate, and
 how to compare two builds when a change is too small for the gate to see.
 
@@ -328,3 +340,7 @@ helpers.
 - [docs/operations.md](docs/operations.md): CLI, deployment, telemetry
 - [docs/roadmap.md](docs/roadmap.md): status and what is next
 - [docs/research.md](docs/research.md): benchmarks, experiments, open questions
+
+## License
+
+[WTFPL](LICENSE). Do what you want with it.

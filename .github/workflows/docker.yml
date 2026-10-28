@@ -1,0 +1,28 @@
+# Builds the container image and checks that it starts, becomes healthy, and
+# refuses an unauthenticated request (scripts/image-smoke.sh). No provider is
+# contacted and nothing is pushed.
+
+name: docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - rust-toolchain.toml
+      - Cargo.lock
+      - scripts/image-smoke.sh
+      - .github/workflows/docker.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/image-smoke.sh

@@ -21,6 +21,8 @@ allow = [
     "CDLA-Permissive-2.0", # webpki-roots (Mozilla's root store data)
 ]
 confidence-threshold = 0.9
+# The workspace's own crates (WTFPL) are never published; only dependencies are checked.
+private = { ignore = true }
 
 [bans]
 multiple-versions = "warn"

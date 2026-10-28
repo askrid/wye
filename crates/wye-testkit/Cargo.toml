@@ -4,6 +4,8 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Test and benchmark support: test CA and mock upstream server"
 
 [dependencies]
@@ -20,3 +22,7 @@ tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [lints]
 workspace = true
+
+# Benchmark and test support: never released.
+[package.metadata.dist]
+dist = false

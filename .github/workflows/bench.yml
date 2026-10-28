@@ -1,0 +1,38 @@
+# Benchmarks a pull request against its base on the same runner. Allocation
+# counts and failed requests are gated (they do not depend on the machine);
+# latency and CPU are reported in the job summary only. The full speed gate
+# is the local pre-commit check on the baseline machine.
+
+name: bench
+
+on:
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target
+            target/ci-bench/base -> target
+      - run: scripts/ci-bench.sh "origin/${{ github.base_ref }}" "$GITHUB_STEP_SUMMARY"
