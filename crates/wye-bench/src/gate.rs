@@ -155,8 +155,34 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_cancel_upstream_release_max_us", 1.0, 20_000.0),
 ];
 
-/// Prints a comparison table; returns false if any gated metric regressed or is missing.
-pub fn compare(baseline: &str, current: &str) -> bool {
+/// Which gated metrics a comparison enforces.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Scope {
+    /// Name patterns (`alloc_*`, `*_failed_requests`, or an exact name);
+    /// empty enforces every gate. The others are printed as `report`.
+    pub only: Vec<String>,
+    /// A metric the baseline lacks passes as `new` instead of failing: the
+    /// baseline is another commit's run, which may predate the metric.
+    pub allow_new: bool,
+}
+
+impl Scope {
+    fn enforces(&self, name: &str) -> bool {
+        self.only.is_empty()
+            || self
+                .only
+                .iter()
+                .any(|p| match (p.strip_prefix('*'), p.strip_suffix('*')) {
+                    (Some(suffix), _) => name.ends_with(suffix),
+                    (None, Some(prefix)) => name.starts_with(prefix),
+                    (None, None) => name == p,
+                })
+    }
+}
+
+/// Prints a comparison table; returns false if any enforced metric
+/// regressed or is missing.
+pub fn compare(baseline: &str, current: &str, scope: &Scope) -> bool {
     let (base, cur) = (load(baseline), load(current));
     if base["machine"] != cur["machine"] {
         eprintln!(
@@ -169,21 +195,33 @@ pub fn compare(baseline: &str, current: &str) -> bool {
     );
     let mut ok = true;
     for &(name, rel, abs) in GATES {
-        let (Some(b), Some(c)) = (
+        let enforced = scope.enforces(name);
+        let (b, c) = match (
             base["metrics"][name].as_f64(),
             cur["metrics"][name].as_f64(),
-        ) else {
-            println!("{name:36} missing");
-            ok = false;
-            continue;
+        ) {
+            (Some(b), Some(c)) => (b, c),
+            (None, Some(c)) if scope.allow_new => {
+                println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-");
+                continue;
+            }
+            _ => {
+                println!("{name:36} missing");
+                ok &= !enforced;
+                continue;
+            }
         };
         // Added-latency metrics can be near zero or negative (noise); the absolute floor absorbs that.
         let limit = b.max(0.0) * (1.0 + rel) + abs;
         let pass = c <= limit;
-        ok &= pass;
+        ok &= pass || !enforced;
         println!(
             "{name:36} {b:>10.2} {c:>10.2} {limit:>10.2}  {}",
-            if pass { "ok" } else { "REGRESSED" }
+            match (pass, enforced) {
+                (true, _) => "ok",
+                (false, true) => "REGRESSED",
+                (false, false) => "report",
+            }
         );
     }
     ok
@@ -213,4 +251,77 @@ pub fn adopt_new(baseline: &str, current: &str) {
 fn load(path: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}")))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_scope_enforces_matching_metrics_only() {
+        let all = Scope::default();
+        assert!(all.enforces("unary_added_p50_us"));
+        let ci = Scope {
+            only: vec![
+                "alloc_*".into(),
+                "*_failed_requests".into(),
+                "unary_failed_requests".into(),
+            ],
+            allow_new: true,
+        };
+        assert!(ci.enforces("alloc_unary_per_request"));
+        assert!(ci.enforces("tls_upload_failed_requests"));
+        assert!(ci.enforces("unary_failed_requests"));
+        assert!(!ci.enforces("unary_added_p50_us"));
+        assert!(!ci.enforces("tls_paced_failed_streams"));
+    }
+
+    #[test]
+    fn report_only_and_new_metrics_do_not_fail_a_scoped_comparison() {
+        let dir = std::env::temp_dir().join(format!("wye-bench-gate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, metrics: serde_json::Value| {
+            let path = dir.join(name);
+            std::fs::write(
+                &path,
+                serde_json::json!({"machine": {}, "metrics": metrics}).to_string(),
+            )
+            .unwrap();
+            path.display().to_string()
+        };
+        let base = write(
+            "base.json",
+            serde_json::json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 20.0}),
+        );
+        let slower = write(
+            "slower.json",
+            serde_json::json!({
+                "unary_added_p50_us": 900.0,
+                "alloc_unary_per_request": 20.0,
+                "bedrock_unary_failed_requests": 0.0,
+            }),
+        );
+        let scope = |only: &[&str], allow_new| Scope {
+            only: only.iter().map(|s| (*s).to_owned()).collect(),
+            allow_new,
+        };
+        // Latency is report-only and the new metric passes; gates outside the
+        // scope are missing from this fixture but not enforced.
+        let fixture = ["alloc_unary_per_request", "bedrock_unary_failed_requests"];
+        assert!(compare(&base, &slower, &scope(&fixture, true)));
+        // Without --allow-new, the metric the baseline lacks fails.
+        assert!(!compare(&base, &slower, &scope(&fixture, false)));
+        // The full gate fails on the latency regression.
+        assert!(!compare(&base, &slower, &Scope::default()));
+        let heavier = write(
+            "heavier.json",
+            serde_json::json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 22.0}),
+        );
+        assert!(!compare(
+            &base,
+            &heavier,
+            &scope(&["alloc_unary_per_request"], true)
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
