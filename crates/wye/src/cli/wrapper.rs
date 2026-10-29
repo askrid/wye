@@ -28,11 +28,19 @@ pub enum Agent {
 
 impl Agent {
     fn program(self) -> OsString {
-        let (variable, default) = match self {
-            Self::Claude => ("WYE_CLAUDE_BIN", "claude"),
-            Self::Codex => ("WYE_CODEX_BIN", "codex"),
+        let default = match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
         };
-        std::env::var_os(variable).unwrap_or_else(|| default.into())
+        std::env::var_os(self.program_variable()).unwrap_or_else(|| default.into())
+    }
+
+    /// The variable that names another path to the program.
+    fn program_variable(self) -> &'static str {
+        match self {
+            Self::Claude => "WYE_CLAUDE_BIN",
+            Self::Codex => "WYE_CODEX_BIN",
+        }
     }
 }
 
@@ -194,15 +202,23 @@ fn run(agent: Agent, args: &[&str]) -> Result<i32, String> {
     {
         use std::os::unix::process::CommandExt;
         // Only returns on failure.
-        let error = command.exec();
-        Err(format!("cannot run {name}: {error}"))
+        Err(cannot_run(agent, &name, &command.exec()))
     }
     #[cfg(not(unix))]
     {
-        let status = command
-            .status()
-            .map_err(|e| format!("cannot run {name}: {e}"))?;
+        let status = command.status().map_err(|e| cannot_run(agent, &name, &e))?;
         Ok(status.code().unwrap_or(1))
+    }
+}
+
+fn cannot_run(agent: Agent, name: &str, error: &std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        format!(
+            "cannot run {name}: not found; install it, or set {} to its path",
+            agent.program_variable()
+        )
+    } else {
+        format!("cannot run {name}: {error}")
     }
 }
 

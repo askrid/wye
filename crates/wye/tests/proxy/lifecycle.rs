@@ -219,7 +219,10 @@ fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
     let typo = wye(&["srve"]);
     assert_eq!(typo.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&typo.stderr).starts_with("wye: unknown command `srve`"));
-    // A known command with wrong arguments gets the usage without that line.
+    // A known command with wrong arguments gets its own usage.
     let wrong = wye(&["serve"]);
-    assert!(!String::from_utf8_lossy(&wrong.stderr).contains("unknown command"));
+    assert_eq!(
+        String::from_utf8_lossy(&wrong.stderr),
+        "wye: usage:\n  wye serve --config <path>\nall commands: `wye --help`\n"
+    );
 }

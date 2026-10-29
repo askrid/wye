@@ -35,3 +35,15 @@ pub use wrapper::{Agent, Launch, claude, codex};
 fn plural(n: u64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
+
+/// A configured size as people write it: "32 MiB", "64 KiB", or "1000 bytes".
+fn size(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    match bytes {
+        0 => "0 bytes".to_owned(),
+        b if b % MIB == 0 => format!("{} MiB", b / MIB),
+        b if b % KIB == 0 => format!("{} KiB", b / KIB),
+        b => plural(b, "byte", "bytes"),
+    }
+}

@@ -68,7 +68,7 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 - Upgrade issues by target, rule, and client.
 - The ten sessions and prompts with the most tokens.
 
-Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
+Other lines are skipped and counted. `wye serve --config wye.toml 2>>usage.jsonl` keeps the log across restarts; `wye report usage.jsonl` reads it.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
@@ -82,8 +82,8 @@ To set up locally on macOS or Linux from source, install the binary with `cargo 
 
 ```bash
 mkdir -p ~/.wye
-wye serve --config examples/subscription.toml 2>>~/.wye/usage.jsonl   # claude.ai subscription
-# or: ANTHROPIC_API_KEY=... wye serve --config examples/wye.toml       # API key
+wye init --subscription --out ~/.wye/wye.toml   # claude.ai subscription; plain `wye init` for an API key
+wye serve --config ~/.wye/wye.toml 2>>~/.wye/usage.jsonl
 
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
 export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1      # request class, prompt id, tool durations
@@ -288,7 +288,7 @@ Each Claude Code session stays on one account, chosen from its session id (SDK c
 
 One usage record per proxied request, written as a JSON line to stderr and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Telemetry is not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
-The usage record (`wye serve 2>usage.jsonl` keeps the log; `wye report` reads it):
+The usage record (`wye serve 2>>usage.jsonl` keeps the log; `wye report` reads it):
 
 | Field | Values | Notes |
 |---|---|---|

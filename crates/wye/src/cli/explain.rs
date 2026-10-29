@@ -17,6 +17,7 @@ use gateway_core::{
     upgrade::{self, UpgradeScanner},
 };
 
+use super::size;
 use crate::request_body::TokenLimitError;
 
 /// The gateway credential a request carries.
@@ -130,7 +131,11 @@ pub fn explain(
             format!("{} bytes exceed max_request_body_bytes {limit}", body.len()),
         );
     }
-    out.step(format!("body: {} bytes (limit {limit})", body.len()));
+    out.step(format!(
+        "body: {} bytes (limit {})",
+        body.len(),
+        size(limit)
+    ));
 
     let configured = config.auth.as_ref().and_then(|a| a.models.as_deref());
     let granted = identity.as_ref().and_then(|i| i.models.as_deref());
@@ -254,10 +259,10 @@ pub fn explain(
         .filter_map(|(on, name)| on.then_some(name))
         .collect();
         out.step(format!(
-            "failover: on {} to {} in that order, for bodies up to {} bytes",
+            "failover: on {} to {} in that order, for bodies up to {}",
             reasons.join(", "),
             next.join(", "),
-            failover.max_body_bytes
+            size(failover.max_body_bytes)
         ));
     }
     out.step(format!(

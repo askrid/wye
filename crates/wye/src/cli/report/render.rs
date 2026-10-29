@@ -8,6 +8,15 @@ use crate::cli::plural;
 
 pub(super) fn render(s: &Summary) -> String {
     let mut out = String::new();
+    if s.total.requests == 0 {
+        let _ = writeln!(
+            out,
+            "no request records ({} skipped); the gateway writes one per request to \
+             stderr: `wye serve --config wye.toml 2>>usage.jsonl`",
+            plural(s.skipped, "other line", "other lines"),
+        );
+        return out;
+    }
     // Without `[pricing]` nothing carries a cost; the column would read "-".
     let columns = Columns {
         cost: s.total.cost.priced > 0,
@@ -102,21 +111,27 @@ pub(super) fn render(s: &Summary) -> String {
             out,
             "\nTools: calls the model requested; calls timed by Claude Code, and their time"
         );
-        let _ = writeln!(
-            out,
-            "  {:<28} {:>9} {:>7} {:>10}",
-            "tool", "requested", "timed", "time"
-        );
         let mut tools: Vec<_> = s.tools.iter().collect();
         tools.sort_by(|a, b| {
             ((b.1).1, (b.1).2)
                 .cmp(&((a.1).1, (a.1).2))
                 .then(a.0.cmp(b.0))
         });
-        for (name, (timed, ms, requested)) in tools.iter().take(TOP) {
+        tools.truncate(TOP);
+        // MCP tool names (`mcp__server__tool`) run long.
+        let width = tools
+            .iter()
+            .map(|(name, _)| name.len())
+            .fold(28, usize::max);
+        let _ = writeln!(
+            out,
+            "  {:<width$} {:>9} {:>7} {:>10}",
+            "tool", "requested", "timed", "time"
+        );
+        for (name, (timed, ms, requested)) in tools {
             let _ = writeln!(
                 out,
-                "  {name:<28} {requested:>9} {timed:>7} {:>10}",
+                "  {name:<width$} {requested:>9} {timed:>7} {:>10}",
                 seconds(*ms as f64)
             );
         }
@@ -142,7 +157,11 @@ pub(super) fn render(s: &Summary) -> String {
         };
         columns.row(&mut out, &label, &session.group);
         if session.compactions > 0 {
-            let _ = writeln!(out, "    {} compactions", session.compactions);
+            let _ = writeln!(
+                out,
+                "    {}",
+                plural(session.compactions, "compaction", "compactions")
+            );
         }
     }
 
