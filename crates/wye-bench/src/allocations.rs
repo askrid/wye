@@ -16,6 +16,7 @@ use serde_json::Value;
 use crate::{
     client::Target,
     gateway_process::{Gateway, GatewayProcess},
+    measure::{UPLOAD_BYTES, UPLOAD_CONCURRENCY},
     mock, scenarios,
 };
 
@@ -26,7 +27,6 @@ const SSE_STREAMS: usize = 200;
 const SSE_SHORT_EVENTS: u32 = 10;
 const SSE_LONG_EVENTS: u32 = 110;
 const UPLOAD_REQUESTS: usize = 64;
-const UPLOAD_BYTES: usize = 1024 * 1024;
 const IDLE_STREAMS: usize = 1_000;
 /// Idle streams whose request carried an agent-sized context.
 const IDLE_AFTER_UPLOAD_STREAMS: usize = 200;
@@ -123,7 +123,13 @@ async fn stalled_live_bytes(t: &Target, count: usize) -> f64 {
 }
 
 async fn agent_uploads(t: &Target) {
-    scenarios::upload(t, 16, UPLOAD_REQUESTS, mock::agent_json(UPLOAD_BYTES)).await;
+    scenarios::upload(
+        t,
+        UPLOAD_CONCURRENCY,
+        UPLOAD_REQUESTS,
+        mock::agent_json(UPLOAD_BYTES),
+    )
+    .await;
 }
 
 /// Runs the allocation scenarios against `binary`: the full set in front of the
@@ -173,7 +179,7 @@ pub async fn measure(
 
     let body = mock::message_json(UPLOAD_BYTES);
     let (allocations, bytes) = delta(t, async {
-        scenarios::upload(t, 16, UPLOAD_REQUESTS, body).await;
+        scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await;
     })
     .await;
     put(

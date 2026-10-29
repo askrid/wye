@@ -303,12 +303,20 @@ pub(crate) fn full(status: StatusCode, body: &'static str) -> Response<UpBody> {
 /// An upstream that answers `200 {}` and passes `pick` of each request it
 /// receives to the returned channel.
 pub(crate) fn recording<T: Send + 'static>(pick: fn(Seen) -> T) -> (Handler, mpsc::Receiver<T>) {
+    recording_with(StatusCode::OK, pick)
+}
+
+/// [`recording`], answering `status`.
+pub(crate) fn recording_with<T: Send + 'static>(
+    status: StatusCode,
+    pick: fn(Seen) -> T,
+) -> (Handler, mpsc::Receiver<T>) {
     let (tx, rx) = mpsc::channel(8);
     let handler: Handler = Arc::new(move |seen: Seen| {
         let tx = tx.clone();
         Box::pin(async move {
             tx.send(pick(seen)).await.unwrap();
-            full(StatusCode::OK, "{}")
+            full(status, "{}")
         })
     });
     (handler, rx)

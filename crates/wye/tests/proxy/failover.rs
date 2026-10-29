@@ -8,14 +8,7 @@ async fn upstream(
     status: StatusCode,
     hits: &Arc<AtomicUsize>,
 ) -> (SocketAddr, mpsc::Receiver<Bytes>) {
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.body).await.unwrap();
-            full(status, r#"{"from":"upstream"}"#)
-        })
-    });
+    let (handler, rx) = recording_with(status, |seen| seen.body);
     (
         spawn_upstream(handler, Arc::clone(hits), None, None).await,
         rx,

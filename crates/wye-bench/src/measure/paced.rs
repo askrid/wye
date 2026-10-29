@@ -11,14 +11,14 @@ use crate::{
 };
 
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
-const PACED_STREAMS: usize = 2_000;
-pub(super) const PACED_EVENTS: u32 = 100;
-pub(super) const PACED_INTERVAL_US: u64 = 20_000;
-pub(super) const PACED_EVENT_BYTES: usize = 100;
+pub(crate) const PACED_STREAMS: usize = 2_000;
+pub(crate) const PACED_EVENTS: u32 = 100;
+pub(crate) const PACED_INTERVAL_US: u64 = 20_000;
+pub(crate) const PACED_EVENT_BYTES: usize = 100;
 /// Stream starts are spread over this time (one per millisecond): macOS caps
 /// the listen backlog at 128, and over HTTP/1.1 every stream needs its own
 /// upstream connection, so faster bursts would measure SYN retries.
-const PACED_RAMP: Duration = Duration::from_millis(2_000);
+pub(crate) const PACED_RAMP: Duration = Duration::from_millis(2_000);
 
 /// The parameters, recorded in the report.
 pub(super) fn scenario_report() -> serde_json::Value {

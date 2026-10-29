@@ -12,20 +12,15 @@ use wye_testkit::TestCa;
 use crate::{
     allocations,
     gateway_process::{Gateway, GatewayProcess},
+    measure::{
+        PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US, PACED_RAMP, PACED_STREAMS,
+        UPLOAD_BYTES, UPLOAD_CONCURRENCY,
+    },
     mock, scenarios,
 };
 
-const UPLOAD_BYTES: usize = 1024 * 1024;
-const UPLOAD_CONCURRENCY: usize = 16;
 /// Requests per batch; batches repeat until the time is up.
 const UPLOAD_BATCH: usize = 64;
-
-/// Token-paced streams per batch in the `paced` scenario (TLS + HTTP/2):
-/// 50 events/s of 100 bytes for 2 s, like the gated paced scenario.
-const PACED_STREAMS: usize = 2_000;
-const PACED_EVENTS: u32 = 100;
-const PACED_INTERVAL_US: u64 = 20_000;
-const PACED_RAMP: Duration = Duration::from_millis(2_000);
 
 /// Runs `scenario` through `gateway` for `seconds` and prints the gateway's
 /// pid at the start and its cost at the end.
@@ -156,7 +151,7 @@ async fn soak_paced(process: &GatewayProcess, seconds: u64) {
             PACED_STREAMS,
             PACED_RAMP,
             PACED_EVENTS,
-            100,
+            PACED_EVENT_BYTES,
             PACED_INTERVAL_US,
         )
     };

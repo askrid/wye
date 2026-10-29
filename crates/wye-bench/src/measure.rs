@@ -8,10 +8,15 @@ mod paced;
 mod stress;
 mod upload;
 
-use upload::{
-    AGENT_UPLOAD_REQUESTS, UPLOAD_BYTES, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, agent_body,
-    measure_uploads, upload, upload_agent, upload_body,
+// The gated scenarios' sizes, for the load and allocation runs to reproduce.
+pub(crate) use paced::{
+    PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US, PACED_RAMP, PACED_STREAMS,
 };
+use upload::{
+    AGENT_UPLOAD_REQUESTS, UPLOAD_REQUESTS, agent_body, measure_uploads, upload, upload_agent,
+    upload_body,
+};
+pub(crate) use upload::{UPLOAD_BYTES, UPLOAD_CONCURRENCY};
 
 use paced::{Paced, measure_paced};
 use stress::{Cold, Stress, measure_cold, measure_stress};
