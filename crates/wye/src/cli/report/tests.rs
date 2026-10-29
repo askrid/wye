@@ -44,6 +44,19 @@ fn summarizes_sessions_classes_and_cache_misses() {
 }
 
 #[test]
+fn a_session_starts_at_its_first_cache_write() {
+    // Claude Code counts tokens, and some requests are refused, before the
+    // first request that writes the prompt cache.
+    let log = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages/count_tokens","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"not_observed"}
+{"event":"request","unix_ms":1100,"path":"/v1/messages","status":429,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"not_observed"}
+{"event":"request","unix_ms":1200,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"complete","input_tokens":1172,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}
+{"event":"request","unix_ms":1300,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"main","usage_status":"complete","input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":36820,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
+"#;
+    let out = report(log.as_bytes()).unwrap();
+    assert!(out.contains("0 unexplained, 1 session starts"), "{out}");
+}
+
+#[test]
 fn an_empty_log_reports_zeros() {
     let out = report(&b""[..]).unwrap();
     assert!(out.starts_with("0 requests in 0 sessions"), "{out}");

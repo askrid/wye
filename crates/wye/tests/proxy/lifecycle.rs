@@ -146,6 +146,7 @@ async fn wye_claude_runs_claude_against_the_gateway() {
                 .args(args)
                 .env("WYE_CLAUDE_BIN", fake)
                 .env("ANTHROPIC_API_KEY", "sk-should-be-removed")
+                .env_remove("CLAUDE_CODE_GATEWAY_HINT_HEADERS")
                 .output()
                 .unwrap()
         })
@@ -168,7 +169,11 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     );
     assert_eq!(
         std::fs::read_to_string(&seen).unwrap(),
-        format!("{gateway}|gateway-token|unset|-p fix tests\n")
+        // The URL also goes in --settings, for background sessions; the
+        // credential never goes on the command line.
+        format!(
+            "{gateway}|gateway-token|unset|--settings {{\"env\":{{\"ANTHROPIC_BASE_URL\":\"{gateway}\"}}}} -p fix tests\n"
+        )
     );
 
     // Without a reachable gateway, claude is not started.

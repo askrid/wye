@@ -3,8 +3,8 @@
 //!
 //! It answers what the gateway cannot per request: totals per Claude Code
 //! session and prompt, spend by request class, and which cache misses are
-//! regressions. A miss on a session's first request is expected; one request
-//! cannot know it is first, but the whole log can.
+//! regressions. A miss on a session's first cache write is expected; one
+//! request cannot know it is first, but the whole log can.
 
 use std::{collections::HashMap, io::BufRead};
 
@@ -145,7 +145,8 @@ struct Session {
     group: Group,
     subject: Option<String>,
     compactions: u64,
-    /// Time and cache-miss label of the earliest request seen.
+    /// Time and cache-miss label of the session's first cache write. Earlier
+    /// requests that use no cache (`count_tokens`, refusals) do not count.
     first: Option<(u64, Option<String>)>,
 }
 
@@ -222,13 +223,14 @@ impl Summary {
             if session.subject.is_none() {
                 session.subject.clone_from(&r.subject);
             }
-            if session.first.as_ref().is_none_or(|(at, _)| r.unix_ms < *at) {
+            let writes = r.cache_creation_input_tokens.is_some_and(|n| n > 0);
+            if writes && session.first.as_ref().is_none_or(|(at, _)| r.unix_ms < *at) {
                 session.first = Some((r.unix_ms, r.cache_miss.clone()));
             }
         }
     }
 
-    /// Unexplained misses that were a session's first request: expected.
+    /// Unexplained misses that were a session's first cache write: expected.
     fn session_starts(&self) -> u64 {
         self.sessions
             .values()

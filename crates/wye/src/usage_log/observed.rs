@@ -117,8 +117,10 @@ where
                     }
                 }
                 // With a known length, hyper stops polling once the body reports its end
-                // and never sees `Ready(None)`.
-                if this.inner.is_end_stream() {
+                // and never sees `Ready(None)`; and the client connection stops once the
+                // declared length is written, while an HTTP/2 upstream may still have its
+                // end-of-stream frame to send.
+                if this.inner.is_end_stream() || this.inner.size_hint().exact() == Some(0) {
                     this.outcome = Outcome::Completed;
                 }
             }

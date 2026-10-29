@@ -119,7 +119,7 @@ Weaknesses:
 - Few providers so far: Anthropic, Claude Platform on AWS, and Bedrock (several accounts with failover between them; API keys only, Bedrock not yet checked live), plus OpenAI Responses and Chat Completions. No Vertex yet. Codex support is built from its source and tests, not yet checked in a real Codex session.
 - Not released. The release workflow builds Linux and macOS archives from a tag, but no version and no image is published yet. That hurts "easy to use" more than any missing feature.
 - No cumulative limits, by design: budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
-- Little real-world validation: one partial real Claude Code session, no production deployment, and numbers from one laptop against a mock.
+- Little real-world validation: Claude Code sessions on one developer's subscription since 2026-10-30, none with an API key, no production deployment, and numbers from one laptop against a mock.
 - Ongoing upkeep: Claude Code's gateway contract changes per release, and upgrade checks need a table of each model's breaking changes.
 
 ## Moat
