@@ -100,4 +100,11 @@ pub(crate) fn splice_chunks(
         }
         start = end;
     }
+    // An empty span at the very end (failover's sent bytes ending inside
+    // `"model":""`): the value goes last.
+    if start == span.start
+        && let Some(value) = value.take()
+    {
+        push(value);
+    }
 }

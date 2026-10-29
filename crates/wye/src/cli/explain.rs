@@ -80,6 +80,8 @@ pub fn explain(
         upgrade_issues: Vec::new(),
         upstream: None,
     };
+    // The server matches the path; the query string is forwarded.
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
     let Some(endpoint) = api::endpoint(path) else {
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
     };
@@ -95,6 +97,8 @@ pub fn explain(
     };
     let api = endpoint.api;
     out.step(format!("endpoint: POST {path}"));
+    // Chat Completions carries no session header: the server never sees one.
+    let session = session.filter(|_| api.session_header().is_some());
 
     let mut identity = None;
     match &config.auth {
@@ -176,8 +180,13 @@ pub fn explain(
                 .into(),
         );
     } else {
+        // The server holds the body until its model is read, decides on what
+        // it knows then, and checks the rest as it streams; explain reads the
+        // file the same way, as if the hold ended right after the model.
         let mut scanner = PolicyScanner::for_api(api);
-        scanner.feed(body);
+        let held = held_len(api, body);
+        let (start, rest) = body.split_at(held);
+        scanner.feed(start);
         let mut requested = match scanner.finish() {
             Ok(m) => m.to_owned(),
             Err(e) => return out.refuse(400, "invalid_request_error", e.to_string()),
@@ -205,6 +214,22 @@ pub fn explain(
                 "permission_error",
                 format!("this credential may not use the model {sent:?}"),
             );
+        }
+        // A value is final at the hold; a missing field only at the end.
+        if let Some(limit) = token_limit
+            && (scanner.max_output_tokens().is_some() || rest.is_empty())
+            && let Some(refusal) = TokenLimitError::check(api, limit, scanner.max_output_tokens())
+        {
+            return out.refuse(403, "permission_error", refusal.to_string());
+        }
+        // The rest is checked only for permissions and ceilings, not for an
+        // alias or a provider's model id alone. A refusal there aborts the
+        // upstream request mid-body, with the same answer.
+        if configured.is_some() || granted.is_some() || token_limit.is_some() {
+            scanner.feed(rest);
+            if let Some(e) = scanner.error() {
+                return out.refuse(400, "invalid_request_error", e.to_string());
+            }
         }
         if let Some(limit) = token_limit {
             let requested = scanner.max_output_tokens();
@@ -361,6 +386,18 @@ pub fn explain(
     }
     out.step("decision: forward".into());
     out
+}
+
+/// Bytes of `body` through the end of its top-level `model` value, where
+/// the server's hold ends; the whole body when there is none to find.
+fn held_len(api: Api, body: &[u8]) -> usize {
+    let mut probe = PolicyScanner::for_api(api);
+    probe.feed(body);
+    probe
+        .model_span()
+        .and_then(|span| usize::try_from(span.end + 1).ok())
+        .filter(|&end| end <= body.len())
+        .unwrap_or(body.len())
 }
 
 #[cfg(test)]

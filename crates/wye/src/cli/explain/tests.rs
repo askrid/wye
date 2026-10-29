@@ -434,3 +434,69 @@ fn shows_the_price_that_applies_at_the_upstream() {
         "{unpriced}"
     );
 }
+
+#[test]
+fn reads_the_body_in_the_servers_order() {
+    let aliased = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+         [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
+    )
+    .unwrap();
+    let anonymous = |path: &str, body: &[u8]| {
+        explain(&aliased, path, Credential::None, None, body, NOW, &[]).refused
+    };
+    // With an alias alone the server reads only to the model: the provider
+    // answers the rest.
+    let late_error = br#"{"model":"coding","max_tokens":4096.0,"messages":[]}"#;
+    assert_eq!(anonymous("/v1/messages", late_error), None);
+    // The query string Claude Code sends is not part of the path.
+    assert_eq!(
+        anonymous("/v1/messages?beta=true", br#"{"model":"m"}"#),
+        None
+    );
+
+    // Under permissions, the model is decided first; the rest streams after.
+    let key = wye_testkit::ed25519_keypair();
+    let config = config(&key, "");
+    let verifier = verifier(&config);
+    let t = token(&key, Some(&["claude-haiku-*"]));
+    let status = |body: &[u8]| {
+        let credential = Credential::Token(&t, &verifier);
+        explain(&config, "/v1/messages", credential, None, body, NOW, &[])
+            .refused
+            .map(|(status, ..)| status)
+    };
+    assert_eq!(
+        status(br#"{"model":"claude-opus-5-5","max_tokens":4096.0}"#),
+        Some(403)
+    );
+    assert_eq!(
+        status(br#"{"model":"claude-haiku-4-5","max_tokens":4096.0}"#),
+        Some(400)
+    );
+}
+
+#[test]
+fn chat_completions_carries_no_session_to_route_by() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.openai]\n\
+         [[routes.openai.upstreams]]\nid = \"a\"\nbase_url = \"https://api.openai.com\"\napi_key_env = \"A\"\n\
+         [[routes.openai.upstreams]]\nid = \"b\"\nbase_url = \"https://api.openai.com\"\napi_key_env = \"B\"\n",
+    )
+    .unwrap();
+    let report = explain(
+        &config,
+        "/v1/chat/completions",
+        Credential::None,
+        Some("s-1"),
+        br#"{"model":"gpt-5"}"#,
+        NOW,
+        &[],
+    )
+    .report();
+    assert!(
+        report.contains("cache_affine by nothing: no session id or credential"),
+        "{report}"
+    );
+}

@@ -154,13 +154,13 @@ impl Gateway {
                     .insert(CONTENT_LENGTH, HeaderValue::from(len + prefix.len() as u64));
             }
             info.upstream = upstream.id.clone();
-            // Prompt hashes and upgrade checks read the body once, on the first attempt.
-            let first = info.failovers.is_empty();
+            // Prompt hashes and upgrade checks read the body once: on the first
+            // attempt that sends it whole (a resend replays it from the start).
             let result = upstream
                 .forward(
                     Request::from_parts(attempt, body),
-                    info.prompt.clone().filter(|_| first),
-                    info.upgrade.clone().filter(|_| first),
+                    info.prompt.clone().filter(|slot| slot.get().is_none()),
+                    info.upgrade.clone().filter(|slot| slot.get().is_none()),
                 )
                 .await;
             let next = order.peek().and_then(|&i| route.upstreams.get(i));
