@@ -320,11 +320,13 @@ async fn write_records<W>(
     if let Some((mut batch, metrics)) = otlp {
         batch.flush();
         export_metrics(&batch, &metrics);
-        let otlp_dropped = batch.dropped();
+        let otlp_lost = batch.lost();
         drop(batch);
         if let Some(exporter) = exporter {
             let _ = exporter.await;
         }
+        // After the exporter: the last exports' failures count too.
+        let otlp_dropped = otlp_lost.load(Ordering::Relaxed);
         if otlp_dropped > 0 {
             lost.push(format!(
                 "{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n"
