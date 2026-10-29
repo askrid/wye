@@ -1,10 +1,16 @@
-//! Regression gate: `compare` and `adopt-new`.
+//! Regression gate: `compare`, and `median` to merge alternating rounds.
+
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use crate::stats;
+
 /// Gated metrics as (name, relative tolerance, absolute tolerance). Lower is
 /// better for all of them. Tolerances come from the spread of repeated runs of
-/// unchanged code on the baseline machine.
+/// unchanged code on the development laptop; the SSE time-to-first-byte and
+/// per-event p50s, cold connections, and the stalled-client p99 from eight A/A
+/// comparisons of the alternating-rounds gate (`docs/research.md`).
 ///
 /// Reported but not gated: p99 time to first byte (swung from -521 to 1694 µs
 /// between identical runs; in the paced scenario it is dominated by connection
@@ -15,8 +21,8 @@ const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),
     ("unary_added_p99_us", 0.50, 400.0),
-    ("sse_ttfb_added_p50_us", 0.40, 100.0),
-    ("sse_event_added_p50_us", 0.20, 40.0),
+    ("sse_ttfb_added_p50_us", 0.40, 300.0),
+    ("sse_event_added_p50_us", 0.20, 160.0),
     ("sse_event_added_p99_us", 0.50, 150.0),
     ("throughput_cpu_ms_per_mb", 0.12, 0.05),
     ("idle_rss_kb_per_stream", 0.10, 2.0),
@@ -33,7 +39,7 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_unary_cpu_us_per_request", 0.25, 10.0),
     ("auth_unary_cpu_us_per_request", 0.20, 10.0),
     ("auth_unary_added_p50_us", 0.20, 40.0),
-    ("auth_sse_ttfb_added_p50_us", 0.40, 100.0),
+    ("auth_sse_ttfb_added_p50_us", 0.40, 350.0),
     ("auth_unary_failed_requests", 0.0, 0.0),
     // Heap allocations (alloc-stats build). Nearly deterministic, so the
     // limits catch one extra allocation per request, stream, or event.
@@ -98,7 +104,7 @@ const GATES: &[(&str, f64, f64)] = &[
     ("openai_sse_cpu_us_per_event", 0.25, 0.5),
     ("openai_unary_cpu_us_per_request", 0.20, 10.0),
     ("openai_unary_added_p50_us", 0.20, 40.0),
-    ("openai_sse_ttfb_added_p50_us", 0.40, 100.0),
+    ("openai_sse_ttfb_added_p50_us", 0.40, 350.0),
     ("openai_unary_failed_requests", 0.0, 0.0),
     // A Claude route to Bedrock: every request held until its model and the
     // model id rewritten (`anthropic.` prefix).
@@ -135,11 +141,11 @@ const GATES: &[(&str, f64, f64)] = &[
     // that gate only catches connections set up one after another. Stalled
     // clients: memory per stream is the precise signal (default HTTP/2
     // windows: 3.3 MB, and other streams failed).
-    ("tls_cold_unary_added_p50_us", 1.50, 5_000.0),
+    ("tls_cold_unary_added_p50_us", 1.50, 7_000.0),
     ("tls_mixed_event_added_p50_us", 0.50, 1_000.0),
     ("tls_mixed_event_added_p99_us", 0.50, 2_000.0),
     ("tls_mixed_upload_added_p50_us", 0.50, 1_000.0),
-    ("tls_stalled_event_added_p99_us", 0.50, 2_000.0),
+    ("tls_stalled_event_added_p99_us", 0.50, 3_000.0),
     ("tls_stalled_rss_kb_per_stream", 0.20, 200.0),
     ("tls_cold_failed_requests", 0.0, 0.0),
     ("tls_stress_failed_requests", 0.0, 0.0),
@@ -162,37 +168,40 @@ pub struct Scope {
     /// empty enforces every gate. The others are still compared, and read
     /// `report` instead of `REGRESSED` past their limit.
     pub only: Vec<String>,
-    /// A metric the baseline lacks passes as `new` instead of failing: the
-    /// baseline is another commit's run, which may predate the metric.
+    /// Name patterns of metrics allowed to regress, for an approved tradeoff:
+    /// they read `accepted` instead of `REGRESSED` past their limit.
+    pub accept: Vec<String>,
+    /// A metric the reference lacks passes as `new` instead of failing: the
+    /// reference is another commit's run, which may predate the metric.
     pub allow_new: bool,
 }
 
 impl Scope {
     fn enforces(&self, name: &str) -> bool {
-        self.only.is_empty()
-            || self
-                .only
-                .iter()
-                .any(|p| match (p.strip_prefix('*'), p.strip_suffix('*')) {
-                    (Some(suffix), _) => name.ends_with(suffix),
-                    (None, Some(prefix)) => name.starts_with(prefix),
-                    (None, None) => name == p,
-                })
+        (self.only.is_empty() || matches(&self.only, name)) && !matches(&self.accept, name)
     }
+}
+
+fn matches(patterns: &[String], name: &str) -> bool {
+    patterns
+        .iter()
+        .any(|p| match (p.strip_prefix('*'), p.strip_suffix('*')) {
+            (Some(suffix), _) => name.ends_with(suffix),
+            (None, Some(prefix)) => name.starts_with(prefix),
+            (None, None) => name == p,
+        })
 }
 
 /// Prints a comparison table; returns false if any enforced metric
 /// regressed or is missing.
-pub fn compare(baseline: &str, current: &str, scope: &Scope) -> bool {
-    let (base, cur) = (load(baseline), load(current));
+pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
+    let (base, cur) = (load(reference), load(current));
     if base["machine"] != cur["machine"] {
-        eprintln!(
-            "warning: baseline was recorded on a different machine; comparison is unreliable"
-        );
+        eprintln!("warning: the reference ran on a different machine; comparison is unreliable");
     }
     println!(
         "{:36} {:>10} {:>10} {:>10}  result",
-        "metric", "baseline", "current", "limit"
+        "metric", "reference", "current", "limit"
     );
     let mut ok = true;
     for &(name, rel, abs) in GATES {
@@ -221,6 +230,7 @@ pub fn compare(baseline: &str, current: &str, scope: &Scope) -> bool {
             match (pass, enforced) {
                 (true, _) => "ok",
                 (false, true) => "REGRESSED",
+                (false, false) if matches(&scope.accept, name) => "accepted",
                 (false, false) => "report",
             }
         );
@@ -228,25 +238,27 @@ pub fn compare(baseline: &str, current: &str, scope: &Scope) -> bool {
     ok
 }
 
-/// Copies metrics that exist in `current` but not in `baseline` into the baseline.
-///
-/// Used when a metric is added: existing baseline values stay untouched, so
-/// adding a metric never loosens an existing gate.
-pub fn adopt_new(baseline: &str, current: &str) {
-    let mut base = load(baseline);
-    let cur = load(current);
-    let metrics = base["metrics"].as_object_mut().unwrap();
-    for (name, value) in cur["metrics"].as_object().unwrap() {
-        if !metrics.contains_key(name) {
-            println!("adopted {name} = {value}");
-            metrics.insert(name.clone(), value.clone());
-        }
-    }
-    std::fs::write(
-        baseline,
-        serde_json::to_string_pretty(&base).unwrap() + "\n",
-    )
-    .unwrap();
+/// Writes to `out` the report of `runs` (results of one `wye-bench run`
+/// each) with the per-metric median: rounds alternated with another binary
+/// merge as one run of `--repeat` would.
+pub fn median(out: &str, runs: &[&str]) {
+    let reports: Vec<Value> = runs.iter().map(|path| load(path)).collect();
+    let metrics: Vec<BTreeMap<String, f64>> = reports
+        .iter()
+        .map(|report| {
+            report["metrics"]
+                .as_object()
+                .unwrap()
+                .iter()
+                // `null`: a gateway produced no samples.
+                .map(|(name, value)| (name.clone(), value.as_f64().unwrap_or(f64::NAN)))
+                .collect()
+        })
+        .collect();
+    let mut report = reports[0].clone();
+    report["repeat"] = runs.len().into();
+    report["metrics"] = serde_json::to_value(stats::median(&metrics)).unwrap();
+    std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
 }
 
 fn load(path: &str) -> Value {
@@ -269,12 +281,19 @@ mod tests {
                 "unary_failed_requests".into(),
             ],
             allow_new: true,
+            ..Scope::default()
         };
         assert!(ci.enforces("alloc_unary_per_request"));
         assert!(ci.enforces("tls_upload_failed_requests"));
         assert!(ci.enforces("unary_failed_requests"));
         assert!(!ci.enforces("unary_added_p50_us"));
         assert!(!ci.enforces("tls_paced_failed_streams"));
+        let tradeoff = Scope {
+            accept: vec!["unary_added_*".into()],
+            ..Scope::default()
+        };
+        assert!(!tradeoff.enforces("unary_added_p50_us"));
+        assert!(tradeoff.enforces("alloc_unary_per_request"));
     }
 
     #[test]
@@ -305,15 +324,23 @@ mod tests {
         let scope = |only: &[&str], allow_new| Scope {
             only: only.iter().map(|s| (*s).to_owned()).collect(),
             allow_new,
+            ..Scope::default()
         };
         // Latency is report-only and the new metric passes; gates outside the
         // scope are missing from this fixture but not enforced.
         let fixture = ["alloc_unary_per_request", "bedrock_unary_failed_requests"];
         assert!(compare(&base, &slower, &scope(&fixture, true)));
-        // Without --allow-new, the metric the baseline lacks fails.
+        // Without --allow-new, the metric the reference lacks fails.
         assert!(!compare(&base, &slower, &scope(&fixture, false)));
-        // The full gate fails on the latency regression.
+        // The full gate fails on the latency regression, unless it is accepted.
         assert!(!compare(&base, &slower, &Scope::default()));
+        let latency = ["unary_added_p50_us", "alloc_unary_per_request"];
+        assert!(!compare(&base, &slower, &scope(&latency, false)));
+        let accepted = Scope {
+            accept: vec!["unary_added_p50_us".into()],
+            ..scope(&latency, false)
+        };
+        assert!(compare(&base, &slower, &accepted));
         let heavier = write(
             "heavier.json",
             serde_json::json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 22.0}),
@@ -323,6 +350,35 @@ mod tests {
             &heavier,
             &scope(&["alloc_unary_per_request"], true)
         ));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn median_merges_rounds_into_one_report() {
+        let dir = std::env::temp_dir().join(format!("wye-bench-median-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rounds: Vec<String> = [(3.0, Some(0.0)), (1.0, None), (2.0, Some(0.0))]
+            .iter()
+            .enumerate()
+            .map(|(i, (latency, failed))| {
+                let path = dir.join(format!("round-{i}.json")).display().to_string();
+                let report = serde_json::json!({
+                    "machine": {"os": "test"},
+                    "repeat": 1,
+                    "metrics": {"unary_added_p50_us": latency, "unary_failed_requests": failed},
+                });
+                std::fs::write(&path, report.to_string()).unwrap();
+                path
+            })
+            .collect();
+        let out = dir.join("median.json").display().to_string();
+        median(&out, &rounds.iter().map(String::as_str).collect::<Vec<_>>());
+        let merged = load(&out);
+        assert_eq!(merged["machine"]["os"], "test");
+        assert_eq!(merged["repeat"], 3);
+        assert_eq!(merged["metrics"]["unary_added_p50_us"], 2.0);
+        // A round without samples sorts last, like a slow one.
+        assert_eq!(merged["metrics"]["unary_failed_requests"], 0.0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
