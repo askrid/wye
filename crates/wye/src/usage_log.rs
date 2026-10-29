@@ -316,7 +316,14 @@ async fn write_records<W>(
         }
         buf.clear();
     }
-    let mut lost = Vec::new();
+    // The log's own losses, written before the exporter's last exports,
+    // which a slow collector can hold past shutdown's flush.
+    let count = dropped.load(Ordering::Relaxed);
+    if count > 0 {
+        let line = format!("{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n");
+        let _ = out.write_all(line.as_bytes()).await;
+        let _ = out.flush().await;
+    }
     if let Some((mut batch, metrics)) = otlp {
         batch.flush();
         export_metrics(&batch, &metrics);
@@ -328,19 +335,9 @@ async fn write_records<W>(
         // After the exporter: the last exports' failures count too.
         let otlp_dropped = otlp_lost.load(Ordering::Relaxed);
         if otlp_dropped > 0 {
-            lost.push(format!(
-                "{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n"
-            ));
+            let line = format!("{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n");
+            let _ = out.write_all(line.as_bytes()).await;
         }
-    }
-    let count = dropped.load(Ordering::Relaxed);
-    if count > 0 {
-        lost.push(format!(
-            "{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n"
-        ));
-    }
-    for line in lost {
-        let _ = out.write_all(line.as_bytes()).await;
     }
     let _ = out.flush().await;
 }
