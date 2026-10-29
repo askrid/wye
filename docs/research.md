@@ -37,7 +37,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 
 ## Benchmarks
 
-**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses), `bedrock_`, `failover_`, and `refused_` ([development.md](development.md#benchmark) lists what each runs). An allocation-counting build adds `alloc_`. The commit gate compares every commit with `bench/baseline.json` ([development.md](development.md#commit-gate)). Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
+**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses), `bedrock_`, `failover_`, and `refused_` ([development.md](development.md#benchmark) lists what each runs). An allocation-counting build adds `alloc_`. The commit gate runs every commit and its parent in alternating rounds and compares the medians ([development.md](development.md#commit-gate)); `bench/baseline.json` records the numbers below. Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
@@ -227,6 +227,37 @@ The suite measures the gateway's own cost under agent-shaped load; each part ear
 | LiteLLM | Keep: the incumbent |
 
 Licenses, versions, and Claude Code support of each are to verify before a run; results go in this file with their configurations.
+
+### Gate method: the parent in alternating rounds
+
+Adopted 2026-10-29. Until then the gate compared each commit with `bench/baseline.json`, recorded once. On 2026-10-28 it failed five times in a row on `sse_ttfb_added_p50_us` (limit 387 µs) for code identical to a commit that had passed that morning. Alternating runs showed the binary that had recorded the 205 µs baseline now measuring 406 µs on the same laptop (11 days up, under load all day); after a reboot the same code measured 264–317 µs. A stored result gates the machine's state as much as the code.
+
+The gate now runs both commits in alternating rounds, the side that goes first alternating, and compares medians: the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order.
+
+| Option | Verdict | Why |
+|---|---|---|
+| The parent in alternating rounds | Adopted | Both sides share the machine's state; nothing is recorded first, so it runs on any machine. Costs a second build and twice the benchmark time |
+| Both at once ([duet benchmarking](https://arxiv.org/abs/2001.05811)) | Rejected | The paced and stress scenarios load every core: two runs at once would measure each other |
+| A cloud VM as the gate machine | Rejected | Instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). A dedicated machine stays the option for published numbers |
+| The parent's results from its own gate run | Rejected | Halves the benchmark but brings the time gap back |
+| A fixed reference commit | Rejected for now | Catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand |
+
+The first run was in effect an A/A run: it only changed the harness, so both sides ran the same gateway code. Across the 69 gated metrics both sides measured, the median difference was 3.8%. The largest were on small latency metrics (`auth_sse_ttfb_added_p50_us` +68%, `tls_stalled_event_added_p99_us` +63%), all within their absolute floors, and allocations differed by at most 7% (uploads).
+
+Tolerances retuned 2026-10-29 from eight A/A comparisons: five runs on a quiet laptop, the gate's own first run, and both comparisons of a comment-only commit gated while the laptop was busy (load average 6-10, a virtual machine running). Each pair counts in both directions. Six gates were too tight; each absolute floor now covers the worst excess seen, plus about 25%:
+
+| Gate | Floor before | Worst excess | Floor now |
+|---|---|---|---|
+| `sse_ttfb_added_p50_us` | 100 µs | 231 µs (busy) | 300 µs |
+| `auth_sse_ttfb_added_p50_us` | 100 µs | 277 µs (busy) | 350 µs |
+| `openai_sse_ttfb_added_p50_us` | 100 µs | 260 µs (busy; 143 quiet) | 350 µs |
+| `sse_event_added_p50_us` | 40 µs | 122 µs (busy; under 20 quiet) | 160 µs |
+| `tls_cold_unary_added_p50_us` | 5 ms | 5.3 ms (busy) | 7 ms |
+| `tls_stalled_event_added_p99_us` | 2 ms | 2.0 ms (quiet) | 3 ms |
+
+The other 90 gates kept their limits. Per-event cost stays guarded by CPU per event and zero allocations per event, which the A/A runs moved by less than their tolerances.
+
+The new floors were not enough under everyday load. Gating this change itself, on identical gateway code with the laptop in normal use (load average 11), the run and its rerun failed on different metrics: `alloc_upload_bytes_per_request` (348 → 443 KB), then `tls_upload_added_p50_us` (3.3 → 6.3 ms). Load lands on a different metric each time, so a regression now counts only when the same metric fails both the run and the rerun. In both gate runs that failed twice on identical code, the two comparisons shared no metric.
 
 ### OpenAI stream scanners (micro-benchmark)
 

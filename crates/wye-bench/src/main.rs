@@ -24,8 +24,8 @@
 //!
 //! ```text
 //! wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]
-//! wye-bench compare <baseline.json> <results.json> [--only <pattern,...>] [--allow-new]
-//! wye-bench adopt-new <baseline.json> <results.json>
+//! wye-bench compare <reference.json> <results.json> [--only <pattern,...>] [--accept <pattern,...>] [--allow-new]
+//! wye-bench median <out.json> <results.json>...
 //! wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N
 //! ```
 
@@ -86,11 +86,11 @@ fn main() -> ExitCode {
                 .block_on(run::run(binary, wye_alloc, &others, out, repeat));
             ExitCode::SUCCESS
         }
-        ["compare", baseline, current, flags @ ..] => {
+        ["compare", reference, current, flags @ ..] => {
             let Some(scope) = compare_scope(flags) else {
                 return usage();
             };
-            if gate::compare(baseline, current, &scope) {
+            if gate::compare(reference, current, &scope) {
                 ExitCode::SUCCESS
             } else {
                 eprintln!("benchmark regression: do not commit this change");
@@ -124,15 +124,15 @@ fn main() -> ExitCode {
                 .block_on(load::load(gateway, scenario, seconds));
             ExitCode::SUCCESS
         }
-        ["adopt-new", baseline, current] => {
-            gate::adopt_new(baseline, current);
+        ["median", out, runs @ ..] if !runs.is_empty() => {
+            gate::median(out, runs);
             ExitCode::SUCCESS
         }
         _ => usage(),
     }
 }
 
-/// `[--only <pattern,...>] [--allow-new]` for `compare`.
+/// `[--only <pattern,...>] [--accept <pattern,...>] [--allow-new]` for `compare`.
 fn compare_scope(flags: &[&str]) -> Option<gate::Scope> {
     let mut scope = gate::Scope::default();
     let mut rest = flags;
@@ -141,6 +141,10 @@ fn compare_scope(flags: &[&str]) -> Option<gate::Scope> {
             [] => return Some(scope),
             ["--only", patterns, tail @ ..] => {
                 scope.only = patterns.split(',').map(str::to_owned).collect();
+                rest = tail;
+            }
+            ["--accept", patterns, tail @ ..] => {
+                scope.accept = patterns.split(',').map(str::to_owned).collect();
                 rest = tail;
             }
             ["--allow-new", tail @ ..] => {
@@ -155,8 +159,8 @@ fn compare_scope(flags: &[&str]) -> Option<gate::Scope> {
 fn usage() -> ExitCode {
     eprintln!(
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]\n  \
-         wye-bench compare <baseline.json> <results.json> [--only <pattern,...>] [--allow-new]\n  \
-         wye-bench adopt-new <baseline.json> <results.json>\n  \
+         wye-bench compare <reference.json> <results.json> [--only <pattern,...>] [--accept <pattern,...>] [--allow-new]\n  \
+         wye-bench median <out.json> <results.json>...\n  \
          wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"
     );
     ExitCode::from(2)

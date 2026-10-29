@@ -1,7 +1,7 @@
 # Benchmarks a pull request against its base on the same runner. Allocation
 # counts and failed requests are gated (they do not depend on the machine);
 # latency and CPU are reported in the job summary only. The full speed gate
-# is the local pre-commit check on the baseline machine.
+# is the local pre-commit check on a quiet machine.
 
 name: bench
 
@@ -34,5 +34,5 @@ jobs:
         with:
           workspaces: |
             . -> target
-            target/ci-bench/base -> target
+            target/reference -> target
       - run: scripts/ci-bench.sh "origin/${{ github.base_ref }}" "$GITHUB_STEP_SUMMARY"

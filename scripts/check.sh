@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Correctness and performance gate. Run before every commit (the pre-commit hook does).
 #
-#   scripts/check.sh                    fmt, clippy, tests, benchmark vs bench/baseline.json
-#   scripts/check.sh --update-baseline  same, then record the run as the new baseline
+#   scripts/check.sh   fmt, clippy, tests, then the benchmark against HEAD
 #
-# A benchmark regression fails the check. Update the baseline only for an intended,
-# reviewed tradeoff, and say why in the commit message.
+# The benchmark runs this checkout and its parent commit in alternating rounds
+# (scripts/bench-against.sh). A metric past its limit reruns the benchmark, and
+# the check fails when the same metric is past its limit again. Two variables
+# adjust it, also through the hook:
+#
+#   WYE_GATE_AGAINST=<ref>        compare with another commit: HEAD~1 when
+#                                 amending, a release to look for slow drift
+#   WYE_GATE_ACCEPT=<pattern,...> let these metrics regress, only for an
+#                                 approved tradeoff; give the numbers and the
+#                                 reason in the commit message
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-update=false
-case "${1:-}" in
-  "") ;;
-  --update-baseline) update=true ;;
-  *) echo "usage: scripts/check.sh [--update-baseline]" >&2; exit 2 ;;
-esac
+if (( $# )); then echo "usage: scripts/check.sh (no arguments; see the header)" >&2; exit 2; fi
+against=${WYE_GATE_AGAINST:-HEAD}
+accept=${WYE_GATE_ACCEPT:-}
 
 # Runs a step and reports how long it took.
 step() {
@@ -25,10 +29,14 @@ step() {
   echo "    $name: $((SECONDS - start))s"
 }
 
-# The benchmark's metric table goes to the result file, not the terminal.
-run_bench() {
-  ./target/release/wye-bench run --wye target/release/wye --out "$result" \
-    --wye-alloc target/alloc/release/wye >/dev/null
+# Prints the comparison and writes the failing metrics' names to $1; fails
+# when there are any.
+compare() {
+  ./target/release/wye-bench compare target/bench/reference.json target/bench/current.json \
+    --allow-new ${accept:+--accept "$accept"} | tee target/bench/compare.txt
+  local status=${PIPESTATUS[0]}
+  awk '$NF == "REGRESSED" || $NF == "missing" { print $1 }' target/bench/compare.txt | sort > "$1"
+  return "$status"
 }
 
 # The proxy tests and the benchmark open thousands of sockets (2,000 paced
@@ -43,23 +51,21 @@ step "build release" cargo build --release --quiet -p wye -p wye-bench
 # Allocation-counting build, in its own target dir so it never replaces the measured binary.
 step "build alloc-stats" cargo build --release --quiet -p wye --features alloc-stats --target-dir target/alloc
 
-result=target/bench/latest.json
-step bench run_bench
-
-if $update; then
-  cp "$result" bench/baseline.json
-  echo "baseline updated: bench/baseline.json"
+step bench scripts/bench-against.sh "$against" target/bench
+echo "==> compare with $against"
+if compare target/bench/failed-1.txt; then
   exit 0
 fi
-if [[ ! -f bench/baseline.json ]]; then
-  echo "no bench/baseline.json; run scripts/check.sh --update-baseline" >&2
+# Load pushes some metric past its limit now and then, a different one each
+# time; a real regression fails on the same metric again.
+echo "==> regression reported; re-running the benchmark to rule out noise"
+step bench scripts/bench-against.sh "$against" target/bench
+if compare target/bench/failed-2.txt; then
+  exit 0
+fi
+both=$(comm -12 target/bench/failed-1.txt target/bench/failed-2.txt | tr '\n' ' ')
+if [[ -n $both ]]; then
+  echo "past the limit in both runs: $both" >&2
   exit 1
 fi
-echo "==> compare with bench/baseline.json"
-if ./target/release/wye-bench compare bench/baseline.json "$result"; then
-  exit 0
-fi
-# Laptop noise can push one run past a limit. A real regression fails twice in a row.
-echo "==> regression reported; re-running the benchmark to rule out noise"
-step bench run_bench
-./target/release/wye-bench compare bench/baseline.json "$result"
+echo "==> no metric failed both runs: noise, not a regression"

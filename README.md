@@ -251,9 +251,9 @@ Tooling
 
 ## Performance
 
-Wye is meant to never be the slow part. Every commit runs a benchmark against
-a stored baseline (`scripts/check.sh`), and a change that makes Wye slower or
-heavier is not committed. The numbers below are lab numbers: one laptop (Intel
+Wye is meant to never be the slow part. Every commit is benchmarked against
+its parent, in alternating rounds on the same machine (`scripts/check.sh`), and
+a change that makes Wye slower or heavier is not committed. The numbers below are lab numbers: one laptop (Intel
 i9-9880H, macOS) against a local mock provider. They are not production
 measurements.
 
@@ -318,10 +318,10 @@ without Kubernetes, telemetry, and credential renewal.
 ```bash
 git clone https://github.com/askrid/wye && cd wye
 git config core.hooksPath .githooks   # run the full check before each commit
-scripts/check.sh                      # fmt, clippy, tests, release build, benchmark vs baseline
+scripts/check.sh                      # fmt, clippy, tests, release build, benchmark vs HEAD
 ```
 
-The check takes about four minutes, most of it the benchmark. Tests run
+The check takes about eight minutes, most of it the benchmark. Tests run
 against local mock upstreams and never call a paid API. Pull requests also
 run CI on GitHub: lints and tests on Linux and macOS, `cargo deny`, and the
 benchmark against the base branch, gating allocations and failed requests
