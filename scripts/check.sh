@@ -31,15 +31,16 @@ run_bench() {
     --wye-alloc target/alloc/release/wye >/dev/null
 }
 
+# The proxy tests and the benchmark open thousands of sockets (1000 idle
+# streams, 256 stalled clients); macOS allows 256 by default.
+if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
+
 step fmt cargo fmt --all --check
 step clippy cargo clippy --all-targets --quiet -- -D warnings
 step test cargo test --quiet
 step "build release" cargo build --release --quiet -p wye -p wye-bench
 # Allocation-counting build, in its own target dir so it never replaces the measured binary.
 step "build alloc-stats" cargo build --release --quiet -p wye --features alloc-stats --target-dir target/alloc
-
-# 1000 idle streams need several thousand file descriptors.
-if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 
 result=target/bench/latest.json
 step bench run_bench

@@ -27,6 +27,9 @@ private = { ignore = true }
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# The workspace's own crates depend on each other by path and are never
+# published, so a path dependency without a version is not a wildcard risk.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
