@@ -105,6 +105,10 @@ impl InitOptions {
             steps.push_str("  wye codex\n");
         }
         steps.push_str("  wye report usage.jsonl\n");
+        steps.push_str(
+            "To keep it running across logins: \
+             https://github.com/askrid/wye/blob/main/docs/operations.md#running-as-a-service\n",
+        );
         steps
     }
 }

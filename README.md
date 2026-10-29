@@ -337,6 +337,7 @@ helpers.
 
 ## Documentation
 
+- [docs/README.md](docs/README.md): which document answers what, and the terms they use
 - [docs/product.md](docs/product.md): scope, who it is for, strengths and weaknesses
 - [examples/wye.toml](examples/wye.toml): every configuration option
 - [docs/architecture.md](docs/architecture.md): how it works

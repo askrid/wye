@@ -41,6 +41,14 @@ fn summarizes_sessions_classes_and_cache_misses() {
     assert_eq!(row("Grep")[1..], ["1", "0", "0.0s"]);
     let session = row("session-");
     assert_eq!(session[1], "(alice)");
+    // Session bbbb has no tokens, so it is not ranked.
+    assert_eq!(
+        out.lines()
+            .filter(|l| l.trim_start().starts_with("session-"))
+            .count(),
+        1,
+        "{out}"
+    );
     assert!(out.contains("1 compactions"), "{out}");
     assert_eq!(row("prompt-1")[1], "2");
 }

@@ -106,11 +106,17 @@ impl Gateway {
         let allowed =
             model.is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
         if !allowed {
+            // The name the client sent: an alias's model stays config's business.
+            let sent = resolved
+                .as_ref()
+                .map(|(name, _)| &**name)
+                .or(held.model())
+                .unwrap_or_default();
             return Err(Box::new(error(
                 api,
                 StatusCode::FORBIDDEN,
                 "permission_error",
-                "this credential may not use the requested model",
+                &format!("this credential may not use the model {sent:?}"),
             )));
         }
         // A value is final now; a missing field only once the whole body was read.

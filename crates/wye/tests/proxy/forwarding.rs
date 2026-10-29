@@ -144,13 +144,21 @@ async fn local_endpoints_and_unknown_paths() {
         h.send(Request::get("/readyz"), "").await.status(),
         StatusCode::OK
     );
-    let res = h.send(Request::post("/v1/chat/completions"), "{}").await;
+    // An unknown path gets Anthropic's error shape.
+    let res = h.send(Request::post("/v1/unknown"), "{}").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     assert!(
         read_body(res)
             .await
             .starts_with(br#"{"type":"error","error":{"type":"not_found_error""#)
     );
+    // A known endpoint without a route gets its own API's shape, naming the
+    // section that would serve it.
+    let res = h.send(Request::post("/v1/chat/completions"), "{}").await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let body = String::from_utf8(read_body(res).await.to_vec()).unwrap();
+    assert!(body.starts_with(r#"{"error":{"#), "{body}");
+    assert!(body.contains("add [routes.openai]"), "{body}");
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
 }
 

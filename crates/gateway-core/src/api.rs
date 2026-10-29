@@ -84,11 +84,12 @@ impl Api {
         }
     }
 
-    /// The route that serves the API, as named in config.
-    pub fn route_name(self) -> &'static str {
+    /// The config sections that give this API a route, for messages that say
+    /// what to add.
+    pub fn route_sections(self) -> &'static str {
         match self {
-            Self::Messages => "claude",
-            Self::Responses | Self::ChatCompletions => "openai",
+            Self::Messages => "[upstream] or [routes.claude]",
+            Self::Responses | Self::ChatCompletions => "[routes.openai]",
         }
     }
 }
