@@ -41,43 +41,41 @@ Wye takes the opposite approach:
 
 ## Quick start
 
-Install a release (Linux and macOS, x86_64 and arm64):
-
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
-```
-
-Or take an archive from the [releases page](https://github.com/askrid/wye/releases)
-and check where it came from with
-`gh attestation verify wye-<target>.tar.xz --repo askrid/wye`. To build from
-source instead (the toolchain is pinned in `rust-toolchain.toml`):
+Build and install from source (the toolchain is pinned in
+`rust-toolchain.toml`):
 
 ```bash
 cargo install --git https://github.com/askrid/wye wye --locked
 ```
 
-With an Anthropic API key:
+Prebuilt Linux and macOS archives come with the first release, which is not
+published yet.
+
+With a claude.ai subscription (Pro or Max), Wye forwards your own Claude Code
+login, on loopback only:
 
 ```bash
-wye init                        # writes ./wye.toml and prints the next steps
-export ANTHROPIC_API_KEY=sk-ant-...
-wye doctor --config wye.toml    # checks the key, files, and endpoints
+wye init --subscription         # writes ./wye.toml and prints the next steps
 wye serve --config wye.toml 2>>usage.jsonl &
 wye claude                      # Claude Code, pointed at the gateway
 wye report usage.jsonl
 ```
 
-`wye claude` starts Claude Code with its base URL set to the gateway, and
-`wye claude --bg "task"` starts a background session that goes through it
-too. It does not touch your Claude Code settings.
-
-With a claude.ai subscription (Pro or Max) instead of an API key, Wye forwards
-your own Claude Code login, on loopback only:
+With an Anthropic API key instead:
 
 ```bash
-wye serve --config examples/subscription.toml 2>>usage.jsonl &
+wye init
+export ANTHROPIC_API_KEY=sk-ant-...
+wye doctor --config wye.toml    # checks the key, files, and endpoints
+wye serve --config wye.toml 2>>usage.jsonl &
 wye claude
 ```
+
+`wye claude` starts Claude Code with its base URL set to the gateway, and
+`wye claude --bg "task"` starts a background session that goes through it
+too. It does not touch your Claude Code settings. To keep the gateway running
+across logins, install it as a service
+([docs/operations.md](docs/operations.md#running-as-a-service)).
 
 Apps on the official SDKs only change their base URL:
 

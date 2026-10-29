@@ -68,8 +68,8 @@ impl InitOptions {
             format!("api_key_env = \"{}\"", self.anthropic_key_env)
         };
         let mut text = format!(
-            "# Written by `wye init`. Every field: examples/wye.toml in the Wye repository,\n\
-             # or docs/architecture.md#current-schema-implemented.\n\n\
+            "# Written by `wye init`. Every field, with its default and limits:\n\
+             # https://github.com/askrid/wye/blob/main/examples/wye.toml\n\n\
              [server]\nlisten = \"127.0.0.1:8080\"\n\n\
              [upstream]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
         );

@@ -30,6 +30,8 @@ fn summarizes_sessions_classes_and_cache_misses() {
             .map(str::to_owned)
             .collect::<Vec<_>>()
     };
+    // Nothing is priced, so there is no cost column.
+    assert!(!out.contains(" cost "), "{out}");
     // all: 4 requests, input 40, output 450, cache read 6000, write 5800.
     assert_eq!(row("all")[1..6], ["4", "40", "450", "6000", "5800"]);
     assert_eq!(row("all")[6], "50.7%");
