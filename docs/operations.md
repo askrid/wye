@@ -76,7 +76,7 @@ Other lines are skipped and counted. `wye serve --config wye.toml 2>>usage.jsonl
 
 ### Client wrapper
 
-**`wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program), and arguments after `--` go to Claude Code unchanged. The URL, and `CLAUDE_CODE_GATEWAY_HINT_HEADERS` when it is set, also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The credential is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its credential from [`apiKeyHelper`](#credential-renewal).
+**`wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). It also sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` unless the variable is set, so Claude Code sends the request class, prompt id, and tool times that `wye report` and the usage records use; Claude Code sends them to a custom base URL only when asked. `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program), and arguments after `--` go to Claude Code unchanged. The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The credential is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its credential from [`apiKeyHelper`](#credential-renewal).
 
 To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; rerun after pulling changes). Then run the gateway in one terminal and Claude Code in another:
 
@@ -86,7 +86,6 @@ wye init --subscription --out ~/.wye/wye.toml   # claude.ai subscription; plain 
 wye serve --config ~/.wye/wye.toml 2>>~/.wye/usage.jsonl
 
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
-export CLAUDE_CODE_GATEWAY_HINT_HEADERS=1      # request class, prompt id, tool durations
 wye claude                                     # wye claude -- --resume, etc.
 
 wye report ~/.wye/usage.jsonl                  # afterwards, or at any time
@@ -305,7 +304,7 @@ The usage record (`wye serve 2>>usage.jsonl` keeps the log; `wye report` reads i
 | `cost_usd`, `cost_status`, `pricing_version` | exact decimal string; `complete` \| `partial` \| `unknown`; `pricing.version` | With [`[pricing]`](policy.md#pricing-metadata); `cost_usd` only when a cost was computed |
 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` | counts | As the provider reports them, except that on `/v1/responses` the cached share of OpenAI's `input_tokens` is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on both APIs |
 | `request_class` | `main` \| `subagent` \| `workflow` \| `compaction` \| `auxiliary` \| `other` | Claude Code's hint header; for Codex, from `x-openai-subagent` ([mapping](architecture.md#codex-integration)) |
-| `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | Claude Code: `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`. Codex: thread ids as agent ids, the subagent kind as `agent_type`; no prompt id |
+| `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id` | tokens | Claude Code: `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, which `wye claude` sets. Codex: thread ids as agent ids, the subagent kind as `agent_type`; no prompt id |
 | `compaction`, `context_compacted` | `auto` \| `manual` \| `reactive` \| `other` | Hint headers |
 | `tool_durations` | `[{"name": "Bash", "ms": 742}]` | Tool calls since the agent's previous request; at most 32 |
 | `tool_calls` | `{"Bash": 2, "Read": 1}` | `tool_use` blocks the response started; at most 8 names, the rest under `(other)`; inputs never read |
