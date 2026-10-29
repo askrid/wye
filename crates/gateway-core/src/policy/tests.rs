@@ -118,6 +118,43 @@ fn rejects_what_it_cannot_check() {
 }
 
 #[test]
+fn reads_only_what_a_strict_json_parser_reads() {
+    // A UTF-16 body: a decoder that detects the encoding reads other keys
+    // than the bytes spell as UTF-8. Its NUL bytes are not JSON.
+    let utf16: Vec<u8> =
+        r#"{"model":"claude-opus-4-1"}"#.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    for (body, error) in [
+        (&utf16[..], PolicyError::Malformed),
+        // Lenient parsers (JSON5, Gson) read unquoted keys, comments, and
+        // single quotes.
+        (br#"{"model":"a", model:"b"}"#, PolicyError::Malformed),
+        (
+            br#"{"model":"a" /* , "model":"b" */}"#,
+            PolicyError::Malformed,
+        ),
+        (br#"{"model":"a", 'model':'b'}"#, PolicyError::Malformed),
+        // Go's encoding/json binds keys ignoring case.
+        (br#"{"model":"a","MODEL":"b"}"#, PolicyError::Repeated),
+        (
+            br#"{"model":"a","max_tokens":1,"Max_Tokens":9000}"#,
+            PolicyError::RepeatedMaxTokens,
+        ),
+        // ...and folds the Kelvin sign into `k`.
+        (
+            "{\"model\":\"a\",\"max_to\u{212A}ens\":9000}".as_bytes(),
+            PolicyError::EscapedKey,
+        ),
+    ] {
+        assert_eq!(scan(body), Err(error), "{}", String::from_utf8_lossy(body));
+    }
+    let literals = br#"{"model":"m","temperature":-1.5e+2,"stream":false,"stop":null,"x":true}"#;
+    assert_eq!(scan(literals).unwrap(), "m");
+    let mut scanner = PolicyScanner::new();
+    scanner.feed(br#"{"model":"a","MAX_TOKENS":7}"#);
+    assert_eq!(scanner.max_output_tokens(), Some(7));
+}
+
+#[test]
 fn model_is_known_right_after_its_value() {
     let body = br#"{"model":"claude-x","messages":[]}"#;
     let end = body.iter().position(|&b| b == b',').unwrap();

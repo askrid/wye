@@ -34,6 +34,8 @@ pub struct PolicyScanner {
     token_keys: &'static [&'static str],
     key_len: usize,
     key_long: bool,
+    /// The string has an escape, or (a key) a non-ASCII byte: it may read
+    /// as another key once decoded or case-folded.
     escaped: bool,
     /// The last top-level key was `model` and its value comes next.
     model_next: bool,
@@ -245,8 +247,24 @@ impl PolicyScanner {
                     self.expect_key = depth > 0 && !self.nest.is_array(depth);
                 }
                 b':' => {}
-                // A number, `true`, `false`, or `null`.
-                _ => {
+                // A number, `true`, `false`, or `null`. Any other byte is not
+                // JSON, and a provider that reads it anyway (a NUL in UTF-16
+                // text, an unquoted key, a comment) could see other keys than
+                // these.
+                b'0'..=b'9'
+                | b'-'
+                | b'+'
+                | b'.'
+                | b'E'
+                | b'a'
+                | b'e'
+                | b'f'
+                | b'l'
+                | b'n'
+                | b'r'
+                | b's'
+                | b't'
+                | b'u' => {
                     if self.nest.depth() == 1 && self.model_next {
                         self.error = Some(PolicyError::Invalid);
                         break;
@@ -267,6 +285,10 @@ impl PolicyScanner {
                             }
                         }
                     }
+                }
+                _ => {
+                    self.error = Some(PolicyError::Malformed);
+                    break;
                 }
             }
         }
@@ -289,7 +311,8 @@ impl PolicyScanner {
         if self.capture == Capture::None {
             return;
         }
-        if content.contains(&b'\\') {
+        // Go's encoding/json, for one, folds `\u212a` (the Kelvin sign) to `k`.
+        if content.contains(&b'\\') || (self.capture == Capture::Key && !content.is_ascii()) {
             self.escaped = true;
         }
         let (buf, len, long) = match self.capture {
@@ -309,17 +332,27 @@ impl PolicyScanner {
     fn end_string(&mut self) {
         match std::mem::replace(&mut self.capture, Capture::None) {
             Capture::None => {}
+            // Keys compare ignoring ASCII case: some decoders (Go's) bind
+            // `MODEL` to `model`.
             Capture::Key => {
                 if self.escaped {
                     self.error = Some(PolicyError::EscapedKey);
-                } else if !self.key_long && self.key.get(..self.key_len) == Some(b"model") {
+                } else if !self.key_long
+                    && self
+                        .key
+                        .get(..self.key_len)
+                        .is_some_and(|key| key.eq_ignore_ascii_case(b"model"))
+                {
                     if self.found {
                         self.error = Some(PolicyError::Repeated);
                     }
                     self.model_next = true;
                 } else if !self.key_long
                     && let Some(key) = self.key.get(..self.key_len)
-                    && self.token_keys.iter().any(|k| k.as_bytes() == key)
+                    && self
+                        .token_keys
+                        .iter()
+                        .any(|k| k.as_bytes().eq_ignore_ascii_case(key))
                 {
                     if self.tokens_seen {
                         self.error = Some(PolicyError::RepeatedMaxTokens);

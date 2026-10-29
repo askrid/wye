@@ -5,7 +5,10 @@
 use std::{ops::Range, sync::Arc};
 
 use gateway_core::policy;
-use http::{HeaderMap, HeaderValue, Response, StatusCode, header::CONTENT_LENGTH};
+use http::{
+    HeaderMap, HeaderValue, Response, StatusCode,
+    header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE},
+};
 use http_body_util::Limited;
 use hyper::body::{Body, Incoming};
 
@@ -61,6 +64,14 @@ impl Gateway {
             && !prefixes_model_ids
         {
             return Ok((RequestBody::new(body), None));
+        }
+        if let Some(reason) = unreadable(headers) {
+            return Err(Box::new(error(
+                api,
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "invalid_request_error",
+                reason,
+            )));
         }
         let mut held = hold_until_model(
             &mut body,
@@ -149,6 +160,35 @@ impl Gateway {
             })
             .flatten();
         Ok((RequestBody::after_hold(held, body), model_span))
+    }
+}
+
+/// Why the body cannot be read as the provider would read it: Wye checks
+/// UTF-8 JSON, and a provider that honours a content encoding or another
+/// charset could find other keys in the same bytes.
+fn unreadable(headers: &HeaderMap) -> Option<&'static str> {
+    if headers
+        .get(CONTENT_ENCODING)
+        .is_some_and(|v| !v.as_bytes().eq_ignore_ascii_case(b"identity"))
+    {
+        return Some("the request body must not be compressed");
+    }
+    let charset = headers
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| {
+            v.split(';').skip(1).find_map(|param| {
+                let (name, value) = param.split_once('=')?;
+                name.trim()
+                    .eq_ignore_ascii_case("charset")
+                    .then(|| value.trim().trim_matches('"'))
+            })
+        });
+    match charset {
+        Some(c) if !c.eq_ignore_ascii_case("utf-8") && !c.eq_ignore_ascii_case("utf8") => {
+            Some("the request body must be UTF-8 JSON")
+        }
+        _ => None,
     }
 }
 
