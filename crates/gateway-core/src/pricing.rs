@@ -135,14 +135,13 @@ impl Pricing {
         let prompt = input.saturating_add(read).saturating_add(written);
         let prices = entry.prices_for(prompt);
 
-        let split = (
-            usage.cache_creation_5m_tokens,
-            usage.cache_creation_1h_tokens,
-        );
-        // Only the total of cache writes known: priced at the higher TTL below,
-        // so the cost does not undercount, and not exact.
-        let ttl_unknown = split == (None, None) && written > 0;
-        let mut complete = usage_complete && !usage.unpriced && !ttl_unknown;
+        let five = usage.cache_creation_5m_tokens.unwrap_or(0);
+        let one = usage.cache_creation_1h_tokens.unwrap_or(0);
+        // Cache writes of unknown TTL (no 5m/1h split, or a total the split
+        // does not cover): priced at the higher TTL below, so the cost does
+        // not undercount, and not exact.
+        let unsplit = written.saturating_sub(five.saturating_add(one));
+        let mut complete = usage_complete && !usage.unpriced && unsplit == 0;
         let mut total: Option<Pico> = Some(0);
         let mut add = |tokens: u64, price: Option<Pico>| {
             if tokens == 0 {
@@ -159,13 +158,9 @@ impl Pricing {
         add(input, Some(prices.input));
         add(output, Some(prices.output));
         add(read, prices.cache_read);
-        match split {
-            (None, None) => add(written, prices.cache_write_1h.or(prices.cache_write_5m)),
-            (five, one) => {
-                add(five.unwrap_or(0), prices.cache_write_5m);
-                add(one.unwrap_or(0), prices.cache_write_1h);
-            }
-        }
+        add(five, prices.cache_write_5m);
+        add(one, prices.cache_write_1h);
+        add(unsplit, prices.cache_write_1h.or(prices.cache_write_5m));
         match total {
             None => Cost::UNKNOWN,
             Some(pico) => Cost {
