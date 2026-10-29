@@ -285,15 +285,15 @@ Implemented in M2b stage B. Moving an alias, or a client, to a new model fails i
 
 | Rule | Request field | Rejected by (dated ids included) |
 |---|---|---|
-| `thinking_disabled` | `thinking.type` `disabled` | Opus 5.5 |
-| `budget_tokens` | `thinking.type` `enabled` (manual budget) | Opus 4.7, 4.8, 5, 5.5; Sonnet 5, 5.5; Fable 5, 5.1 |
-| `forced_tool_choice` | `tool_choice.type` `any` or `tool` | Opus 5.5 |
-| `computer_tool` | `tools[].type` `computer_20250124` or `computer_20251124` | Opus 5.5 (Claude API) |
-| `prefill` | the last `messages[]` entry is an assistant turn | Opus 4.6 and later; Sonnet 5 |
-| `sampling` | `temperature`, `top_p`, or `top_k` | Sonnet 5; Opus 5.5 |
-| `system_role` | a `messages[]` entry with role `system` | Opus 4.7 |
+| `thinking_disabled` | `thinking.type` `disabled` | Opus 5.5; Sonnet 5.5; Fable 5, 5.1; Mythos 5.1 (Opus 5 and Haiku 5.5 only at effort `xhigh` or `max`, not reported) |
+| `budget_tokens` | `thinking.type` `enabled` (manual budget) | Opus 4.7, 4.8, 5, 5.5; Sonnet 5, 5.5; Haiku 5.5; Fable 5, 5.1; Mythos 5.1 |
+| `forced_tool_choice` | `tool_choice.type` `any` or `tool` | Opus 5.5; Sonnet 5.5; Fable 5.1; Mythos 5.1 |
+| `computer_tool` | `tools[].type` `computer_20250124` or `computer_20251124` | Opus 5.5, Sonnet 5.5, Haiku 5.5 on the Claude API and Google Cloud (Bedrock still takes `computer_20251124` on Opus and Sonnet 5.5) |
+| `prefill` | the last `messages[]` entry is an assistant turn | Opus 4.6 and later; Sonnet 4.6, 5, 5.5; Haiku 5.5; Fable 5, 5.1; Mythos 5.1 |
+| `sampling` | `temperature`, `top_p`, or `top_k` | Opus 4.7 and later (any value); Sonnet 5, 5.5, Haiku 5.5, Fable 5, 5.1, Mythos 5.1 (non-default values; reported for any, since the guide says to omit them) |
+| `system_role` | a `messages[]` entry with role `system` | Opus 4.6, 4.7; Sonnet 4.6, 5 (mid-conversation system messages start with Opus 4.8) |
 
-Source: Anthropic's [Opus 5.5 migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide), read 2026-10-26, and its API reference for Sonnet 5.5 and Fable (`budget_tokens`). The deprecated `output_format` is rejected without a beta header on every model, so it is not an upgrade rule.
+Source: Anthropic's model migration guide, its per-model sections (the [Opus 5.5 guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide) read 2026-10-26, the models per rule re-read 2026-10-30). Only rejections the body shows are rules: the effort level, the platform, and a parameter left at its default can make a listed model accept the request. The deprecated `output_format` is rejected without a beta header on every model, so it is not an upgrade rule.
 
 ```toml
 [upgrade_check]

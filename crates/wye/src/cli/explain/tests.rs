@@ -247,13 +247,13 @@ fn explains_upgrade_issues_per_target_without_refusing() {
         None,
         body,
         NOW,
-        &["claude-opus-4-6"],
+        &["claude-haiku-4-5"],
     );
     assert!(named.upgrade_issues.is_empty());
     assert!(
         named
             .report()
-            .contains("upgrade check: claude-opus-4-6 accepts this request")
+            .contains("upgrade check: claude-haiku-4-5 accepts this request")
     );
 }
 
