@@ -29,6 +29,16 @@ pub(super) enum VerifyKey {
 }
 
 impl VerifyKey {
+    /// Whether `other` is the same public key.
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Ed25519(a), Self::Ed25519(b)) => a.as_ref() == b.as_ref(),
+            (Self::Es256(a), Self::Es256(b)) => a.as_ref() == b.as_ref(),
+            (Self::Rs256(a), Self::Rs256(b)) => a.n == b.n && a.e == b.e,
+            _ => false,
+        }
+    }
+
     pub(super) fn ed25519(public: [u8; 32]) -> Self {
         Self::Ed25519(UnparsedPublicKey::new(&ED25519, public))
     }
@@ -153,6 +163,15 @@ impl ProviderKeys {
     /// Key ids in the set, in document order.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         self.keys.iter().map(|(kid, _)| &**kid)
+    }
+
+    /// Ids of the keys this set trusts and `old` did not: new ids, and ids
+    /// that now name another key.
+    pub fn added_since<'a>(&'a self, old: &'a Self) -> impl Iterator<Item = &'a str> {
+        self.keys
+            .iter()
+            .filter(|(kid, key)| !old.keys.iter().any(|(k, o)| k == kid && o.same(key)))
+            .map(|(kid, _)| &**kid)
     }
 }
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, UpstreamCredential},
+    config::{Config, Issuer, UpstreamCredential},
     credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
 };
@@ -181,19 +181,26 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
     let Some(auth) = &config.auth else {
         return Ok(None);
     };
-    let mut sets = Vec::with_capacity(auth.issuers.len());
-    for issuer in &auth.issuers {
-        let path = config_dir.join(&issuer.jwks_file);
-        let error = |reason: String| StartupError::JwksFile {
-            path: path.clone(),
-            reason,
-        };
-        let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
-        sets.push(ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))?);
-    }
+    let sets = auth
+        .issuers
+        .iter()
+        .map(|issuer| key_set(issuer, config_dir))
+        .collect::<Result<_, _>>()?;
     Verifier::new(auth, sets)
         .map(Some)
         .map_err(StartupError::KeySet)
+}
+
+/// An identity provider's key set, read from its `jwks_file` (relative to
+/// `config_dir`).
+pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<ProviderKeys, StartupError> {
+    let path = config_dir.join(&issuer.jwks_file);
+    let error = |reason: String| StartupError::JwksFile {
+        path: path.clone(),
+        reason,
+    };
+    let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
+    ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
 
 /// A secret file's contents without surrounding whitespace (mounted secrets

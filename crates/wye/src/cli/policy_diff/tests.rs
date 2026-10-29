@@ -191,3 +191,101 @@ fn routes_are_reported_without_widening() {
             .contains("changes: routes.claude: upstream bedrock removed")
     );
 }
+
+#[test]
+fn exposure_new_routes_and_the_operators_key_widen() {
+    let auth = own("", "");
+    let inside = config("10.0.0.5:8080", Some(&auth), "");
+    let everywhere = config("0.0.0.0:8080", Some(&auth), "");
+    assert!(
+        policy_diff(&inside, &everywhere)
+            .report()
+            .contains("widens: server.listen: 10.0.0.5:8080 -> 0.0.0.0:8080, on every interface")
+    );
+
+    let claude = config("127.0.0.1:8080", None, "");
+    let both = config(
+        "127.0.0.1:8080",
+        None,
+        "[routes.openai]
+[[routes.openai.upstreams]]
+id = \"openai\"
+provider = \"openai\"
+\
+         base_url = \"https://api.openai.com\"\napi_key_env = \"O\"\n",
+    );
+    let report = policy_diff(&claude, &both).report();
+    assert!(
+        report.contains("widens: routes.openai added: its API now reaches a provider"),
+        "{report}"
+    );
+    let report = policy_diff(&both, &claude).report();
+    assert!(
+        report.contains("narrows: routes.openai removed"),
+        "{report}"
+    );
+
+    let upstream = |credential: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
+        ))
+        .unwrap()
+    };
+    let forwarded = upstream("forward_caller_credential = true");
+    let keyed = upstream("api_key_env = \"K\"");
+    let report = policy_diff(&forwarded, &keyed).report();
+    assert!(
+        report.contains(
+            "widens: [upstream] sends the operator's key, where callers brought their own"
+        ),
+        "{report}"
+    );
+    assert!(!policy_diff(&keyed, &forwarded).widens());
+    let report = policy_diff(&keyed, &upstream("api_key_env = \"OTHER\"")).report();
+    assert!(
+        report.contains("changes: [upstream] key: $K -> $OTHER"),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_key_set_compares_by_its_keys() {
+    use wye_testkit::jwt::{IdpKey, jwks};
+
+    let (a, b, c) = (IdpKey::ed25519(), IdpKey::ed25519(), IdpKey::ed25519());
+    let dir = std::env::temp_dir().join(format!("wye-policy-diff-{}", std::process::id()));
+    let side = |name: &str, keys: &[(&IdpKey, &str)]| {
+        let at = dir.join(name);
+        std::fs::create_dir_all(&at).unwrap();
+        std::fs::write(at.join("idp.jwks"), jwks(keys)).unwrap();
+        at
+    };
+    let issuer = "[[auth.issuers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
+                  algorithm = \"EdDSA\"\njwks_file = \"idp.jwks\"\n";
+    let config = config("127.0.0.1:8080", Some(issuer), "");
+    let old = side("old", &[(&a, "a")]);
+    let added = side("added", &[(&a, "a"), (&b, "b")]);
+    let replaced = side("replaced", &[(&c, "a")]);
+
+    let mut diff = policy_diff(&config, &config);
+    diff.key_sets(&config, &old, &config, &added).unwrap();
+    assert!(
+        diff.report()
+            .contains("widens: [[auth.issuers]] https://idp.example: key b newly trusted"),
+        "{}",
+        diff.report()
+    );
+    let mut diff = policy_diff(&config, &config);
+    diff.key_sets(&config, &old, &config, &replaced).unwrap();
+    let report = diff.report();
+    assert!(report.contains("key a newly trusted"), "{report}");
+    assert!(
+        report.contains("narrows: [[auth.issuers]] https://idp.example: key a no longer trusted"),
+        "{report}"
+    );
+    let mut diff = policy_diff(&config, &config);
+    diff.key_sets(&config, &old, &config, &old).unwrap();
+    assert!(!diff.widens());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

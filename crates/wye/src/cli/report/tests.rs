@@ -110,6 +110,15 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
     assert_eq!(cost("all"), "$0.3500+");
     let unpriced = report(LOG.as_bytes()).unwrap();
     assert!(!unpriced.contains('$'), "{unpriced}");
+
+    // Records written before `[pricing]` was added are missing from the sum.
+    let mixed = format!(
+        "{}{}",
+        r#"{"event":"request","request_class":"main","cost_usd":"0.1","cost_status":"complete"}"#,
+        "\n{\"event\":\"request\",\"request_class\":\"main\",\"output_tokens\":5}\n"
+    );
+    let out = report(mixed.as_bytes()).unwrap();
+    assert!(out.contains("$0.1000+"), "{out}");
 }
 
 #[test]

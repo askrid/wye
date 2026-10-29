@@ -70,14 +70,19 @@ struct Tokens {
 
 impl Tokens {
     fn add(&mut self, r: &Record) {
-        self.input += r.input_tokens.unwrap_or(0);
-        self.output += r.output_tokens.unwrap_or(0);
-        self.cache_read += r.cache_read_input_tokens.unwrap_or(0);
-        self.cache_write += r.cache_creation_input_tokens.unwrap_or(0);
+        // Saturating: a corrupt line must not wrap the totals.
+        let add = |sum: &mut u64, n: Option<u64>| *sum = sum.saturating_add(n.unwrap_or(0));
+        add(&mut self.input, r.input_tokens);
+        add(&mut self.output, r.output_tokens);
+        add(&mut self.cache_read, r.cache_read_input_tokens);
+        add(&mut self.cache_write, r.cache_creation_input_tokens);
     }
 
     fn total(self) -> u64 {
-        self.input + self.output + self.cache_read + self.cache_write
+        self.input
+            .saturating_add(self.output)
+            .saturating_add(self.cache_read)
+            .saturating_add(self.cache_write)
     }
 
     /// Share of prompt tokens read from the cache.
@@ -97,18 +102,25 @@ struct Cost {
     pico: u64,
     /// Records with a cost status.
     priced: u64,
-    /// Some summed record was partial or unknown: the sum is a lower bound.
+    /// Some record was partial, unknown, or not priced at all while others
+    /// were: the sum is a lower bound.
     lower_bound: bool,
 }
 
 impl Cost {
     fn add(&mut self, r: &Record) {
-        let Some(status) = &r.cost_status else { return };
+        let mut tokens = Tokens::default();
+        tokens.add(r);
+        let Some(status) = &r.cost_status else {
+            // Written without `[pricing]` (before it was added, or by a
+            // replica without it): its tokens are not in the sum.
+            self.lower_bound |= tokens.total() > 0;
+            return;
+        };
         self.priced += 1;
-        self.lower_bound |= status != "complete";
-        if let Some(pico) = r.cost_usd.as_deref().and_then(parse_usd) {
-            self.pico = self.pico.saturating_add(pico);
-        }
+        let pico = r.cost_usd.as_deref().and_then(parse_usd);
+        self.lower_bound |= status != "complete" || pico.is_none();
+        self.pico = self.pico.saturating_add(pico.unwrap_or(0));
     }
 
     /// Dollars to four decimals (display only); `+` marks a lower bound.

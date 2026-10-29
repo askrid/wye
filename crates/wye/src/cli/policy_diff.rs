@@ -1,18 +1,23 @@
 //! `wye policy-diff`: what a config change does to access, for review and
 //! CI. It compares two configs offline and lists what each change widens,
 //! narrows, or only changes; a change that widens access (a model newly
-//! allowed, a raised ceiling, a new trusted signer, authentication removed,
-//! a listener beyond loopback) makes the command exit non-zero, so it can
-//! require a second review.
+//! allowed, a raised ceiling, a new trusted signer or key, authentication
+//! removed, a listener beyond loopback or on every interface, a new API
+//! route, the operator's key where callers brought their own) makes the
+//! command exit non-zero, so it can require a second review.
 //!
 //! Model patterns compare by coverage: `claude-*` covers `claude-opus-*`
 //! and `claude-opus-5-5`, so narrowing a list never reads as widening.
 
+use std::path::Path;
+
 use gateway_core::{
-    config::{Auth, Config, Issuer},
+    config::{Auth, Config, Issuer, UpstreamCredential},
     policy::ModelPattern,
     route::Route,
 };
+
+use crate::{StartupError, startup::key_set};
 
 /// The comparison, line by line.
 #[derive(Debug, Default)]
@@ -45,9 +50,42 @@ impl PolicyDiff {
         });
         out
     }
+
+    /// Adds what the identity providers' key sets change, each read from
+    /// its config's `jwks_file` relative to that config's directory: a key
+    /// newly trusted widens.
+    pub fn key_sets(
+        &mut self,
+        old: &Config,
+        old_dir: &Path,
+        new: &Config,
+        new_dir: &Path,
+    ) -> Result<(), StartupError> {
+        let (Some(old), Some(new)) = (&old.auth, &new.auth) else {
+            return Ok(());
+        };
+        for issuer in &new.issuers {
+            // A new identity provider is reported with its config.
+            let Some(before) = old.issuers.iter().find(|i| i.issuer == issuer.issuer) else {
+                continue;
+            };
+            let (was, now) = (key_set(before, old_dir)?, key_set(issuer, new_dir)?);
+            let name = &issuer.issuer;
+            for kid in now.added_since(&was) {
+                self.widens
+                    .push(format!("[[auth.issuers]] {name}: key {kid} newly trusted"));
+            }
+            for kid in was.added_since(&now) {
+                self.narrows.push(format!(
+                    "[[auth.issuers]] {name}: key {kid} no longer trusted"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
-/// Compares `old` with `new`.
+/// Compares `old` with `new`; [`PolicyDiff::key_sets`] adds the key sets.
 pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
     let mut diff = PolicyDiff::default();
     let (from, to) = (old.server.listen, new.server.listen);
@@ -55,6 +93,9 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
         diff.widens.push(format!(
             "server.listen: {from} -> {to}, reachable beyond this machine"
         ));
+    } else if to.ip().is_unspecified() && !from.ip().is_unspecified() {
+        diff.widens
+            .push(format!("server.listen: {from} -> {to}, on every interface"));
     } else if from != to {
         diff.changes.push(format!("server.listen: {from} -> {to}"));
     }
@@ -172,13 +213,13 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
 fn issuer_change(diff: &mut PolicyDiff, old: &Issuer, new: &Issuer) {
     let name = &new.issuer;
     // Which tokens verify, and whose subject they carry: review each change.
+    // The key set's keys compare in `PolicyDiff::key_sets`.
     if old.audience != new.audience
         || old.algorithm != new.algorithm
-        || old.jwks_file != new.jwks_file
         || old.subject_claim != new.subject_claim
     {
         diff.widens.push(format!(
-            "[[auth.issuers]] {name}: audience, algorithm, key set, or subject claim changed"
+            "[[auth.issuers]] {name}: audience, algorithm, or subject claim changed"
         ));
     }
     match (old.grants.is_empty(), new.grants.is_empty()) {
@@ -247,40 +288,77 @@ fn models(
     }
 }
 
-/// Where requests go: reported for review, never counted as widening.
+/// Where requests go. A route for an API that had none widens, and so does
+/// an upstream that starts sending the operator's key where callers
+/// brought their own; other changes are listed for review, since where
+/// requests go is not who may send them.
 fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Route>) {
-    let ids = |route: Option<&Route>| -> Vec<(String, String)> {
+    match (old, new) {
+        (None, Some(_)) => diff.widens.push(format!(
+            "routes.{name} added: its API now reaches a provider"
+        )),
+        (Some(_), None) => diff.narrows.push(format!(
+            "routes.{name} removed: its API is no longer served"
+        )),
+        _ => {}
+    }
+    // Where each upstream is, for the report: `[upstream]` has no id.
+    let upstreams = |route: Option<&Route>| -> Vec<(String, String, UpstreamCredential)> {
         route
             .map(|r| {
                 r.upstreams()
                     .iter()
                     .map(|u| {
                         (
-                            u.id.as_deref().unwrap_or("upstream").to_owned(),
+                            u.id.as_deref().map_or_else(
+                                || "[upstream]".to_owned(),
+                                |id| format!("routes.{name}: upstream {id}"),
+                            ),
                             format!("{}://{}{}", u.scheme, u.authority, u.path_prefix),
+                            u.credential.clone(),
                         )
                     })
                     .collect()
             })
             .unwrap_or_default()
     };
-    let (before, after) = (ids(old), ids(new));
-    for (id, url) in &after {
-        match before.iter().find(|(i, _)| i == id) {
-            None => diff
-                .changes
-                .push(format!("routes.{name}: upstream {id} added ({url})")),
-            Some((_, was)) if was != url => diff
-                .changes
-                .push(format!("routes.{name}: upstream {id}: {was} -> {url}")),
-            Some(_) => {}
+    let (before, after) = (upstreams(old), upstreams(new));
+    for (at, url, credential) in &after {
+        let Some((_, was, was_credential)) = before.iter().find(|(i, ..)| i == at) else {
+            diff.changes.push(format!("{at} added ({url})"));
+            continue;
+        };
+        if was != url {
+            diff.changes.push(format!("{at}: {was} -> {url}"));
+        }
+        match (was_credential, credential) {
+            (UpstreamCredential::ForwardCaller, UpstreamCredential::ForwardCaller) => {}
+            (UpstreamCredential::ForwardCaller, _) => diff.widens.push(format!(
+                "{at} sends the operator's key, where callers brought their own"
+            )),
+            (_, UpstreamCredential::ForwardCaller) => diff
+                .narrows
+                .push(format!("{at} forwards each caller's own credential")),
+            (a, b) if a != b => {
+                diff.changes
+                    .push(format!("{at} key: {} -> {}", key_source(a), key_source(b)))
+            }
+            _ => {}
         }
     }
-    for (id, _) in &before {
-        if !after.iter().any(|(i, _)| i == id) {
-            diff.changes
-                .push(format!("routes.{name}: upstream {id} removed"));
+    for (at, ..) in &before {
+        if !after.iter().any(|(i, ..)| i == at) {
+            diff.changes.push(format!("{at} removed"));
         }
+    }
+}
+
+/// Where an upstream's key comes from, by name.
+fn key_source(credential: &UpstreamCredential) -> String {
+    match credential {
+        UpstreamCredential::ApiKeyEnv(name) => format!("${name}"),
+        UpstreamCredential::ApiKeyFile(path) => path.display().to_string(),
+        UpstreamCredential::ForwardCaller => "the caller's own".to_owned(),
     }
 }
 
