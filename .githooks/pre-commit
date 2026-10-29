@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Blocks commits that fail correctness or regress performance. See scripts/check.sh.
-# Commits that touch only docs or bench/baseline.json skip the run.
+# Commits that touch only docs or bench/baseline.json skip the run, except
+# docs/policy.md, which a test reads.
 set -euo pipefail
-if git diff --cached --name-only | grep -qvE '^(bench/baseline\.json|.*\.md)$'; then
+# A variable, not a pipe: with pipefail, grep -q leaving early could fail
+# the pipeline and skip the gate.
+staged=$(git diff --cached --name-only)
+if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md)$' <<<"$staged" \
+  || grep -qx 'docs/policy\.md' <<<"$staged"; }; then
+  # check.sh builds the working tree: it must be what is committed.
+  if ! git diff --quiet; then
+    echo "pre-commit: unstaged changes would be benchmarked but not committed;" \
+      "stage or stash them" >&2
+    exit 1
+  fi
   exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
 fi

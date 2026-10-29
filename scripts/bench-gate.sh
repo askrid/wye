@@ -17,13 +17,18 @@ out=${2:?$usage}
 shift 2
 
 # Prints the comparison and writes the failing metrics' names to $1; fails
-# when there are any.
+# when there are any. A comparison that fails without naming a metric (a
+# panic, a bad report) ends the gate: there is no run to rerun against.
 compare() {
   local failed=$1; shift
   ./target/release/wye-bench compare "$out/reference.json" "$out/current.json" "$@" \
     | tee "$out/compare.txt"
   local status=${PIPESTATUS[0]}
   awk '$NF == "REGRESSED" || $NF == "missing" { print $1 }' "$out/compare.txt" | sort > "$failed"
+  if [[ $status -ne 0 && ! -s $failed ]]; then
+    echo "the comparison failed (exit $status) without naming a metric" >&2
+    exit 1
+  fi
   return "$status"
 }
 
