@@ -59,7 +59,7 @@ pub(crate) struct Observed<B> {
     _permit: Held,
 }
 
-impl<B> Observed<B> {
+impl<B: Body> Observed<B> {
     pub(crate) fn new(
         inner: B,
         info: RequestInfo,
@@ -77,6 +77,13 @@ impl<B> Observed<B> {
             BodyKind::Json => Some(UsageScanner::json(api)),
             BodyKind::Other => None,
         };
+        // hyper never polls a body that is already at its end (a 204, a
+        // `content-length: 0`): it is delivered with the headers.
+        let outcome = if inner.is_end_stream() {
+            Outcome::Completed
+        } else {
+            Outcome::Cancelled
+        };
         Self {
             inner,
             scanner,
@@ -85,7 +92,7 @@ impl<B> Observed<B> {
             info: Some(info),
             status,
             headers_after,
-            outcome: Outcome::Cancelled,
+            outcome,
             log,
             _permit: permit,
         }

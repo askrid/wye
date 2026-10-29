@@ -14,6 +14,16 @@ const USAGE_STREAM: &str = concat!(
 );
 
 #[tokio::test]
+async fn an_empty_response_is_completed() {
+    // hyper sends an empty body with the headers and never polls it.
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "") }))).await;
+    let res = h.send(messages(), "{}").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(read_body(res).await.is_empty());
+    assert_eq!(h.usage_record().await["outcome"], "completed");
+}
+
+#[tokio::test]
 async fn completed_stream_logs_usage_without_changing_bytes() {
     let h = Harness::api_key(Arc::new(|_| {
         Box::pin(async {

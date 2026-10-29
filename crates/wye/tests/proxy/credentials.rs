@@ -23,14 +23,19 @@ fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {
     )
 }
 
+/// An `[auth]` section trusting `key`, with `extra` lines.
+fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
+    format!(
+        "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
+         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
+        credential::encode_public_key(key.public_key().as_ref())
+    )
+}
+
 /// Gateway with `[auth]` trusting `key`, recording what the upstream receives.
 async fn harness(key: &Ed25519KeyPair) -> (Harness, mpsc::Receiver<HeaderMap>) {
     let (handler, rx) = recording(|seen| seen.headers);
-    let auth = format!(
-        "api_key_env = \"UNUSED\"\n\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
-        credential::encode_public_key(key.public_key().as_ref())
-    );
+    let auth = format!("api_key_env = \"UNUSED\"\n{}", auth_section(key, ""));
     let h = Harness::start(handler, &auth, UpstreamAuth::api_key(API_KEY).unwrap()).await;
     (h, rx)
 }
@@ -118,9 +123,8 @@ fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
 async fn body_harness(key: &Ed25519KeyPair, auth_extra: &str) -> (Harness, mpsc::Receiver<Bytes>) {
     let (handler, rx) = recording(|seen| seen.body);
     let auth = format!(
-        "api_key_env = \"UNUSED\"\n\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth_extra}\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
-        credential::encode_public_key(key.public_key().as_ref())
+        "api_key_env = \"UNUSED\"\n{}",
+        auth_section(key, auth_extra)
     );
     let h = Harness::start(handler, &auth, UpstreamAuth::api_key(API_KEY).unwrap()).await;
     (h, rx)
@@ -261,38 +265,41 @@ async fn max_tokens_above_the_stricter_limit_is_refused() {
 async fn a_late_max_tokens_above_the_limit_aborts_the_upstream_request() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "max_output_tokens = 4000").await;
-    let t = token(&key, now(), now() + 600);
-    // The client streams the body: model first, max_tokens in a later chunk.
-    let (tx, rx) = mpsc::channel::<Bytes>(2);
-    let client: Client<HttpConnector, ChannelBody> =
-        Client::builder(TokioExecutor::new()).build_http();
-    let req = Request::post(format!("http://{}/v1/messages", h.gateway))
-        .header("authorization", format!("Bearer {t}"))
-        .body(ChannelBody(rx))
-        .unwrap();
-    let response = tokio::spawn(async move { client.request(req).await });
-    tx.send(Bytes::from_static(
+    late_max_tokens_is_refused(&h, &key, &mut bodies).await;
+}
+
+#[tokio::test]
+async fn a_late_refusal_gets_the_same_answer_from_an_http2_upstream() {
+    // hyper's HTTP/2 client drops the request body's error and resets the
+    // stream; the refusal must still reach the client.
+    let key = keypair();
+    let ca = TestCa::generate();
+    let (handler, mut bodies) = recording(|seen| seen.body);
+    let auth = auth_section(&key, "max_output_tokens = 4000");
+    let h = Harness::start_tls_with(handler, &ca, true, None, &auth).await;
+    late_max_tokens_is_refused(&h, &key, &mut bodies).await;
+}
+
+/// The client streams the body, model first and max_tokens in a later
+/// chunk; the gateway refuses it and the upstream never sees it complete.
+async fn late_max_tokens_is_refused(
+    h: &Harness,
+    key: &Ed25519KeyPair,
+    bodies: &mut mpsc::Receiver<Bytes>,
+) {
+    let t = token(key, now(), now() + 600);
+    let req = messages().header("authorization", format!("Bearer {t}"));
+    let chunks: [&[u8]; 2] = [
         br#"{"model":"claude-haiku-4-5","messages":[],"#,
-    ))
-    .await
-    .unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    tx.send(Bytes::from_static(br#""max_tokens":9000}"#))
-        .await
-        .unwrap();
-    drop(tx);
-    let res = tokio::time::timeout(WAIT, response)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+        br#""max_tokens":9000}"#,
+    ];
+    let res = h.send_chunked(req, &chunks).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let text = read_body(res).await;
     assert!(
         String::from_utf8_lossy(&text).contains("max_tokens 9000"),
         "{text:?}"
     );
-    // The upstream saw the request start, never a complete body.
     assert!(
         bodies.try_recv().is_err(),
         "the upstream received a complete body"

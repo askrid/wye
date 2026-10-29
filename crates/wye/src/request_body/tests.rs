@@ -14,7 +14,7 @@ async fn holds_only_until_the_model_then_replays_everything() {
     let budget = Gauge::default();
     let parts = [r#"{"model":"m","#, r#""messages":[]"#, "}"];
     let mut client = Client::of(&parts);
-    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
+    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, None)
         .await
         .unwrap();
     assert_eq!(held.model(), Some("m"));
@@ -46,10 +46,9 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
                     .collect();
                 let budget = Gauge::default();
                 let mut client = Client::of(&parts);
-                let mut held =
-                    hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
-                        .await
-                        .unwrap();
+                let mut held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, None)
+                    .await
+                    .unwrap();
                 assert_eq!(held.splice_model(Bytes::from(to)), Some(want_delta));
                 let got = collect(RequestBody::after_hold(held, client))
                     .await
@@ -65,7 +64,7 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
 async fn a_repeated_model_later_fails_the_body() {
     let budget = Gauge::default();
     let mut client = Client::of(&[r#"{"model":"allowed","#, r#""model":"other"}"#]);
-    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
+    let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, None)
         .await
         .unwrap();
     let error = collect(RequestBody::after_hold(held, client))
@@ -85,7 +84,6 @@ async fn a_late_max_tokens_above_the_limit_fails_the_body() {
         Api::Messages,
         &Gauge::default(),
         1 << 20,
-        1 << 20,
         Some(4000),
     )
     .await
@@ -103,6 +101,35 @@ async fn a_late_max_tokens_above_the_limit_fails_the_body() {
 }
 
 #[tokio::test]
+async fn trailers_end_the_body_for_a_required_field() {
+    let mut client = Client::of(&[r#"{"model":"m","#, r#""input":[]}"#])
+        .with_trailers(std::future::ready(Some(Ok(http::HeaderMap::new()))));
+    let held = hold_until_model(
+        &mut client,
+        Api::Responses,
+        &Gauge::default(),
+        1 << 20,
+        Some(4000),
+    )
+    .await
+    .unwrap();
+    let mut body = RequestBody::after_hold(held, client);
+    // As hyper polls: nothing after the trailers.
+    let refused = loop {
+        match body.frame().await {
+            Some(Ok(frame)) if frame.is_trailers() => break false,
+            Some(Ok(_)) => {}
+            Some(Err(e)) => break e.is::<TokenLimitError>(),
+            None => break false,
+        }
+    };
+    assert!(
+        refused,
+        "a body without max_output_tokens ended with its trailers"
+    );
+}
+
+#[tokio::test]
 async fn refuses_beyond_the_budget_or_without_a_model() {
     let budget = Gauge::default();
     let _other = {
@@ -111,7 +138,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
         other
     };
     let mut client = Client::of(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
-    let error = hold_until_model(&mut client, Api::Messages, &budget, 100, 1 << 20, None)
+    let error = hold_until_model(&mut client, Api::Messages, &budget, 100, None)
         .await
         .err()
         .unwrap();
@@ -119,21 +146,17 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     assert_eq!(budget.current(), 90);
 
     let mut client = Client::of(&[r#"{"messages":[]}"#]);
-    let error = hold_until_model(
-        &mut client,
-        Api::Messages,
-        &Gauge::default(),
-        100,
-        1 << 20,
-        None,
-    )
-    .await
-    .err()
-    .unwrap();
+    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, None)
+        .await
+        .err()
+        .unwrap();
     assert!(matches!(error, HoldError::Model(PolicyError::Missing)));
 
-    let mut client = Client::of(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]);
-    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, 10, None)
+    let mut client = Limited::new(
+        Client::of(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]),
+        10,
+    );
+    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, None)
         .await
         .err()
         .unwrap();
@@ -148,7 +171,6 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
         &mut client,
         Api::Responses,
         &Gauge::default(),
-        1 << 20,
         1 << 20,
         Some(4000),
     )
@@ -175,7 +197,6 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
         Api::Responses,
         &Gauge::default(),
         1 << 20,
-        1 << 20,
         Some(4000),
     )
     .await
@@ -191,7 +212,6 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
         &mut client,
         Api::Responses,
         &Gauge::default(),
-        1 << 20,
         1 << 20,
         Some(4000),
     )

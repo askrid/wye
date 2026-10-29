@@ -200,6 +200,12 @@ where
                     } else {
                         this.keep = None;
                     }
+                } else if let Some(keep) = this.keep.as_mut()
+                    && frame.is_trailers()
+                {
+                    // The last frame: hyper polls no further. A resend leaves
+                    // the trailers out; providers read none.
+                    keep.ended = true;
                 }
             }
             Poll::Ready(None) => this.rest = None,

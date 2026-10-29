@@ -6,6 +6,7 @@ use std::{ops::Range, sync::Arc};
 
 use gateway_core::policy;
 use http::{HeaderMap, HeaderValue, Response, StatusCode, header::CONTENT_LENGTH};
+use http_body_util::Limited;
 use hyper::body::{Body, Incoming};
 
 use super::{
@@ -13,7 +14,7 @@ use super::{
     responses::{error, hold_error},
 };
 use crate::{
-    request_body::{RequestBody, TokenLimitError, hold_until_model},
+    request_body::{ClientBody, RequestBody, TokenLimitError, hold_until_model},
     usage_log::RequestInfo,
 };
 
@@ -32,11 +33,12 @@ impl Gateway {
     /// `content-length` adjusted) and checked as it streams.
     pub(super) async fn admit_body(
         &self,
-        mut body: Incoming,
+        body: Incoming,
         info: &mut RequestInfo,
         headers: &mut HeaderMap,
-    ) -> Result<(RequestBody<Incoming>, Option<ModelSpan>), Box<Response<ResBody>>> {
+    ) -> Result<(RequestBody<ClientBody>, Option<ModelSpan>), Box<Response<ResBody>>> {
         let api = info.endpoint.api;
+        let mut body = Limited::new(body, self.max_request_body_bytes);
         let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
         // The ceiling bounds generation; count_tokens generates nothing.
         let token_limit = info
@@ -65,7 +67,6 @@ impl Gateway {
             api,
             &self.held_bytes,
             self.max_held_request_bytes,
-            self.max_request_body_bytes,
             token_limit,
         )
         .await

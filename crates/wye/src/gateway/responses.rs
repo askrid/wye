@@ -29,12 +29,7 @@ pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
             e.as_str(),
         ),
         HoldError::Overloaded => overloaded(api, "gateway is holding too many request bytes"),
-        HoldError::TooLarge => error(
-            api,
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "request_too_large",
-            "request body exceeds the gateway limit",
-        ),
+        HoldError::TooLarge => too_large(api),
         HoldError::Body => error(
             api,
             StatusCode::BAD_REQUEST,
@@ -64,10 +59,24 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "invalid_request_error",
             e.as_str(),
         ),
-        ForwardError::Policy(PolicyRefusal::TokenLimit(message)) => {
-            error(api, StatusCode::FORBIDDEN, "permission_error", &message)
-        }
+        ForwardError::Policy(PolicyRefusal::TokenLimit(e)) => error(
+            api,
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            &e.to_string(),
+        ),
+        ForwardError::Policy(PolicyRefusal::TooLarge) => too_large(api),
     }
+}
+
+/// A body past `server.max_request_body_bytes`, declared or sent.
+pub(super) fn too_large(api: Api) -> Response<ResBody> {
+    error(
+        api,
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "request_too_large",
+        "request body exceeds the gateway limit",
+    )
 }
 
 /// An overload Wye generated before contacting the provider: always safe to
