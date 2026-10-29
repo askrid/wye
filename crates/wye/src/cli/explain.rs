@@ -40,7 +40,7 @@ pub struct Explanation {
     pub model: Option<String>,
     /// `(target model, rule)` for each upgrade-check issue.
     pub upgrade_issues: Vec<(String, &'static str)>,
-    /// The route upstream's id, with `[routes.claude]`.
+    /// The route upstream's id, with a route of named upstreams.
     pub upstream: Option<String>,
 }
 

@@ -15,7 +15,7 @@ A provider integration keeps needing work after it ships. Models arrive every fe
 
 A gateway can absorb the part of that churn that is not application logic, but only if it stays transparent. A gateway that translates between provider APIs adds churn of its own, because its abstraction lags every new feature. Wye passes each native API through unchanged and adds indirection only where a decision belongs to operations: the model behind a name, the provider and account behind a model, the policy around a request.
 
-Spend was part of the motivating case too: a team stopped using an AI gateway once model spend became hard to justify or control. Wye bounds spend without a ledger of its own, with per-request ceilings and cumulative limits held by the provider that bills ([policy.md](policy.md#provider-held-budgets)).
+Spend was part of the motivating case too: a team stopped using an AI gateway once model spend became hard to justify or control. Wye is designed to bound spend without a ledger of its own: per-request output-token ceilings today, and (planned) per-request cost ceilings and cumulative limits held by the provider that bills ([policy.md](policy.md#provider-held-budgets)).
 
 Performance is a requirement: the gateway must never be the bottleneck, whether in streaming without buffering, memory per idle stream, CPU per event, or cancellation. Every commit is benchmarked on these against its parent ([development.md](development.md#commit-gate)). The results so far come from one laptop against a mock upstream; there are no production measurements yet ([research.md](research.md#current-harness-and-baseline)).
 

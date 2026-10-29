@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 0.1.0 (unreleased)
 
 First public release. Wye is a working prototype: tested and benchmarked on
 one machine, used with Claude Code through a claude.ai subscription. Expect

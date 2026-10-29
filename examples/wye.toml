@@ -90,6 +90,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # OpenAI Responses and Chat Completions, for Codex (`wye codex`) and the
 # OpenAI SDKs, beside or instead of the Claude route. Clients use base URL
 # http://<gateway>/v1; the key goes upstream as Authorization: Bearer.
+# Several accounts, `select`, `weight`, and `failover` work as above.
 # [routes.openai]
 # [[routes.openai.upstreams]]
 # id = "openai"
@@ -207,7 +208,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # which requests that model would reject (a manual thinking budget, forced
 # tool_choice, prefill, ...). Report only; requests are never changed.
 # Results: upgrade_issues in usage records, wye.upgrade.issues in OTLP,
-# `wye report`, and `wye explain --target-model <model> request.json`.
+# `wye report`, and `wye explain --config wye.toml --target-model <model> request.json`.
 # [upgrade_check]
 # targets = ["claude-opus-5-5"]        # up to 16 models
 # sample_percent = 100                 # share of sessions (or clients) checked; lower it on busy fleets
