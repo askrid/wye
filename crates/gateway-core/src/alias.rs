@@ -110,7 +110,8 @@ impl Alias {
 pub struct Aliases(Box<[Alias]>);
 
 impl Aliases {
-    /// Fails on a repeated name or more than [`MAX_ALIASES`] aliases.
+    /// Fails on a repeated name, an alias that resolves to another alias's
+    /// name (resolution is one step), or more than [`MAX_ALIASES`] aliases.
     pub fn new(aliases: Vec<Alias>) -> Result<Self, AliasError> {
         if aliases.len() > MAX_ALIASES {
             return Err(AliasError("aliases: at most 256 aliases"));
@@ -118,6 +119,14 @@ impl Aliases {
         for (i, alias) in aliases.iter().enumerate() {
             if aliases.iter().take(i).any(|a| a.name == alias.name) {
                 return Err(AliasError("aliases: duplicate name"));
+            }
+            if alias
+                .models()
+                .any(|model| aliases.iter().any(|a| a.name == *model))
+            {
+                return Err(AliasError(
+                    "aliases: a model must not be another alias's name; resolution is one step",
+                ));
             }
         }
         Ok(Self(aliases.into()))
@@ -186,8 +195,13 @@ mod tests {
         assert!(Alias::new("a", "m", [rule(&["x"], "n*")]).is_err());
         let a = Alias::new("a", "m", []).unwrap();
         assert!(Aliases::new(vec![a.clone(), a.clone()]).is_err());
-        let aliases = Aliases::new(vec![a]).unwrap();
+        let aliases = Aliases::new(vec![a.clone()]).unwrap();
         assert!(aliases.get("a").is_some());
         assert!(aliases.get("m").is_none());
+        // A chain, in its model or a rollout rule's.
+        let to_a = Alias::new("b", "a", []).unwrap();
+        assert!(Aliases::new(vec![a.clone(), to_a]).is_err());
+        let rule_to_a = Alias::new("b", "m", [rule(&["x"], "a")]).unwrap();
+        assert!(Aliases::new(vec![a, rule_to_a]).is_err());
     }
 }

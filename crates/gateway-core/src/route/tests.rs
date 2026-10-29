@@ -181,3 +181,11 @@ fn failover_settings_are_validated() {
     );
     assert!(parse("select = \"random\"", &["a", "b"]).contains("ordered"));
 }
+
+#[test]
+fn the_unit_is_never_zero_or_one() {
+    for hash in [0, 1, u64::MAX >> 1, u64::MAX - 1, u64::MAX] {
+        let u = super::unit(hash);
+        assert!(u > 0.0 && u < 1.0, "{hash}: {u}");
+    }
+}

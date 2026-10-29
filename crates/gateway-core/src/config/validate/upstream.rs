@@ -1,8 +1,6 @@
 //! The upstreams: `[upstream]` or `[routes.claude]` for Anthropic Messages,
 //! and `[routes.openai]` for OpenAI Responses and Chat Completions.
 
-use std::net::IpAddr;
-
 use serde::Deserialize;
 
 use super::*;
@@ -87,6 +85,22 @@ pub(crate) fn validate_routes(
         return Err(ConfigError::Invalid(
             "set [upstream] (or [routes.claude]) for Claude, [routes.openai] for OpenAI, or both",
         ));
+    }
+    // Ids name an upstream in usage records and price entries, across routes.
+    let ids = |route: &Option<Route>| -> Vec<Box<str>> {
+        route
+            .iter()
+            .flat_map(|r| r.upstreams())
+            .filter_map(|u| u.id.clone())
+            .collect()
+    };
+    let claude_ids = ids(&claude);
+    if let Some(id) = ids(&openai).into_iter().find(|id| claude_ids.contains(id)) {
+        return Err(ConfigError::RouteUpstream {
+            route: "openai",
+            id: id.into(),
+            error: Box::new(ConfigError::Invalid("id is used by routes.claude too")),
+        });
     }
     Ok(Routes { claude, openai })
 }
@@ -311,12 +325,12 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
             }
             path => path,
         },
-        connect_timeout: secs(
+        connect_timeout: running_timer(
             raw.connect_timeout_secs
                 .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
             "upstream.connect_timeout_secs",
         )?,
-        response_header_timeout: secs(
+        response_header_timeout: running_timer(
             raw.response_header_timeout_secs
                 .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
             "upstream.response_header_timeout_secs",
@@ -330,7 +344,7 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
                 ));
             }
         },
-        stream_idle_timeout: secs(
+        stream_idle_timeout: running_timer(
             raw.stream_idle_timeout_secs
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
             "upstream.stream_idle_timeout_secs",
@@ -368,10 +382,4 @@ fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError>
         ));
     }
     Ok((scheme, authority, path_prefix))
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
