@@ -13,7 +13,7 @@ use bytes::Bytes;
 use gateway_core::{
     alias::Aliases,
     api::{self, Api},
-    config::{Config, UpgradeCheck},
+    config::{Config, DEFAULT_SAMPLE_PERCENT, UpgradeCheck},
     credential::Verifier,
     policy::ModelPattern,
     pricing::Pricing,
@@ -163,7 +163,7 @@ impl Gateway {
             prompt_sample_percent: config
                 .cache_diagnostics
                 .as_ref()
-                .map_or(100, |d| d.sample_percent),
+                .map_or(DEFAULT_SAMPLE_PERCENT, |d| d.sample_percent),
             max_request_body_bytes: usize::try_from(config.server.max_request_body_bytes)
                 .map_err(|_| StartupError::BodyLimitTooLarge)?,
             in_flight: Gauge::default(),

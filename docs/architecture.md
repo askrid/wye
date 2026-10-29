@@ -361,6 +361,29 @@ No hot reload; changes require a restart (or rolling deploy). A config snapshot 
 | `[[aliases]]`, `[upgrade_check]` | model aliases and upgrade checks | [aliases and upgrade checks](#model-aliases-and-upgrade-checks) |
 | `[pricing]` | the price table for costs | [policy.md](policy.md#pricing-metadata) |
 
+Config defaults are the `DEFAULT_*` constants in `gateway-core/src/config.rs`; the limits a config may set (16 upstreams per route, 256 aliases, ...) are `MAX_*` constants beside their types, and `examples/wye.toml` states each.
+
+### Fixed limits
+
+Bounds operators should not need to tune are compile-time constants, each documented where it is used with its value and the measurement behind it. Changing one goes through the benchmark gate like any code change.
+
+| Constant | File | Bounds |
+|---|---|---|
+| `LANES` | `wye/src/upstream/pool.rs` | HTTP/2 connections per upstream host ([upstream connections](#upstream-connections)) |
+| `STREAM_WINDOW`, `CONNECTION_WINDOW` | `wye/src/upstream.rs` | Response bytes Wye buffers per upstream stream; the connection window is the protocol maximum |
+| `MAX_CONNECTION_BUFFER` | `wye/src/server.rs` | A client connection's read buffer, which also bounds request headers |
+| `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer, so a stalled client holds little kernel memory |
+| `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | How long a refused attempt may take to hand its body back for failover |
+| `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer task; beyond it they are dropped and counted |
+| `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting for export, one export attempt |
+| `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log.rs` | How often a partial batch and the cumulative metrics are exported |
+| `MAX_SERIES` | `wye/src/usage_log/metrics.rs` | Attribute sets per OTLP metric |
+| `LOG_FLUSH_TIMEOUT` | `wye/src/server.rs` | How long shutdown waits for the usage log |
+| `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/credential.rs`, `credential/keys.rs` | A presented credential and an identity provider's key set |
+| `MAX_USAGE_LINE_BYTES`, `MAX_TOOL_NAMES` | `gateway-core/src/usage.rs` | A usage-bearing SSE line; tool names counted per response |
+| `MAX_MODEL_BYTES` | `gateway-core/src/policy.rs` | A `model` value the policy scanner reads |
+| `MAX_TOKEN_BYTES`, `MAX_TOOL_ENTRIES` | `gateway-core/src/agent.rs` | An agent id or type from a client header; tool durations read per request |
+
 ### Target schema (illustrative, not implemented)
 
 What the planned work adds to the [current schema](#current-schema-implemented); nothing in this block exists yet.

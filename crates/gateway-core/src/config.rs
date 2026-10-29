@@ -41,6 +41,9 @@ const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
 pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
 /// Default `failover_max_held_bytes`, across all requests of a process.
 pub(crate) const DEFAULT_FAILOVER_MAX_HELD_BYTES: u64 = 256 * 1024 * 1024;
+/// Default `sample_percent` of cache diagnostics and upgrade checks: every
+/// session.
+pub const DEFAULT_SAMPLE_PERCENT: u8 = 100;
 
 /// Validated gateway configuration.
 #[derive(Debug, Clone)]
@@ -457,7 +460,7 @@ impl Config {
             .cache_diagnostics
             .map(|raw| {
                 let sample_percent = match raw.sample_percent {
-                    None => 100,
+                    None => DEFAULT_SAMPLE_PERCENT,
                     Some(p @ 1..=100) => p,
                     Some(_) => {
                         return Err(ConfigError::Percent("cache_diagnostics.sample_percent"));
