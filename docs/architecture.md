@@ -160,6 +160,7 @@ Claude Code documents what a gateway must do ([gateway compatibility guide](http
 - Gateway-generated errors use Anthropic's error JSON shape and status codes, so Claude Code's retry and recovery logic reads them as it reads upstream errors. Wye's own `529 overloaded_error` (concurrency or held-bytes limit, always before any upstream contact) carries `retry-after: 1` and `x-should-retry: true`: integer seconds at most 60, or Claude Code stops retrying.
 - Gateway sessions are not eligible for Claude Code's HIPAA configuration; regulated teams must know before adopting Wye.
 - Claude Code sends background requests to a second, smaller model unless one is pinned; model permissions must cover it or those requests fail.
+- Interactive and background sessions open with a one-token probe (`max_tokens: 1`, no tools, not streamed). With a claude.ai login behind a custom base URL, Anthropic answers it `429 rate_limit_error`, with or without Wye in the path (checked 2026-10-30), and Claude Code carries on, so one 429 per session start in the usage log is expected.
 
 The guide changes with the client. Re-run the contract tests against each targeted Claude Code release.
 

@@ -67,8 +67,9 @@ wye claude                      # Claude Code, pointed at the gateway
 wye report usage.jsonl
 ```
 
-`wye claude` starts Claude Code with its base URL set to the gateway. It does
-not touch your Claude Code settings.
+`wye claude` starts Claude Code with its base URL set to the gateway, and
+`wye claude --bg "task"` starts a background session that goes through it
+too. It does not touch your Claude Code settings.
 
 With a claude.ai subscription (Pro or Max) instead of an API key, Wye forwards
 your own Claude Code login, on loopback only:
@@ -282,7 +283,9 @@ Not checked against the real services yet:
   particular needs one live request to confirm.
 - Codex support was built from Codex's source and tests, not from a real
   session.
-- Claude Code has been run through Wye in one real session, on a subscription.
+- Claude Code runs through Wye on a claude.ai subscription (since 2026-10-30:
+  streaming, tool use, prompt caching, extended thinking, token counting,
+  background sessions); not yet with an API key.
 
 Not built yet: a published container image, Vertex AI, AWS SigV4 signing,
 per-request cost ceilings, budgets held by the provider, and reloading

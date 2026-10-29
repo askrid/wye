@@ -6,7 +6,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 
 | Milestone | State |
 |---|---|
-| M0: Claude Code stream proxy | Done and gated. Exit check partly run: one real session through subscription passthrough (2026-10-17) streamed correctly and exposed compressed responses, since fixed; the full check with an API key is open |
+| M0: Claude Code stream proxy | Done and gated. Exit check half done: the first real session through subscription passthrough (2026-10-17) exposed compressed responses, since fixed; since 2026-10-30 full sessions run through it (streaming, tool use, prompt caching, extended thinking, token counting, background sessions), which found `count_tokens` replies recorded as cancelled and background sessions bypassing `wye claude`, both fixed. The check with an API key is open |
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, stress scenarios, KrakenD, LiteLLM, and Bifrost comparisons |
 | M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5-6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Release archives for Linux and macOS from a `v*` tag (dist; first release pending). Open: published images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
 | M1b: agent-aware visibility | A1-A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
@@ -43,7 +43,7 @@ The first reviewable implementation stops after stages 1-2. Resource bounds and 
 
 Exit: a real Claude Code session, with an API key and with a claude.ai login through passthrough, works through Wye with streaming, tool use, prompt caching, extended thinking, and token counting. Loopback only. No multi-provider claim.
 
-Status: stages 1-3 are implemented and covered by integration tests against a mock upstream; the real-session exit check is partly run (see [status](#status)).
+Status: stages 1-3 are implemented and covered by integration tests against a mock upstream; the real-session exit check is half done (see [status](#status)).
 
 ### M1: team-ready Claude Code
 

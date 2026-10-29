@@ -179,6 +179,41 @@ async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     assert_eq!(record["usage_status"], "not_observed");
 }
 
+/// Anthropic's API is HTTP/2, and its `count_tokens` reply has a
+/// `content-length`; the client's HTTP/1.1 connection stops polling once that
+/// many bytes are written, so the end-of-stream frame may never be read.
+#[tokio::test]
+async fn a_body_delivered_to_its_length_is_completed_before_its_stream_ends() {
+    const COUNT: &str = r#"{"input_tokens":12}"#;
+    let ca = TestCa::generate();
+    // The senders stay alive: the upstream stream never ends.
+    let open = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = Arc::clone(&open);
+    let handler: Handler = Arc::new(move |_| {
+        let kept = Arc::clone(&kept);
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel(1);
+            tx.send(Bytes::from_static(COUNT.as_bytes())).await.unwrap();
+            kept.lock().unwrap().push(tx);
+            let mut res = Response::new(Either::Right(ChannelBody(rx)));
+            res.headers_mut()
+                .insert("content-type", "application/json".parse().unwrap());
+            res.headers_mut()
+                .insert("content-length", COUNT.len().into());
+            res
+        })
+    });
+    let h = Harness::start_tls(handler, &ca, true).await;
+    let res = h
+        .send(Request::post("/v1/messages/count_tokens"), "{}")
+        .await;
+    assert_eq!(read_body(res).await, COUNT);
+    let record = h.usage_record().await;
+    assert_eq!(record["path"], "/v1/messages/count_tokens");
+    assert_eq!(record["outcome"], "completed");
+    assert_eq!(open.lock().unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn cache_diagnostics_log_keyed_prompt_hashes() {
     const BODY: &str = r#"{"model":"claude-test","system":"be brief","tools":[{"name":"Read"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}"#;

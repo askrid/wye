@@ -2,9 +2,9 @@
 //!
 //! Nothing on disk changes, so nothing needs cleaning up: the wrapper checks
 //! that the gateway answers, points the agent at it through its environment
-//! (Claude Code) or command-line config overrides (Codex), and then replaces
-//! itself with the agent. Signals, the terminal, and the exit code are
-//! therefore the agent's own.
+//! and `--settings` (Claude Code) or command-line config overrides (Codex),
+//! and then replaces itself with the agent. Signals, the terminal, and the
+//! exit code are therefore the agent's own.
 
 use std::{ffi::OsString, process::Command};
 
@@ -16,6 +16,8 @@ const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";
 /// Sent by Codex when the gateway takes no credential: Codex needs a token,
 /// and a gateway without `[auth]` replaces it with the provider key.
 const CODEX_NO_CREDENTIAL: &str = "wye-loopback";
+/// Makes Claude Code send its request class, prompt id, and tool times.
+const HINT_HEADERS_ENV: &str = "CLAUDE_CODE_GATEWAY_HINT_HEADERS";
 
 /// The agents the wrapper can launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +44,9 @@ pub struct Launch {
     /// Claude Code's own login (subscription passthrough), or lets Codex
     /// reach a gateway without `[auth]`.
     pub credential: Option<String>,
+    /// The caller's `CLAUDE_CODE_GATEWAY_HINT_HEADERS`, passed on to
+    /// background sessions with the gateway URL.
+    pub hint_headers: Option<String>,
     /// Arguments for the agent itself.
     pub args: Vec<String>,
 }
@@ -82,6 +87,7 @@ impl Launch {
         Ok(Self {
             gateway,
             credential,
+            hint_headers: env(HINT_HEADERS_ENV),
             args: rest.iter().map(|a| (*a).to_owned()).collect(),
         })
     }
@@ -91,6 +97,18 @@ impl Launch {
         let mut command = Command::new(program.into());
         match agent {
             Agent::Claude => {
+                // Background sessions (`--bg`) are started by Claude Code's
+                // daemon, which does not inherit this environment but reads
+                // `--settings`. The credential stays out of it: other local
+                // users can read a command line.
+                let mut env = serde_json::Map::new();
+                env.insert("ANTHROPIC_BASE_URL".into(), self.gateway.clone().into());
+                if let Some(value) = &self.hint_headers {
+                    env.insert(HINT_HEADERS_ENV.into(), value.clone().into());
+                }
+                command
+                    .arg("--settings")
+                    .arg(serde_json::json!({ "env": env }).to_string());
                 command.env("ANTHROPIC_BASE_URL", &self.gateway);
                 if let Some(credential) = &self.credential {
                     command.env("ANTHROPIC_AUTH_TOKEN", credential);
@@ -215,6 +233,7 @@ mod tests {
         let launch = Launch {
             gateway: "http://gw".into(),
             credential: Some("tok".into()),
+            hint_headers: Some("1".into()),
             args: vec!["-p".into()],
         };
         let command = launch.command(Agent::Claude, "claude");
@@ -222,7 +241,15 @@ mod tests {
         assert!(envs.contains(&("ANTHROPIC_BASE_URL".as_ref(), Some("http://gw".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_AUTH_TOKEN".as_ref(), Some("tok".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_API_KEY".as_ref(), None)));
-        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-p"]);
+        // Background sessions get the URL and hint headers, never the credential.
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "--settings",
+                r#"{"env":{"ANTHROPIC_BASE_URL":"http://gw","CLAUDE_CODE_GATEWAY_HINT_HEADERS":"1"}}"#,
+                "-p"
+            ]
+        );
     }
 
     #[test]
@@ -230,6 +257,7 @@ mod tests {
         let launch = Launch {
             gateway: "http://gw:9000".into(),
             credential: None,
+            hint_headers: None,
             args: vec!["exec".into(), "fix tests".into()],
         };
         let command = launch.command(Agent::Codex, "codex");
