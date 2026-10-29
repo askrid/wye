@@ -74,6 +74,14 @@ pub(crate) fn splice_chunks(
     for chunk in chunks {
         let end = start + chunk.len() as u64;
         if end <= span.start || start >= span.end {
+            // An empty span on a chunk boundary (`"model":""` cut between
+            // its quotes) overlaps no chunk: the value goes before the
+            // first chunk past it.
+            if start >= span.start
+                && let Some(value) = value.take()
+            {
+                push(value);
+            }
             push(chunk);
         } else {
             let head = span.start.saturating_sub(start) as usize;
