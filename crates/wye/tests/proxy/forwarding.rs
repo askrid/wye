@@ -131,7 +131,8 @@ async fn oversized_body_is_rejected_before_upstream() {
 
 #[tokio::test]
 async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let (handler, mut bodies) = recording(|seen| seen.body);
+    let h = Harness::api_key(handler).await;
     // The harness allows 1024 bytes; the second chunk passes it mid-upload.
     let rest: &'static [u8] = Box::leak(vec![b' '; 1100].into_boxed_slice());
     let res = h
@@ -142,6 +143,10 @@ async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
         read_body(res)
             .await
             .starts_with(br#"{"type":"error","error":{"type":"request_too_large""#)
+    );
+    assert!(
+        bodies.try_recv().is_err(),
+        "the upstream got the body whole"
     );
 }
 

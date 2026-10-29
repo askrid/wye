@@ -274,3 +274,16 @@ data: [DONE]\n\n";
     assert_eq!(record["cache_read_input_tokens"], 10);
     assert_eq!(record["output_tokens"], 3);
 }
+
+#[tokio::test]
+async fn a_body_past_the_limit_gets_openais_error_shape() {
+    let (h, mut seen) = harness("").await;
+    // The harness allows 1024 bytes.
+    let big: &'static str =
+        Box::leak(format!(r#"{{"input":"{}"}}"#, "x".repeat(2048)).into_boxed_str());
+    let res = h.send(responses(), big).await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let body: serde_json::Value = serde_json::from_slice(&read_body(res).await).unwrap();
+    assert_eq!(body["error"]["code"], "request_too_large", "{body}");
+    assert!(seen.try_recv().is_err());
+}

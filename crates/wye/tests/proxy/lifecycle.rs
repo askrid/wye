@@ -50,6 +50,44 @@ async fn requests_beyond_the_concurrency_limit_get_an_overload_error() {
 }
 
 #[tokio::test]
+async fn requests_beyond_the_hold_budget_get_an_overload_error() {
+    // An alias makes the gateway hold each body until its model is read.
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (handler, _bodies) = recording(|seen| seen.body);
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )]);
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         max_held_request_bytes = 1024\n\
+         [upstream]\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n\
+         [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n"
+    );
+    let h = Harness::launch_config(&config, resources, hits).await;
+    // A first request holds 900 bytes, its model still to come.
+    let (tx, rx) = mpsc::channel::<Bytes>(2);
+    let client: Client<HttpConnector, ChannelBody> =
+        Client::builder(TokioExecutor::new()).build_http();
+    let held = Request::post(format!("http://{}/v1/messages", h.gateway))
+        .body(ChannelBody(rx))
+        .unwrap();
+    let _first = tokio::spawn(async move { client.request(held).await });
+    let padding = format!(r#"{{"messages":[],"pad":"{}","#, "x".repeat(880));
+    tx.send(Bytes::from(padding)).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let res = h
+        .send(messages(), r#"{"messages":[],"pad":"0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789","model":"coding"}"#)
+        .await;
+    assert_eq!(res.status().as_u16(), 529);
+    assert_eq!(res.headers()["retry-after"], "1");
+    assert_eq!(res.headers()["x-should-retry"], "true");
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
+    drop(tx);
+}
+
+#[tokio::test]
 async fn shutdown_drains_then_stops_within_the_deadline() {
     let open = Arc::default();
     let mut h = Harness::with_server_config(
@@ -242,4 +280,96 @@ fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
         String::from_utf8_lossy(&wrong.stderr),
         "wye: usage:\n  wye serve --config <path>\nall commands: `wye --help`\n"
     );
+}
+
+#[test]
+fn review_commands_exit_3_on_what_they_report() {
+    let dir = std::env::temp_dir().join(format!("wye-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, text: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path
+    };
+    let loopback = write(
+        "loopback.toml",
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+    );
+    let keyed = write(
+        "keyed.toml",
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"WYE_TEST_UNSET\"\n",
+    );
+    let request = write("request.json", r#"{"messages":[]}"#);
+    let status = |args: &[&std::ffi::OsStr]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_wye"))
+            .args(args)
+            .env_remove("WYE_TEST_UNSET")
+            .output()
+            .unwrap()
+            .status
+            .code()
+    };
+    // The operator's key where callers brought their own widens access.
+    assert_eq!(
+        status(&[
+            "policy-diff".as_ref(),
+            loopback.as_os_str(),
+            keyed.as_os_str()
+        ]),
+        Some(3)
+    );
+    assert_eq!(
+        status(&[
+            "policy-diff".as_ref(),
+            keyed.as_os_str(),
+            loopback.as_os_str()
+        ]),
+        Some(0)
+    );
+    // explain: a path no route serves is a refusal; the key is not read.
+    let explain = |path: &str| {
+        status(&[
+            "explain".as_ref(),
+            "--config".as_ref(),
+            keyed.as_os_str(),
+            "--path".as_ref(),
+            path.as_ref(),
+            request.as_os_str(),
+        ])
+    };
+    assert_eq!(explain("/v1/messages"), Some(0));
+    assert_eq!(explain("/v1/unknown"), Some(3));
+    // policy-test: a case whose expectation is wrong fails.
+    let cases = dir.join("cases");
+    std::fs::create_dir_all(&cases).unwrap();
+    std::fs::write(cases.join("wrong.json"), r#"{"model":"m"}"#).unwrap();
+    std::fs::write(cases.join("wrong.expect.toml"), "decision = \"refuse\"\n").unwrap();
+    assert_eq!(
+        status(&[
+            "policy-test".as_ref(),
+            "--config".as_ref(),
+            keyed.as_os_str(),
+            cases.as_os_str()
+        ]),
+        Some(3)
+    );
+    // The provider key is not set.
+    assert_eq!(
+        status(&["doctor".as_ref(), "--config".as_ref(), keyed.as_os_str()]),
+        Some(3)
+    );
+    let examples =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy-tests");
+    assert_eq!(
+        status(&[
+            "policy-test".as_ref(),
+            "--config".as_ref(),
+            examples.join("wye.toml").as_os_str(),
+            examples.as_os_str()
+        ]),
+        Some(0)
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
 }

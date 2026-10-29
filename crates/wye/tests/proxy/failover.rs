@@ -326,3 +326,92 @@ async fn early_refusals_over_http2_move_concurrent_uploads_on() {
     let bodies = tokio::time::timeout(WAIT, received).await.unwrap().unwrap();
     assert!(bodies.iter().all(|b| *b == body), "every body resent whole");
 }
+
+#[tokio::test]
+async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
+    use tokio::io::AsyncReadExt;
+
+    // Reads the whole request, then closes without answering: the provider
+    // may be processing it, so a resend could bill it twice.
+    let lost = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let lost_addr = lost.local_addr().unwrap();
+    tokio::spawn(async move {
+        let Ok((mut socket, _)) = lost.accept().await else {
+            return;
+        };
+        let mut request = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n @ 1..) = socket.read(&mut buf).await {
+            request.extend_from_slice(&buf[..n]);
+            if request.ends_with(BODY.as_bytes()) {
+                break;
+            }
+        }
+        drop(socket);
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let h = gateway(
+        "failover = [\"429\", \"529\", \"connect\"]",
+        &format!("http://{lost_addr}"),
+        &format!("http://{b}"),
+    )
+    .await;
+    let res = h.send(messages(), BODY).await;
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    read_body(res).await;
+    assert!(seen_b.try_recv().is_err(), "the request was sent twice");
+    assert!(h.usage_record().await.get("failovers").is_none());
+}
+
+#[tokio::test]
+async fn an_overloaded_upstream_moves_the_request_on() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (a, _seen_a) = upstream(StatusCode::from_u16(529).unwrap(), &hits).await;
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let h = gateway(
+        "failover = [\"529\"]",
+        &format!("http://{a}"),
+        &format!("http://{b}"),
+    )
+    .await;
+    let res = h.send(messages(), BODY).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
+    assert_eq!(seen_b.recv().await.unwrap(), BODY);
+    assert_eq!(
+        h.usage_record().await["failovers"],
+        serde_json::json!([{"upstream": "a", "status": 529}])
+    );
+}
+
+#[tokio::test]
+async fn when_every_upstream_refuses_the_last_refusal_is_the_answer() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+    let last: Handler = Arc::new(|_| {
+        Box::pin(async {
+            let mut res = full(StatusCode::TOO_MANY_REQUESTS, r#"{"error":"from b"}"#);
+            res.headers_mut()
+                .insert("retry-after", "7".parse().unwrap());
+            res
+        })
+    });
+    let b = spawn_upstream(last, Arc::clone(&hits), None, None).await;
+    let h = gateway(
+        "failover = [\"429\"]",
+        &format!("http://{a}"),
+        &format!("http://{b}"),
+    )
+    .await;
+    let res = h.send(messages(), BODY).await;
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(res.headers()["retry-after"], "7");
+    assert_eq!(read_body(res).await, r#"{"error":"from b"}"#);
+    let record = h.usage_record().await;
+    assert_eq!(record["upstream"], "b");
+    assert_eq!(
+        record["failovers"],
+        serde_json::json!([{"upstream": "a", "status": 429}])
+    );
+}
