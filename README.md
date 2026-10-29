@@ -71,9 +71,10 @@ wye serve --config wye.toml 2>>usage.jsonl &
 wye claude
 ```
 
-`wye claude` starts Claude Code with its base URL set to the gateway, and
-`wye claude --bg "task"` starts a background session that goes through it
-too. It does not touch your Claude Code settings. To keep the gateway running
+`wye claude` starts Claude Code with its base URL set to the gateway and its
+gateway hints on (request class, prompt id, and tool times, for the usage
+log), and `wye claude --bg "task"` starts a background session that goes
+through it too. It does not touch your Claude Code settings. To keep the gateway running
 across logins, install it as a service
 ([docs/operations.md](docs/operations.md#running-as-a-service)).
 

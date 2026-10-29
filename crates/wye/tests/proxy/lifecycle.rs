@@ -169,10 +169,10 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     );
     assert_eq!(
         std::fs::read_to_string(&seen).unwrap(),
-        // The URL also goes in --settings, for background sessions; the
+        // The URL and the hints also go in --settings, for background sessions; the
         // credential never goes on the command line.
         format!(
-            "{gateway}|gateway-token|unset|--settings {{\"env\":{{\"ANTHROPIC_BASE_URL\":\"{gateway}\"}}}} -p fix tests\n"
+            "{gateway}|gateway-token|unset|--settings {{\"env\":{{\"ANTHROPIC_BASE_URL\":\"{gateway}\",\"CLAUDE_CODE_GATEWAY_HINT_HEADERS\":\"1\"}}}} -p fix tests\n"
         )
     );
 
