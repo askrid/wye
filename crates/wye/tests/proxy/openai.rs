@@ -80,9 +80,11 @@ async fn responses_reach_openai_with_the_provider_key() {
     assert_eq!(record["agent_id"], "thread-2");
     assert_eq!(record["parent_agent_id"], "thread-1");
 
-    // No Claude route configured: Messages is not proxied.
+    // No Claude route configured: Messages is not proxied, and the 404 says why.
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let body = String::from_utf8(read_body(res).await.to_vec()).unwrap();
+    assert!(body.contains("add [upstream] or [routes.claude]"), "{body}");
 }
 
 fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Option<u64>) -> String {

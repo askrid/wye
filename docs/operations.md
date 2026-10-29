@@ -33,7 +33,14 @@ wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --sub
 
 All of these are built. `init` writes a minimal validated config for an API key or a claude.ai subscription, optionally with `[routes.openai]`, never over an existing file, and prints the next commands; `check-config` parses the config and reads the identity providers' key sets (environment secrets are not checked; `doctor` checks them). `doctor`, `explain`, `policy-test`, and `policy-diff` exit 3 when they find a problem, a refusal, a failed case, or widened access.
 
-**`wye doctor --config wye.toml`** checks what `serve` will need and says what to change, one line per check: each upstream's provider key is present (environment variable or file; never printed) and how it will be sent; a Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is; each upstream answers at its base URL (one unauthenticated `HEAD`, trusting its `ca_file`, so DNS, TCP, TLS, and HTTP are proven while no model request is made and nothing is billed); the identity providers' key sets; the cache-diagnostics hash key's length; the OTLP header variable and endpoint. Every check runs, so one pass lists every problem; exit 3 if any failed. Not checked yet: model availability per upstream.
+**`wye doctor --config wye.toml`** checks what `serve` will need and says what to change, one line per check:
+
+- Each upstream's provider key is present (environment variable or file; never printed), and how it will be sent.
+- A Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is.
+- Each upstream answers at its base URL: one unauthenticated `HEAD`, trusting its `ca_file`, proves DNS, TCP, TLS, and HTTP without a model request, so nothing is billed.
+- The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP header variable and endpoint.
+
+Every check runs, so one pass lists every problem; exit 3 if any failed. Not checked yet: model availability per upstream.
 
 **`wye explain`** prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, `max_tokens` ceiling, the route upstream with `[routes.claude]` (and whether the session id or the credential subject chose it) and the failover order, upstream URL and provider credential (by name, never value), the provider's model id (Bedrock), the `[pricing]` entry that prices the model at that upstream, and whether cache diagnostics would hash it; with `--target-model` (or `[upgrade_check]`), what each target model would reject, the fix, and the source. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. Run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) are not evaluated. With cost ceilings it will also print the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
 
@@ -51,7 +58,17 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 
 **`wye policy-diff <old> <new>`** compares two configs offline and prints what the change widens, narrows, or only changes, then exits 3 when anything widens, so CI can ask for a second review (`git show main:wye.toml > old.toml && wye policy-diff old.toml wye.toml`). Widening: authentication removed, a listener moved beyond loopback, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_credential_ttl_secs`, and a newly trusted signer (a signing key, Wye's own credentials, an identity provider, or a changed audience, algorithm, key set, or subject claim). Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows. Upstreams added, removed, or moved are listed as changes for review, not as widening: where requests go is not who may send them. Credentials are not read: a credential can only narrow what config allows.
 
-**`wye report [<usage.jsonl>]`** summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend: requests and outcomes; tokens, cache-hit rate (cache reads as a share of prompt tokens), cost (with `[pricing]`: summed exactly from `cost_usd`, `+` when it includes partial or unknown costs), request time, and tool time by request class; cache misses split into unexplained ones, session starts, compactions, and the first request after a compaction (a session's first cache write is an expected miss that one request cannot recognize, but the whole log can; `count_tokens` and refused requests before it do not count); tool calls the model requested, and calls and time Claude Code reported, by tool; requests, tokens, and cost by upstream, when records name one ([routes](architecture.md#cache-affine-routing)), and failovers by refusing upstream and reason; upgrade issues by target, rule, and client; and the ten sessions and prompts with the most tokens. Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
+**`wye report [<usage.jsonl>]`** summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend:
+
+- Requests and outcomes.
+- By request class: tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and, with `[pricing]`, cost (summed exactly from `cost_usd`, marked `+` when it includes partial or unknown costs).
+- Cache misses: unexplained ones, session starts, compactions, and the first request after a compaction. A session's first cache write is an expected miss that one request cannot recognize but the whole log can; `count_tokens` and refused requests before it do not count.
+- By tool: calls the model requested, and calls and time Claude Code reported.
+- By upstream, when records name one ([routes](architecture.md#cache-affine-routing)): requests, tokens, and cost, and failovers by refusing upstream and reason.
+- Upgrade issues by target, rule, and client.
+- The ten sessions and prompts with the most tokens.
+
+Other lines are skipped and counted. `wye serve --config wye.toml 2>usage.jsonl` keeps the log; `wye report usage.jsonl` reads it.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 

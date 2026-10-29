@@ -132,6 +132,9 @@ pub(super) fn render(s: &Summary) -> String {
             .cmp(&a.1.group.tokens.total())
             .then(a.0.cmp(b.0))
     });
+    // A session without tokens (a refused probe, a count) has no place in a
+    // ranking by tokens.
+    sessions.retain(|(_, session)| session.group.tokens.total() > 0);
     for (id, session) in sessions.iter().take(TOP) {
         let label = match &session.subject {
             Some(subject) => format!("{} ({subject})", short(id)),

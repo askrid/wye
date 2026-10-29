@@ -1,4 +1,4 @@
-//! Concurrency limit and two-phase shutdown.
+//! Concurrency limit, two-phase shutdown, and the binary: `wye claude`, `--help`, `--version`.
 
 use super::harness::*;
 

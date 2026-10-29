@@ -67,18 +67,21 @@ fn explains_forwarding_and_each_refusal() {
 
     let sonnet = br#"{"model":"claude-sonnet-4-5"}"#;
     let refused = |e: Explanation| e.refused.map(|(status, kind, _)| (status, kind));
-    assert_eq!(
-        refused(explain(
-            &config,
-            "/v1/messages",
-            Credential::Token(&t, &verifier(&config)),
-            None,
-            sonnet,
-            NOW,
-            &[]
-        )),
-        Some((403, "permission_error"))
+    let forbidden = explain(
+        &config,
+        "/v1/messages",
+        Credential::Token(&t, &verifier(&config)),
+        None,
+        sonnet,
+        NOW,
+        &[],
     );
+    // The server's message: the model as the client sent it.
+    assert_eq!(
+        forbidden.refused.as_ref().map(|r| r.2.as_str()),
+        Some("this credential may not use the model \"claude-sonnet-4-5\"")
+    );
+    assert_eq!(refused(forbidden), Some((403, "permission_error")));
     assert_eq!(
         refused(explain(
             &config,
@@ -388,7 +391,7 @@ fn explains_responses_on_the_openai_route() {
     );
     assert_eq!(
         no_claude.refused.as_ref().map(|r| r.2.as_str()),
-        Some("/v1/messages is not proxied: no [routes.claude]")
+        Some("no route serves /v1/messages: add [upstream] or [routes.claude]")
     );
 }
 

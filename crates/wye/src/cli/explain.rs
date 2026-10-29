@@ -87,8 +87,8 @@ pub fn explain(
             404,
             "not_found_error",
             format!(
-                "{path} is not proxied: no [routes.{}]",
-                endpoint.api.route_name()
+                "no route serves {path}: add {}",
+                endpoint.api.route_sections()
             ),
         );
     };
@@ -177,6 +177,8 @@ pub fn explain(
             Ok(m) => m.to_owned(),
             Err(e) => return out.refuse(400, "invalid_request_error", e.to_string()),
         };
+        // The server's refusal names the model as the client sent it.
+        let sent = requested.clone();
         if let Some(alias) = config.aliases.as_ref().and_then(|a| a.get(&requested)) {
             let subject = identity.as_ref().map(|i| &*i.subject);
             let resolved = alias.model_for(subject);
@@ -196,7 +198,7 @@ pub fn explain(
             return out.refuse(
                 403,
                 "permission_error",
-                format!("this credential may not use {requested}"),
+                format!("this credential may not use the model {sent:?}"),
             );
         }
         if let Some(limit) = token_limit {

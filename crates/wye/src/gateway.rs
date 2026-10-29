@@ -248,7 +248,8 @@ impl Gateway {
             }
             (&Method::POST, path) => match api::endpoint(path) {
                 Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
-                _ => return self.local(req.method(), path),
+                Some(endpoint) => return no_route(endpoint.api, path),
+                None => return self.local(req.method(), path),
             },
             (method, path) => return self.local(method, path),
         };
@@ -310,6 +311,13 @@ impl Gateway {
             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         res
     }
+}
+
+/// A known endpoint whose API no route serves: the 404, in that API's shape,
+/// names the sections that would.
+fn no_route(api: Api, path: &str) -> Response<ResBody> {
+    let message = format!("no route serves {path}: add {}", api.route_sections());
+    error(api, StatusCode::NOT_FOUND, "not_found_error", &message)
 }
 
 /// Codex asks `GET {base_url}/models?client_version=...` for its own catalog

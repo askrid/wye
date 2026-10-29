@@ -144,11 +144,11 @@ async fn credential_models_allow_or_refuse_before_upstream() {
 
     let res = h.send(bearer(), SONNET).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
-    assert!(
-        read_body(res)
-            .await
-            .starts_with(br#"{"type":"error","error":{"type":"permission_error""#)
-    );
+    let refusal = read_body(res).await;
+    assert!(refusal.starts_with(br#"{"type":"error","error":{"type":"permission_error""#));
+    // The refusal names the model, so the client knows what to change.
+    let refusal = String::from_utf8(refusal.to_vec()).unwrap();
+    assert!(refusal.contains("claude-sonnet"), "{refusal}");
     assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 1);
     assert_eq!(h.usage_record().await["status"], 403);
 

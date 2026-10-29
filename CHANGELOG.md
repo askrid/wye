@@ -28,9 +28,11 @@ What is in it:
 - Cost from a price table in config, in exact integer arithmetic.
 - Commands: `init`, `serve`, `check-config`, `doctor`, `explain`,
   `policy-test`, `policy-diff`, `report`, `probe`, `claude`, `codex`, and
-  `token`.
+  `token`. `wye claude --bg` starts Claude Code background sessions that
+  go through the gateway too.
 - Release archives for Linux and macOS (x86_64, arm64) with checksums and
-  build provenance attestations.
+  build provenance attestations, and service definitions for a user
+  LaunchAgent (macOS) and systemd unit (Linux) in docs/operations.md.
 
 Not yet checked against the real services:
 

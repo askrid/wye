@@ -20,6 +20,20 @@ Each document owns one concern. Other documents link to it instead of restating 
 | [examples/wye.toml](../examples/wye.toml) | Every configuration field: its default, limits, and meaning (parsed by a test with every section enabled) |
 | [CHANGELOG.md](../CHANGELOG.md) | What each release contains and what it leaves unverified |
 
+## Terms
+
+| Term | Meaning |
+| --- | --- |
+| Route | The upstreams that serve one native API: `[upstream]` or `[routes.claude]` for Anthropic Messages, `[routes.openai]` for OpenAI Responses and Chat Completions |
+| Upstream | One provider account a route sends requests to: an `id`, a `provider`, a base URL, and its key |
+| Provider | Who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai` |
+| Affinity | The choice of upstream from the session id (`cache_affine`), so a session keeps one account and its prompt cache |
+| Failover | Resending a request to the route's next upstream after a refusal that proves it was not processed, before any output |
+| Alias | A model name clients send that config maps to a real model, per credential subject |
+| Gateway credential | What a caller presents to Wye (a JWT from Wye or an identity provider); Wye replaces it with the provider key |
+| Hold | Reading the start of a request body until its `model` is known, for permissions, aliases, and provider model ids |
+| Usage record | One JSON line per proxied request: tokens, cost, session, request class, outcome; also an OTLP log record and span |
+
 ## Conventions
 
 - **Requirement:** intended design decision. Change only with an explicit design review.

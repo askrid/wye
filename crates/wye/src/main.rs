@@ -101,6 +101,12 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             .block_on(wye::probe(url))
             .map_err(Into::into),
         ["report"] => {
+            // Waiting on a terminal for a log nobody types would look like a hang.
+            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                return Err(
+                    "report needs a usage log: `wye report usage.jsonl`, or pipe one in".into(),
+                );
+            }
             print!("{}", wye::report(std::io::stdin().lock())?);
             Ok(())
         }

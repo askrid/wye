@@ -180,7 +180,13 @@ fn run(agent: Agent, args: &[&str]) -> Result<i32, String> {
         .build()
         .map_err(|e| e.to_string())?
         .block_on(super::probe(&health))
-        .map_err(|e| format!("gateway not reachable ({e}); start it with `wye serve`"))?;
+        .map_err(|e| {
+            format!(
+                "no gateway at {} ({e}); start one with `wye serve --config <path>`, \
+                 or name another with --gateway",
+                launch.gateway
+            )
+        })?;
     let program = agent.program();
     let name = program.to_string_lossy().into_owned();
     let mut command = launch.command(agent, program);
