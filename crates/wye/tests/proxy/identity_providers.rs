@@ -17,14 +17,7 @@ async fn harness(key: &IdpKey) -> (Harness, mpsc::Receiver<HeaderMap>) {
     std::fs::create_dir_all(&dir).unwrap();
     let jwks_file = dir.join(format!("{}.jwks", key.alg()));
     std::fs::write(&jwks_file, jwks(&[(key, "gh-1")])).unwrap();
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.headers).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, rx) = recording(|seen| seen.headers);
     let auth = format!(
         "api_key_env = \"UNUSED\"\n\n[auth]\n\
          [[auth.issuers]]\nissuer = \"{ISS}\"\naudience = \"wye-prod\"\nalgorithm = \"{}\"\n\

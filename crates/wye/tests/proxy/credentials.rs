@@ -25,14 +25,7 @@ fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {
 
 /// Gateway with `[auth]` trusting `key`, recording what the upstream receives.
 async fn harness(key: &Ed25519KeyPair) -> (Harness, mpsc::Receiver<HeaderMap>) {
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.headers).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, rx) = recording(|seen| seen.headers);
     let auth = format!(
         "api_key_env = \"UNUSED\"\n\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n\
          [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
@@ -123,14 +116,7 @@ fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
 /// Gateway with `[auth]` trusting `key` and `auth_extra` lines, recording
 /// the request bodies the upstream receives.
 async fn body_harness(key: &Ed25519KeyPair, auth_extra: &str) -> (Harness, mpsc::Receiver<Bytes>) {
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.body).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, rx) = recording(|seen| seen.body);
     let auth = format!(
         "api_key_env = \"UNUSED\"\n\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth_extra}\n\
          [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",

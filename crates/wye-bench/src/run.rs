@@ -26,7 +26,8 @@ struct UpstreamPath<'a> {
     /// path: over HTTP/1.1 every stream opens its own connections, and
     /// repeated runs exhaust the laptop's ephemeral ports.
     paced: bool,
-    /// Also measures the Wye variants (`auth_`, `models_`, `diag_`, `otlp_`, `openai_`, `bedrock_`, `failover_`, `refused_`).
+    /// Also measures the Wye variants (`auth_`, `models_`, `diag_`, `otlp_`,
+    /// `openai_`, `bedrock_`, `failover_`, `refused_`).
     variants: bool,
 }
 
@@ -44,7 +45,7 @@ pub async fn run(
     gateways.extend_from_slice(others);
     // Competitors may parse events and drop what is not Anthropic-shaped, so
     // comparisons stream complete Anthropic frames, through every gateway
-    // alike. Gate runs keep the minimal events their baseline was recorded with.
+    // alike. Gate runs keep the minimal events earlier commits measured.
     let anthropic_frames = !others.is_empty();
     if anthropic_frames {
         crate::mock::use_anthropic_frames();
@@ -120,7 +121,8 @@ pub async fn run(
                     path.name,
                     gateway.name()
                 );
-                // A fresh process per run, so memory retained from earlier runs cannot hide new allocations.
+                // A fresh process per run, so memory retained from earlier
+                // runs cannot hide new allocations.
                 let process =
                     GatewayProcess::start(gateway, &path.base_url, path.ca_pem, dir, path.name)
                         .await;

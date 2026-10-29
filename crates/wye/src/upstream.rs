@@ -35,23 +35,26 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 pub(crate) use body::{BoxError, UpstreamBody};
 use pool::ClientPool;
 
-use gateway_core::policy::PolicyError;
+use gateway_core::{policy::PolicyError, prompt::PromptScanner, upgrade::UpgradeScanner};
 
 use crate::{
     StartupError,
-    diagnostics::{PromptBody, PromptSlot},
+    diagnostics::PromptSlot,
     failover::FailoverBody,
     request_body::{RequestBody, TokenLimitError},
-    upgrade_check::{UpgradeBody, UpgradeSlot},
+    scanned_body::ScannedBody,
+    upgrade_check::UpgradeSlot,
 };
 
-/// The request body as hyper sends it: the client's (checked for
-/// permissions, kept for failover), bounded, and read for upgrade checks and
-/// prompt hashes in passing.
+/// The client's request body, checked for permissions and kept for failover.
 pub(crate) type SendBody = FailoverBody<RequestBody<Incoming>>;
 
-type UpstreamClient =
-    Client<HttpsConnector<HttpConnector>, PromptBody<UpgradeBody<Limited<SendBody>>>>;
+/// Sends a [`SendBody`] bounded, and read for upgrade checks and prompt
+/// hashes in passing.
+type UpstreamClient = Client<
+    HttpsConnector<HttpConnector>,
+    ScannedBody<ScannedBody<Limited<SendBody>, UpgradeScanner>, PromptScanner>,
+>;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const WORKSPACE_ID: HeaderName = HeaderName::from_static("anthropic-workspace-id");
@@ -243,8 +246,8 @@ impl Upstream {
         if let Some(workspace) = &self.workspace {
             parts.headers.insert(WORKSPACE_ID, workspace.clone());
         }
-        let body = PromptBody::new(
-            UpgradeBody::new(Limited::new(body, max_body_bytes), upgrade),
+        let body = ScannedBody::new(
+            ScannedBody::new(Limited::new(body, max_body_bytes), upgrade),
             prompt,
         );
         let req = Request::from_parts(parts, body);

@@ -3,32 +3,7 @@
 use http_body_util::BodyExt;
 
 use super::*;
-
-/// A client body that yields its chunks, one per poll.
-struct Client(VecDeque<Bytes>);
-
-impl Body for Client {
-    type Data = Bytes;
-    type Error = std::convert::Infallible;
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
-        Poll::Ready(self.0.pop_front().map(|c| Ok(Frame::data(c))))
-    }
-    fn is_end_stream(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-fn client(parts: &[&'static str]) -> Client {
-    Client(
-        parts
-            .iter()
-            .map(|p| Bytes::from_static(p.as_bytes()))
-            .collect(),
-    )
-}
+use crate::test_body::Client;
 
 const ROOMY: Bounds = Bounds {
     max_body: 1 << 20,
@@ -45,7 +20,7 @@ where
 #[tokio::test]
 async fn a_sent_body_comes_back_whole() {
     let held = Gauge::default();
-    let (body, handback) = FailoverBody::kept(client(&["ab", "cd", "ef"]), &held, ROOMY);
+    let (body, handback) = FailoverBody::kept(Client::of(&["ab", "cd", "ef"]), &held, ROOMY);
     assert_eq!(collect(body).await, "abcdef");
     let resend = handback.await.unwrap();
     assert_eq!(held.current(), 6);
@@ -60,7 +35,7 @@ async fn a_sent_body_comes_back_whole() {
 #[tokio::test]
 async fn a_partly_sent_body_resumes_where_it_stopped() {
     let held = Gauge::default();
-    let (mut body, handback) = FailoverBody::kept(client(&["ab", "cd", "ef"]), &held, ROOMY);
+    let (mut body, handback) = FailoverBody::kept(Client::of(&["ab", "cd", "ef"]), &held, ROOMY);
     let first = body.frame().await.unwrap().unwrap().into_data().unwrap();
     assert_eq!(first, "ab");
     drop(body);
@@ -76,7 +51,7 @@ async fn a_body_beyond_either_bound_is_not_kept() {
         max_body: 3,
         max_held: 1 << 20,
     };
-    let (body, handback) = FailoverBody::kept(client(&["ab", "cd"]), &held, small);
+    let (body, handback) = FailoverBody::kept(Client::of(&["ab", "cd"]), &held, small);
     assert_eq!(collect(body).await, "abcd", "forwarded all the same");
     assert!(handback.await.is_err());
     assert_eq!(held.current(), 0);
@@ -91,14 +66,14 @@ async fn a_body_beyond_either_bound_is_not_kept() {
         max_body: 1 << 20,
         max_held: 10,
     };
-    let (body, handback) = FailoverBody::kept(client(&["ab"]), &busy, process);
+    let (body, handback) = FailoverBody::kept(Client::of(&["ab"]), &busy, process);
     assert_eq!(collect(body).await, "ab");
     assert!(handback.await.is_err(), "the process-wide bound is full");
 }
 
 #[tokio::test]
 async fn a_body_sent_once_hands_nothing_back() {
-    let body = FailoverBody::once(client(&["ab"]));
+    let body = FailoverBody::once(Client::of(&["ab"]));
     assert_eq!(body.size_hint().lower(), 0);
     assert_eq!(collect(body).await, "ab");
 }
@@ -202,7 +177,7 @@ async fn a_handed_back_body_takes_a_new_model_id_wherever_it_is() {
 #[tokio::test]
 async fn a_hand_back_says_whether_the_whole_body_was_delivered() {
     let held = Gauge::default();
-    let (body, handback) = FailoverBody::kept(client(&["ab", "cd"]), &held, ROOMY);
+    let (body, handback) = FailoverBody::kept(Client::of(&["ab", "cd"]), &held, ROOMY);
     assert_eq!(collect(body).await, "abcd");
     let resend = handback.await.unwrap();
     assert!(resend.sent_whole());
@@ -212,7 +187,7 @@ async fn a_hand_back_says_whether_the_whole_body_was_delivered() {
     assert_eq!(collect(again).await, "abcd");
     assert!(handback.await.unwrap().sent_whole());
 
-    let (mut body, handback) = FailoverBody::kept(client(&["ab", "cd"]), &held, ROOMY);
+    let (mut body, handback) = FailoverBody::kept(Client::of(&["ab", "cd"]), &held, ROOMY);
     body.frame().await.unwrap().unwrap();
     drop(body);
     let resend = handback.await.unwrap();

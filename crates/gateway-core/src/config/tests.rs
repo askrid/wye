@@ -19,20 +19,15 @@ fn minimal_config_gets_defaults() {
         config.server.max_request_body_bytes,
         DEFAULT_MAX_REQUEST_BODY_BYTES
     );
-    assert_eq!(claude(&config).upstreams()[0].scheme, Scheme::HTTPS);
+    let upstream = &claude(&config).upstreams()[0];
+    assert_eq!(upstream.scheme, Scheme::HTTPS);
+    assert_eq!(upstream.authority.as_str(), "api.anthropic.com");
+    assert_eq!(upstream.path_prefix, "");
     assert_eq!(
-        claude(&config).upstreams()[0].authority.as_str(),
-        "api.anthropic.com"
-    );
-    assert_eq!(claude(&config).upstreams()[0].path_prefix, "");
-    assert_eq!(
-        claude(&config).upstreams()[0].credential,
+        upstream.credential,
         UpstreamCredential::ApiKeyEnv("ANTHROPIC_API_KEY".into())
     );
-    assert_eq!(
-        claude(&config).upstreams()[0].response_header_timeout,
-        Duration::from_secs(600)
-    );
+    assert_eq!(upstream.response_header_timeout, Duration::from_secs(600));
 }
 
 #[test]
@@ -40,11 +35,9 @@ fn base_path_keeps_prefix_without_trailing_slash() {
     let config =
         parse("base_url = \"https://gw.example.com/anthropic/\"\nforward_caller_credential = true")
             .unwrap();
-    assert_eq!(claude(&config).upstreams()[0].path_prefix, "/anthropic");
-    assert_eq!(
-        claude(&config).upstreams()[0].credential,
-        UpstreamCredential::ForwardCaller
-    );
+    let upstream = &claude(&config).upstreams()[0];
+    assert_eq!(upstream.path_prefix, "/anthropic");
+    assert_eq!(upstream.credential, UpstreamCredential::ForwardCaller);
 }
 
 #[test]

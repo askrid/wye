@@ -9,8 +9,8 @@
 //! [`RequestBody`] replays the held chunks and streams the rest, and keeps
 //! checking it: a second top-level `model` key, an output-token maximum above
 //! the ceiling that arrives after the hold, or (on the OpenAI APIs, where the
-//! field is optional) none at all, fails the body, which aborts the upstream request
-//! before the provider sees a complete request.
+//! field is optional) none at all, fails the body, which aborts the upstream
+//! request before the provider sees a complete request.
 //!
 //! The same hold resolves model aliases (spliced in place) and finds where
 //! `model` is, so each attempt can send the provider's own model id

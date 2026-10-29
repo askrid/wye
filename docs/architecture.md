@@ -82,6 +82,7 @@ wye/
 │   │   ├── auth.rs              credential checks, cached per connection
 │   │   ├── request_body.rs      the forwarded body: held until `model`, replayed, checked as it streams
 │   │   ├── discovery.rs         GET /v1/models
+│   │   ├── scanned_body.rs      request bodies read by a scanner as they are sent
 │   │   ├── diagnostics.rs       prompt hashes of forwarded request bodies
 │   │   ├── upgrade_check.rs     upgrade-check findings of forwarded request bodies
 │   │   ├── upstream.rs          forwarding to a provider, the TLS client

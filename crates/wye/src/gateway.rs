@@ -51,7 +51,7 @@ pub struct Gateway {
     verifier: Option<Verifier>,
     /// Anthropic Messages, when `[upstream]` or `[routes.claude]` is set.
     claude: Option<ApiRoute>,
-    /// OpenAI Responses, when `[routes.openai]` is set.
+    /// OpenAI Responses and Chat Completions, when `[routes.openai]` is set.
     openai: Option<ApiRoute>,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,

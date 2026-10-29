@@ -238,7 +238,8 @@ pub(crate) async fn measure(
     let (mb_s, mb) = phase(format!("{prefix}throughput"), throughput(process.target())).await;
     let cpu_after = process.cpu_secs();
     put(metrics, prefix, "via_throughput_mb_s", mb_s);
-    // `ps` reports CPU time in 10 ms steps; the scenario streams enough data to make that negligible.
+    // `ps` reports CPU time in 10 ms steps; the scenario streams enough data
+    // to make that negligible.
     put(
         metrics,
         prefix,

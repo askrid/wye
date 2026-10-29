@@ -1,92 +1,31 @@
 //! Cache-miss diagnostics: prompt hashes of forwarded request bodies, keyed
 //! and written into usage records.
 //!
-//! [`PromptBody`] feeds the request bytes to a [`PromptScanner`] as hyper
-//! sends them upstream, without changing or delaying them, and stores the
-//! hashes in a [`PromptSlot`] when the body ends. The usage record reads the
-//! slot when the response ends; the writer task turns each hash into a keyed
-//! tag ([`HashKey::tag`]) while serializing, off the request path.
+//! A [`PromptScanner`] reads the request bytes as they are sent
+//! ([`crate::scanned_body`]) and leaves the hashes in a [`PromptSlot`]. The
+//! usage record reads the slot when the response ends; the writer task turns
+//! each hash into a keyed tag ([`HashKey::tag`]) while serializing, off the
+//! request path.
 
-use std::{
-    pin::Pin,
-    sync::{Arc, OnceLock},
-    task::{Context, Poll},
-};
-
-use bytes::Bytes;
 use gateway_core::prompt::{
     HashKey, MAX_BREAKPOINTS, MESSAGE_PREFIXES, PromptHashes, PromptScanner,
 };
-use hyper::body::{Body, Frame, SizeHint};
 use serde::{Serialize, Serializer};
 
-/// Hashes of one request body, set once the whole body was read and could be
-/// followed. Shared between the request body (in hyper's client) and the usage record.
-pub(crate) type PromptSlot = Arc<OnceLock<PromptHashes>>;
+use crate::scanned_body::{BodyScanner, Slot};
 
-/// Request body wrapper that hashes the prompt when diagnostics are on.
-pub(crate) struct PromptBody<B> {
-    inner: B,
-    /// Boxed so the wrapper stays small when diagnostics are off.
-    scan: Option<(Box<PromptScanner>, PromptSlot)>,
-}
+/// Prompt hashes of one request body ([`Slot`]).
+pub(crate) type PromptSlot = Slot<PromptHashes>;
 
-impl<B> PromptBody<B> {
-    pub(crate) fn new(inner: B, slot: Option<PromptSlot>) -> Self {
-        Self {
-            inner,
-            scan: slot.map(|slot| (Box::new(PromptScanner::new()), slot)),
-        }
+impl BodyScanner for PromptScanner {
+    type Output = PromptHashes;
+
+    fn feed(&mut self, chunk: &[u8]) {
+        PromptScanner::feed(self, chunk);
     }
 
-    fn finish(&mut self) {
-        if let Some((scanner, slot)) = self.scan.take()
-            && let Some(hashes) = scanner.finish()
-        {
-            let _ = slot.set(hashes);
-        }
-    }
-}
-
-impl<B> Body for PromptBody<B>
-where
-    B: Body<Data = Bytes> + Unpin,
-{
-    type Data = Bytes;
-    type Error = B::Error;
-
-    fn poll_frame(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, B::Error>>> {
-        let this = self.get_mut();
-        let polled = Pin::new(&mut this.inner).poll_frame(cx);
-        if let Some((scanner, _)) = this.scan.as_mut() {
-            match &polled {
-                Poll::Ready(Some(Ok(frame))) => {
-                    if let Some(data) = frame.data_ref() {
-                        scanner.feed(data);
-                    }
-                    // With a known length, hyper stops polling once the body
-                    // reports its end and never sees `Ready(None)`.
-                    if this.inner.is_end_stream() {
-                        this.finish();
-                    }
-                }
-                Poll::Ready(None) => this.finish(),
-                // An error or a dropped body leaves the slot empty: unknown.
-                Poll::Ready(Some(Err(_))) | Poll::Pending => {}
-            }
-        }
-        polled
-    }
-
-    fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
-    }
-
-    fn size_hint(&self) -> SizeHint {
-        self.inner.size_hint()
+    fn finish(self) -> Option<PromptHashes> {
+        PromptScanner::finish(self)
     }
 }
 

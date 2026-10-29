@@ -12,14 +12,7 @@ const ALIASES: &str = "\n[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5
 
 /// Gateway whose upstream reports each request's headers and body.
 async fn harness(upstream_extra: &str) -> (Harness, mpsc::Receiver<(HeaderMap, Bytes)>) {
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send((seen.headers, seen.body)).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, rx) = recording(|seen| (seen.headers, seen.body));
     let config = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
     let h = Harness::start(handler, &config, UpstreamAuth::api_key(API_KEY).unwrap()).await;
     (h, rx)

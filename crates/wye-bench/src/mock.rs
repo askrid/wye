@@ -145,6 +145,16 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     res
 }
 
+/// A Messages request of exactly `size` bytes whose one user message is
+/// filler: an agent-sized context as one long string.
+pub fn message_json(size: usize) -> Bytes {
+    padded_json(
+        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
+        r#""}]}"#,
+        size,
+    )
+}
+
 /// A Messages request shaped like Claude Code's, of at least `size` bytes:
 /// tool definitions with JSON schemas, a cached system prompt, then turns of
 /// tool calls and code-carrying tool results (quotes, backslashes, newlines),
@@ -186,7 +196,7 @@ pub fn agent_json(size: usize) -> Bytes {
 /// Valid JSON of exactly `size` bytes (at least the fixed parts): `head`, then
 /// filler text, then `tail`. Gateways that parse bodies must not fail on the
 /// benchmark's payloads where real traffic would pass.
-pub fn padded_json(head: &str, tail: &str, size: usize) -> Bytes {
+fn padded_json(head: &str, tail: &str, size: usize) -> Bytes {
     let filler = size.saturating_sub(head.len() + tail.len());
     let mut body = Vec::with_capacity(head.len() + filler + tail.len());
     body.extend_from_slice(head.as_bytes());

@@ -126,14 +126,6 @@ async fn agent_uploads(t: &Target) {
     scenarios::upload(t, 16, UPLOAD_REQUESTS, mock::agent_json(UPLOAD_BYTES)).await;
 }
 
-fn upload_body(bytes: usize) -> Bytes {
-    mock::padded_json(
-        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
-        r#""}]}"#,
-        bytes,
-    )
-}
-
 /// Runs the allocation scenarios against `binary`: the full set in front of the
 /// plain upstream, and idle-stream memory in front of the TLS + HTTP/2 upstream
 /// (`tls_base_url`, trusting `tls_ca_pem`), the production connection shape.
@@ -179,7 +171,7 @@ pub async fn measure(
         short / SSE_STREAMS as f64 - per_event * f64::from(SSE_SHORT_EVENTS),
     );
 
-    let body = upload_body(UPLOAD_BYTES);
+    let body = mock::message_json(UPLOAD_BYTES);
     let (allocations, bytes) = delta(t, async {
         scenarios::upload(t, 16, UPLOAD_REQUESTS, body).await;
     })
@@ -213,7 +205,7 @@ pub async fn measure(
         idle_live_bytes(
             t,
             IDLE_AFTER_UPLOAD_STREAMS,
-            Some(upload_body(IDLE_UPLOAD_BYTES)),
+            Some(mock::message_json(IDLE_UPLOAD_BYTES)),
         )
         .await,
     );
@@ -238,7 +230,7 @@ pub async fn measure(
         idle_live_bytes(
             t,
             IDLE_AFTER_UPLOAD_STREAMS,
-            Some(upload_body(IDLE_UPLOAD_BYTES)),
+            Some(mock::message_json(IDLE_UPLOAD_BYTES)),
         )
         .await,
     );

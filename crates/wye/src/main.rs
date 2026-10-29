@@ -55,10 +55,7 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         }
         ["explain", rest @ ..] => explain(rest),
         ["policy-test", "--config", path, dir] => {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_secs();
-            let (report, passed) = wye::policy_test(&load(path)?, Path::new(dir), now)?;
+            let (report, passed) = wye::policy_test(&load(path)?, Path::new(dir), unix_secs()?)?;
             print!("{report}");
             if !passed {
                 std::process::exit(3);
@@ -139,9 +136,7 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
         .map(|file| std::fs::read_to_string(file).map_err(|e| format!("cannot read {file}: {e}")))
         .transpose()?;
     let body = std::fs::read(request).map_err(|e| format!("cannot read {request}: {e}"))?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs();
+    let now = unix_secs()?;
     let credential = match (token.as_deref(), &verifier) {
         (Some(token), Some(verifier)) => wye::Credential::Token(token.trim(), verifier),
         _ => wye::Credential::None,
@@ -152,6 +147,13 @@ fn explain(args: &[&str]) -> Result<(), Box<dyn Error>> {
         std::process::exit(3);
     }
     Ok(())
+}
+
+/// The time offline checks verify credentials at.
+fn unix_secs() -> Result<u64, std::time::SystemTimeError> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs())
 }
 
 fn load(path: &str) -> Result<Config, Box<dyn Error>> {
