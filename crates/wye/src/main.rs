@@ -2,10 +2,14 @@
 #[global_allocator]
 static ALLOCATOR: wye::alloc_stats::Counting = wye::alloc_stats::Counting;
 
-use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc};
+use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 use gateway_core::config::Config;
 use wye::{Gateway, Resources};
+
+/// How long `serve` waits, after the server stopped, for blocking work such
+/// as a stderr write to finish before the process exits anyway.
+const STOP_WAIT: Duration = Duration::from_secs(1);
 
 const USAGE: &str = "usage:
   wye --help | --version
@@ -203,7 +207,7 @@ fn serve(config: Config, config_dir: &Path) -> Result<(), Box<dyn Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async {
+    let flushed = runtime.block_on(async {
         let listen = config.server.listen;
         let listener = tokio::net::TcpListener::bind(listen)
             .await
@@ -214,10 +218,16 @@ fn serve(config: Config, config_dir: &Path) -> Result<(), Box<dyn Error>> {
                 _ => format!("cannot listen on {listen}: {e}"),
             })?;
         eprintln!("wye: listening on http://{}", listener.local_addr()?);
-        wye::serve(listener, gateway, shutdown_signal(), tokio::io::stderr()).await;
+        let flushed = wye::serve(listener, gateway, shutdown_signal(), tokio::io::stderr()).await;
+        Ok::<_, Box<dyn Error>>(flushed)
+    })?;
+    // A write to a stderr nobody reads blocks its thread, and the stderr lock,
+    // for good: dropping the runtime would wait on it, and so would a last line.
+    runtime.shutdown_timeout(STOP_WAIT);
+    if flushed {
         eprintln!("wye: stopped");
-        Ok(())
-    })
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {

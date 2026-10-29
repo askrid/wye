@@ -41,6 +41,9 @@ const CLIENT_SEND_BUFFER: usize = 128 * 1024;
 
 /// How long `serve` waits for the usage log to be written after connections close.
 const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
+/// The pause after an accept error that is not one connection's (out of file
+/// descriptors, say): the listener stays ready, so retrying at once spins a core.
+const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(100);
 
 /// Serves connections until `shutdown` resolves, then shuts down in two phases:
 ///
@@ -49,12 +52,17 @@ const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 ///    routing here before connections are refused.
 /// 2. Grace: the listener closes and active requests get the shutdown grace
 ///    period to finish; the rest are cancelled.
+///
+/// Returns whether the usage log was written out within a second after
+/// that. If not, `usage_out` is not draining (a log reader that stopped):
+/// a write to it may block a thread for good, so the caller should not wait
+/// on one.
 pub async fn serve(
     listener: TcpListener,
     gateway: Arc<Gateway>,
     shutdown: impl Future<Output = ()>,
     usage_out: impl AsyncWrite + Send + Unpin + 'static,
-) {
+) -> bool {
     let (log, writer) = UsageLog::start(usage_out, gateway.sinks());
     let graceful = GracefulShutdown::new();
     let mut http = http1::Builder::new();
@@ -64,11 +72,15 @@ pub async fn serve(
     let mut connections = JoinSet::new();
     // Takes `connections` as an argument, not a capture, so the select loops can
     // also reap from it between calls.
+    // Returns the accept error to pause after, if any.
     let accept = |connections: &mut JoinSet<_>,
                   accepted: std::io::Result<(TcpStream, SocketAddr)>| {
-        // Transient accept errors (file descriptor exhaustion, say) must not
-        // stop the server.
-        let Ok((stream, _)) = accepted else { return };
+        // Accept errors (file descriptor exhaustion, say) are transient: they
+        // must not stop the server.
+        let (stream, _) = match accepted {
+            Ok(accepted) => accepted,
+            Err(e) => return pause_after(&e),
+        };
         let _ = stream.set_nodelay(true);
         // Best effort: without it the kernel autotunes, as before.
         let _ = socket2::SockRef::from(&stream).set_send_buffer_size(CLIENT_SEND_BUFFER);
@@ -85,12 +97,18 @@ pub async fn serve(
         });
         // Watched by `graceful` so shutdown can ask it to finish its current request.
         connections.spawn(graceful.watch(http.serve_connection(io, service)));
+        false
     };
 
+    // Cancel safety: `accept` and `join_next` lose nothing when another
+    // branch wins; a pause delays the other branches by at most
+    // ACCEPT_ERROR_PAUSE.
     tokio::pin!(shutdown);
     loop {
         tokio::select! {
-            accepted = listener.accept() => accept(&mut connections, accepted),
+            accepted = listener.accept() => if accept(&mut connections, accepted) {
+                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
+            },
             // Reap finished connections so the set stays as large as the live ones.
             Some(_) = connections.join_next() => {}
             () = &mut shutdown => break,
@@ -102,7 +120,9 @@ pub async fn serve(
     tokio::pin!(drain);
     loop {
         tokio::select! {
-            accepted = listener.accept() => accept(&mut connections, accepted),
+            accepted = listener.accept() => if accept(&mut connections, accepted) {
+                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
+            },
             Some(_) = connections.join_next() => {}
             () = &mut drain => break,
         }
@@ -115,5 +135,32 @@ pub async fn serve(
     connections.shutdown().await;
     // The writer ends once the last handle is gone: here and in drained connections.
     drop(log);
-    let _ = tokio::time::timeout(LOG_FLUSH_TIMEOUT, writer).await;
+    tokio::time::timeout(LOG_FLUSH_TIMEOUT, writer)
+        .await
+        .is_ok()
+}
+
+/// Whether an accept error calls for a pause: not when one connection failed
+/// before it was accepted (reset, aborted), which the next accept moves past.
+fn pause_after(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind::{ConnectionAborted, ConnectionReset, Interrupted, WouldBlock};
+    !matches!(
+        error.kind(),
+        ConnectionAborted | ConnectionReset | Interrupted | WouldBlock
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Error, ErrorKind};
+
+    use super::pause_after;
+
+    #[test]
+    fn pauses_on_resource_errors_only() {
+        // EMFILE: the process is out of file descriptors.
+        assert!(pause_after(&Error::from_raw_os_error(24)));
+        assert!(!pause_after(&Error::from(ErrorKind::ConnectionAborted)));
+        assert!(!pause_after(&Error::from(ErrorKind::ConnectionReset)));
+    }
 }

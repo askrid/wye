@@ -255,8 +255,12 @@ async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped
         let sent = tokio::time::timeout(EXPORT_TIMEOUT, async {
             let res = target.client.request(req).await.ok()?;
             let ok = res.status().is_success();
-            // Read the (small) response so the connection can be reused.
-            res.into_body().collect().await.ok()?;
+            // Read the response so the connection can be reused, keeping none
+            // of it: a collector's answer is not bounded.
+            let mut body = res.into_body();
+            while let Some(frame) = body.frame().await {
+                frame.ok()?;
+            }
             ok.then_some(())
         })
         .await;

@@ -292,7 +292,7 @@ The usage record (`wye serve 2>>usage.jsonl` keeps the log; `wye report` reads i
 | Field | Values | Notes |
 |---|---|---|
 | `event`, `unix_ms`, `path`, `status` | `request`, time, route, HTTP status | |
-| `outcome` | `completed` \| `failed` \| `cancelled` \| `gateway_error` | Recorded when the response body is dropped, so every outcome is counted |
+| `outcome` | `completed` \| `failed` \| `cancelled` \| `gateway_error` | Recorded when the response body is dropped, so every outcome is counted; a client that leaves before the response headers is `cancelled` with `status` `499` |
 | `duration_ms`, `headers_ms` | milliseconds | `headers_ms` = time to response headers |
 | `upstream` | the route upstream's `id` | With `[routes.claude]`; absent with `[upstream]` and for requests refused before routing |
 | `failovers` | `[{"upstream": "a", "status": 429}]`, or `"error": "connect"` | Attempts refused before the one that answered, in order ([failover](architecture.md#claude-across-providers-m4)); absent when none |
@@ -355,6 +355,7 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 | Invalid or expired credential | Reject locally |
 | No eligible route | Explicit compatibility or policy error |
 | Slow downstream | Bounded flow control: about 0.56 MB of heap per stalled stream (256 KiB upstream window) plus a kernel send buffer fixed at 128 KiB, at most `max_concurrent_requests` of them; streams sharing its upstream connection are unaffected; a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled |
+| Request body breaks the policy or the size limit mid-upload | The upstream request is aborted before the provider sees the body whole; the client gets the refusal's own `400`, `403`, or `413`, from HTTP/1.1 and HTTP/2 upstreams alike |
 | Upstream failure before downstream output | Gateway error; with `failover` in `[routes.claude]`, the session's next upstream when the refusal proves the request was not processed ([retries and fallback](architecture.md#retries-and-fallback)) |
 | Partial stream failure | Terminate the stream; never silently replay output. A successful event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error; mid-event failures still drop the stream, since appending would corrupt the event |
 | Client disconnect | Cancel upstream where possible, free resources, record uncertain cost |

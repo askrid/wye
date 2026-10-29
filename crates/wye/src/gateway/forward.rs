@@ -25,7 +25,7 @@ use crate::{
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, UsageLog},
+    usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, Unanswered, UsageLog},
 };
 
 /// How long a refused attempt may take to hand its body back: hyper drops a
@@ -36,7 +36,7 @@ impl Gateway {
     pub(super) async fn forward(
         &self,
         req: Request<Incoming>,
-        mut info: RequestInfo,
+        info: RequestInfo,
         log: &UsageLog,
     ) -> Response<ResBody> {
         let api = info.endpoint.api;
@@ -51,22 +51,30 @@ impl Gateway {
             log.gateway_error(info, res.status());
             return res;
         }
+        // The awaits below read the body and wait for the upstream; if the
+        // client leaves meanwhile, hyper drops this future and `pending`
+        // records the request.
+        let mut pending = Unanswered::new(info, log);
         let (mut parts, body) = req.into_parts();
-        let (body, model_span) = match self.admit_body(body, &mut info, &mut parts.headers).await {
+        let admitted = self
+            .admit_body(body, pending.info(), &mut parts.headers)
+            .await;
+        let (body, model_span) = match admitted {
             Ok(admitted) => admitted,
             Err(res) => {
-                log.gateway_error(info, res.status());
+                log.gateway_error(pending.answered(), res.status());
                 return *res;
             }
         };
-        self.sample(&mut info);
+        self.sample(pending.info());
         let Some(route) = self.route(api) else {
             unreachable!("handle only forwards endpoints with a route")
         };
-        match self
-            .attempts(route, parts, body, model_span, declared_len, &mut info)
-            .await
-        {
+        let result = self
+            .attempts(route, parts, body, model_span, declared_len, pending.info())
+            .await;
+        let info = pending.answered();
+        match result {
             Ok(res) => {
                 let status = res.status();
                 let kind = BodyKind::of(res.headers().get(CONTENT_TYPE).map(HeaderValue::as_bytes));
