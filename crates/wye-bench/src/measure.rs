@@ -168,12 +168,14 @@ pub(crate) async fn measure(
     );
 
     let base = &direct.latency;
+    // Failures in the CPU phases count too: for some variants they run last.
     put(
         metrics,
         prefix,
         "unary_failed_requests",
-        via.unary_failed as f64,
+        (via.unary_failed + failed) as f64,
     );
+    let mut sse_failed = via.sse_failed;
     for (label, p) in PERCENTILES {
         let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
         put(
@@ -216,6 +218,7 @@ pub(crate) async fn measure(
         )
         .await;
         let cpu_after = process.cpu_secs();
+        sse_failed += streams.iter().filter(|s| s.failed).count();
         let events: usize = streams.iter().map(|s| s.event_delays_us.len()).sum();
         // `ps` reports CPU time in 10 ms steps; 128,000 events make that < 0.1 µs per event.
         put(
@@ -225,6 +228,7 @@ pub(crate) async fn measure(
             (cpu_after - cpu_before) * 1e6 / events.max(1) as f64,
         );
     }
+    put(metrics, prefix, "sse_failed_streams", sse_failed as f64);
     if scope.per_request_only {
         if scope.uploads {
             measure_uploads(direct, process, prefix, metrics).await;
@@ -301,12 +305,14 @@ async fn measure_idle_and_cancel(
     );
 }
 
-/// Sorted latency samples of the unary and SSE scenarios.
+/// Sorted latency samples of the unary and SSE scenarios, of the requests
+/// and streams that succeeded, and the number that failed.
 pub(crate) struct Latency {
     pub(crate) unary: Vec<u64>,
     pub(crate) unary_failed: usize,
     pub(crate) ttfb: Vec<u64>,
     pub(crate) event_delay: Vec<u64>,
+    pub(crate) sse_failed: usize,
 }
 
 impl Latency {
@@ -329,7 +335,15 @@ impl Latency {
         Self {
             unary,
             unary_failed,
-            ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
+            // A failed stream's TTFB of 0 would pull the percentiles down.
+            ttfb: sorted(
+                streams
+                    .iter()
+                    .filter(|s| !s.failed)
+                    .map(|s| s.ttfb_us)
+                    .collect(),
+            ),
+            sse_failed: streams.iter().filter(|s| s.failed).count(),
             event_delay: sorted(
                 streams
                     .into_iter()

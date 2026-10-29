@@ -8,13 +8,27 @@ pub(crate) fn put(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str,
     metrics.insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
 }
 
-pub(crate) fn median(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
+/// Whether `name` counts failures: merged by the worst round and gated at
+/// an absolute count, never by the median or the reference's count.
+pub(crate) fn counts_failures(name: &str) -> bool {
+    name.ends_with("_failed_requests") || name.ends_with("_failed_streams")
+}
+
+/// Each metric's median over `runs`, except failure counts, which take the
+/// worst round: a failure in one round of three is still a failure. `NaN`
+/// (no samples) sorts last, like the slowest round.
+pub(crate) fn merge(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
     runs[0]
         .keys()
         .map(|name| {
             let mut values: Vec<f64> = runs.iter().map(|r| r[name]).collect();
             values.sort_by(f64::total_cmp);
-            (name.clone(), values[values.len() / 2])
+            let at = if counts_failures(name) {
+                values.len() - 1
+            } else {
+                values.len() / 2
+            };
+            (name.clone(), values[at])
         })
         .collect()
 }

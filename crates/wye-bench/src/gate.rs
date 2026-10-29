@@ -17,6 +17,9 @@ use crate::stats;
 /// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
 /// the TLS + HTTP/2 path. Upload allocation counts for the agent-shaped body
 /// are reported but not gated: they swing about 20% with read timing.
+/// The most a `*_release_max_us` metric may read, whatever the reference.
+const RELEASE_CEILING_US: f64 = 1_000_000.0;
+
 const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),
@@ -155,6 +158,18 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_unary_failed_requests", 0.0, 0.0),
     ("tls_upload_failed_requests", 0.0, 0.0),
     ("tls_paced_failed_streams", 0.0, 0.0),
+    // Streams that failed or ended short, in the latency and CPU-per-event
+    // scenarios of each gateway variant.
+    ("sse_failed_streams", 0.0, 0.0),
+    ("tls_sse_failed_streams", 0.0, 0.0),
+    ("auth_sse_failed_streams", 0.0, 0.0),
+    ("models_sse_failed_streams", 0.0, 0.0),
+    ("diag_sse_failed_streams", 0.0, 0.0),
+    ("otlp_sse_failed_streams", 0.0, 0.0),
+    ("openai_sse_failed_streams", 0.0, 0.0),
+    ("bedrock_sse_failed_streams", 0.0, 0.0),
+    ("failover_sse_failed_streams", 0.0, 0.0),
+    ("refused_sse_failed_streams", 0.0, 0.0),
     // Guard the property, not the microseconds: a release that waits for the
     // next upstream write would take seconds.
     ("cancel_upstream_release_max_us", 1.0, 20_000.0),
@@ -215,15 +230,25 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
                 println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-");
                 continue;
             }
+            // `missing` fails the gate; `absent`, outside the gated set, not.
             _ => {
-                println!("{name:36} missing");
+                println!("{name:36} {}", if enforced { "missing" } else { "absent" });
                 ok &= !enforced;
                 continue;
             }
         };
-        // Added latency can be near zero or negative (noise); the absolute
-        // floor absorbs that.
-        let limit = b.max(0.0) * (1.0 + rel) + abs;
+        let limit = if stats::counts_failures(name) {
+            // An absolute count: failures the reference had are no allowance.
+            abs
+        } else if name.ends_with("_release_max_us") {
+            // A broken reference (5 s, the scenario's timeout) is no allowance
+            // either: past a second, the upstream request was not released.
+            (b.max(0.0) * (1.0 + rel) + abs).min(RELEASE_CEILING_US)
+        } else {
+            // Added latency can be near zero or negative (noise); the absolute
+            // floor absorbs that.
+            b.max(0.0) * (1.0 + rel) + abs
+        };
         let pass = c <= limit;
         ok &= pass || !enforced;
         println!(
@@ -240,8 +265,8 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
 }
 
 /// Writes to `out` the report of `runs` (results of one `wye-bench run`
-/// each) with the per-metric median: rounds alternated with another binary
-/// merge as one run of `--repeat` would.
+/// each) merged per metric ([`stats::merge`]): rounds alternated with
+/// another binary merge as one run of `--repeat` would.
 pub fn median(out: &str, runs: &[&str]) {
     let reports: Vec<Value> = runs.iter().map(|path| load(path)).collect();
     let metrics: Vec<BTreeMap<String, f64>> = reports
@@ -258,7 +283,7 @@ pub fn median(out: &str, runs: &[&str]) {
         .collect();
     let mut report = reports[0].clone();
     report["repeat"] = runs.len().into();
-    report["metrics"] = serde_json::to_value(stats::median(&metrics)).unwrap();
+    report["metrics"] = serde_json::to_value(stats::merge(&metrics)).unwrap();
     std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
 }
 
@@ -355,10 +380,50 @@ mod tests {
     }
 
     #[test]
+    fn failures_and_release_times_have_absolute_limits() {
+        let dir = std::env::temp_dir().join(format!("wye-bench-abs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, metrics: serde_json::Value| {
+            let path = dir.join(name);
+            std::fs::write(
+                &path,
+                serde_json::json!({"machine": {}, "metrics": metrics}).to_string(),
+            )
+            .unwrap();
+            path.display().to_string()
+        };
+        let only = |name: &str| Scope {
+            only: vec![name.into()],
+            ..Scope::default()
+        };
+        // The reference failing 5 requests allows the current commit none.
+        let failing = write(
+            "failing.json",
+            serde_json::json!({"unary_failed_requests": 5.0}),
+        );
+        let fewer = write(
+            "fewer.json",
+            serde_json::json!({"unary_failed_requests": 3.0}),
+        );
+        assert!(!compare(&failing, &fewer, &only("unary_failed_requests")));
+        let none = write(
+            "none.json",
+            serde_json::json!({"unary_failed_requests": 0.0}),
+        );
+        assert!(compare(&failing, &none, &only("unary_failed_requests")));
+        // A reference stuck at the 5 s timeout allows no more than a second.
+        let metric = "cancel_upstream_release_max_us";
+        let stuck = write("stuck.json", serde_json::json!({metric: 5_000_000.0}));
+        let slow = write("slow.json", serde_json::json!({metric: 2_000_000.0}));
+        assert!(!compare(&stuck, &slow, &only(metric)));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn median_merges_rounds_into_one_report() {
         let dir = std::env::temp_dir().join(format!("wye-bench-median-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let rounds: Vec<String> = [(3.0, Some(0.0)), (1.0, None), (2.0, Some(0.0))]
+        let rounds: Vec<String> = [(3.0, Some(0.0)), (1.0, None), (2.0, Some(2.0))]
             .iter()
             .enumerate()
             .map(|(i, (latency, failed))| {
@@ -378,8 +443,9 @@ mod tests {
         assert_eq!(merged["machine"]["os"], "test");
         assert_eq!(merged["repeat"], 3);
         assert_eq!(merged["metrics"]["unary_added_p50_us"], 2.0);
-        // A round without samples sorts last, like a slow one.
-        assert_eq!(merged["metrics"]["unary_failed_requests"], 0.0);
+        // Failure counts take the worst round, and a round without samples
+        // is worse than any: one round of three failing still fails.
+        assert!(merged["metrics"]["unary_failed_requests"].is_null());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

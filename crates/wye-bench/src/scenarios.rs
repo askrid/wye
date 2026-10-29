@@ -28,7 +28,8 @@ pub struct Stream {
     /// Delay of each event from mock send to client receive.
     pub event_delays_us: Vec<u64>,
     pub bytes: u64,
-    /// The request or body failed before the stream ended.
+    /// The request or body failed, or the stream ended before all its
+    /// events.
     pub failed: bool,
 }
 
@@ -193,6 +194,11 @@ async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64
                 event_delays_us.push(received.saturating_sub(sent) / 1_000);
             }
         }
+    }
+    // A stream that ends before all its events is as broken as one that
+    // fails.
+    if event_delays_us.len() < events as usize {
+        failed = true;
     }
     Stream {
         ttfb_us: ttfb_us.unwrap_or(0),

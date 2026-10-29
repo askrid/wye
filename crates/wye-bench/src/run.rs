@@ -11,7 +11,7 @@ use crate::{
     gateway_process::{Gateway, GatewayProcess},
     measure::{self, Direct, Scope},
     mock,
-    stats::{PERCENTILES, median, percentile, phase, put},
+    stats::{PERCENTILES, merge, percentile, phase, put},
 };
 
 /// One way of reaching the mock upstream.
@@ -31,7 +31,8 @@ struct UpstreamPath<'a> {
     variants: bool,
 }
 
-/// Runs every scenario `repeat` times and writes the per-metric median to `out`.
+/// Runs every scenario `repeat` times and writes the merged metrics
+/// ([`merge`]: the median, the worst round for failure counts) to `out`.
 /// Competitors in `others` run the same scenarios under their own metric prefix.
 /// With `wye_alloc` (a `--features alloc-stats` build), allocation metrics are added.
 pub async fn run(
@@ -177,7 +178,7 @@ pub async fn run(
         "paths": {"": "plain HTTP/1.1 upstream", "tls_": "TLS + HTTP/2 upstream"},
         "scenarios": measure::scenario_report(),
         "stream_frames": if anthropic_frames { "anthropic" } else { "minimal" },
-        "metrics": median(&runs),
+        "metrics": merge(&runs),
     });
     std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
     for (name, value) in report["metrics"].as_object().unwrap() {
