@@ -328,7 +328,7 @@ OTLP metrics are cumulative since process start, exported every 10 s and at shut
 | `wye.tool.calls` | sum | `gen_ai.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |
-| `wye.telemetry.lost` | sum | records lost to full queues, failed exports, or the series cap |
+| `wye.telemetry.lost` | sum | log records and spans lost to full queues, failed exports, or the series cap (a request losing both counts twice) |
 
 `wye.upstream` is present only with a route's named upstreams (`[routes.claude]`, `[routes.openai]`).
 

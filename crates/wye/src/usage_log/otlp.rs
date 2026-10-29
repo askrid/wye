@@ -176,26 +176,28 @@ impl Batch {
         let body = Bytes::copy_from_slice(&buffer.buf);
         let records = std::mem::take(&mut buffer.records);
         buffer.buf.clear();
-        // A lost span batch repeats the loss of its log batch; count records once.
-        let counted = if matches!(signal, Signal::Logs) {
-            records
-        } else {
-            0
-        };
+        // Log records and spans are counted alike: a collector can take one
+        // signal and refuse the other (one without a traces pipeline).
         let export = Export {
             signal,
             body,
-            records: counted,
+            records,
         };
         if self.queue.try_send(export).is_err() {
             // Statistics counter only.
-            self.dropped.fetch_add(counted as u64, Ordering::Relaxed);
+            self.dropped.fetch_add(records as u64, Ordering::Relaxed);
         }
     }
 
     /// Records lost so far.
     pub(super) fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// The loss counter, which the exporter task keeps adding to after the
+    /// batch is gone.
+    pub(super) fn lost(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.dropped)
     }
 
     /// Queues a metrics export; a full queue skips it, and the next one
@@ -228,7 +230,7 @@ fn append(buffer: &mut Buffer, prefix: &[u8], write: impl FnOnce(&mut Vec<u8>)) 
 struct Export {
     signal: Signal,
     body: Bytes,
-    /// Log records in `body`, counted as lost if it is not delivered.
+    /// Log records or spans in `body`, counted as lost if it is not delivered.
     records: usize,
 }
 

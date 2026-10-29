@@ -585,3 +585,47 @@ async fn tool_calls_past_eight_names_go_under_other() {
     assert_eq!(calls.as_object().unwrap().len(), 9, "{calls}");
     assert_eq!(calls["(other)"], 2, "{calls}");
 }
+
+#[tokio::test]
+async fn spans_a_collector_refuses_are_counted_as_lost() {
+    // A collector without a traces pipeline: logs in, traces refused.
+    let collector: Handler = Arc::new(|seen: Seen| {
+        Box::pin(async move {
+            match seen.uri.path() {
+                "/v1/traces" => full(StatusCode::NOT_FOUND, "{}"),
+                _ => full(StatusCode::OK, "{}"),
+            }
+        })
+    });
+    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(
+        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        Arc::clone(&hits),
+        None,
+        None,
+    )
+    .await;
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )]);
+    let mut h = Harness::launch(
+        &format!("http://{upstream}"),
+        "",
+        &format!("api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\""),
+        resources,
+        hits,
+    )
+    .await;
+    read_body(h.send(messages(), "{}").await).await;
+    h.usage_record().await;
+    h.begin_shutdown();
+    tokio::time::timeout(WAIT, &mut h.served)
+        .await
+        .unwrap()
+        .unwrap();
+    // The shutdown summary follows the request's record.
+    let summary = h.usage_record().await;
+    assert_eq!(summary["event"], "otlp_dropped", "{summary}");
+    assert_eq!(summary["records"], 1, "{summary}");
+}
