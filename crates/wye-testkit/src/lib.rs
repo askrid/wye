@@ -6,7 +6,8 @@
 //! - [`spawn_upstream`]: a mock upstream over plain HTTP/1.1, or over TLS with
 //!   HTTP/2 or HTTP/1.1 negotiated by ALPN, like a real provider.
 //!
-//! Not for production use: keys are generated per process and never protected.
+//! Not for production use: keys are generated per process (the RSA ones are
+//! fixed files) and never protected.
 // Test support: setup failures abort the test or benchmark that called them.
 #![allow(clippy::expect_used)]
 

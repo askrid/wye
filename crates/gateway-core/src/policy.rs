@@ -1,5 +1,6 @@
 //! Per-request policy: which models a request may name, its output-token
-//! ceiling, and reading `model` and `max_tokens` from a streamed request body.
+//! ceiling, and reading `model` and the output-token field from a streamed
+//! request body.
 //!
 //! [`PolicyScanner`] follows the body's structure (strings, escapes, nesting)
 //! with constant memory and chunk boundaries anywhere. It reports the
@@ -112,8 +113,8 @@ pub enum PolicyError {
     EscapedKey,
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
-    /// The output-token field (`max_tokens`, `max_output_tokens`) is not a
-    /// non-negative integer.
+    /// The output-token field (`max_tokens`, `max_output_tokens`,
+    /// `max_completion_tokens`) is not a non-negative integer.
     InvalidMaxTokens,
     /// A second top-level output-token field.
     RepeatedMaxTokens,
@@ -129,9 +130,9 @@ impl PolicyError {
             Self::EscapedKey => "top-level keys must not contain escapes",
             Self::Malformed => "request body is not a JSON object",
             Self::InvalidMaxTokens => {
-                "the output-token limit (max_tokens, max_output_tokens) must be a non-negative integer"
+                "the output-token field (max_tokens, max_output_tokens, or max_completion_tokens) must be a non-negative integer"
             }
-            Self::RepeatedMaxTokens => "request names its output-token limit more than once",
+            Self::RepeatedMaxTokens => "request names its output-token field more than once",
         }
     }
 }

@@ -27,7 +27,7 @@ impl Metrics {
             &mut buf,
             "wye.requests",
             "{request}",
-            "Proxied requests by outcome",
+            "Proxied requests by route, upstream, status, and outcome",
         );
         for (i, s) in self.requests.iter().enumerate() {
             point_start(&mut buf, i, &times, s.count);
@@ -79,7 +79,7 @@ impl Metrics {
             &mut buf,
             "wye.tokens",
             "{token}",
-            "Tokens the provider reported, by kind, model, and Claude Code request class",
+            "Tokens the provider reported, by kind, model, request class, and upstream",
         );
         for (i, s) in self.tokens.iter().enumerate() {
             point_start(&mut buf, i, &times, s.count);
@@ -100,7 +100,7 @@ impl Metrics {
             &mut buf,
             "wye.cost",
             "USD",
-            "Priced cost of requests (complete and partial costs), by model and Claude Code request class",
+            "Priced cost of requests (complete and partial costs), by model, request class, and upstream",
         );
         for (i, s) in self.costs.iter().enumerate() {
             if i > 0 {

@@ -8,20 +8,23 @@ use gateway_core::config::Config;
 use wye::{Gateway, Resources};
 
 const USAGE: &str = "usage:
+  wye init [--subscription] [--anthropic-key-env <name>] [--openai-key-env <name>] [--out <path>]
   wye serve --config <path>
   wye check-config <path>
-  wye probe <url>
   wye doctor --config <path>
-  wye init [--subscription] [--anthropic-key-env <name>] [--openai-key-env <name>] [--out <path>]
-  wye policy-test --config <path> <dir>
-  wye policy-diff <old-config> <new-config>   (exit 3 when access widens)
-  wye report [<usage.jsonl>]           (default: standard input)
   wye explain --config <path> [--credential <file>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json>
+  wye policy-test --config <path> <dir>
+  wye policy-diff <old-config> <new-config>
+  wye report [<usage.jsonl>]   (default: standard input)
+  wye probe <url>
   wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]
   wye codex [--gateway <url>] [--credential-file <path>] [--] [codex args...]
   wye token keygen --out <key-file>
   wye token issue --key <key-file> --kid <id> --issuer <iss> --audience <aud> \
---subject <sub> --ttl-secs <n> [--models <name,prefix*,...>] [--max-output-tokens <n>]";
+--subject <sub> --ttl-secs <n> [--models <name,prefix*,...>] [--max-output-tokens <n>]
+
+Exit status 3: doctor found a problem, explain a refusal, policy-test a failed case, or
+policy-diff widened access.";
 
 fn main() -> ExitCode {
     match run(std::env::args_os().skip(1).collect()) {

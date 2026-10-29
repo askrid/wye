@@ -31,8 +31,9 @@ run_bench() {
     --wye-alloc target/alloc/release/wye >/dev/null
 }
 
-# The proxy tests and the benchmark open thousands of sockets (1000 idle
-# streams, 256 stalled clients); macOS allows 256 by default.
+# The proxy tests and the benchmark open thousands of sockets (2,000 paced
+# streams, each a client and an upstream connection); macOS allows 256 open
+# files by default.
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 
 step fmt cargo fmt --all --check

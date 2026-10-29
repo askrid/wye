@@ -1,7 +1,6 @@
 //! The request body as forwarded, held until its `model` is read, so model
-//! permissions and the output-token ceiling (`max_tokens` or
-//! `max_output_tokens`, when it arrives in time) are checked before anything
-//! is sent upstream.
+//! permissions and the output-token ceiling (the API's output-token field,
+//! when it arrives in time) are checked before anything is sent upstream.
 //!
 //! [`hold_until_model`] reads the request body only until its top-level
 //! `model` value has been read. Claude Code sends `model` first, so usually
@@ -9,8 +8,8 @@
 //! budget (`server.max_held_request_bytes`). When the model is allowed,
 //! [`RequestBody`] replays the held chunks and streams the rest, and keeps
 //! checking it: a second top-level `model` key, an output-token maximum above
-//! the ceiling that arrives after the hold, or (on Responses, where the field
-//! is optional) none at all, fails the body, which aborts the upstream request
+//! the ceiling that arrives after the hold, or (on the OpenAI APIs, where the
+//! field is optional) none at all, fails the body, which aborts the upstream request
 //! before the provider sees a complete request.
 //!
 //! The same hold resolves model aliases (spliced in place) and finds where
@@ -67,7 +66,8 @@ struct Hold {
     /// ceiling requires it.
     api: Api,
     /// Whether the rest of the body is checked as it streams (a repeated
-    /// `model`, a late `max_tokens`); off when no permission or ceiling applies.
+    /// `model`, a late output-token field); off when no permission or ceiling
+    /// applies.
     check_rest: bool,
 }
 
@@ -75,7 +75,8 @@ struct Hold {
 /// the ceiling requires it.
 #[derive(Debug)]
 pub(crate) struct TokenLimitError {
-    /// `max_tokens` or `max_output_tokens`.
+    /// The field's name: `max_tokens`, `max_output_tokens`, or
+    /// `max_completion_tokens`.
     pub(crate) field: &'static str,
     /// `None`: the request did not set the field.
     pub(crate) requested: Option<u64>,

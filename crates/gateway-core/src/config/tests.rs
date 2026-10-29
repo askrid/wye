@@ -532,3 +532,5 @@ fn upgrade_check_targets_are_unique_model_names() {
 }
 
 mod routes;
+
+mod examples;

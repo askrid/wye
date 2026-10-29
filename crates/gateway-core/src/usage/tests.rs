@@ -85,7 +85,7 @@ proptest! {
 }
 
 #[test]
-fn crlf_line_endings() {
+fn crlf_line_ends_are_accepted() {
     let s = scan(&[STREAM.replace('\n', "\r\n").as_bytes()]);
     assert_eq!(s.usage(), EXPECTED);
 }

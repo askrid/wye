@@ -4,9 +4,9 @@ Wye is a small, stateless gateway that sits between coding agents (Claude Code,
 Codex) or your own apps and the model providers. It speaks each provider's
 native API and forwards requests byte for byte, so clients keep the official
 SDK and nothing gets translated. What changes is where the decisions live:
-which provider and account a request goes to, who may use which model, token
-ceilings, failover, model upgrades, and prices all sit in one TOML file you keep
-in Git.
+which provider and account a request goes to, who may use which model,
+output-token ceilings, failover, model upgrades, and prices all sit in one TOML
+file you keep in Git.
 
 It is one Rust binary with no database and no admin API. Every replica makes
 the same decision for the same request, so you can run as many as you like
@@ -91,7 +91,7 @@ needs a `[routes.openai]` section (`wye init --openai-key-env OPENAI_API_KEY`
 adds one). `wye codex` launches Codex against the gateway the same way
 `wye claude` does.
 
-With `[auth]` on, the SDK's API key is a Wye credential (see
+With `[auth]` on, the SDK's API key is a gateway credential (see
 [docs/policy.md](docs/policy.md#gateway-credentials)). Without it, Wye sends
 its own provider key and ignores whatever the client sends.
 
@@ -118,11 +118,14 @@ base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
 api_key_env = "BEDROCK_API_KEY"
 
 [pricing]
-version = "2026-10"
+version = "anthropic-2026-10-06"
 [[pricing.models]]
-models = ["claude-opus-5-*"]
-input = "5.00"     # USD per million tokens
-output = "25.00"
+models = ["claude-opus-5-5"]
+input = "4.00"     # USD per million tokens
+output = "20.00"
+cache_read = "0.40"
+cache_write_5m = "5.00"
+cache_write_1h = "8.00"
 ```
 
 Each Claude Code session is pinned to one account by hashing its session id,
@@ -133,10 +136,9 @@ turn. It never does this after the first response byte, so a request is never
 billed twice.
 
 Secrets are read from environment variables or files and never appear in the
-config. Unknown fields are rejected at startup. [examples/wye.toml](examples/wye.toml)
-shows every section with comments, and
-[docs/architecture.md](docs/architecture.md#current-schema-implemented) is the
-reference.
+config. Unknown fields are rejected at startup.
+[examples/wye.toml](examples/wye.toml) is the reference: every option with its
+default and limits, kept valid by a test.
 
 ## What it looks like
 
@@ -146,13 +148,13 @@ OTLP log record, a span, and metrics). This record is from a local test run:
 ```json
 {
   "event": "request",
-  "unix_ms": 1793105262403,
+  "unix_ms": 1793178637975,
   "path": "/v1/messages",
   "status": 200,
   "outcome": "completed",
-  "duration_ms": 3.94,
-  "headers_ms": 3.42,
-  "upstream": "team-a",
+  "duration_ms": 3.07,
+  "headers_ms": 2.65,
+  "upstream": "bedrock-us",
   "session_id": "7f2c4a10-8e1b-4d3a-9c55-2b6e0d1f9a33",
   "request_class": "main",
   "model": "claude-opus-5-5",
@@ -161,9 +163,9 @@ OTLP log record, a span, and metrics). This record is from a local test run:
   "output_tokens": 38,
   "cache_creation_input_tokens": 1530,
   "cache_read_input_tokens": 48210,
-  "cost_usd": "0.0346775",
+  "cost_usd": "0.027742",
   "cost_status": "complete",
-  "pricing_version": "anthropic-2026-10",
+  "pricing_version": "anthropic-2026-10-06",
   "tool_calls": { "Bash": 1 }
 }
 ```
@@ -176,12 +178,12 @@ near money. A model with no price is recorded as `unknown`, never as $0.
 
 ```console
 $ wye report usage.jsonl
-3 requests in 1 sessions (2 other lines skipped); outcomes: completed 3
+3 requests in 1 session (2 other lines skipped); outcomes: completed 3
 
 By request class
   class                           reqs        input     output    cache read   cache write     hit        cost       time      tools
-  all                                3           36        114        144630          4590   96.9%     $0.1040       0.0s       0.0s
-  main                               3           36        114        144630          4590   96.9%     $0.1040       0.0s       0.0s
+  all                                3           36        114        144630          4590   96.9%     $0.0832       0.0s       0.0s
+  main                               3           36        114        144630          4590   96.9%     $0.0832       0.0s       0.0s
 ...
 ```
 
@@ -198,8 +200,8 @@ route: upstream bedrock-us of 2 (cache_affine by session id)
 failover: on 429, 529, connect to anthropic in that order, for bodies up to 8388608 bytes
 upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages
 provider credential: x-api-key from $BEDROCK_API_KEY
-model id: the body names anthropic.claude-opus-5-5 upstream (the provider's spelling)
-price: claude-opus-5-5 at bedrock-us: input $5, output $25 per million tokens (pricing version 2026-10)
+model id: the body names anthropic.claude-opus-5-5 upstream, the provider's id for claude-opus-5-5
+price: claude-opus-5-5 at bedrock-us: input $4.00, output $20.00, cache read $0.40, cache write 5m $5.00, cache write 1h $8.00 per million tokens (pricing version anthropic-2026-10-06)
 decision: forward
 ```
 
@@ -244,8 +246,8 @@ Tooling
 - `wye policy-diff old.toml new.toml` exits non-zero when a config change
   widens access: a model newly allowed, a ceiling raised, a new trusted signing
   key, auth removed, or a listener moved off loopback.
-- `wye doctor`, `wye init`, `wye token`, `wye probe` (a health check for
-  images without curl).
+- `wye init`, `wye doctor`, `wye probe` (a health check for images without
+  curl), and `wye token`.
 
 ## Performance
 
@@ -266,7 +268,7 @@ measurements.
 
 Compared at their best configurations on the same machine, Bifrost used about
 6.6× more CPU per request and 4.4× more per streamed event, and LiteLLM about
-120× and 9×. KrakenD CE could not stream at all, though it beats Wye on bulk
+120× and 9×. KrakenD CE cannot stream at all, though it beats Wye on bulk
 transfer and TLS uploads. [docs/research.md](docs/research.md#benchmarks) has
 the method, the full tables, the configurations used, and where Wye loses.
 
@@ -276,7 +278,7 @@ Built and covered by tests: everything listed under [Features](#features).
 
 Not checked against the real services yet:
 - Bedrock and Claude Platform on AWS were built from the providers'
-  documentation and tested against mocks. Bedrock's API-key header in
+  documentation and tested against mocks. Bedrock's API key header in
   particular needs one live request to confirm.
 - Codex support was built from Codex's source and tests, not from a real
   session.
@@ -335,7 +337,8 @@ helpers.
 ## Documentation
 
 - [docs/product.md](docs/product.md): scope, who it is for, strengths and weaknesses
-- [docs/architecture.md](docs/architecture.md): how it works, and the config reference
+- [examples/wye.toml](examples/wye.toml): every configuration option
+- [docs/architecture.md](docs/architecture.md): how it works
 - [docs/policy.md](docs/policy.md): credentials, permissions, pricing
 - [docs/operations.md](docs/operations.md): CLI, deployment, telemetry
 - [docs/roadmap.md](docs/roadmap.md): status and what is next

@@ -141,3 +141,18 @@ fn counts_failovers_by_upstream_and_reason() {
     assert_eq!(rows, ["a 429 2", "c connect 1"]);
     assert!(!report(LOG.as_bytes()).unwrap().contains("Failovers"));
 }
+
+#[test]
+fn the_summary_line_counts_in_the_singular_too() {
+    let out = report(
+        r#"{"event":"request","outcome":"completed","session_id":"s-1"}
+not a record
+"#
+        .as_bytes(),
+    )
+    .unwrap();
+    assert!(
+        out.starts_with("1 request in 1 session (1 other line skipped)"),
+        "{out}"
+    );
+}

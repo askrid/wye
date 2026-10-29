@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Test and benchmark support: test CA and mock upstream server"
+description = "Test and benchmark support: a throwaway CA, signing keys, and a mock upstream"
 
 [dependencies]
 base64.workspace = true
@@ -14,8 +14,8 @@ bytes.workspace = true
 http.workspace = true
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["http1", "http2", "server", "server-auto", "tokio"] }
-ring = { workspace = true, features = ["alloc"] }
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
+ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 tokio = { workspace = true, features = ["net", "rt"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }

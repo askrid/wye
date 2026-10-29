@@ -6,20 +6,21 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Benchmark and regression gate: mock upstream, load client, and comparison"
 
 [dependencies]
-wye-testkit.workspace = true
 gateway-core.workspace = true
-ring = { workspace = true, features = ["alloc"] }
+wye-testkit.workspace = true
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["http1", "http2", "client"] }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "tokio"] }
+ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde_json = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time", "process", "sync"] }
+tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true

@@ -238,8 +238,8 @@ impl ResponsesUsageScanner {
         if self.event != Event::Terminal {
             return;
         }
-        // The tier that served the request; others than default are priced
-        // differently.
+        // The tier that served the request; a tier other than default is
+        // priced differently.
         if fields.service_tier().is_some_and(|tier| tier != "default") {
             self.usage.unpriced = true;
         }

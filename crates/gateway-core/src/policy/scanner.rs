@@ -14,10 +14,12 @@ enum Capture {
     Model,
 }
 
-/// Bytes kept of a top-level key: enough to compare with `max_output_tokens`.
+/// Bytes kept of a top-level key: enough to compare with the longest
+/// output-token field, `max_completion_tokens`.
 const KEY_CAP: usize = 24;
 
-/// Incremental reader of one request body's top-level `model`.
+/// Incremental reader of one request body's top-level `model` and
+/// output-token field.
 pub struct PolicyScanner {
     error: Option<PolicyError>,
     started: bool,
@@ -112,7 +114,8 @@ impl PolicyScanner {
     }
 
     /// The requested output-token maximum (`max_tokens` on Messages,
-    /// `max_output_tokens` on Responses), once its value was read completely.
+    /// `max_output_tokens` on Responses, either field on Chat Completions),
+    /// once its value was read completely.
     pub fn max_output_tokens(&self) -> Option<u64> {
         self.max_tokens
     }

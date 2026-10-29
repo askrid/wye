@@ -37,7 +37,8 @@ struct TokenSeries {
     kind: &'static str,
     model: Box<str>,
     upstream: Option<Box<str>>,
-    /// Claude Code's request class, when hint headers are on.
+    /// The agent's request class: Claude Code's hint header, or Codex's
+    /// subagent header.
     request_class: Option<&'static str>,
     count: u64,
 }
