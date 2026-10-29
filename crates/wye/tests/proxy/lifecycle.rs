@@ -199,3 +199,27 @@ fn example_policy_tests_pass() {
     assert!(passed, "{report}");
     assert!(report.ends_with("4 passed, 0 failed\n"), "{report}");
 }
+
+#[test]
+fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
+    let wye = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_wye"))
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let help = wye(&["--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("wye serve --config"));
+    let version = wye(&["--version"]);
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout),
+        format!("wye {}\n", env!("CARGO_PKG_VERSION"))
+    );
+    let typo = wye(&["srve"]);
+    assert_eq!(typo.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&typo.stderr).starts_with("wye: unknown command `srve`"));
+    // A known command with wrong arguments gets the usage without that line.
+    let wrong = wye(&["serve"]);
+    assert!(!String::from_utf8_lossy(&wrong.stderr).contains("unknown command"));
+}

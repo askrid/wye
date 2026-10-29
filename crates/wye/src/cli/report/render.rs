@@ -8,6 +8,10 @@ use crate::cli::plural;
 
 pub(super) fn render(s: &Summary) -> String {
     let mut out = String::new();
+    // Without `[pricing]` nothing carries a cost; the column would read "-".
+    let columns = Columns {
+        cost: s.total.cost.priced > 0,
+    };
     let mut outcomes: Vec<_> = s.outcomes.iter().collect();
     outcomes.sort();
     let _ = writeln!(
@@ -24,8 +28,8 @@ pub(super) fn render(s: &Summary) -> String {
     );
 
     let _ = writeln!(out, "\nBy request class");
-    table_header(&mut out, "class");
-    table_row(&mut out, "all", &s.total);
+    columns.header(&mut out, "class");
+    columns.row(&mut out, "all", &s.total);
     let mut classes: Vec<_> = s.classes.iter().collect();
     classes.sort_by(|a, b| {
         b.1.tokens
@@ -34,16 +38,16 @@ pub(super) fn render(s: &Summary) -> String {
             .then(a.0.cmp(b.0))
     });
     for (name, group) in classes {
-        table_row(&mut out, name, group);
+        columns.row(&mut out, name, group);
     }
 
     if !s.upstreams.is_empty() {
         let _ = writeln!(out, "\nBy upstream");
-        table_header(&mut out, "upstream");
+        columns.header(&mut out, "upstream");
         let mut upstreams: Vec<_> = s.upstreams.iter().collect();
         upstreams.sort_by(|a, b| a.0.cmp(b.0));
         for (name, group) in upstreams {
-            table_row(&mut out, name, group);
+            columns.row(&mut out, name, group);
         }
     }
     if !s.failovers.is_empty() {
@@ -119,7 +123,7 @@ pub(super) fn render(s: &Summary) -> String {
     }
 
     let _ = writeln!(out, "\nTop sessions by tokens");
-    table_header(&mut out, "session (subject)");
+    columns.header(&mut out, "session (subject)");
     let mut sessions: Vec<_> = s.sessions.iter().collect();
     sessions.sort_by(|a, b| {
         b.1.group
@@ -133,7 +137,7 @@ pub(super) fn render(s: &Summary) -> String {
             Some(subject) => format!("{} ({subject})", short(id)),
             None => short(id).to_owned(),
         };
-        table_row(&mut out, &label, &session.group);
+        columns.row(&mut out, &label, &session.group);
         if session.compactions > 0 {
             let _ = writeln!(out, "    {} compactions", session.compactions);
         }
@@ -141,7 +145,7 @@ pub(super) fn render(s: &Summary) -> String {
 
     if !s.prompts.is_empty() {
         let _ = writeln!(out, "\nTop prompts by tokens");
-        table_header(&mut out, "prompt");
+        columns.header(&mut out, "prompt");
         let mut prompts: Vec<_> = s.prompts.iter().collect();
         prompts.sort_by(|a, b| {
             b.1.tokens
@@ -150,35 +154,52 @@ pub(super) fn render(s: &Summary) -> String {
                 .then(a.0.cmp(b.0))
         });
         for (id, group) in prompts.iter().take(TOP) {
-            table_row(&mut out, short(id), group);
+            columns.row(&mut out, short(id), group);
         }
     }
     out
 }
 
-fn table_header(out: &mut String, first: &str) {
-    let _ = writeln!(
-        out,
-        "  {first:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>11} {:>10} {:>10}",
-        "reqs", "input", "output", "cache read", "cache write", "hit", "cost", "time", "tools"
-    );
+/// The columns of the token tables.
+struct Columns {
+    cost: bool,
 }
 
-fn table_row(out: &mut String, name: &str, g: &Group) {
-    let t = g.tokens;
-    let _ = writeln!(
-        out,
-        "  {name:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7} {:>11} {:>10} {:>10}",
-        g.requests,
-        t.input,
-        t.output,
-        t.cache_read,
-        t.cache_write,
-        t.hit_rate(),
-        g.cost.show(),
-        seconds(g.model_ms),
-        seconds(g.tool_ms as f64),
-    );
+impl Columns {
+    fn header(&self, out: &mut String, first: &str) {
+        let _ = write!(
+            out,
+            "  {first:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7}",
+            "reqs", "input", "output", "cache read", "cache write", "hit"
+        );
+        if self.cost {
+            let _ = write!(out, " {:>11}", "cost");
+        }
+        let _ = writeln!(out, " {:>10} {:>10}", "time", "tools");
+    }
+
+    fn row(&self, out: &mut String, name: &str, g: &Group) {
+        let t = g.tokens;
+        let _ = write!(
+            out,
+            "  {name:<28} {:>7} {:>12} {:>10} {:>13} {:>13} {:>7}",
+            g.requests,
+            t.input,
+            t.output,
+            t.cache_read,
+            t.cache_write,
+            t.hit_rate(),
+        );
+        if self.cost {
+            let _ = write!(out, " {:>11}", g.cost.show());
+        }
+        let _ = writeln!(
+            out,
+            " {:>10} {:>10}",
+            seconds(g.model_ms),
+            seconds(g.tool_ms as f64)
+        );
+    }
 }
 
 fn seconds(ms: f64) -> String {

@@ -169,6 +169,62 @@ A native Tokio listener does not fit every serverless runtime; a gateway functio
 
 A portable core with a platform adapter can run at the edge, but the edge is not automatically faster: provider and telemetry location, network hops, and runtime limits matter. Do not promise identical native and WASM performance.
 
+### Running as a service
+
+On one machine, a user service keeps the gateway running across logins and restarts it if it exits. The usage log is the service's stderr, so the service appends it to a file. With an API key, put the key in a file (`chmod 600`) and point `upstream.api_key_file` at it, rather than writing it into the service definition.
+
+macOS, as a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`; replace `/Users/you`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.wye.gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/.cargo/bin/wye</string>
+    <string>serve</string>
+    <string>--config</string>
+    <string>/Users/you/.wye/wye.toml</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>/Users/you/.wye/usage.jsonl</string>
+  <key>ExitTimeOut</key><integer>35</integer>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.wye.gateway.plist   # start, and at every login
+launchctl kickstart -k gui/$(id -u)/dev.wye.gateway                              # restart, after installing a new wye
+launchctl bootout gui/$(id -u)/dev.wye.gateway                                   # stop
+```
+
+Linux, as a systemd user unit (`~/.config/systemd/user/wye.service`; not yet tested):
+
+```ini
+[Unit]
+Description=Wye gateway
+
+[Service]
+ExecStart=%h/.cargo/bin/wye serve --config %h/.wye/wye.toml
+StandardError=append:%h/.wye/usage.jsonl
+Restart=on-failure
+TimeoutStopSec=35
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now wye    # start, and at every login
+systemctl --user restart wye         # after installing a new wye
+```
+
+The stop timeouts (35 s) cover the default 30 s shutdown grace. A restart ends open streams after that grace; Claude Code retries them. The log grows without limit: rotate it, or truncate it after `wye report`.
+
 ### Without Kubernetes
 
 Because Wye keeps no state, every multi-node setup has the same shape: a load balancer in front of identical processes reading the same config. For example:

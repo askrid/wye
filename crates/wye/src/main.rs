@@ -8,6 +8,7 @@ use gateway_core::config::Config;
 use wye::{Gateway, Resources};
 
 const USAGE: &str = "usage:
+  wye --help | --version
   wye init [--subscription] [--anthropic-key-env <name>] [--openai-key-env <name>] [--out <path>]
   wye serve --config <path>
   wye check-config <path>
@@ -42,6 +43,14 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
         .map(|a| a.to_str().ok_or("arguments must be valid UTF-8"))
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
+        ["--help" | "-h" | "help"] => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        ["--version" | "-V"] => {
+            println!("wye {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         ["serve", "--config", path] => serve(load(path)?, config_dir(path)),
         ["token", "keygen", "--out", path] => wye::cli::token::keygen(Path::new(path)),
         ["token", "issue", flags @ ..] => wye::cli::token::issue(flags),
@@ -106,7 +115,20 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             println!("{path}: ok");
             Ok(())
         }
-        _ => Err(USAGE.into()),
+        _ => Err(usage_error(args.first().copied()).into()),
+    }
+}
+
+/// The usage text, after naming a command it does not list.
+fn usage_error(command: Option<&str>) -> String {
+    let mut known = USAGE
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("wye ")?.split(' ').next());
+    match command {
+        Some(command) if !known.any(|k| k == command) => {
+            format!("unknown command `{command}`\n{USAGE}")
+        }
+        _ => USAGE.into(),
     }
 }
 
@@ -172,7 +194,15 @@ fn serve(config: Config, config_dir: &Path) -> Result<(), Box<dyn Error>> {
         .enable_all()
         .build()?;
     runtime.block_on(async {
-        let listener = tokio::net::TcpListener::bind(config.server.listen).await?;
+        let listen = config.server.listen;
+        let listener = tokio::net::TcpListener::bind(listen)
+            .await
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::AddrInUse => {
+                    format!("cannot listen on {listen}: the port is in use (a running wye?)")
+                }
+                _ => format!("cannot listen on {listen}: {e}"),
+            })?;
         eprintln!("wye: listening on http://{}", listener.local_addr()?);
         wye::serve(listener, gateway, shutdown_signal(), tokio::io::stderr()).await;
         eprintln!("wye: stopped");
