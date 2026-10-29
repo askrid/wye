@@ -135,6 +135,34 @@ const HAIKU: &str =
 const SONNET: &str = r#"{"model":"claude-sonnet-4-5","max_tokens":1,"messages":[]}"#;
 
 #[tokio::test]
+async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
+    let key = keypair();
+    let (h, _bodies) = body_harness(&key, "").await;
+    let t = token_with_models(&key, &["claude-haiku-*"]);
+    let with = |name: &'static str, value: &'static str| {
+        let mut req = messages().header("authorization", format!("Bearer {t}"));
+        req.headers_mut()
+            .unwrap()
+            .insert(name, http::HeaderValue::from_static(value));
+        req
+    };
+    for (name, value) in [
+        ("content-encoding", "br"),
+        ("content-type", "application/json; charset=utf-16"),
+    ] {
+        let res = h.send(with(name, value), HAIKU).await;
+        assert_eq!(
+            res.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "{name}: {value}"
+        );
+    }
+    let utf8 = with("content-type", "application/json; charset=UTF-8");
+    assert_eq!(h.send(utf8, HAIKU).await.status(), StatusCode::OK);
+    assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn credential_models_allow_or_refuse_before_upstream() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;

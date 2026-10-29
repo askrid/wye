@@ -109,7 +109,8 @@ pub enum PolicyError {
     Invalid,
     /// A second top-level `model` key.
     Repeated,
-    /// A top-level key with escapes, which could spell `model`.
+    /// A top-level key with escapes or non-ASCII bytes, which could spell
+    /// `model` once decoded or case-folded.
     EscapedKey,
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
@@ -127,7 +128,7 @@ impl PolicyError {
             Self::Missing => "request has no model",
             Self::Invalid => "model must be a short string without escapes",
             Self::Repeated => "request names model more than once",
-            Self::EscapedKey => "top-level keys must not contain escapes",
+            Self::EscapedKey => "top-level keys must be ASCII without escapes",
             Self::Malformed => "request body is not a JSON object",
             Self::InvalidMaxTokens => {
                 "the output-token field (max_tokens, max_output_tokens, or max_completion_tokens) must be a non-negative integer"
