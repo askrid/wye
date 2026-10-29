@@ -171,7 +171,7 @@ pub(crate) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeChec
         targets.push(target.into());
     }
     let sample_percent = match raw.sample_percent {
-        None => 100,
+        None => DEFAULT_SAMPLE_PERCENT,
         Some(p @ 1..=100) => p,
         Some(_) => return Err(ConfigError::Percent("upgrade_check.sample_percent")),
     };
