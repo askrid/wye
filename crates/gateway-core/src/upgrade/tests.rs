@@ -42,7 +42,7 @@ fn each_rule_is_caught_on_its_models_only() {
         (
             r#"{"thinking":{"type":"disabled"}}"#,
             "thinking_disabled",
-            "claude-opus-5-5",
+            "claude-sonnet-5-5",
             "claude-opus-5",
         ),
         (
@@ -60,8 +60,8 @@ fn each_rule_is_caught_on_its_models_only() {
         (
             r#"{"tool_choice":{"type":"any"}}"#,
             "forced_tool_choice",
-            "claude-opus-5-5",
-            "claude-opus-4-8",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
         ),
         (
             r#"{"tools":[{"type":"bash_20250124"},{"type":"computer_20251124","name":"computer"}]}"#,
@@ -78,14 +78,14 @@ fn each_rule_is_caught_on_its_models_only() {
         (
             r#"{"temperature":0.2,"messages":[]}"#,
             "sampling",
-            "claude-sonnet-5",
             "claude-opus-4-8",
+            "claude-opus-4-6",
         ),
         (
             r#"{"top_k":5}"#,
             "sampling",
-            "claude-opus-5-5",
             "claude-haiku-5-5",
+            "claude-haiku-4-5",
         ),
         (
             r#"{"messages":[{"role":"system","content":"x"},{"role":"user","content":"y"}]}"#,

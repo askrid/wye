@@ -12,7 +12,8 @@ mod scanner;
 
 pub use scanner::UpgradeScanner;
 
-/// A section of Anthropic's model migration guide (read 2026-10-26).
+/// A section of Anthropic's model migration guide (read 2026-10-26; the
+/// models per rule re-read 2026-10-30).
 macro_rules! guide {
     ($anchor:literal) => {
         concat!(
@@ -107,8 +108,6 @@ impl Rule {
     /// Where the provider says so.
     pub fn source(self) -> &'static str {
         match self {
-            // Fable 5 and 5.1 and Sonnet 5.5 also reject it, per Anthropic's
-            // API reference ("API drift": `budget_tokens`).
             Self::BudgetTokens => guide!("#migrating-from-claude-opus-46"),
             Self::Prefill => guide!("#migrating-from-claude-opus-45"),
             Self::SystemRole => guide!("#migrating-from-claude-opus-47"),
@@ -119,12 +118,22 @@ impl Rule {
         }
     }
 
-    /// Model families that reject the request (dated ids included).
+    /// Model families that reject the request (dated ids included), per the
+    /// migration guide's per-model sections (read 2026-10-30). Only
+    /// unconditional rejections: Opus 5 and Haiku 5.5 reject disabled
+    /// thinking only at effort `xhigh` or `max`, which the body may not say.
+    /// Two caveats the body cannot show: Bedrock still accepts
+    /// `computer_20251124` on Opus and Sonnet 5.5, and Sonnet 5 and later
+    /// (besides Opus) accept a sampling parameter left at its default.
     fn rejected_by(self) -> &'static [&'static str] {
         match self {
-            Self::ThinkingDisabled | Self::ForcedToolChoice | Self::ComputerTool => {
-                &["claude-opus-5-5"]
-            }
+            Self::ThinkingDisabled => &[
+                "claude-opus-5-5",
+                "claude-sonnet-5-5",
+                "claude-fable-5",
+                "claude-fable-5-1",
+                "claude-mythos-5-1",
+            ],
             Self::BudgetTokens => &[
                 "claude-opus-4-7",
                 "claude-opus-4-8",
@@ -132,19 +141,52 @@ impl Rule {
                 "claude-opus-5-5",
                 "claude-sonnet-5",
                 "claude-sonnet-5-5",
+                "claude-haiku-5-5",
                 "claude-fable-5",
                 "claude-fable-5-1",
+                "claude-mythos-5-1",
             ],
+            Self::ForcedToolChoice => &[
+                "claude-opus-5-5",
+                "claude-sonnet-5-5",
+                "claude-fable-5-1",
+                "claude-mythos-5-1",
+            ],
+            Self::ComputerTool => &["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
             Self::Prefill => &[
                 "claude-opus-4-6",
+                "claude-sonnet-4-6",
                 "claude-opus-4-7",
                 "claude-opus-4-8",
                 "claude-opus-5",
                 "claude-opus-5-5",
                 "claude-sonnet-5",
+                "claude-sonnet-5-5",
+                "claude-haiku-5-5",
+                "claude-fable-5",
+                "claude-fable-5-1",
+                "claude-mythos-5-1",
             ],
-            Self::Sampling => &["claude-sonnet-5", "claude-opus-5-5"],
-            Self::SystemRole => &["claude-opus-4-7"],
+            Self::Sampling => &[
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+                "claude-opus-5",
+                "claude-opus-5-5",
+                "claude-sonnet-5",
+                "claude-sonnet-5-5",
+                "claude-haiku-5-5",
+                "claude-fable-5",
+                "claude-fable-5-1",
+                "claude-mythos-5-1",
+            ],
+            // Mid-conversation system messages arrived with Opus 4.8; Sonnet
+            // 5 does not take them.
+            Self::SystemRole => &[
+                "claude-opus-4-6",
+                "claude-sonnet-4-6",
+                "claude-opus-4-7",
+                "claude-sonnet-5",
+            ],
         }
     }
 
