@@ -60,6 +60,24 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
     }
 }
 
+#[test]
+fn an_empty_value_is_spliced_at_any_cut() {
+    let body = r#"{"model":"","stream":true}"#;
+    let at = body.find(r#""""#).unwrap() as u64 + 1;
+    for cut in 1..body.len() {
+        let (head, tail) = body.as_bytes().split_at(cut);
+        let chunks = [Bytes::from_static(head), Bytes::from_static(tail)];
+        let mut out = Vec::new();
+        let prefix = Bytes::from_static(b"anthropic.");
+        splice_chunks(chunks.into_iter(), &(at..at), prefix, |c| out.push(c));
+        assert_eq!(
+            out.concat(),
+            br#"{"model":"anthropic.","stream":true}"#,
+            "cut at {cut}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_repeated_model_later_fails_the_body() {
     let budget = Gauge::default();
