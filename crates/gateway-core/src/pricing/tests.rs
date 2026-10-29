@@ -94,6 +94,18 @@ fn an_unknown_ttl_split_prices_writes_high_and_is_partial() {
     let cost = t.cost("claude-opus-5-5", None, &u, true);
     assert_eq!(cost.status, CostStatus::Partial);
     assert_eq!(Usd(cost.pico.unwrap()).to_string(), "8");
+
+    // A total the split does not cover (updated after it): the rest is of
+    // unknown TTL too. 1M at 5 USD, 2M at 8 USD.
+    let stale = Usage {
+        cache_creation_input_tokens: Some(3_000_000),
+        cache_creation_5m_tokens: Some(1_000_000),
+        cache_creation_1h_tokens: Some(0),
+        ..usage(0, 0)
+    };
+    let cost = t.cost("claude-opus-5-5", None, &stale, true);
+    assert_eq!(cost.status, CostStatus::Partial);
+    assert_eq!(Usd(cost.pico.unwrap()).to_string(), "21");
 }
 
 #[test]
