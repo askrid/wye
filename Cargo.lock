@@ -1119,6 +1119,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "socket2",
  "tokio",
  "toml",
  "webpki-roots",

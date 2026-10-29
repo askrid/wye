@@ -25,6 +25,7 @@ ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
+socket2.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true, features = ["parse", "serde", "std"] }
 webpki-roots.workspace = true

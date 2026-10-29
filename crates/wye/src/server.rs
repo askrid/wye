@@ -30,6 +30,15 @@ use write_timeout::WriteTimeout;
 /// above an 8 KiB gateway credential plus Claude Code's headers.
 const MAX_CONNECTION_BUFFER: usize = 32 * 1024;
 
+/// Kernel send buffer of a client connection, macOS's initial size.
+///
+/// Left to autotuning, the kernel grows the send buffer of a connection whose
+/// client has stopped reading to as much as 4 MiB, kernel memory that Wye's own
+/// bounds do not see. Fixed, 256 stalled clients hold 32 MB of send buffers.
+/// It limits one response to 128 KiB per round trip: far above token pace, and
+/// clients usually sit behind a load balancer less than a millisecond away.
+const CLIENT_SEND_BUFFER: usize = 128 * 1024;
+
 /// How long `serve` waits for the usage log to be written after connections close.
 const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -60,6 +69,8 @@ pub async fn serve(
         // Transient accept errors (for example, file descriptor exhaustion) must not stop the server.
         let Ok((stream, _)) = accepted else { return };
         let _ = stream.set_nodelay(true);
+        // Best effort: without it the kernel autotunes, as before.
+        let _ = socket2::SockRef::from(&stream).set_send_buffer_size(CLIENT_SEND_BUFFER);
         let io = TokioIo::new(WriteTimeout::new(stream, gateway.client_write_timeout));
         let gateway = Arc::clone(&gateway);
         let log = log.clone();
