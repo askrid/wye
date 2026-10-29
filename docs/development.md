@@ -71,7 +71,14 @@ Failed requests and streams are gated at zero. `--krakend <path>`, `--litellm <p
 
 `--wye-alloc <path>` adds `alloc_` metrics from a `--features alloc-stats` build, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (benchmarks only; never ship it): allocations and bytes per request, per streamed event, and per stream; live heap per idle stream, also after a 512 KB request and on TLS, and per stalled stream on TLS; allocations per 1 MiB upload. Counts vary under 1% (uploads about 5%), so the gate catches one extra allocation per request, stream, or event, which CPU timing cannot resolve.
 
-`wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N` keeps one scenario running and prints the gateway's pid, for `sample <pid>` (macOS) or `perf` (Linux). `paced` is the soak test: resident memory, and with an alloc-stats build the live heap, after every batch of 2,000 streams. `capacity` runs Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more) and steps paced streams up until the added p99 passes 10 ms (`--seconds` is ignored). `events` repeats the gated CPU-per-event scenario (unpaced 64-byte events; `WYE_BENCH_EVENT_BYTES` changes the payload) and prints CPU per event; with `--wye-openai` the events are OpenAI Responses. `--wye-refused` runs the `refused_` variant (uploads to an account that refuses one in four) and prints failed requests.
+`wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <name> --seconds N` keeps one scenario running and prints the gateway's pid, for `sample <pid>` (macOS) or `perf` (Linux):
+
+- `upload`, `tls-upload`: 1 MiB uploads on the plain or the TLS path.
+- `paced`: the soak test. Resident memory, and with an alloc-stats build the live heap, after every batch of 2,000 streams.
+- `capacity`: Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more), stepping paced streams up until the added p99 passes 10 ms; `--seconds` is ignored.
+- `events`: the gated CPU-per-event scenario (unpaced 64-byte events; `WYE_BENCH_EVENT_BYTES` changes the payload), printing CPU per event; with `--wye-openai` the events are OpenAI Responses.
+
+`--wye-refused` runs the `refused_` variant (uploads to an account that refuses one in four) and prints failed requests.
 
 ## Code changes
 

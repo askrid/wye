@@ -13,8 +13,8 @@ use crate::{
     stats::{PERCENTILES, percentile, phase, put},
 };
 
-pub(super) const UPLOAD_BYTES: usize = 1024 * 1024;
-pub(super) const UPLOAD_CONCURRENCY: usize = 16;
+pub(crate) const UPLOAD_BYTES: usize = 1024 * 1024;
+pub(crate) const UPLOAD_CONCURRENCY: usize = 16;
 pub(super) const UPLOAD_REQUESTS: usize = 256;
 /// The upload scenario's body is one long string; the agent upload sends a
 /// Claude Code-shaped body of the same size, which costs the cache diagnostics
