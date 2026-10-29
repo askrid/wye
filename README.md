@@ -252,10 +252,10 @@ Tooling
 ## Performance
 
 Wye is meant to never be the slow part. Every commit is benchmarked against
-its parent, in alternating rounds on the same machine (`scripts/check.sh`), and
-a change that makes Wye slower or heavier is not committed. The numbers below are lab numbers: one laptop (Intel
-i9-9880H, macOS) against a local mock provider. They are not production
-measurements.
+its parent, in alternating rounds on the same machine (`scripts/check.sh`),
+and a change that makes Wye slower or heavier is not committed. The numbers
+below are lab numbers from one laptop (Intel i9-9880H, macOS) against a local
+mock provider, not production measurements.
 
 | What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
