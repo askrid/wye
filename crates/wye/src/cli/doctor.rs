@@ -192,9 +192,9 @@ async fn head(
     let started = Instant::now();
     match tokio::time::timeout(CHECK_TIMEOUT, client.request(request)).await {
         Ok(Ok(res)) => pass(format!(
-            "{name}: {uri} reachable (HTTP {} in {} ms)",
-            res.status().as_u16(),
-            started.elapsed().as_millis()
+            "{name}: {uri} reachable in {} ms (HEAD answered {}; any status will do)",
+            started.elapsed().as_millis(),
+            res.status().as_u16()
         )),
         Ok(Err(e)) => fail(format!("{name}: {uri} unreachable: {}", error_chain(&e))),
         Err(_) => fail(format!(

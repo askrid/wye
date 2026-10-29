@@ -125,16 +125,20 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
     }
 }
 
-/// The usage text, after naming a command it does not list.
+/// The usage of the command given, or all of it for a command it does not
+/// list.
 fn usage_error(command: Option<&str>) -> String {
-    let mut known = USAGE
+    let lines: Vec<&str> = USAGE
         .lines()
-        .filter_map(|line| line.trim().strip_prefix("wye ")?.split(' ').next());
+        .filter(|line| {
+            let mut words = line.trim().split(' ');
+            words.next() == Some("wye") && words.next() == command
+        })
+        .collect();
     match command {
-        Some(command) if !known.any(|k| k == command) => {
-            format!("unknown command `{command}`\n{USAGE}")
-        }
-        _ => USAGE.into(),
+        None => USAGE.into(),
+        Some(command) if lines.is_empty() => format!("unknown command `{command}`\n{USAGE}"),
+        Some(_) => format!("usage:\n{}\nall commands: `wye --help`", lines.join("\n")),
     }
 }
 

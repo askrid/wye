@@ -49,7 +49,7 @@ fn summarizes_sessions_classes_and_cache_misses() {
         1,
         "{out}"
     );
-    assert!(out.contains("1 compactions"), "{out}");
+    assert!(out.contains("    1 compaction\n"), "{out}");
     assert_eq!(row("prompt-1")[1], "2");
 }
 
@@ -67,9 +67,20 @@ fn a_session_starts_at_its_first_cache_write() {
 }
 
 #[test]
-fn an_empty_log_reports_zeros() {
-    let out = report(&b""[..]).unwrap();
-    assert!(out.starts_with("0 requests in 0 sessions"), "{out}");
+fn a_log_without_requests_says_where_they_come_from() {
+    let out = report(&b"not json\n"[..]).unwrap();
+    assert!(
+        out.starts_with("no request records (1 other line skipped)"),
+        "{out}"
+    );
+    assert!(out.contains("2>>usage.jsonl"), "{out}");
+}
+
+#[test]
+fn a_request_without_tokens_has_no_hit_rate() {
+    let failed = LOG.lines().nth(3).unwrap();
+    let out = report(failed.as_bytes()).unwrap();
+    assert!(out.starts_with("1 request in 1 session"), "{out}");
     assert!(
         out.contains(" - "),
         "no hit rate without prompt tokens: {out}"

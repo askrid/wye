@@ -193,10 +193,10 @@ calling the same functions in the same order:
 $ wye explain --config wye.toml --session session-a request.json
 endpoint: POST /v1/messages
 credential: not required (no [auth])
-body: 90 bytes (limit 33554432)
+body: 90 bytes (limit 32 MiB)
 model: claude-opus-5-5; allowed by config: any; by credential: any
 route: upstream bedrock-us of 2 (cache_affine by session id)
-failover: on 429, 529, connect to anthropic in that order, for bodies up to 8388608 bytes
+failover: on 429, 529, connect to anthropic in that order, for bodies up to 8 MiB
 upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages
 provider credential: x-api-key from $BEDROCK_API_KEY
 model id: the body names anthropic.claude-opus-5-5 upstream, the provider's id for claude-opus-5-5
