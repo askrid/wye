@@ -7,28 +7,27 @@
 #
 #   scripts/ci-bench.sh <base-ref> [<summary-file>]
 #
-# Both sides run as scripts/bench-against.sh runs them: alternating rounds,
-# each with its own wye-bench.
+# Both sides run as scripts/bench-against.sh runs them (alternating rounds,
+# each with its own wye-bench), and a regression counts as in the local gate:
+# the same metric past its limit in a run and its rerun (scripts/bench-gate.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 base_ref=${1:?usage: scripts/ci-bench.sh <base-ref> [summary-file]}
 summary=${2:-/dev/null}
 out=target/ci-bench
-
-echo "==> build and benchmark against $base_ref"
-scripts/bench-against.sh "$base_ref" "$out"
-
 gated='alloc_*,*_failed_requests,*_failed_streams'
+
+mkdir -p "$out"
+status=0
+scripts/bench-gate.sh "$base_ref" "$out" --only "$gated" --allow-new || status=$?
 {
   echo "## Benchmark against \`$base_ref\`"
   echo
   echo "Gated: \`$gated\`. Other rows past their limit read \`report\`: latency and CPU on a shared runner are informational."
   echo
   echo '```'
-  ./target/release/wye-bench compare "$out/reference.json" "$out/current.json" --only "$gated" --allow-new || true
+  cat "$out/compare.txt" 2>/dev/null || echo "(no comparison: the benchmark did not finish)"
   echo '```'
-} | tee -a "$summary"
-
-./target/release/wye-bench compare "$out/reference.json" "$out/current.json" \
-  --only "$gated" --allow-new >/dev/null
+} >> "$summary"
+exit "$status"
