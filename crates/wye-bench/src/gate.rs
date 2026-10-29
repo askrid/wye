@@ -159,7 +159,8 @@ const GATES: &[(&str, f64, f64)] = &[
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Scope {
     /// Name patterns (`alloc_*`, `*_failed_requests`, or an exact name);
-    /// empty enforces every gate. The others are printed as `report`.
+    /// empty enforces every gate. The others are still compared, and read
+    /// `report` instead of `REGRESSED` past their limit.
     pub only: Vec<String>,
     /// A metric the baseline lacks passes as `new` instead of failing: the
     /// baseline is another commit's run, which may predate the metric.

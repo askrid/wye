@@ -134,9 +134,12 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
     };
     let explain_tail = || result.steps.last().cloned().unwrap_or_default();
     if got != expect.decision {
+        let expected = match expect.decision {
+            Decision::Forward => "forward",
+            Decision::Refuse => "refuse",
+        };
         return Err(format!(
-            "expected {:?}, got {}",
-            expect.decision,
+            "expected decision {expected}, got {}",
             explain_tail()
         ));
     }
@@ -232,7 +235,7 @@ mod tests {
         assert!(report.contains("ok    b-sonnet"), "{report}");
         assert!(report.contains("ok    c-anonymous"), "{report}");
         assert!(
-            report.contains("FAIL  d-wrong: expected Forward, got decision: refuse 403"),
+            report.contains("FAIL  d-wrong: expected decision forward, got decision: refuse 403"),
             "{report}"
         );
         assert!(

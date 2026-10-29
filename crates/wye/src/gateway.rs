@@ -55,7 +55,7 @@ pub struct Gateway {
     openai: Option<ApiRoute>,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
-    /// Largest `max_tokens` any credential may request.
+    /// Largest output-token maximum any request may ask for.
     max_output_tokens: Option<u64>,
     /// `GET /v1/models`, when `[discovery]` is configured.
     catalog: Option<ModelCatalog>,

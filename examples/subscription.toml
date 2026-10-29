@@ -12,9 +12,10 @@
 #
 # What you get: per-request usage records (tokens, cache hits and misses,
 # Claude Code session, subagent, request class, tool calls and time), `wye
-# report`, and OTLP export if you add [telemetry]. What you do not get in this
-# mode: gateway credentials, model permissions, or token ceilings, which all
-# need [auth], and [auth] cannot be combined with forwarding your login.
+# report`, and OTLP export if you add [telemetry]. What you do not get in
+# this mode: gateway credentials, model permissions, or output-token ceilings,
+# which all need [auth], and [auth] cannot be combined with forwarding your
+# login.
 
 [server]
 # Required: forwarding your login is refused on any non-loopback address.

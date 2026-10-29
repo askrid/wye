@@ -1,6 +1,7 @@
-# cargo-deny configuration (`cargo deny check`), a CI gate per AGENTS.md.
-# Prepared from the locked dependency graph's licenses; run it once cargo-deny
-# is installed and keep this list as narrow as the graph allows.
+# cargo-deny: licenses, advisories, bans, and sources of every dependency.
+# CI runs it on pushes to main and every pull request (.github/workflows/ci.yml);
+# run `cargo deny check` locally if cargo-deny is installed. Keep the license
+# list as narrow as the locked graph allows.
 
 [graph]
 all-features = false

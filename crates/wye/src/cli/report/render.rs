@@ -4,6 +4,7 @@
 use std::fmt::Write as _;
 
 use super::{Group, Summary, TOP};
+use crate::cli::plural;
 
 pub(super) fn render(s: &Summary) -> String {
     let mut out = String::new();
@@ -11,10 +12,10 @@ pub(super) fn render(s: &Summary) -> String {
     outcomes.sort();
     let _ = writeln!(
         out,
-        "{} requests in {} sessions ({} other lines skipped); outcomes: {}",
-        s.total.requests,
-        s.sessions.len(),
-        s.skipped,
+        "{} in {} ({} skipped); outcomes: {}",
+        plural(s.total.requests, "request", "requests"),
+        plural(s.sessions.len() as u64, "session", "sessions"),
+        plural(s.skipped, "other line", "other lines"),
         outcomes
             .iter()
             .map(|(k, v)| format!("{k} {v}"))

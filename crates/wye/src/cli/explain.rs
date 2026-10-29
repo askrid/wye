@@ -167,7 +167,7 @@ pub fn explain(
         && !prefixes_model_ids
     {
         out.step(
-            "model aliases, permissions, and token ceiling: none apply; the body is not read"
+            "model aliases, permissions, and output-token ceiling: none apply; the body is not read"
                 .into(),
         );
     } else {
@@ -288,7 +288,7 @@ pub fn explain(
         && !model.starts_with(prefix)
     {
         out.step(format!(
-            "model id: the body names {prefix}{model} upstream (the provider's spelling)"
+            "model id: the body names {prefix}{model} upstream, the provider's id for {model}"
         ));
     }
     if let (Some(pricing), Some(model)) = (&config.pricing, &model) {
@@ -359,9 +359,17 @@ pub fn explain(
 #[cfg(test)]
 mod tests;
 
-/// An entry's prices per million tokens, as `[pricing]` writes them.
+/// An entry's prices per million tokens, exact and with at least two
+/// decimals, as `[pricing]` writes them.
 fn prices(entry: &PricedModels) -> String {
-    let per_mtok = |p: Pico| Usd(p.saturating_mul(1_000_000));
+    let per_mtok = |p: Pico| {
+        let usd = Usd(p.saturating_mul(1_000_000)).to_string();
+        match usd.split_once('.').map(|(_, decimals)| decimals.len()) {
+            None => format!("{usd}.00"),
+            Some(1) => format!("{usd}0"),
+            Some(_) => usd,
+        }
+    };
     let p = &entry.prices;
     let mut text = format!(
         "input ${}, output ${}",
@@ -380,8 +388,8 @@ fn prices(entry: &PricedModels) -> String {
     text.push_str(" per million tokens");
     if let Some(first) = entry.tiers.first() {
         text.push_str(&format!(
-            "; {} tier(s), the first above {} prompt tokens",
-            entry.tiers.len(),
+            "; {}, the first above {} prompt tokens",
+            super::plural(entry.tiers.len() as u64, "tier", "tiers"),
             first.above_prompt_tokens
         ));
     }

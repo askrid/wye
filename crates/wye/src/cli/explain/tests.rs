@@ -420,7 +420,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
     let priced = report(br#"{"model":"claude-opus-5-5"}"#);
     assert!(
         priced.contains(
-            "price: claude-opus-5-5 at aws: input $5.5, output $27.5 per million tokens \
+            "price: claude-opus-5-5 at aws: input $5.50, output $27.50 per million tokens \
              (pricing version v1)"
         ),
         "{priced}"

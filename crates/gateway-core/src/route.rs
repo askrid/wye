@@ -37,7 +37,8 @@ pub struct Failover {
     pub on_429: bool,
     /// `529`: Anthropic overloaded.
     pub on_529: bool,
-    /// The connection could not be made.
+    /// The connection failed, or was cut before the request body was
+    /// delivered whole.
     pub on_connect: bool,
     /// Larger request bodies are forwarded without failover: resending needs
     /// the bytes already sent.

@@ -19,13 +19,13 @@ use validate::{
     validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
 };
 
-/// Request bytes held process-wide while reading `model` for permissions.
+/// Default `max_held_request_bytes`.
 const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
 const DEFAULT_CLIENT_WRITE_TIMEOUT_SECS: u64 = 60;
-/// Generous for one process: an idle Claude Code stream costs Wye about 5-30 KB.
+/// Generous for one process: an idle Claude Code stream costs Wye tens of KB.
 const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 10_000;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 /// Non-streaming generations send no headers until they complete.
@@ -107,7 +107,8 @@ pub const MAX_UPGRADE_TARGETS: usize = 16;
 pub struct UpgradeCheck {
     /// Models an alias or a client may move to; unique.
     pub targets: Box<[Box<str>]>,
-    /// Share of Claude Code sessions checked, every request of each.
+    /// Share of sessions checked (by session id, else credential subject),
+    /// every request of each.
     pub sample_percent: u8,
 }
 
@@ -179,8 +180,9 @@ pub struct Auth {
     /// credential's `models` claim, or an issuer's grants, narrow this, never
     /// widen it.
     pub models: Option<Vec<ModelPattern>>,
-    /// Largest `max_tokens` any credential may request on `/v1/messages`;
-    /// a credential's `max_output_tokens` claim can only lower it.
+    /// Largest output-token maximum any request may ask for (`max_tokens`,
+    /// `max_output_tokens`, `max_completion_tokens`); a credential's
+    /// `max_output_tokens` claim can only lower it.
     pub max_output_tokens: Option<u64>,
 }
 
@@ -257,8 +259,8 @@ pub struct Server {
     /// A loopback address unless `[auth]` is set.
     pub listen: SocketAddr,
     pub max_request_body_bytes: u64,
-    /// Request bytes held across all requests while reading `model` and
-    /// `max_tokens`; beyond it, requests are answered with an overload error.
+    /// Request bytes held across all requests while reading `model`; beyond
+    /// it, requests are answered with an overload error.
     pub max_held_request_bytes: u64,
     /// Proxied requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
@@ -324,7 +326,7 @@ impl Provider {
         matches!(self, Self::OpenAi | Self::ClaudePlatformAws)
     }
 
-    /// How the key is sent, for messages.
+    /// How the key is sent, for diagnostics.
     pub fn key_header(self) -> &'static str {
         if self.bearer_key() {
             "Authorization: Bearer"

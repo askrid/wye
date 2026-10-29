@@ -34,27 +34,32 @@ Every feature obeys these; a feature that cannot is not built.
 
 ### Built
 
-For the Anthropic Messages API, passthrough to Anthropic ([roadmap.md](roadmap.md#status) has the detail):
+Detail and stages: [roadmap.md](roadmap.md#status).
 
-- **Streaming proxy** for `/v1/messages` and `/v1/messages/count_tokens`, honoring Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract) and serving the same calls from Anthropic SDK clients (batches, files, and other endpoints are not proxied): SSE relayed as it arrives, backpressure, cancellation, timeouts, graceful two-phase shutdown, concurrency and memory bounds.
+- **Native passthrough** of Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), OpenAI Responses, and OpenAI Chat Completions, honoring Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract) and serving the same calls from SDK clients (batches, files, and other endpoints are not proxied): streams relayed as they arrive, backpressure, cancellation, timeouts, graceful two-phase shutdown, concurrency and memory bounds.
+- **Accounts and providers for Claude:** several accounts per route, each session kept on one; failover before output; Anthropic, Claude Platform on AWS, and Bedrock with API keys ([design](architecture.md#claude-across-providers-m4)).
 - **Credentials:** Wye's own Ed25519 tokens (`wye token`), or identity-provider tokens directly (CI workload identity such as GitHub Actions, or the team's IdP through Claude Code's `apiKeyHelper`), with model permissions and output-token ceilings checked before the provider is contacted.
 - **Subscription passthrough** for a single developer on a claude.ai plan, loopback only.
-- **Agent-aware telemetry:** usage records with subject, session, subagent, request class, prompt, compaction, and tool calls; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
-- **Offline tools:** `wye report` (usage log summary, no backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye probe`, `GET /v1/models` from policy.
-- **Deployment:** native binary from source, OCI image (built locally, not published).
+- **Model aliases and upgrade checks:** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories; before an alias moves, Wye checks live requests against the new model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks)).
+- **Cost:** a price table in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report`.
+- **Agent-aware telemetry:** usage records with subject, session, subagent, request class, prompt, compaction, and tool calls, for Claude Code and Codex; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
+- **Offline tools:** `wye report` (usage log summary, no backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye doctor`, `wye init`, `wye probe`, and `GET /v1/models` from policy.
+- **Distribution:** release archives for Linux and macOS from a tag, and an OCI image built from the repository (not published).
 
 ### Next
 
 In this order ([roadmap.md](roadmap.md)):
 
-1. **Cost (M2):** pricing in config ([format](policy.md#pricing-metadata)), so usage becomes dollars in records, metrics, and `wye report` (built); next, the provable per-request cost ceiling and provider-held budgets.
-2. **Packaging:** published binaries and images, a Compose example.
-3. **Model aliases and upgrade checks (M2b):** clients ask for a stable name (`coding-default`) that config maps to a model, per team or credential, so a model upgrade or retirement is a reviewed config change instead of edits across repositories. Before an alias moves to a new model, Wye checks live requests against that model's known breaking changes and reports which clients would fail and why (built; [design](architecture.md#model-aliases-and-upgrade-checks)).
-4. **Claude across providers and accounts (M4):** one name served from Anthropic, Claude Platform on AWS, Amazon Bedrock, Google Vertex AI, and several accounts, chosen per request with cache affinity, failing over on overload before any output. Clients write no Bedrock or Vertex code; moving traffic is a config change ([design](architecture.md#claude-across-providers-m4)). Built: several Anthropic, Claude Platform on AWS, and Bedrock accounts with session affinity and failover before output, Bedrock's model ids spelled per attempt; Vertex is next.
+1. **Verification against the real services:** a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
+2. **The rest of cost (M2):** the provable per-request cost ceiling and provider-held budgets.
+3. **Packaging:** a published container image and a Compose example.
+4. **The rest of Claude across providers (M4):** Vertex AI and AWS SigV4.
 
 ### Later
 
-More clients on their native APIs: Codex through the OpenAI Responses API (M3), Chat Completions passthrough for OpenAI SDK clients, then other agents. The cost bound and provider-held budgets (rest of M2), agent-aware model routing, Helm.
+Agent-aware model routing within a provider, a Helm chart, and other agents on their native APIs.
+
+### Phases
 
 | Phase | Clients | Client-facing API | Upstream | Status |
 |---|---|---|---|---|
@@ -93,7 +98,7 @@ Landscape as of 2026-10; competitor features change quickly and should be re-che
 |---|---|---|
 | No gateway | SDK calls straight to the provider, keys per service, the provider console's workspaces, spend limits, and usage reports; agents' own telemetry | Keys, models, limits, and failover out of application code; one telemetry and cost model across clients; upgrade checks. The default to beat: for a few services on one provider it is enough |
 | Claude apps gateway | Anthropic's self-hosted Claude Code gateway: SSO sign-in, model access by IdP group, OTLP | Service and CI credentials, SDK apps and other agents, aliases, multi-provider Claude, policy tests. **For a team that uses only Claude Code and has SSO, prefer it:** it tracks every Claude Code release by construction |
-| LiteLLM | The common open-source gateway: unified API across many providers, virtual keys, budgets, fallbacks, admin UI; needs a database for spend | No database; native APIs passed through, so no feature lag; about 10× less CPU per streamed event in the same benchmark ([research.md](research.md#against-litellm)); far fewer providers by design |
+| LiteLLM | The common open-source gateway: unified API across many providers, virtual keys, budgets, fallbacks, admin UI; needs a database for spend | No database; native APIs passed through, so no feature lag; about 9× less CPU per streamed event in the same benchmark ([research.md](research.md#against-litellm)); far fewer providers by design |
 | Newer lean gateways (Bifrost, Portkey, Helicone's gateway, and others) | Fast, open-source gateways, several with dashboards, budgets, and many providers | Agent-aware attribution, stateless GitOps policy, upgrade checks; they compete on Wye's own speed claim. Measured against Bifrost at its best case: 6.6× less CPU per request, 11× lower added latency, 20× less memory under load ([research.md](research.md#against-bifrost)) |
 | Hosted gateways (Cloudflare, Vercel, Kong, OpenRouter) | Managed, nothing to run | Self-hosted, customer-controlled path and data |
 | Observability tools (Langfuse, Arize, provider analytics) | Traces and analytics of LLM calls, through SDKs or exports | Captured at the gateway from verified credentials, no instrumentation; not a replacement for evaluation tooling |

@@ -15,24 +15,24 @@ alloc-stats = []
 [dependencies]
 gateway-core.workspace = true
 base64.workspace = true
-ring = { workspace = true, features = ["alloc"] }
 bytes.workspace = true
 http.workspace = true
 http-body-util.workspace = true
-hyper = { workspace = true, features = ["http1", "server", "client"] }
+hyper = { workspace = true, features = ["client", "http1", "server"] }
 hyper-rustls = { workspace = true, features = ["http1", "http2", "ring", "tls12"] }
 hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", "server", "server-graceful", "tokio"] }
+ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true, features = ["parse", "serde", "std"] }
 webpki-roots.workspace = true
-tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["io-util", "sync", "test-util"] }
-proptest.workspace = true
 wye-testkit.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "test-util"] }
 
 [lints]
 workspace = true

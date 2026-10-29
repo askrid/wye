@@ -1,4 +1,4 @@
-//! Request forwarding, credentials replacement, errors, and local endpoints.
+//! Request forwarding, credential replacement, errors, and local endpoints.
 
 use super::harness::*;
 

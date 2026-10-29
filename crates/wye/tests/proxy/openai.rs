@@ -1,5 +1,5 @@
-//! The OpenAI route: `/v1/responses` passthrough for Codex and the OpenAI
-//! SDKs, with the provider key as a bearer token.
+//! The OpenAI route: `/v1/responses` and `/v1/chat/completions` passthrough
+//! for Codex and the OpenAI SDKs, with the provider key as a bearer token.
 
 use gateway_core::credential::{self, NewCredential};
 use ring::signature::{Ed25519KeyPair, KeyPair};

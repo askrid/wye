@@ -111,7 +111,8 @@ fn usd<S: Serializer>(cost: &Option<Pico>, serializer: S) -> Result<S::Ok, S::Er
 
 /// The record as borrowed fields, written as a JSON line and as OTLP. With
 /// `pricing`, every record carries a cost status: a record without usage
-/// (an error, a non-streaming response) is `unknown`, never $0.
+/// (an error, `count_tokens`, a response neither SSE nor JSON) is `unknown`,
+/// never $0.
 pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     let pricing = context.pricing;
     let usage = r

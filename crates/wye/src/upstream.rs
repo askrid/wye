@@ -78,10 +78,10 @@ const HOP_BY_HOP: [HeaderName; 9] = [
 /// Credential Wye presents upstream.
 pub enum UpstreamAuth {
     /// Replace the caller's credential headers with this `x-api-key` value
-    /// (Anthropic).
+    /// (Anthropic, Bedrock).
     ApiKey(HeaderValue),
     /// Replace the caller's credential headers with this `Authorization`
-    /// value, `Bearer` and the key (OpenAI).
+    /// value, `Bearer` and the key (OpenAI, Claude Platform on AWS).
     Bearer(HeaderValue),
     /// Forward the caller's credential headers unchanged.
     ForwardCaller,
@@ -130,16 +130,16 @@ pub(crate) enum ForwardError {
 /// A policy failure found in the streamed part of the body.
 #[derive(Debug)]
 pub(crate) enum PolicyRefusal {
-    /// A repeated `model`, an escaped top-level key, or a bad `max_tokens`.
+    /// A repeated `model`, an escaped top-level key, or a bad output-token field.
     Invalid(PolicyError),
     /// The output-token maximum above the request's ceiling, or missing.
     TokenLimit(String),
 }
 
 /// HTTP/2 receive window per upstream stream: what one response may buffer
-/// in Wye while its client is not reading (heap per stalled stream: ~0.5 MB;
+/// in Wye while its client is not reading (heap per stalled stream: 0.56 MB;
 /// 2.2 MB at 1 MiB). It sustains about 5 MB/s per response at 50 ms round
-/// trip, far above token pace; bulk relays cost ~6% more CPU per MB than
+/// trip, far above token pace; bulk relays cost ~10% more CPU per MB than
 /// with 1 MiB.
 const STREAM_WINDOW: u32 = 256 * 1024;
 /// The largest HTTP/2 window, so the connection never limits: streams share

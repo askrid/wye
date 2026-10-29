@@ -25,7 +25,7 @@ use write_timeout::WriteTimeout;
 /// the connection's lifetime. An agent resends its whole context (hundreds of
 /// KB) and then holds the stream open for minutes, so the grown buffer
 /// dominated per-stream memory: 150 KB of live heap per idle stream after a
-/// 512 KB request on the TLS path, 48 KB with this cap, at no measurable
+/// 512 KB request on the TLS path, 49 KB with this cap, at no measurable
 /// upload cost there. The cap also bounds request headers, so it stays well
 /// above an 8 KiB gateway credential plus Claude Code's headers.
 const MAX_CONNECTION_BUFFER: usize = 32 * 1024;

@@ -2,6 +2,8 @@
 # Builds the OCI image and checks it: the gateway starts with an [auth]
 # config, becomes healthy, answers /readyz, and rejects an unauthenticated
 # request before any upstream contact (no provider call is made).
+#
+#   scripts/image-smoke.sh      (WYE_IMAGE and WYE_SMOKE_PORT override the tag and port)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,7 +26,6 @@ docker run --rm "$image" token keygen --out /tmp/issuer.key \
 cat > "$work/wye.toml" <<TOML
 [server]
 listen = "0.0.0.0:8080"
-drain_delay_secs = 0
 
 [upstream]
 base_url = "https://api.anthropic.com"

@@ -43,7 +43,7 @@ pub fn endpoint(path: &str) -> Option<Endpoint> {
 
 impl Api {
     /// The top-level request field that bounds generated tokens, as named
-    /// in messages.
+    /// in error messages and diagnostics.
     pub fn token_field(self) -> &'static str {
         self.token_fields().first().copied().unwrap_or_default()
     }
@@ -59,10 +59,10 @@ impl Api {
         }
     }
 
-    /// Whether a request without the token field may pass an output-token ceiling.
-    /// Anthropic requires `max_tokens`, so the provider rejects such a
-    /// request itself; on OpenAI's APIs the field is optional and its
-    /// absence means the model's maximum, so a ceiling refuses it.
+    /// Whether an output-token ceiling refuses a request without the token
+    /// field. Anthropic requires `max_tokens`, so the provider rejects such a
+    /// request itself; on OpenAI's APIs the field is optional and its absence
+    /// means the model's maximum, which no ceiling can allow.
     pub fn token_field_required(self) -> bool {
         self != Self::Messages
     }

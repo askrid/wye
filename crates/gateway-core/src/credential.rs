@@ -46,8 +46,9 @@ pub struct Identity {
     /// provider's matching grants); `None` leaves the configured list in
     /// charge. An empty list allows no model.
     pub models: Option<Box<[ModelPattern]>>,
-    /// Largest output-token maximum (`max_tokens`, `max_output_tokens`)
-    /// this credential may request (`max_output_tokens` claim).
+    /// Largest output-token maximum (`max_tokens`, `max_output_tokens`,
+    /// `max_completion_tokens`) this credential may request (the
+    /// `max_output_tokens` claim).
     pub max_output_tokens: Option<u64>,
 }
 
@@ -363,7 +364,7 @@ pub struct NewCredential<'a> {
     /// Allowed models (names or prefixes ending in `*`); `None` omits the claim.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<&'a [&'a str]>,
-    /// Largest `max_tokens`; `None` omits the claim.
+    /// Largest output-token maximum; `None` omits the claim.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u64>,
 }

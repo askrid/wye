@@ -18,7 +18,7 @@ fn held_open(open: &Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>>) -> Handler 
 }
 
 #[tokio::test]
-async fn requests_beyond_the_concurrency_limit_get_overloaded_error() {
+async fn requests_beyond_the_concurrency_limit_get_an_overload_error() {
     let open = Arc::default();
     let h = Harness::with_server_config(held_open(&open), "max_concurrent_requests = 2").await;
     let first = h.send(messages(), "{}").await;

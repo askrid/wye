@@ -3,13 +3,13 @@
 //!
 //! The gateway runs with one Tokio worker thread (`TOKIO_WORKER_THREADS=1`,
 //! set for the child only; `WYE_BENCH_GATEWAY_THREADS` changes the count),
-//! on the TLS + HTTP/2 path. Each step runs a batch
-//! of streams at 50 events/s of 100 bytes, first directly against the mock
-//! and then through the gateway, and reports the events per second relayed,
-//! the gateway's CPU in cores, and the p99 event delay the gateway adds over
-//! the direct run at the same load. Steps grow until streams fail, the
-//! gateway's core is saturated, or the added p99 passes ten times
-//! [`MAX_ADDED_P99_US`]; the largest step within that bound, without
+//! on the TLS + HTTP/2 path. Each step runs a batch of streams at 50
+//! events/s of 100 bytes, first directly against the mock and then through
+//! the gateway, and reports the events per second relayed, the gateway's CPU
+//! in cores, and the p99 event delay the gateway adds over the direct run at
+//! the same load. Steps grow until streams fail, the gateway's core is
+//! saturated, or the added p99 passes ten times [`MAX_ADDED_P99_US`]; the
+//! largest step whose added p99 stays within [`MAX_ADDED_P99_US`], without
 //! failures or saturation, is the sustainable capacity.
 
 use std::time::{Duration, Instant};

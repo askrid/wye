@@ -26,9 +26,9 @@ What is in it:
   subagent, request class, tool calls and time), OTLP logs, traces, and
   metrics, and optional cache-miss diagnostics.
 - Cost from a price table in config, in exact integer arithmetic.
-- Commands: `serve`, `init`, `doctor`, `explain`, `policy-test`,
-  `policy-diff`, `report`, `claude`, `codex`, `token`, `probe`,
-  `check-config`.
+- Commands: `init`, `serve`, `check-config`, `doctor`, `explain`,
+  `policy-test`, `policy-diff`, `report`, `probe`, `claude`, `codex`, and
+  `token`.
 - Release archives for Linux and macOS (x86_64, arm64) with checksums and
   build provenance attestations.
 
@@ -37,7 +37,8 @@ Not yet checked against the real services:
 - Bedrock and Claude Platform on AWS were built from the providers'
   documentation and tested against mocks. Bedrock's API key header in
   particular is unconfirmed (`x-api-key` is sent).
-- Codex support was built from Codex's source, not a real session.
+- Codex support was built from Codex's source and tests, not from a real
+  session.
 
 Known limits:
 

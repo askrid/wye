@@ -37,7 +37,7 @@ pub const MAX_TOOL_NAMES: usize = 8;
 /// Longest tool name counted by name.
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
 
-/// Token counts reported by the provider. `None` when the stream did not report the field.
+/// Token counts reported by the provider. `None` when the response did not report the field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
     pub input_tokens: Option<u64>,
@@ -144,7 +144,7 @@ impl ToolCalls {
     }
 }
 
-/// The usage scanner for one response body: an SSE stream of either API,
+/// The usage scanner for one response body: an SSE stream of any of the APIs,
 /// or a non-streaming JSON body. An enum, so the per-chunk call is a match,
 /// not a virtual call; the other scanners are boxed, so Messages streams
 /// keep their size.

@@ -19,7 +19,7 @@ out=target/ci-bench
 base_tree=$out/base
 
 mkdir -p "$out"
-ulimit -n 65536 2>/dev/null || ulimit -n 8192
+if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 
 build() {
   (cd "$1" &&
@@ -50,7 +50,7 @@ gated='alloc_*,*_failed_requests,*_failed_streams'
 {
   echo "## Benchmark against \`$base_ref\`"
   echo
-  echo "Gated: \`$gated\`. Latency and CPU rows marked \`report\` are informational (shared runner)."
+  echo "Gated: \`$gated\`. Other rows past their limit read \`report\`: latency and CPU on a shared runner are informational."
   echo
   echo '```'
   ./target/release/wye-bench compare "$out/base.json" "$out/head.json" --only "$gated" --allow-new || true

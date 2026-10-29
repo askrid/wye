@@ -156,7 +156,7 @@ async fn cancelled_stream_logs_partial_usage() {
 }
 
 #[tokio::test]
-async fn gateway_errors_and_non_stream_responses_are_logged() {
+async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
     let big: &'static str = Box::leak("x".repeat(2048).into_boxed_str());
     assert_eq!(
