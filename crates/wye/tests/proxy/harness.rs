@@ -71,7 +71,8 @@ pub(crate) struct Harness {
     pub(crate) usage: Mutex<Lines<BufReader<DuplexStream>>>,
     /// Sending (or dropping) triggers the gateway's shutdown.
     pub(crate) shutdown: Option<oneshot::Sender<()>>,
-    pub(crate) served: JoinHandle<()>,
+    /// Whether the usage log was written out at shutdown.
+    pub(crate) served: JoinHandle<bool>,
 }
 
 impl Harness {

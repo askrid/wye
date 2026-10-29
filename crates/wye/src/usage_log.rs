@@ -46,6 +46,11 @@ pub(crate) use otlp::{OtlpTarget, parse_headers};
 
 /// Records buffered before new ones are dropped.
 const QUEUE_CAPACITY: usize = 4096;
+/// The status of a request the client left before it was answered.
+const CLIENT_CLOSED: u16 = 499;
+/// Queued records batched into one write at most: bounds the write buffer,
+/// and lets the export ticks run while records keep arriving.
+const WRITE_BATCH: usize = 256;
 /// A partly filled OTLP batch is sent after at most this long.
 const OTLP_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 /// Cumulative OTLP metrics are exported this often.
@@ -160,18 +165,66 @@ impl UsageLog {
 
     /// Records a response Wye generated itself.
     pub(crate) fn gateway_error(&self, info: RequestInfo, status: StatusCode) {
+        self.unobserved(info, status, Outcome::GatewayError);
+    }
+
+    /// A record without a response body to observe.
+    fn unobserved(&self, info: RequestInfo, status: StatusCode, outcome: Outcome) {
         let duration = info.started.elapsed();
         self.send(Record {
             info,
             status,
             headers_after: None,
             duration,
-            outcome: Outcome::GatewayError,
+            outcome,
             model: None,
             usage: None,
             tool_calls: None,
             unix_ms: unix_ms(),
         });
+    }
+}
+
+/// A request's facts until it is answered. Dropped before that, with the
+/// future of a client that left while Wye held its body or waited for the
+/// upstream's headers, it records the request as cancelled, with nginx's
+/// `499` (client closed request) as its status: the provider may have
+/// started, and may bill, the request.
+pub(crate) struct Unanswered<'a> {
+    info: Option<RequestInfo>,
+    log: &'a UsageLog,
+}
+
+impl<'a> Unanswered<'a> {
+    pub(crate) fn new(info: RequestInfo, log: &'a UsageLog) -> Self {
+        Self {
+            info: Some(info),
+            log,
+        }
+    }
+
+    pub(crate) fn info(&mut self) -> &mut RequestInfo {
+        match &mut self.info {
+            Some(info) => info,
+            None => unreachable!("only `answered` takes the facts, and it consumes the guard"),
+        }
+    }
+
+    /// The facts, for the record of the answer.
+    pub(crate) fn answered(mut self) -> RequestInfo {
+        match self.info.take() {
+            Some(info) => info,
+            None => unreachable!("only `answered` takes the facts, and it consumes the guard"),
+        }
+    }
+}
+
+impl Drop for Unanswered<'_> {
+    fn drop(&mut self) {
+        if let Some(info) = self.info.take() {
+            let status = StatusCode::from_u16(CLIENT_CLOSED).unwrap_or(StatusCode::REQUEST_TIMEOUT);
+            self.log.unobserved(info, status, Outcome::Cancelled);
+        }
     }
 }
 
@@ -240,9 +293,12 @@ async fn write_records<W>(
             }
         };
         let Some(record) = record else { break };
-        let mut record = Some(record);
-        // Batch whatever else is queued into one write.
-        while let Some(r) = record.take().or_else(|| rx.try_recv().ok()) {
+        let mut next = Some(record);
+        // Batch what else is queued into one write.
+        for _ in 0..WRITE_BATCH {
+            let Some(r) = next.take().or_else(|| rx.try_recv().ok()) else {
+                break;
+            };
             let line = line(&r, &context);
             push_line(&mut buf, &line);
             if let Some((batch, metrics)) = otlp.as_mut() {

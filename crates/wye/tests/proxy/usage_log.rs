@@ -166,6 +166,31 @@ async fn cancelled_stream_logs_partial_usage() {
 }
 
 #[tokio::test]
+async fn a_client_that_leaves_before_the_headers_is_recorded() {
+    use tokio::io::AsyncWriteExt;
+    // The upstream never answers; the client stops waiting.
+    let h = Harness::api_key(Arc::new(|_| Box::pin(std::future::pending()))).await;
+    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    client
+        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-length: 2\r\n\r\n{}")
+        .await
+        .unwrap();
+    tokio::time::timeout(WAIT, async {
+        while h.upstream_hits.load(Ordering::Relaxed) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(client);
+
+    let record = h.usage_record().await;
+    assert_eq!(record["outcome"], "cancelled");
+    assert_eq!(record["status"], 499);
+    assert_eq!(record["path"], "/v1/messages");
+}
+
+#[tokio::test]
 async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
     let big: &'static str = Box::leak("x".repeat(2048).into_boxed_str());

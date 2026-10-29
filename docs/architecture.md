@@ -203,7 +203,7 @@ Each rewrite is per-route configuration, covered by tests, and reported by `wye 
 
 A bounded, read-only observer reads the same bytes Wye relays and recognizes only usage-bearing events; it never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream.
 
-For Anthropic Messages streams (`gateway-core/src/usage.rs`): at most one partial line is kept (32 bytes for ordinary events, 64 KiB for usage events), line ends are found with SIMD `memchr`, and JSON is parsed only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names, borrowed). A body wrapper emits one record when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded. A body also counts as completed once its declared length is delivered: the client connection stops polling then, and an HTTP/2 upstream may send its end-of-stream frame after the data. Messages streams always carry usage, so no rewrite is needed.
+For Anthropic Messages streams (`gateway-core/src/usage.rs`): at most one partial line is kept (32 bytes for ordinary events, 64 KiB for usage events), line ends are found with SIMD `memchr`, and JSON is parsed only for `message_start` and `message_delta` (usage) and `content_block_start` (tool names, borrowed). A body wrapper emits one record when the body is dropped, so completed, failed, cancelled, and gateway-error outcomes are all recorded; a request the client leaves before its response headers (while Wye holds its body or waits on the upstream) is recorded as cancelled with nginx's status `499`. A body also counts as completed once its declared length is delivered: the client connection stops polling then, and an HTTP/2 upstream may send its end-of-stream frame after the data. Messages streams always carry usage, so no rewrite is needed.
 
 For Chat Completions streams (`gateway-core/src/usage/chat.rs`): only `data:` lines, found with `memchr`, and parsed only when a substring search (`memmem`) shows they matter: the first chunk (the model), a chunk with `"usage":{`, or one starting a tool call (`"tool_calls"` with a `"name":"` key, which escaped quotes inside argument strings never match). Usage arrives only in a final chunk the client asks for with `stream_options.include_usage`; Wye does not add the field (the [rewrite](#forwarding-contract) is an open decision: the extra chunk with empty `choices` trips some clients), so a stream without it records `unknown`. `prompt_tokens` include cached tokens and are split like Responses' `input_tokens`.
 
@@ -386,10 +386,13 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer, so a stalled client holds little kernel memory |
 | `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | How long a refused attempt may take to hand its body back for failover |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer task; beyond it they are dropped and counted |
+| `WRITE_BATCH` | `wye/src/usage_log.rs` | Queued records formatted into one write: bounds the write buffer while records keep arriving |
 | `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting for export, one export attempt |
 | `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log.rs` | How often a partial batch and the cumulative metrics are exported |
 | `MAX_SERIES` | `wye/src/usage_log/metrics.rs` | Attribute sets per OTLP metric |
 | `LOG_FLUSH_TIMEOUT` | `wye/src/server.rs` | How long shutdown waits for the usage log |
+| `STOP_WAIT` | `wye/src/main.rs` | How long the process waits on blocking work, such as a write to a stderr nobody reads, before it exits anyway |
+| `ACCEPT_ERROR_PAUSE` | `wye/src/server.rs` | The pause after an accept error such as file descriptor exhaustion, which would otherwise spin a core |
 | `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/credential.rs`, `credential/keys.rs` | A presented credential and an identity provider's key set |
 | `MAX_USAGE_LINE_BYTES`, `MAX_TOOL_NAMES` | `gateway-core/src/usage.rs` | A usage-bearing SSE line; tool names counted per response |
 | `MAX_MODEL_BYTES` | `gateway-core/src/policy.rs` | A `model` value the policy scanner reads |

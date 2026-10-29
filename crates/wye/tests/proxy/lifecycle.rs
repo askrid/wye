@@ -94,6 +94,23 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
 }
 
 #[tokio::test]
+async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
+    let mut h =
+        Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    // Nothing reads the usage stream, so its 64 KiB buffer fills and the
+    // writer waits on it.
+    for _ in 0..400 {
+        h.send(messages(), "{}").await;
+    }
+    h.begin_shutdown();
+    let flushed = tokio::time::timeout(WAIT, &mut h.served)
+        .await
+        .expect("serve waited on the usage log")
+        .unwrap();
+    assert!(!flushed);
+}
+
+#[tokio::test]
 async fn probe_succeeds_only_for_a_2xx_answer() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
     wye::probe(&format!("http://{}/healthz", h.gateway))
