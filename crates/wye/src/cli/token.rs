@@ -78,6 +78,16 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
     {
         return Err(format!("unknown flag {unknown}").into());
     }
+    // A repeated flag would leave one of its values unused: `--models`
+    // given twice would issue the first, perhaps broader, list.
+    let names: Vec<&str> = flags.iter().step_by(2).copied().collect();
+    if let Some(repeated) = names
+        .iter()
+        .enumerate()
+        .find_map(|(i, name)| names.get(..i)?.contains(name).then_some(name))
+    {
+        return Err(format!("{repeated} given more than once").into());
+    }
     let key_path = flag("--key")?;
     let encoded =
         std::fs::read_to_string(key_path).map_err(|e| format!("cannot read {key_path}: {e}"))?;
@@ -124,8 +134,18 @@ pub fn issue(flags: &[&str]) -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn unknown_flags_are_refused_before_anything_is_signed() {
+    fn unknown_and_repeated_flags_are_refused_before_anything_is_signed() {
         let error = super::issue(&["--key", "k", "--model", "claude-haiku-*"]).unwrap_err();
         assert_eq!(error.to_string(), "unknown flag --model");
+        let flags = [
+            "--models",
+            "claude-*",
+            "--key",
+            "k",
+            "--models",
+            "claude-haiku-*",
+        ];
+        let error = super::issue(&flags).unwrap_err();
+        assert_eq!(error.to_string(), "--models given more than once");
     }
 }

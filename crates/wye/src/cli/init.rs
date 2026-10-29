@@ -113,17 +113,25 @@ impl InitOptions {
     }
 }
 
-/// Writes the starter config to `options.out`, never over an existing file.
+/// Writes the starter config to `options.out`, never over an existing file
+/// (or through a symlink).
 pub fn init(options: &InitOptions) -> Result<String, String> {
+    use std::io::Write;
+
     let text = options.config()?;
     let path = Path::new(&options.out);
-    if path.exists() {
-        return Err(format!(
-            "{} exists; choose another path with --out",
-            path.display()
-        ));
-    }
-    std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                format!("{} exists; choose another path with --out", path.display())
+            }
+            _ => format!("cannot write {}: {e}", path.display()),
+        })?;
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     Ok(format!(
         "wrote {}\n{}",
         path.display(),

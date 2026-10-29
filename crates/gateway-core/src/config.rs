@@ -392,6 +392,11 @@ pub enum ConfigError {
     },
     EmptyPath(&'static str),
     Zero(&'static str),
+    /// A timer longer than `max` seconds.
+    TooLong {
+        field: &'static str,
+        max: u64,
+    },
     Percent(&'static str),
     Invalid(&'static str),
     /// A problem in one `[[routes.<route>.upstreams]]` entry.
@@ -427,6 +432,7 @@ impl fmt::Display for ConfigError {
             }
             Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
+            Self::TooLong { field, max } => write!(f, "{field} must be at most {max} seconds"),
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
             Self::RouteUpstream { route, id, error } => {
@@ -437,6 +443,16 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
+
+/// Whether a URL's host is this machine (`localhost`, `127.0.0.1`, `[::1]`):
+/// the only hosts plain http may reach without crossing a network.
+pub fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
 
 impl Config {
     /// Parses and validates a TOML document.

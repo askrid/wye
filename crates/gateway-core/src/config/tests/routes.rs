@@ -44,6 +44,12 @@ fn route_upstreams_are_validated() {
         (entry("id = \"a b\""), "letters, digits"),
         (entry("id = \"\""), "letters, digits"),
         (entry("id = \"a\"") + &entry("id = \"a\""), "used twice"),
+        (
+            entry("id = \"a\"")
+                + "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"a\"\n\
+                   base_url = \"https://api.openai.com\"\napi_key_env = \"O\"\n",
+            "routes.openai.upstreams \"a\": id is used by routes.claude too",
+        ),
         (entry("id = \"a\"\nweight = 0"), "between 1 and 1000"),
         (entry("id = \"a\"\nweight = 1001"), "between 1 and 1000"),
         (entry("id = \"a\"\nprovider = \"vertex\""), "provider"),

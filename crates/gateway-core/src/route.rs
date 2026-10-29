@@ -170,7 +170,10 @@ impl Route {
 /// The top 53 bits of `hash` as a float in (0, 1), never 0 or 1.
 fn unit(hash: u64) -> f64 {
     const STEPS: f64 = (1u64 << 53) as f64;
-    ((hash >> 11) as f64 + 0.5) / STEPS
+    // The largest float below 1: the top step's midpoint rounds up to 1.0,
+    // whose -ln is 0. Clamping moves that one value, so no session moves.
+    const BELOW_ONE: f64 = 1.0 - f64::EPSILON / 2.0;
+    (((hash >> 11) as f64 + 0.5) / STEPS).min(BELOW_ONE)
 }
 
 #[cfg(test)]

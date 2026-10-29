@@ -264,12 +264,48 @@ fn cache_diagnostics_require_a_key_variable() {
 }
 
 #[test]
-fn rejects_zero_timeouts() {
+fn rejects_zero_timeouts_and_timers_past_a_day() {
     assert_eq!(
         parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\nstream_idle_timeout_secs = 0")
             .unwrap_err(),
         ConfigError::Zero("upstream.stream_idle_timeout_secs")
     );
+    // The largest TOML integer would overflow `Instant + timeout`.
+    let huge = "9223372036854775807";
+    assert_eq!(
+        parse(&format!("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\nstream_idle_timeout_secs = {huge}"))
+            .unwrap_err(),
+        ConfigError::TooLong {
+            field: "upstream.stream_idle_timeout_secs",
+            max: 86_400
+        }
+    );
+    let server = |line: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n{line}\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true"
+        ))
+    };
+    assert!(matches!(
+        server(&format!("client_write_timeout_secs = {huge}")),
+        Err(ConfigError::TooLong { .. })
+    ));
+    assert!(server("shutdown_grace_secs = 86400").is_ok());
+}
+
+#[test]
+fn the_hold_budget_fits_one_whole_body() {
+    let server = |line: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n{line}\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true"
+        ))
+    };
+    assert!(matches!(
+        server("max_held_request_bytes = 1048576"),
+        Err(ConfigError::Invalid(_))
+    ));
+    assert!(server("max_held_request_bytes = 1048576\nmax_request_body_bytes = 1048576").is_ok());
 }
 
 #[test]

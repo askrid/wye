@@ -8,6 +8,8 @@
 
 use std::{ffi::OsString, process::Command};
 
+use gateway_core::config::is_loopback_host;
+
 /// Gateway URL when neither `--gateway` nor `WYE_GATEWAY_URL` is set.
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
 /// The environment variable Codex reads its bearer token from (the Codex
@@ -91,6 +93,16 @@ impl Launch {
             .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
             .trim_end_matches('/')
             .to_owned();
+        // Plain http beyond this machine would carry the gateway credential,
+        // or Claude Code's own login, in the clear.
+        if let Ok(uri) = gateway.parse::<http::Uri>()
+            && uri.scheme_str() == Some("http")
+            && uri.host().is_some_and(|host| !is_loopback_host(host))
+        {
+            return Err(format!(
+                "{gateway} is a remote gateway over plain http; use https"
+            ));
+        }
         if credential.as_deref() == Some("") {
             return Err("the gateway credential is empty".into());
         }
@@ -105,6 +117,9 @@ impl Launch {
     /// The agent's command, pointed at the gateway.
     pub fn command(&self, agent: Agent, program: impl Into<OsString>) -> Command {
         let mut command = Command::new(program.into());
+        // The agent gets the credential its own way below; every tool it runs
+        // would inherit this one.
+        command.env_remove("WYE_CREDENTIAL");
         match agent {
             Agent::Claude => {
                 // Background sessions (`--bg`) are started by Claude Code's
@@ -233,19 +248,22 @@ mod tests {
     #[test]
     fn flags_override_environment_and_the_rest_goes_to_the_agent() {
         let env = |name: &str| match name {
-            "WYE_GATEWAY_URL" => Some("http://gw:9000/".to_owned()),
+            "WYE_GATEWAY_URL" => Some("http://localhost:9000/".to_owned()),
             "WYE_CREDENTIAL" => Some("from-env".to_owned()),
             _ => None,
         };
         let launch = Launch::from_args(&["-p", "fix tests"], env).unwrap();
-        assert_eq!(launch.gateway, "http://gw:9000");
+        assert_eq!(launch.gateway, "http://localhost:9000");
         assert_eq!(launch.credential.as_deref(), Some("from-env"));
         assert_eq!(launch.args, ["-p", "fix tests"]);
 
         let launch =
-            Launch::from_args(&["--gateway", "http://other", "--", "--gateway"], env).unwrap();
-        assert_eq!(launch.gateway, "http://other");
+            Launch::from_args(&["--gateway", "https://other", "--", "--gateway"], env).unwrap();
+        assert_eq!(launch.gateway, "https://other");
         assert_eq!(launch.args, ["--gateway"]);
+        let remote = Launch::from_args(&["--gateway", "http://gw.example.com:8080"], env);
+        assert!(remote.unwrap_err().contains("plain http"));
+        assert!(Launch::from_args(&["--gateway", "http://[::1]:8080"], env).is_ok());
 
         let defaults = Launch::from_args(&[], |_| None).unwrap();
         assert_eq!(defaults.gateway, DEFAULT_GATEWAY);
@@ -268,6 +286,7 @@ mod tests {
         assert!(envs.contains(&("ANTHROPIC_BASE_URL".as_ref(), Some("http://gw".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_AUTH_TOKEN".as_ref(), Some("tok".as_ref()))));
         assert!(envs.contains(&("ANTHROPIC_API_KEY".as_ref(), None)));
+        assert!(envs.contains(&("WYE_CREDENTIAL".as_ref(), None)));
         assert!(envs.contains(&(HINT_HEADERS_ENV.as_ref(), Some("1".as_ref()))));
         // Background sessions get the URL and hint headers, never the credential.
         assert_eq!(

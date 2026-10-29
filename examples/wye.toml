@@ -7,14 +7,16 @@
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 #
 # Only `listen`, `base_url`, and one credential are required. Unknown fields
-# are rejected at startup. Paths are relative to this file. Secrets are never
-# written here: they come from environment variables or files.
+# are rejected at startup, and so are timers over 86400 seconds (a day).
+# Paths are relative to this file. Secrets are never written here: they come
+# from environment variables or files.
 
 [server]
 listen = "127.0.0.1:8080"              # beyond loopback only with [auth]
 # max_request_body_bytes = 33554432    # Anthropic's request size limit
 # Request bytes held while reading `model` (for permissions, aliases, and a
-# provider's model id), all requests together; beyond it, an overload error:
+# provider's model id), all requests together; beyond it, an overload error.
+# At least max_request_body_bytes, since one body may be held whole:
 # max_held_request_bytes = 67108864
 # Requests in flight before new ones get an overload error (529 on the
 # Messages API, 503 on the OpenAI APIs):

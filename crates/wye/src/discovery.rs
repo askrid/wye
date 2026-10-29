@@ -38,10 +38,13 @@ impl ModelCatalog {
         aliases: Option<&Aliases>,
         ceiling: Option<&[ModelPattern]>,
     ) -> Self {
+        // A request for an alias's name gets the alias's model, so an id that
+        // is also an alias is checked like the alias, per caller.
+        let alias_named = |id: &str| aliases.and_then(|a| a.get(id)).cloned();
         let mut entries: Vec<Entry> = discovery
             .models
             .iter()
-            .filter(|m| policy::permitted(ceiling, None, &m.id))
+            .filter(|m| alias_named(&m.id).is_some() || policy::permitted(ceiling, None, &m.id))
             .map(|m| {
                 let mut object = serde_json::Map::new();
                 object.insert("type".into(), "model".into());
@@ -54,13 +57,18 @@ impl ModelCatalog {
                 }
                 Entry {
                     id: m.id.as_str().into(),
-                    alias: None,
+                    alias: alias_named(&m.id),
                     json: serde_json::to_vec(&object).unwrap_or_default().into(),
                     id_json: serde_json::to_vec(&m.id).unwrap_or_default().into(),
                 }
             })
             .collect();
-        for alias in aliases.into_iter().flat_map(Aliases::iter) {
+        let listed = |name: &str| discovery.models.iter().any(|m| m.id == name);
+        for alias in aliases
+            .into_iter()
+            .flat_map(Aliases::iter)
+            .filter(|a| !listed(a.name()))
+        {
             let id = serde_json::to_vec(&**alias.name()).unwrap_or_default();
             let mut json = br#"{"type":"model","id":"#.to_vec();
             json.extend_from_slice(&id);
@@ -201,5 +209,23 @@ mod tests {
         // `coding` is Opus, outside the ceiling, except for the canary subject.
         assert_eq!(ids(None), ["claude-haiku-4-5", "fast"]);
         assert_eq!(ids(Some("canary")), ["claude-haiku-4-5", "coding", "fast"]);
+    }
+
+    #[test]
+    fn an_id_that_is_also_an_alias_is_checked_as_the_alias_once() {
+        // Requests for `claude-opus-4-6` run Opus 5.5.
+        let aliases = Aliases::new(vec![
+            Alias::new("claude-opus-4-6", "claude-opus-5-5", []).unwrap(),
+        ])
+        .unwrap();
+        let catalog = ModelCatalog::new(&discovery(&["claude-opus-4-6"]), Some(&aliases), None);
+        let count = |granted: &[&str]| {
+            parse(catalog.list(Some(&patterns(granted)), None))["data"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        assert_eq!(count(&["claude-opus-4-*"]), 0);
+        assert_eq!(count(&["claude-opus-*"]), 1);
     }
 }

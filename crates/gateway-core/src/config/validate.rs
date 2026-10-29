@@ -86,29 +86,42 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
     if !listen.ip().is_loopback() && !authenticated {
         return Err(ConfigError::NonLoopbackListen(listen));
     }
+    let max_request_body_bytes = nonzero(
+        raw.max_request_body_bytes
+            .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
+        "server.max_request_body_bytes",
+    )?;
+    let max_held_request_bytes = nonzero(
+        raw.max_held_request_bytes
+            .unwrap_or(DEFAULT_MAX_HELD_REQUEST_BYTES),
+        "server.max_held_request_bytes",
+    )?;
+    // A body that names its model last is held whole; with a smaller budget
+    // it would be refused as an overload, and retried, forever.
+    if max_held_request_bytes < max_request_body_bytes {
+        return Err(ConfigError::Invalid(
+            "server.max_held_request_bytes must be at least server.max_request_body_bytes",
+        ));
+    }
     Ok(Server {
         listen,
-        max_request_body_bytes: nonzero(
-            raw.max_request_body_bytes
-                .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
-            "server.max_request_body_bytes",
-        )?,
-        max_held_request_bytes: nonzero(
-            raw.max_held_request_bytes
-                .unwrap_or(DEFAULT_MAX_HELD_REQUEST_BYTES),
-            "server.max_held_request_bytes",
-        )?,
+        max_request_body_bytes,
+        max_held_request_bytes,
         max_concurrent_requests: match raw.max_concurrent_requests {
             Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
             value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
         },
-        drain_delay: Duration::from_secs(raw.drain_delay_secs.unwrap_or(DEFAULT_DRAIN_DELAY_SECS)),
+        drain_delay: timer(
+            raw.drain_delay_secs.unwrap_or(DEFAULT_DRAIN_DELAY_SECS),
+            "server.drain_delay_secs",
+        )?,
         // Zero is valid: cancel active streams immediately on shutdown.
-        shutdown_grace: Duration::from_secs(
+        shutdown_grace: timer(
             raw.shutdown_grace_secs
                 .unwrap_or(DEFAULT_SHUTDOWN_GRACE_SECS),
-        ),
-        client_write_timeout: secs(
+            "server.shutdown_grace_secs",
+        )?,
+        client_write_timeout: running_timer(
             raw.client_write_timeout_secs
                 .unwrap_or(DEFAULT_CLIENT_WRITE_TIMEOUT_SECS),
             "server.client_write_timeout_secs",
@@ -229,4 +242,24 @@ fn nonzero(value: u64, field: &'static str) -> Result<u64, ConfigError> {
 
 fn secs(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
     nonzero(value, field).map(Duration::from_secs)
+}
+
+/// The longest timer, a day: longer ones are mistakes, and a timer adds its
+/// duration to an `Instant`, which must not overflow.
+const MAX_TIMER_SECS: u64 = 24 * 3600;
+
+/// A timer of `value` seconds, zero allowed.
+fn timer(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
+    if value > MAX_TIMER_SECS {
+        return Err(ConfigError::TooLong {
+            field,
+            max: MAX_TIMER_SECS,
+        });
+    }
+    Ok(Duration::from_secs(value))
+}
+
+/// A timer that must run: more than zero seconds.
+fn running_timer(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
+    nonzero(value, field).and_then(|value| timer(value, field))
 }
