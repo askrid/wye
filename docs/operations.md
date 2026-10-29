@@ -38,7 +38,7 @@ All of these are built. `init` writes a minimal validated config for an API key 
 - Each upstream's provider key is present (environment variable or file; never printed), and how it will be sent.
 - A Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is.
 - Each upstream answers at its base URL: one unauthenticated `HEAD`, trusting its `ca_file`, proves DNS, TCP, TLS, and HTTP without a model request, so nothing is billed.
-- The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP header variable and endpoint.
+- The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP header variable and endpoint; headers sent over plain http beyond this machine are a problem, since they usually carry a backend's API key.
 
 Every check runs, so one pass lists every problem; exit 3 if any failed. Not checked yet: model availability per upstream.
 

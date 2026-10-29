@@ -66,3 +66,22 @@ async fn a_bedrock_upstream_needs_the_anthropic_path() {
         "{report}"
     );
 }
+
+#[tokio::test]
+async fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
+    let config = |endpoint: &str| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n\
+             [telemetry]\notlp_endpoint = \"{endpoint}\"\notlp_headers_env = \"PATH\"\n"
+        ))
+        .unwrap()
+    };
+    let (report, _) = doctor(&config("http://collector.example:4318"), Path::new(".")).await;
+    assert!(
+        report.contains("FAIL  telemetry: $PATH would cross the network in the clear"),
+        "{report}"
+    );
+    let (report, _) = doctor(&config("http://127.0.0.1:4318"), Path::new(".")).await;
+    assert!(!report.contains("in the clear"), "{report}");
+}
