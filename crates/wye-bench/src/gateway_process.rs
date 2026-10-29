@@ -4,14 +4,11 @@ use std::{collections::HashSet, path::Path, process::Stdio, time::Duration};
 
 use tokio::process::Child;
 
-use crate::{
-    client::Target,
-    gateway_config::{
-        BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BIFROST_API_PREFIX, BIFROST_USER_AGENT,
-        BenchCredentials, LITELLM_API_PREFIX, LITELLM_MASTER_KEY, WyeOptions, bifrost_config,
-        krakend_config, litellm_config, wye_config,
-    },
-};
+use crate::client::Target;
+
+mod launch;
+
+use launch::{Launch, Setup};
 
 /// Which gateway to start, with the path to its executable.
 #[derive(Clone, Copy)]
@@ -89,18 +86,6 @@ impl Gateway<'_> {
     }
 }
 
-/// [`Gateway::WyeRefused`]'s first account refuses one request in this many.
-const REFUSE_EVERY: u64 = 4;
-
-/// How to launch one gateway in front of an upstream.
-struct Launch {
-    program: String,
-    args: Vec<String>,
-    env: Vec<(&'static str, String)>,
-    health: &'static str,
-    target: Target,
-}
-
 pub struct GatewayProcess {
     /// Held so the process lives as long as this value; `kill_on_drop` stops it.
     _child: Child,
@@ -135,165 +120,20 @@ impl GatewayProcess {
             let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             probe.local_addr().unwrap().port()
         };
-        // Absolute, because Wye resolves relative paths against its config file
-        // and the others against their working directory.
-        let ca_file = ca_pem.map(|pem| {
-            let path = dir.join(format!("bench-{name}-ca.pem"));
-            std::fs::write(&path, pem).unwrap();
-            std::fs::canonicalize(path).unwrap()
-        });
-        let config = |extension: &str, contents: String| {
-            let path = dir.join(format!("bench-{name}-{}.{extension}", gateway.name()));
-            std::fs::write(&path, contents).unwrap();
-            path.display().to_string()
+        let setup = Setup {
+            port,
+            addr: format!("127.0.0.1:{port}").parse().unwrap(),
+            upstream: upstream_base_url,
+            ca_pem,
+            ca_file: ca_pem.map(|pem| {
+                let path = dir.join(format!("bench-{name}-ca.pem"));
+                std::fs::write(&path, pem).unwrap();
+                std::fs::canonicalize(path).unwrap()
+            }),
+            dir,
+            name,
         };
-        let addr = format!("127.0.0.1:{port}").parse().unwrap();
-        // The refusing first account, spawned for this process only.
-        let refusing = match gateway {
-            Gateway::WyeRefused(_) => Some(format!(
-                "http://{}",
-                crate::mock::spawn_refusing(REFUSE_EVERY).await
-            )),
-            _ => None,
-        };
-        let launch = match gateway {
-            Gateway::Wye(program)
-            | Gateway::WyeAuth(program)
-            | Gateway::WyeModels(program)
-            | Gateway::WyeDiag(program)
-            | Gateway::WyeOtlp(program)
-            | Gateway::WyeOpenai(program)
-            | Gateway::WyeBedrock(program)
-            | Gateway::WyeFailover(program)
-            | Gateway::WyeRefused(program) => {
-                let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
-                let models = matches!(gateway, Gateway::WyeModels(_));
-                // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
-                // only for a provider-qualified model): allowed by both lists.
-                let credentials = authenticated.then(|| {
-                    BenchCredentials::generate(models.then_some(&["anthropic/bench"][..]))
-                });
-                let options = WyeOptions {
-                    auth_public_key: credentials.as_ref().map(|c| c.public_key.as_str()),
-                    auth_models: models.then_some(r#"["anthropic/bench*", "claude-*"]"#),
-                    cache_diagnostics: matches!(gateway, Gateway::WyeDiag(_)),
-                    // The mock answers the export POSTs like any request.
-                    otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_))
-                        .then_some(upstream_base_url),
-                    openai: matches!(gateway, Gateway::WyeOpenai(_)),
-                    bedrock: matches!(gateway, Gateway::WyeBedrock(_)),
-                    failover: matches!(gateway, Gateway::WyeFailover(_) | Gateway::WyeRefused(_)),
-                    refusing_upstream: refusing.as_deref(),
-                };
-                let mut env = Vec::new();
-                if authenticated || options.openai || options.bedrock || options.failover {
-                    // `[auth]` excludes caller-credential passthrough; the mock ignores the key.
-                    env.push((BENCH_PROVIDER_KEY_ENV, "sk-bench-provider".to_owned()));
-                }
-                if options.cache_diagnostics {
-                    env.push((BENCH_HASH_KEY_ENV, "b".repeat(64)));
-                }
-                Launch {
-                    program: program.into(),
-                    args: vec![
-                        "serve".into(),
-                        "--config".into(),
-                        config(
-                            "toml",
-                            wye_config(port, upstream_base_url, ca_file.as_deref(), &options),
-                        ),
-                    ],
-                    env,
-                    health: "/healthz",
-                    target: match (&credentials, options.openai) {
-                        (Some(c), _) => Target::gateway(
-                            addr,
-                            "",
-                            vec![("authorization", format!("Bearer {}", c.token))],
-                        ),
-                        (None, true) => Target::plain(addr).with_responses(),
-                        (None, false) => Target::plain(addr),
-                    },
-                }
-            }
-            Gateway::KrakenD(program) => Launch {
-                program: program.into(),
-                args: vec![
-                    "run".into(),
-                    "-c".into(),
-                    config(
-                        "json",
-                        krakend_config(port, upstream_base_url, ca_file.as_deref()),
-                    ),
-                ],
-                env: Vec::new(),
-                health: "/__health",
-                target: Target::plain(addr),
-            },
-            Gateway::LiteLlm(program) => Launch {
-                program: program.into(),
-                args: vec![
-                    "--config".into(),
-                    config("yaml", litellm_config(upstream_base_url)),
-                    "--port".into(),
-                    port.to_string(),
-                    // LiteLLM's production recommendation: one worker per core.
-                    "--num_workers".into(),
-                    std::thread::available_parallelism()
-                        .map_or(1, |n| n.get())
-                        .to_string(),
-                ],
-                env: ca_file
-                    .iter()
-                    // Pass-through requests trust the CA path in SSL_VERIFY. Not
-                    // SSL_CERT_FILE: it replaces the system roots for every client,
-                    // breaking LiteLLM's other outbound HTTPS calls.
-                    .map(|path| ("SSL_VERIFY", path.display().to_string()))
-                    .chain([("LITELLM_LOG", "ERROR".into())])
-                    .collect(),
-                health: "/health/liveliness",
-                target: Target::gateway(
-                    addr,
-                    LITELLM_API_PREFIX,
-                    vec![("authorization", format!("Bearer {LITELLM_MASTER_KEY}"))],
-                ),
-            },
-            Gateway::Bifrost(program) => {
-                // Bifrost reads `config.json` from its app directory.
-                let app_dir = dir.join(format!("bench-{name}-bifrost"));
-                std::fs::create_dir_all(&app_dir).unwrap();
-                std::fs::write(
-                    app_dir.join("config.json"),
-                    bifrost_config(upstream_base_url, ca_pem),
-                )
-                .unwrap();
-                Launch {
-                    program: program.into(),
-                    args: vec![
-                        "-app-dir".into(),
-                        app_dir.display().to_string(),
-                        "-host".into(),
-                        "127.0.0.1".into(),
-                        "-port".into(),
-                        port.to_string(),
-                        "-log-level".into(),
-                        "error".into(),
-                    ],
-                    env: Vec::new(),
-                    health: "/health",
-                    target: Target::gateway(
-                        addr,
-                        BIFROST_API_PREFIX,
-                        vec![("user-agent", BIFROST_USER_AGENT.into())],
-                    )
-                    // Bifrost forwards only allowlisted headers, plus any sent
-                    // as `x-bf-eh-<name>` (as `<name>`); its Anthropic route drops
-                    // those when the request carries `anthropic-version`, which
-                    // Bifrost adds upstream itself.
-                    .with_control_prefix("x-bf-eh-"),
-                }
-            }
-        };
+        let launch = Launch::new(gateway, &setup).await;
 
         // `WYE_BENCH_GATEWAY_LOG=1` keeps each gateway's output next to its config.
         let (stdout, stderr) = match std::env::var_os("WYE_BENCH_GATEWAY_LOG") {
