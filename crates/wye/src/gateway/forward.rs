@@ -14,16 +14,17 @@ use http_body_util::Either;
 use hyper::body::Incoming;
 
 use super::{
-    Gateway, ResBody,
+    ApiRoute, Gateway, ResBody,
     admit::ModelSpan,
     content_length,
     responses::{error, forward_error, overloaded},
 };
 use crate::{
     diagnostics::PromptSlot,
-    failover::{Bounds, FailoverBody},
+    failover::{Bounds, FailoverBody, Handback, Resend},
+    request_body::RequestBody,
     upgrade_check::UpgradeSlot,
-    upstream::{ForwardError, Upstream},
+    upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, UsageLog},
 };
 
@@ -56,15 +57,47 @@ impl Gateway {
             return res;
         }
         let (mut parts, body) = req.into_parts();
-        let (mut body, model_span) =
-            match self.admit_body(body, &mut info, &mut parts.headers).await {
-                Ok(admitted) => admitted,
-                Err(res) => {
-                    log.gateway_error(info, res.status());
-                    return *res;
-                }
-            };
+        let (body, model_span) = match self.admit_body(body, &mut info, &mut parts.headers).await {
+            Ok(admitted) => admitted,
+            Err(res) => {
+                log.gateway_error(info, res.status());
+                return *res;
+            }
+        };
         self.sample(&mut info);
+        let Some(route) = self.route(api) else {
+            unreachable!("handle only forwards endpoints with a route")
+        };
+        match self
+            .attempts(route, parts, body, model_span, declared_len, &mut info)
+            .await
+        {
+            Ok(res) => {
+                let status = res.status();
+                let kind = BodyKind::of(res.headers().get(CONTENT_TYPE).map(HeaderValue::as_bytes));
+                let log = log.clone();
+                res.map(|body| Either::Right(Observed::new(body, info, status, kind, log, permit)))
+            }
+            Err(e) => {
+                let res = forward_error(api, e);
+                log.gateway_error(info, res.status());
+                res
+            }
+        }
+    }
+
+    /// Sends the request to the upstream its affinity key picks and, after a
+    /// refusal that proves it was not processed, to the next upstream in its
+    /// ranking, as long as failover can resend the body.
+    async fn attempts(
+        &self,
+        route: &ApiRoute,
+        parts: http::request::Parts,
+        mut body: RequestBody<Incoming>,
+        model_span: Option<ModelSpan>,
+        declared_len: Option<u64>,
+        info: &mut RequestInfo,
+    ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         // Session affinity: prompt caches are per provider account.
         let key = info
             .session_id
@@ -72,9 +105,6 @@ impl Gateway {
             .map(HeaderValue::as_bytes)
             .or(info.identity.as_ref().map(|i| i.subject.as_bytes()))
             .unwrap_or_default();
-        let Some(route) = self.route(api) else {
-            unreachable!("handle only forwards endpoints with a route")
-        };
         let ranking = route.route.rank(key);
         // Failover keeps the body for resending, unless it is declared too large.
         let failover = route
@@ -106,7 +136,7 @@ impl Gateway {
         let mut parts = Some(parts);
         let mut order = ranking.iter().peekable();
         loop {
-            let (Some(index), Some(attempt)) = (
+            let (Some(index), Some(mut attempt)) = (
                 order.next(),
                 parts.take().or_else(|| received.as_ref().map(copy_parts)),
             ) else {
@@ -115,7 +145,6 @@ impl Gateway {
             let Some(upstream) = route.upstreams.get(index) else {
                 unreachable!("the route and its upstreams have the same length")
             };
-            let mut attempt = attempt;
             if let (Some(prefix), Some(len)) = (prefix_sent, base_len) {
                 attempt
                     .headers
@@ -132,85 +161,89 @@ impl Gateway {
                     info.upgrade.clone().filter(|_| first),
                 )
                 .await;
-            let refusal = match (&result, &failover) {
-                (Ok(res), Some(f)) if f.retries_status(res.status().as_u16()) => {
-                    Some(Some(res.status().as_u16()))
-                }
-                // Any other failure qualifies only if the attempt did not
-                // deliver the whole body (checked below): a provider can
-                // refuse early and close while the upload runs, and an
-                // incomplete request cannot have been processed.
-                (Err(ForwardError::Connect | ForwardError::Upstream), Some(f)) if f.on_connect => {
-                    Some(None)
-                }
-                _ => None,
-            };
-            let cut = matches!(result, Err(ForwardError::Upstream));
-            if let (Some(status), Some(f), Some(handback), true) = (
-                refusal,
+            let next = order.peek().and_then(|&i| route.upstreams.get(i));
+            if let (Some(status), Some(f), Some(handback), Some(next)) = (
+                refusal(&result, failover.as_ref()),
                 &failover,
                 handback.as_mut(),
-                order.peek().is_some(),
+                next,
             ) {
-                // Resend only a body handed back: the bytes sent plus the
-                // unread rest, so a refusal during the upload moves on when
-                // hyper drops the body. If the attempt still holds it (hyper
-                // still writing), the refusal is answered as it is: dropping
-                // the answer first could lose both it and the body.
-                let resend = match handback.try_recv() {
-                    Ok(resend) => Some(resend),
-                    Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
-                        .await
-                        .ok()
-                        .and_then(Result::ok),
-                }
-                .filter(|resend| !cut || !resend.sent_whole());
-                // The next upstream's provider may have its own model id.
-                let next = order.peek().and_then(|&i| route.upstreams.get(i));
-                let resend = match (resend, &model_span, next) {
-                    (Some(mut resend), Some(at), Some(next)) => {
-                        match model_id_for(at, next, prefix_sent) {
-                            None => Some(resend),
-                            // A value split between the sent bytes and the
-                            // unread rest cannot be re-prefixed: answer as is.
-                            Some((prefix, value)) => resend
-                                .splice(&model_id_span(at, prefix_sent), value)
-                                .then(|| {
-                                    prefix_sent = prefix;
-                                    resend
-                                }),
-                        }
-                    }
-                    (resend, _, _) => resend,
-                };
-                if let Some(resend) = resend {
+                let cut = matches!(result, Err(ForwardError::Upstream));
+                if let Some(resend) = handed_back(handback, cut).await.and_then(|resend| {
+                    with_model_id(resend, model_span.as_ref(), next, &mut prefix_sent)
+                }) {
                     drop(result);
                     info.failovers.push(RefusedAttempt {
                         upstream: upstream.id.clone(),
                         status,
                     });
-                    let (next, next_handback) = FailoverBody::resume(resend, bounds(f));
-                    body = next;
-                    *handback = next_handback;
+                    (body, *handback) = FailoverBody::resume(resend, bounds(f));
                     continue;
                 }
             }
-            return match result {
-                Ok(res) => {
-                    let status = res.status();
-                    let kind =
-                        BodyKind::of(res.headers().get(CONTENT_TYPE).map(HeaderValue::as_bytes));
-                    let log = log.clone();
-                    res.map(|body| {
-                        Either::Right(Observed::new(body, info, status, kind, log, permit))
-                    })
-                }
-                Err(e) => {
-                    let res = forward_error(api, e);
-                    log.gateway_error(info, res.status());
-                    res
-                }
-            };
+            return result;
+        }
+    }
+}
+
+/// What failover may act on in `result`: `Some(status)` for a refusing
+/// status, `Some(None)` for a connection refused or lost. A lost connection
+/// qualifies only if the attempt did not deliver the whole body (checked by
+/// [`handed_back`]): a provider can refuse early and close while the upload
+/// runs, and an incomplete request cannot have been processed.
+fn refusal(
+    result: &Result<Response<UpstreamBody<Incoming>>, ForwardError>,
+    failover: Option<&route::Failover>,
+) -> Option<Option<u16>> {
+    let failover = failover?;
+    match result {
+        Ok(res) if failover.retries_status(res.status().as_u16()) => {
+            Some(Some(res.status().as_u16()))
+        }
+        Err(ForwardError::Connect | ForwardError::Upstream) if failover.on_connect => Some(None),
+        _ => None,
+    }
+}
+
+/// The body a refused attempt hands back: the bytes it sent plus the unread
+/// rest, so a refusal during the upload moves on once hyper drops the body.
+/// If the attempt still holds it after [`HANDBACK_WAIT`] (hyper still
+/// writing), `None`: the refusal is answered as it is, because dropping the
+/// answer first could lose both it and the body. Also `None` when the
+/// connection was `cut` after the whole body was delivered.
+async fn handed_back(
+    handback: &mut Handback<RequestBody<Incoming>>,
+    cut: bool,
+) -> Option<Resend<RequestBody<Incoming>>> {
+    let resend = match handback.try_recv() {
+        Ok(resend) => Some(resend),
+        Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
+            .await
+            .ok()
+            .and_then(Result::ok),
+    };
+    resend.filter(|resend| !cut || !resend.sent_whole())
+}
+
+/// `resend` with the model id `next`'s provider needs, or `None` when the
+/// value is split between the sent bytes and the unread rest and cannot be
+/// rewritten: the refusal is then answered as it is.
+fn with_model_id(
+    mut resend: Resend<RequestBody<Incoming>>,
+    at: Option<&ModelSpan>,
+    next: &Upstream,
+    prefix_sent: &mut Option<&'static str>,
+) -> Option<Resend<RequestBody<Incoming>>> {
+    let Some(at) = at else { return Some(resend) };
+    match model_id_for(at, next, *prefix_sent) {
+        None => Some(resend),
+        Some((prefix, value)) => {
+            resend
+                .splice(&model_id_span(at, *prefix_sent), value)
+                .then(|| {
+                    *prefix_sent = prefix;
+                    resend
+                })
         }
     }
 }
