@@ -42,6 +42,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The stalled-client test keeps 256 loopback connections full. Their client
+      # ends stand in for remote machines but autotune receive buffers out of
+      # the same pool, and a 7 GB macOS runner has only 96 MB of it.
+      - if: runner.os == 'macOS'
+        run: sudo sysctl -w net.inet.tcp.autorcvbufmax=131072
       # The proxy tests open several hundred sockets; macOS allows 256 by default.
       - run: ulimit -n 8192 && cargo test --locked
       # Release builds, including the allocation-counting one the benchmark uses.
