@@ -76,6 +76,12 @@ fn an_empty_value_is_spliced_at_any_cut() {
             "cut at {cut}"
         );
     }
+    // The chunks end at the span: failover's sent bytes, before the rest.
+    let head = Bytes::from_static(&body.as_bytes()[..at as usize]);
+    let mut out = Vec::new();
+    let prefix = Bytes::from_static(b"anthropic.");
+    splice_chunks(std::iter::once(head), &(at..at), prefix, |c| out.push(c));
+    assert_eq!(out.concat(), br#"{"model":"anthropic."#);
 }
 
 #[tokio::test]
