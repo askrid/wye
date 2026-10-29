@@ -308,6 +308,29 @@ async fn a_late_refusal_gets_the_same_answer_from_an_http2_upstream() {
     late_max_tokens_is_refused(&h, &key, &mut bodies).await;
 }
 
+#[tokio::test]
+async fn a_late_second_model_aborts_the_upstream_request() {
+    let key = keypair();
+    let (h, mut bodies) = body_harness(&key, "").await;
+    let t = token_with_models(&key, &["claude-haiku-*"]);
+    let req = messages().header("authorization", format!("Bearer {t}"));
+    let chunks: [&[u8]; 2] = [
+        br#"{"model":"claude-haiku-4-5","messages":[],"#,
+        br#""model":"claude-opus-5-5"}"#,
+    ];
+    let res = h.send_chunked(req, &chunks).await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let text = read_body(res).await;
+    assert!(
+        String::from_utf8_lossy(&text).contains("request names model more than once"),
+        "{text:?}"
+    );
+    assert!(
+        bodies.try_recv().is_err(),
+        "the upstream received a complete body"
+    );
+}
+
 /// The client streams the body, model first and max_tokens in a later
 /// chunk; the gateway refuses it and the upstream never sees it complete.
 async fn late_max_tokens_is_refused(

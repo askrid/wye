@@ -556,3 +556,32 @@ async fn non_streaming_json_responses_report_usage() {
     assert_eq!(record["output_tokens"], 34);
     assert_eq!(record["tool_calls"]["Read"], 1);
 }
+
+#[tokio::test]
+async fn tool_calls_past_eight_names_go_under_other() {
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+    let blocks: Vec<String> = names
+        .iter()
+        .map(|n| format!(r#"{{"type":"tool_use","id":"t{n}","name":"{n}","input":{{}}}}"#))
+        .collect();
+    let body: &'static str = Box::leak(
+        format!(
+            r#"{{"type":"message","model":"m","content":[{}],"usage":{{"input_tokens":1,"output_tokens":1}}}}"#,
+            blocks.join(",")
+        )
+        .into_boxed_str(),
+    );
+    let h = Harness::api_key(Arc::new(move |_| {
+        Box::pin(async move {
+            let mut res = full(StatusCode::OK, body);
+            res.headers_mut()
+                .insert("content-type", "application/json".parse().unwrap());
+            res
+        })
+    }))
+    .await;
+    read_body(h.send(messages(), "{}").await).await;
+    let calls = &h.usage_record().await["tool_calls"];
+    assert_eq!(calls.as_object().unwrap().len(), 9, "{calls}");
+    assert_eq!(calls["(other)"], 2, "{calls}");
+}
