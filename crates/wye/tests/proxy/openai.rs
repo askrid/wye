@@ -287,3 +287,40 @@ async fn a_body_past_the_limit_gets_openais_error_shape() {
     assert_eq!(body["error"]["code"], "request_too_large", "{body}");
     assert!(seen.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn beyond_the_concurrency_limit_responses_get_a_retryable_503() {
+    // An upstream that keeps its stream open, holding the one permit.
+    let (_keep, rx) = mpsc::channel::<Bytes>(1);
+    let rx = std::sync::Mutex::new(Some(rx));
+    let handler: Handler = Arc::new(move |_| {
+        let rx = rx.lock().unwrap().take();
+        Box::pin(async move {
+            match rx {
+                Some(rx) => Response::new(Either::Right(ChannelBody(rx))),
+                None => full(StatusCode::OK, "{}"),
+            }
+        })
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_concurrent_requests = 1\n\
+         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
+         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
+    );
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
+    )]);
+    let h = Harness::launch_config(&config, resources, hits).await;
+    let _held = h
+        .send(responses(), r#"{"model":"gpt-5","input":"a"}"#)
+        .await;
+    let res = h
+        .send(responses(), r#"{"model":"gpt-5","input":"b"}"#)
+        .await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.headers()["retry-after"], "1");
+    let body: serde_json::Value = serde_json::from_slice(&read_body(res).await).unwrap();
+    assert_eq!(body["error"]["code"], "overloaded_error", "{body}");
+}
