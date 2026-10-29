@@ -244,8 +244,9 @@ Tooling
   sample requests with expected decisions, so routing and permission changes
   can be tested in CI.
 - `wye policy-diff old.toml new.toml` exits non-zero when a config change
-  widens access: a model newly allowed, a ceiling raised, a new trusted signing
-  key, auth removed, or a listener moved off loopback.
+  widens access: a model newly allowed, a ceiling raised, a new trusted key,
+  auth removed, a listener opened wider, a new API route, or the operator's
+  key where callers brought their own.
 - `wye init`, `wye doctor`, `wye probe` (a health check for images without
   curl), and `wye token`.
 

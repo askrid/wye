@@ -165,6 +165,7 @@ Core unit tests and property tests cover configuration validation, credential ve
 ### Policy / security
 
 - [ ] Signature, issuer, audience, expiry, and model permissions enforced before upstream dispatch.
+- [ ] Model permissions and ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused.
 - [ ] Config references and environment secrets validated; errors fail closed.
 - [ ] Caller-credential passthrough refuses to start on a non-loopback bind.
 - [ ] Provider credentials and prompt bodies not logged by default.

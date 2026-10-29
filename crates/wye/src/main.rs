@@ -76,7 +76,9 @@ fn run(args: Vec<OsString>) -> Result<(), Box<dyn Error>> {
             Ok(())
         }
         ["policy-diff", old, new] => {
-            let diff = wye::policy_diff(&load(old)?, &load(new)?);
+            let (before, after) = (load(old)?, load(new)?);
+            let mut diff = wye::policy_diff(&before, &after);
+            diff.key_sets(&before, config_dir(old), &after, config_dir(new))?;
             print!("{}", diff.report());
             if diff.widens() {
                 std::process::exit(3);
