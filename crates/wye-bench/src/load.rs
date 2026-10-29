@@ -80,11 +80,7 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
-    let body = mock::padded_json(
-        r#"{"model":"anthropic/bench","max_tokens":1,"messages":[{"role":"user","content":""#,
-        r#""}]}"#,
-        UPLOAD_BYTES,
-    );
+    let body = mock::message_json(UPLOAD_BYTES);
     // Warm up connection pools before the measured window.
     scenarios::upload(
         process.target(),

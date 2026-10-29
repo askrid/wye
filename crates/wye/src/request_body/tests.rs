@@ -1,36 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use std::collections::VecDeque;
-
 use gateway_core::api::Api;
 
 use super::*;
-
-/// A client body that yields its chunks, one per poll.
-struct Client(VecDeque<Bytes>);
-
-impl Body for Client {
-    type Data = Bytes;
-    type Error = std::convert::Infallible;
-    fn poll_frame(
-        mut self: Pin<&mut Self>,
-        _: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
-        Poll::Ready(self.0.pop_front().map(|c| Ok(Frame::data(c))))
-    }
-    fn is_end_stream(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-fn chunks(parts: &[&'static str]) -> Client {
-    Client(
-        parts
-            .iter()
-            .map(|p| Bytes::from_static(p.as_bytes()))
-            .collect(),
-    )
-}
+use crate::test_body::Client;
 
 async fn collect(body: RequestBody<Client>) -> Result<Bytes, BoxError> {
     body.collect().await.map(|c| c.to_bytes())
@@ -40,7 +13,7 @@ async fn collect(body: RequestBody<Client>) -> Result<Bytes, BoxError> {
 async fn holds_only_until_the_model_then_replays_everything() {
     let budget = Gauge::default();
     let parts = [r#"{"model":"m","#, r#""messages":[]"#, "}"];
-    let mut client = chunks(&parts);
+    let mut client = Client::of(&parts);
     let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
         .await
         .unwrap();
@@ -72,7 +45,7 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
                     .map(|p| &*Box::leak(p.to_owned().into_boxed_str()))
                     .collect();
                 let budget = Gauge::default();
-                let mut client = chunks(&parts);
+                let mut client = Client::of(&parts);
                 let mut held =
                     hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
                         .await
@@ -91,7 +64,7 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
 #[tokio::test]
 async fn a_repeated_model_later_fails_the_body() {
     let budget = Gauge::default();
-    let mut client = chunks(&[r#"{"model":"allowed","#, r#""model":"other"}"#]);
+    let mut client = Client::of(&[r#"{"model":"allowed","#, r#""model":"other"}"#]);
     let held = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, 1 << 20, None)
         .await
         .unwrap();
@@ -106,7 +79,7 @@ async fn a_repeated_model_later_fails_the_body() {
 
 #[tokio::test]
 async fn a_late_max_tokens_above_the_limit_fails_the_body() {
-    let mut client = chunks(&[r#"{"model":"m","messages":[],"#, r#""max_tokens":9000}"#]);
+    let mut client = Client::of(&[r#"{"model":"m","messages":[],"#, r#""max_tokens":9000}"#]);
     let held = hold_until_model(
         &mut client,
         Api::Messages,
@@ -137,7 +110,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
         assert!(other.try_grow(90, 100));
         other
     };
-    let mut client = chunks(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
+    let mut client = Client::of(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
     let error = hold_until_model(&mut client, Api::Messages, &budget, 100, 1 << 20, None)
         .await
         .err()
@@ -145,7 +118,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     assert!(matches!(error, HoldError::Overloaded));
     assert_eq!(budget.current(), 90);
 
-    let mut client = chunks(&[r#"{"messages":[]}"#]);
+    let mut client = Client::of(&[r#"{"messages":[]}"#]);
     let error = hold_until_model(
         &mut client,
         Api::Messages,
@@ -159,7 +132,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     .unwrap();
     assert!(matches!(error, HoldError::Model(PolicyError::Missing)));
 
-    let mut client = chunks(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]);
+    let mut client = Client::of(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]);
     let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, 10, None)
         .await
         .err()
@@ -170,7 +143,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
 #[tokio::test]
 async fn responses_need_max_output_tokens_under_a_ceiling() {
     // Absent: refused when the body ends, so the request is never complete.
-    let mut client = chunks(&[r#"{"model":"m","input":[]"#, r#","stream":true}"#]);
+    let mut client = Client::of(&[r#"{"model":"m","input":[]"#, r#","stream":true}"#]);
     let held = hold_until_model(
         &mut client,
         Api::Responses,
@@ -196,7 +169,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
         r#"{"model":"m","input":[],"#,
         r#""max_output_tokens":1000}"#,
     ];
-    let mut client = chunks(&body);
+    let mut client = Client::of(&body);
     let held = hold_until_model(
         &mut client,
         Api::Responses,
@@ -213,7 +186,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
     assert_eq!(forwarded, body.concat());
 
     // Anthropic's max_tokens is not the Responses field.
-    let mut client = chunks(&[r#"{"model":"m","#, r#""max_tokens":10}"#]);
+    let mut client = Client::of(&[r#"{"model":"m","#, r#""max_tokens":10}"#]);
     let held = hold_until_model(
         &mut client,
         Api::Responses,

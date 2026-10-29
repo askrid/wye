@@ -195,8 +195,8 @@ fn matches(patterns: &[String], name: &str) -> bool {
 /// Prints a comparison table; returns false if any enforced metric
 /// regressed or is missing.
 pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
-    let (base, cur) = (load(reference), load(current));
-    if base["machine"] != cur["machine"] {
+    let (reference, current) = (load(reference), load(current));
+    if reference["machine"] != current["machine"] {
         eprintln!("warning: the reference ran on a different machine; comparison is unreliable");
     }
     println!(
@@ -207,8 +207,8 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
     for &(name, rel, abs) in GATES {
         let enforced = scope.enforces(name);
         let (b, c) = match (
-            base["metrics"][name].as_f64(),
-            cur["metrics"][name].as_f64(),
+            reference["metrics"][name].as_f64(),
+            current["metrics"][name].as_f64(),
         ) {
             (Some(b), Some(c)) => (b, c),
             (None, Some(c)) if scope.allow_new => {
@@ -221,7 +221,8 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
                 continue;
             }
         };
-        // Added-latency metrics can be near zero or negative (noise); the absolute floor absorbs that.
+        // Added latency can be near zero or negative (noise); the absolute
+        // floor absorbs that.
         let limit = b.max(0.0) * (1.0 + rel) + abs;
         let pass = c <= limit;
         ok &= pass || !enforced;

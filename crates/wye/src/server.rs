@@ -66,7 +66,8 @@ pub async fn serve(
     // also reap from it between calls.
     let accept = |connections: &mut JoinSet<_>,
                   accepted: std::io::Result<(TcpStream, SocketAddr)>| {
-        // Transient accept errors (for example, file descriptor exhaustion) must not stop the server.
+        // Transient accept errors (file descriptor exhaustion, say) must not
+        // stop the server.
         let Ok((stream, _)) = accepted else { return };
         let _ = stream.set_nodelay(true);
         // Best effort: without it the kernel autotunes, as before.

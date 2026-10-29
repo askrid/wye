@@ -2,10 +2,11 @@
 //!
 //! Clients such as Claude Code keep a connection open and send the same
 //! credential on every request, so a full signature verification (about
-//! 90 µs of CPU per request for Ed25519) repeats identical work. Each
+//! 88 µs of CPU per request for Ed25519) repeats identical work. Each
 //! connection remembers the last credential it verified; a request carrying
-//! the same bytes skips signature verification and only rechecks expiry. Answers equal a fresh verification:
-//! keys, issuers, and audiences are fixed for the process lifetime.
+//! the same bytes skips signature verification and only rechecks expiry.
+//! Answers equal a fresh verification: keys, issuers, and audiences are fixed
+//! for the process lifetime.
 //!
 //! The cache belongs to one connection and dies with it: nothing is shared
 //! between connections or replicas. It holds one credential, and only one that

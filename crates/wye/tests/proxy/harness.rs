@@ -300,6 +300,20 @@ pub(crate) fn full(status: StatusCode, body: &'static str) -> Response<UpBody> {
     res
 }
 
+/// An upstream that answers `200 {}` and passes `pick` of each request it
+/// receives to the returned channel.
+pub(crate) fn recording<T: Send + 'static>(pick: fn(Seen) -> T) -> (Handler, mpsc::Receiver<T>) {
+    let (tx, rx) = mpsc::channel(8);
+    let handler: Handler = Arc::new(move |seen: Seen| {
+        let tx = tx.clone();
+        Box::pin(async move {
+            tx.send(pick(seen)).await.unwrap();
+            full(StatusCode::OK, "{}")
+        })
+    });
+    (handler, rx)
+}
+
 pub(crate) fn messages() -> http::request::Builder {
     Request::post("/v1/messages?beta=true")
         .header("content-type", "application/json")

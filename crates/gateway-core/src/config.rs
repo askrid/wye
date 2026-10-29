@@ -73,7 +73,7 @@ pub struct Config {
 pub struct Routes {
     /// Anthropic Messages: `[upstream]`, or `[routes.claude]`.
     pub claude: Option<Route>,
-    /// OpenAI Responses: `[routes.openai]`.
+    /// OpenAI Responses and Chat Completions: `[routes.openai]`.
     pub openai: Option<Route>,
 }
 

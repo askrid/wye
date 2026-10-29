@@ -1,22 +1,5 @@
-//! Wye runtime: startup resolution, HTTP server, routing, and upstream forwarding.
-//!
-//! - `startup`: secrets and files referenced by the config
-//! - `server`: listener, connections, graceful shutdown
-//! - `auth`: gateway credential checks, cached per connection
-//! - `discovery`: `GET /v1/models`, the model catalog filtered by permissions
-//! - `gateway`: routing and gateway-generated responses
-//! - `cli`: the commands besides `serve` (`explain`, `policy-test`,
-//!   `policy-diff`, `report`, `doctor`, `init`, `claude`, `codex`, `probe`,
-//!   `token`)
-//! - `request_body`: the forwarded body, held until `model` for permissions, the
-//!   output-token ceiling, aliases, and the provider's model id
-//! - `failover`: a request body kept for resending to the route's next upstream
-//! - `upstream`: forwarding to the provider
-//! - `upgrade_check`: sampled request scans for what a target model would reject
-//! - `usage_log`: per-request usage records
-//! - `diagnostics`: prompt hashes for cache-miss diagnostics
-//! - `gauge`: in-flight counters released on drop
-//! - `alloc_stats`: heap allocation counters (feature `alloc-stats`, benchmarks only)
+//! Wye runtime: startup resolution, HTTP server, routing, and upstream
+//! forwarding. The module map is in `docs/architecture.md`.
 
 #[cfg(feature = "alloc-stats")]
 pub mod alloc_stats;
@@ -28,8 +11,11 @@ mod failover;
 mod gateway;
 mod gauge;
 mod request_body;
+mod scanned_body;
 mod server;
 mod startup;
+#[cfg(test)]
+mod test_body;
 mod upgrade_check;
 mod upstream;
 mod usage_log;

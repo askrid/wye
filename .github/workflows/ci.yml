@@ -1,7 +1,7 @@
 # Correctness gates for pushes to main and every pull request: formatting,
-# lints, tests on Linux and macOS, release builds, and cargo-deny. bench.yml compares
-# allocations and failed requests with the base branch; the latency and CPU
-# gate runs locally before each commit (scripts/check.sh).
+# lints, tests on Linux and macOS, release builds, and cargo-deny. bench.yml
+# compares allocations and failed requests with the base branch; the latency
+# and CPU gate runs locally before each commit (scripts/check.sh).
 
 name: ci
 
