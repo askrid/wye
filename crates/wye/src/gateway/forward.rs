@@ -7,7 +7,7 @@ use std::{ops::Range, time::Duration};
 use bytes::Bytes;
 use gateway_core::{api::Api, prompt, route};
 use http::{
-    HeaderValue, Request, Response, StatusCode,
+    HeaderValue, Request, Response,
     header::{CONTENT_LENGTH, CONTENT_TYPE},
 };
 use http_body_util::Either;
@@ -17,12 +17,12 @@ use super::{
     ApiRoute, Gateway, ResBody,
     admit::ModelSpan,
     content_length,
-    responses::{error, forward_error, overloaded},
+    responses::{forward_error, overloaded, too_large},
 };
 use crate::{
     diagnostics::PromptSlot,
     failover::{Bounds, FailoverBody, Handback, Resend},
-    request_body::RequestBody,
+    request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody},
     usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, UsageLog},
@@ -47,12 +47,7 @@ impl Gateway {
         };
         let declared_len = content_length(req.headers());
         if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
-            let res = error(
-                api,
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "request_too_large",
-                "request body exceeds the gateway limit",
-            );
+            let res = too_large(api);
             log.gateway_error(info, res.status());
             return res;
         }
@@ -93,7 +88,7 @@ impl Gateway {
         &self,
         route: &ApiRoute,
         parts: http::request::Parts,
-        mut body: RequestBody<Incoming>,
+        mut body: RequestBody<ClientBody>,
         model_span: Option<ModelSpan>,
         declared_len: Option<u64>,
         info: &mut RequestInfo,
@@ -156,7 +151,6 @@ impl Gateway {
             let result = upstream
                 .forward(
                     Request::from_parts(attempt, body),
-                    self.max_request_body_bytes,
                     info.prompt.clone().filter(|_| first),
                     info.upgrade.clone().filter(|_| first),
                 )
@@ -212,9 +206,9 @@ fn refusal(
 /// answer first could lose both it and the body. Also `None` when the
 /// connection was `cut` after the whole body was delivered.
 async fn handed_back(
-    handback: &mut Handback<RequestBody<Incoming>>,
+    handback: &mut Handback<RequestBody<ClientBody>>,
     cut: bool,
-) -> Option<Resend<RequestBody<Incoming>>> {
+) -> Option<Resend<RequestBody<ClientBody>>> {
     let resend = match handback.try_recv() {
         Ok(resend) => Some(resend),
         Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
@@ -229,11 +223,11 @@ async fn handed_back(
 /// value is split between the sent bytes and the unread rest and cannot be
 /// rewritten: the refusal is then answered as it is.
 fn with_model_id(
-    mut resend: Resend<RequestBody<Incoming>>,
+    mut resend: Resend<RequestBody<ClientBody>>,
     at: Option<&ModelSpan>,
     next: &Upstream,
     prefix_sent: &mut Option<&'static str>,
-) -> Option<Resend<RequestBody<Incoming>>> {
+) -> Option<Resend<RequestBody<ClientBody>>> {
     let Some(at) = at else { return Some(resend) };
     match model_id_for(at, next, *prefix_sent) {
         None => Some(resend),

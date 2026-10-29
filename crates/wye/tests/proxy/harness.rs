@@ -244,6 +244,37 @@ impl Harness {
             .unwrap()
     }
 
+    /// Sends `chunks` as a body without a declared length, pausing after
+    /// each, so the gateway forwards the first before the rest arrive.
+    pub(crate) async fn send_chunked(
+        &self,
+        req: http::request::Builder,
+        chunks: &[&'static [u8]],
+    ) -> Response<Incoming> {
+        let (tx, rx) = mpsc::channel::<Bytes>(2);
+        let client: Client<HttpConnector, ChannelBody> =
+            Client::builder(TokioExecutor::new()).build_http();
+        let path = req.uri_ref().unwrap().to_string();
+        let req = req
+            .uri(format!("http://{}{path}", self.gateway))
+            .body(ChannelBody(rx))
+            .unwrap();
+        let response = tokio::spawn(async move { client.request(req).await });
+        for chunk in chunks {
+            // A refusal may close the request before the last chunk.
+            if tx.send(Bytes::from_static(chunk)).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        drop(tx);
+        tokio::time::timeout(WAIT, response)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    }
+
     /// Next usage record written by the gateway.
     pub(crate) async fn usage_record(&self) -> serde_json::Value {
         let line = tokio::time::timeout(WAIT, self.usage.lock().await.next_line())

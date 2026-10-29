@@ -142,10 +142,9 @@ async fn a_handed_back_body_takes_a_new_model_id_wherever_it_is() {
             for sent_frames in 0..=parts.len() {
                 let gauge = Gauge::default();
                 let mut client = Client(parts.clone());
-                let held =
-                    hold_until_model(&mut client, Api::Messages, &gauge, 1 << 20, 1 << 20, None)
-                        .await
-                        .unwrap();
+                let held = hold_until_model(&mut client, Api::Messages, &gauge, 1 << 20, None)
+                    .await
+                    .unwrap();
                 let body = RequestBody::after_hold(held, client);
                 let (mut body, handback) = FailoverBody::kept(body, &gauge, ROOMY);
                 let mut sent = 0u64;
@@ -198,4 +197,13 @@ async fn a_hand_back_says_whether_the_whole_body_was_delivered() {
     again.frame().await.unwrap().unwrap();
     drop(again);
     assert!(!handback.await.unwrap().sent_whole());
+
+    // Trailers are the last frame: hyper polls no further, and the body was
+    // delivered whole.
+    let chunked = Client::of(&["ab", "cd"])
+        .with_trailers(std::future::ready(Some(Ok(http::HeaderMap::new()))));
+    let (mut body, handback) = FailoverBody::kept(chunked, &held, ROOMY);
+    while !body.frame().await.unwrap().unwrap().is_trailers() {}
+    drop(body);
+    assert!(handback.await.unwrap().sent_whole());
 }

@@ -130,6 +130,22 @@ async fn oversized_body_is_rejected_before_upstream() {
 }
 
 #[tokio::test]
+async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    // The harness allows 1024 bytes; the second chunk passes it mid-upload.
+    let rest: &'static [u8] = Box::leak(vec![b' '; 1100].into_boxed_slice());
+    let res = h
+        .send_chunked(messages(), &[br#"{"messages":["#, rest])
+        .await;
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(
+        read_body(res)
+            .await
+            .starts_with(br#"{"type":"error","error":{"type":"request_too_large""#)
+    );
+}
+
+#[tokio::test]
 async fn local_endpoints_and_unknown_paths() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
     assert_eq!(

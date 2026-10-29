@@ -11,6 +11,7 @@
 
 mod body;
 mod pool;
+mod refusal;
 
 use std::{fmt, sync::Arc, time::Duration};
 
@@ -23,7 +24,6 @@ use http::{
     },
     uri::{Authority, PathAndQuery, Scheme},
 };
-use http_body_util::Limited;
 use hyper::body::Incoming;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
 use hyper_util::{
@@ -34,26 +34,28 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 
 pub(crate) use body::{BoxError, UpstreamBody};
 use pool::ClientPool;
+pub(crate) use refusal::PolicyRefusal;
+use refusal::{RefusalSlot, Refusing, policy_refusal};
 
-use gateway_core::{policy::PolicyError, prompt::PromptScanner, upgrade::UpgradeScanner};
+use gateway_core::{prompt::PromptScanner, upgrade::UpgradeScanner};
 
 use crate::{
     StartupError,
     diagnostics::PromptSlot,
     failover::FailoverBody,
-    request_body::{RequestBody, TokenLimitError},
+    request_body::{ClientBody, RequestBody},
     scanned_body::ScannedBody,
     upgrade_check::UpgradeSlot,
 };
 
 /// The client's request body, checked for permissions and kept for failover.
-pub(crate) type SendBody = FailoverBody<RequestBody<Incoming>>;
+pub(crate) type SendBody = FailoverBody<RequestBody<ClientBody>>;
 
-/// Sends a [`SendBody`] bounded, and read for upgrade checks and prompt
-/// hashes in passing.
+/// Sends a [`SendBody`], read for upgrade checks and prompt hashes in
+/// passing.
 type UpstreamClient = Client<
     HttpsConnector<HttpConnector>,
-    ScannedBody<ScannedBody<Limited<SendBody>, UpgradeScanner>, PromptScanner>,
+    ScannedBody<ScannedBody<Refusing<SendBody>, UpgradeScanner>, PromptScanner>,
 >;
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
@@ -125,18 +127,9 @@ pub(crate) enum ForwardError {
     Connect,
     /// TLS, protocol, or request-body failure, or a connection lost.
     Upstream,
-    /// The request body broke the policy after forwarding began; the
-    /// upstream request was aborted.
+    /// The request body broke the policy or the size limit after
+    /// forwarding began; the upstream request was aborted.
     Policy(PolicyRefusal),
-}
-
-/// A policy failure found in the streamed part of the body.
-#[derive(Debug)]
-pub(crate) enum PolicyRefusal {
-    /// A repeated `model`, an escaped top-level key, or a bad output-token field.
-    Invalid(PolicyError),
-    /// The output-token maximum above the request's ceiling, or missing.
-    TokenLimit(String),
 }
 
 /// HTTP/2 receive window per upstream stream: what one response may buffer
@@ -165,6 +158,8 @@ pub(crate) struct Upstream {
     auth: UpstreamAuth,
     response_header_timeout: Duration,
     stream_idle_timeout: Duration,
+    /// TLS ALPN may pick HTTP/2, whose client drops request-body errors.
+    may_use_http2: bool,
 }
 
 impl Upstream {
@@ -207,6 +202,8 @@ impl Upstream {
             auth,
             response_header_timeout: config.response_header_timeout,
             stream_idle_timeout: config.stream_idle_timeout,
+            may_use_http2: config.scheme == Scheme::HTTPS
+                && config.http_version == config::UpstreamHttpVersion::Auto,
         })
     }
 
@@ -216,7 +213,6 @@ impl Upstream {
     pub(crate) async fn forward(
         &self,
         req: Request<SendBody>,
-        max_body_bytes: usize,
         prompt: Option<PromptSlot>,
         upgrade: Option<UpgradeSlot>,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
@@ -246,8 +242,9 @@ impl Upstream {
         if let Some(workspace) = &self.workspace {
             parts.headers.insert(WORKSPACE_ID, workspace.clone());
         }
+        let refused = self.may_use_http2.then(RefusalSlot::default);
         let body = ScannedBody::new(
-            ScannedBody::new(Limited::new(body, max_body_bytes), upgrade),
+            ScannedBody::new(Refusing::new(body, refused.clone()), upgrade),
             prompt,
         );
         let req = Request::from_parts(parts, body);
@@ -256,10 +253,13 @@ impl Upstream {
         let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
             .await
             .map_err(|_| ForwardError::HeaderTimeout)?
-            .map_err(|e| match policy_refusal(&e) {
-                Some(refusal) => ForwardError::Policy(refusal),
-                None if e.is_connect() => ForwardError::Connect,
-                None => ForwardError::Upstream,
+            .map_err(|e| {
+                let refusal = refused.as_ref().and_then(|r| r.get().copied());
+                match refusal.or_else(|| policy_refusal(&e)) {
+                    Some(refusal) => ForwardError::Policy(refusal),
+                    None if e.is_connect() => ForwardError::Connect,
+                    None => ForwardError::Upstream,
+                }
             })?;
 
         let (mut parts, body) = res.into_parts();
@@ -288,22 +288,6 @@ impl Upstream {
             .build()
             .map_err(|_| ForwardError::Upstream)
     }
-}
-
-/// The policy failure our request body raised, if that is why the upstream
-/// request failed (hyper keeps the body's error as a source).
-fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Option<PolicyRefusal> {
-    let mut cause = Some(error);
-    while let Some(e) = cause {
-        if let Some(e) = e.downcast_ref::<PolicyError>() {
-            return Some(PolicyRefusal::Invalid(*e));
-        }
-        if let Some(e) = e.downcast_ref::<TokenLimitError>() {
-            return Some(PolicyRefusal::TokenLimit(e.to_string()));
-        }
-        cause = e.source();
-    }
-    None
 }
 
 /// An HTTP/1.1 client connector for `http` and `https` URLs, trusting

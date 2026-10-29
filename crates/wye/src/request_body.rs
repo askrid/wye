@@ -27,8 +27,8 @@ use gateway_core::{
     api::Api,
     policy::{PolicyError, PolicyScanner},
 };
-use http_body_util::BodyExt;
-use hyper::body::{Body, Frame, SizeHint};
+use http_body_util::{BodyExt, LengthLimitError, Limited};
+use hyper::body::{Body, Frame, Incoming, SizeHint};
 
 use self::chunks::Chunks;
 pub(crate) use self::chunks::splice_chunks;
@@ -38,6 +38,10 @@ use crate::{
 };
 
 mod chunks;
+
+/// The client's body, bounded by `server.max_request_body_bytes`: the limit
+/// counts what the client sent, not a `model` spliced in.
+pub(crate) type ClientBody = Limited<Incoming>;
 
 /// Why a request was refused while its model was read.
 #[derive(Debug)]
@@ -73,7 +77,7 @@ struct Hold {
 
 /// An output-token maximum above the request's ceiling, or missing where
 /// the ceiling requires it.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct TokenLimitError {
     /// The field's name: `max_tokens`, `max_output_tokens`, or
     /// `max_completion_tokens`.
@@ -195,11 +199,11 @@ pub(crate) async fn hold_until_model<B>(
     api: Api,
     budget: &Gauge,
     max_held: usize,
-    max_body: usize,
     token_limit: Option<u64>,
 ) -> Result<HeldStart, HoldError>
 where
     B: Body<Data = Bytes> + Unpin,
+    B::Error: Into<BoxError>,
 {
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
@@ -210,7 +214,6 @@ where
         api,
         check_rest: true,
     });
-    let mut total = 0usize;
     while hold.scanner.model().is_none() {
         let Some(frame) = body.frame().await else {
             hold.ended = true;
@@ -218,13 +221,9 @@ where
             break;
         };
         // Request trailers carry nothing a provider reads; only data counts.
-        let Ok(data) = frame.map_err(|_| HoldError::Body)?.into_data() else {
+        let Ok(data) = frame.map_err(held_body_error)?.into_data() else {
             continue;
         };
-        total = total.saturating_add(data.len());
-        if total > max_body {
-            return Err(HoldError::TooLarge);
-        }
         if !hold.budget.try_grow(data.len(), max_held) {
             return Err(HoldError::Overloaded);
         }
@@ -235,6 +234,16 @@ where
         }
     }
     Ok(HeldStart(hold))
+}
+
+/// The client's body failed while held: past the size limit ([`ClientBody`]),
+/// or cut off.
+fn held_body_error(error: impl Into<BoxError>) -> HoldError {
+    if error.into().is::<LengthLimitError>() {
+        HoldError::TooLarge
+    } else {
+        HoldError::Body
+    }
 }
 
 /// The request body sent upstream: held chunks first, then the rest of the
@@ -295,9 +304,10 @@ where
         let polled = Pin::new(inner).poll_frame(cx);
         if let (Poll::Ready(Some(Ok(frame))), Some(hold)) = (&polled, this.hold.as_mut())
             && hold.check_rest
-            && let Some(data) = frame.data_ref()
         {
-            hold.scanner.feed(data);
+            if let Some(data) = frame.data_ref() {
+                hold.scanner.feed(data);
+            }
             // Either failure stops the upstream request mid-body: the provider
             // never sees a complete request that breaks the policy.
             if let Some(error) = hold.scanner.error() {
@@ -306,8 +316,9 @@ where
             }
             if let Some(limit) = hold.token_limit {
                 // The field may still come later: only a value is final
-                // before the body ends.
-                let ended = this.inner.as_ref().is_none_or(B::is_end_stream);
+                // before the body ends. Trailers end it: hyper polls no
+                // further.
+                let ended = frame.is_trailers() || this.inner.as_ref().is_none_or(B::is_end_stream);
                 let requested = hold.scanner.max_output_tokens();
                 if (requested.is_some() || ended)
                     && let Some(refusal) = TokenLimitError::check(hold.api, limit, requested)
