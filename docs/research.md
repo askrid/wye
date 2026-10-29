@@ -1,6 +1,6 @@
 # Research
 
-Measured results, open questions, and directions; nothing here is a product promise. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS), loopback, a mock upstream, release build, median of 3 runs: lab results, not production.
+Measured results, open questions, and directions; nothing here is a product promise. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS) over loopback against a mock upstream, release build, median of 3 runs. They are lab results, not production measurements.
 
 ## Questions to test
 
@@ -10,7 +10,7 @@ Measured results, open questions, and directions; nothing here is a product prom
 - How loose is the provable cost bound (bound ÷ actual cost) on real sessions?
 - Which results hold only against the mock?
 
-A proxy adds a hop; it does not improve latency over direct access. Local cancellation does not prove the provider stopped billing. Real-provider experiments are opt-in and record model, usage, cache behavior, pricing, and billed cost.
+A proxy adds a hop and cannot beat direct access on latency. Local cancellation does not prove the provider stopped billing. Real-provider experiments are opt-in and record model, usage, cache behavior, pricing, and billed cost.
 
 ## Verification needed
 
@@ -37,7 +37,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 
 ## Benchmarks
 
-**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics). Variants on the plain path: `auth_`, `models_`, `diag_`, `otlp_`, `openai_` (Wye on `[routes.openai]`, the mock framing OpenAI Responses), `bedrock_`, `failover_`, and `refused_` ([development.md](development.md#benchmark) lists what each runs). An allocation-counting build adds `alloc_`. The commit gate runs every commit and its parent in alternating rounds and compares the medians ([development.md](development.md#commit-gate)); `bench/baseline.json` records the numbers below. Noise: 10–15% on CPU per MB, ±25% on the TLS path, more on tails; the gate catches ~25% or ~100 µs.
+**Method.** `wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics), plus Wye variants and an allocation-counting build ([development.md](development.md#benchmark) lists them). The commit gate runs every commit and its parent in alternating rounds and compares the medians ([development.md](development.md#commit-gate)); `bench/baseline.json` records the numbers below. Run-to-run noise: 10-15% on CPU per MB, ±25% on the TLS path, more on tails; against a stored baseline the gate caught ~25% or ~100 µs ([under alternating rounds](#gate-method-the-parent-in-alternating-rounds)).
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
@@ -80,7 +80,7 @@ Variants (plain path):
 
 | Variant | Cost against plain Wye |
 |---|---|
-| `auth_`: Ed25519 credentials | +88 µs CPU per full verification (the check itself 55–62 µs); on a reused connection the per-connection cache makes it free |
+| `auth_`: Ed25519 credentials | +88 µs CPU per full verification (the check itself 55-62 µs); on a reused connection the per-connection cache makes it free |
 | `models_`: model permissions | +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies |
 | `diag_`: cache diagnostics | +2 allocations per request; +75% upload CPU on Claude Code-shaped bodies (2.6 vs 1.49 ms/MB), hence per-session sampling |
 | `otlp_`: OTLP export | within noise (121.5 vs 120.5 µs CPU per request) |
@@ -97,14 +97,14 @@ Variants (plain path):
 
 | Streams | Events/s | Wye cores | CPU µs/event | Direct p99 | Added p99 |
 |---|---|---|---|---|---|
-| 500 | 11,900 | 0.24 | 20 | 0.9–1.1 ms | 4.1–4.4 ms |
-| 1,000 | 23,900 | 0.37–0.39 | 16 | 1.5–2.2 ms | 6.0–6.4 ms |
-| 1,500 | 35,800–35,900 | 0.46–0.48 | 13 | 2.6–3.0 ms | 8.3–8.9 ms |
-| 2,000 | 47,900 | 0.57–0.58 | 12 | 3.2–3.3 ms | 12.1–13.0 ms |
-| 3,000 | 70,500–71,300 | 0.71–0.73 | 10 | 4.1–4.3 ms | 67–79 ms |
-| 4,000 | 88,400–91,000 | 0.74–0.76 | 8 | 5.2–5.3 ms | 219–258 ms |
+| 500 | 11,900 | 0.24 | 20 | 0.9-1.1 ms | 4.1-4.4 ms |
+| 1,000 | 23,900 | 0.37-0.39 | 16 | 1.5-2.2 ms | 6.0-6.4 ms |
+| 1,500 | 35,800-35,900 | 0.46-0.48 | 13 | 2.6-3.0 ms | 8.3-8.9 ms |
+| 2,000 | 47,900 | 0.57-0.58 | 12 | 3.2-3.3 ms | 12.1-13.0 ms |
+| 3,000 | 70,500-71,300 | 0.71-0.73 | 10 | 4.1-4.3 ms | 67-79 ms |
+| 4,000 | 88,400-91,000 | 0.74-0.76 | 8 | 5.2-5.3 ms | 219-258 ms |
 
-Sustainable (≤10 ms added p99): 1,500 streams, ~36,000 events/s per worker. The limit is queueing on the thread, not CPU. Two workers held 3,000 streams (linear); four were limited by the laptop's load generator (4–5 cores at 3,000 streams), so multi-core capacity needs a separate load machine. CPU per event rises with worker count (12–20 µs at 1, 14–27 at 2, 21–38 at 4): cross-thread wakeups. A smaller default worker count is worth measuring on a real host.
+Sustainable (≤10 ms added p99): 1,500 streams, ~36,000 events/s per worker. The limit is queueing on the thread, not CPU. Two workers held 3,000 streams (linear); four were limited by the laptop's load generator (4-5 cores at 3,000 streams), so multi-core capacity needs a separate load machine. CPU per event rises with worker count (12-20 µs at 1, 14-27 at 2, 21-38 at 4): cross-thread wakeups. A smaller default worker count is worth measuring on a real host.
 
 **Profiles.** Plain path: almost all system calls (`writev`, `recvfrom`). TLS path: first dominated by h2's per-connection mutex; spreading streams over 64 connections ([architecture.md](architecture.md#upstream-connections)) cut CPU per MB 12.3 → 4.1 ms and unary added latency 1.5 → 0.3 ms. What remains: relaying each frame as it arrives, and handing each chunk between the client and upstream connection tasks. Paced load, TLS, 2026-10-24 (`sample`, 10 s of 2,000 streams): of busy samples, `writev` to clients 43% (one write per event, inherent at token pace), `recvfrom` from the upstream 16%, waits on h2's per-connection lock 10% (`poll_data`, `is_end_stream`), Wye's own code under 1%. Memory per stream, 2026-10-25 (`heap` and `malloc_history`, 2,000 paced TLS streams, `MallocStackLogging=1`): of the ~24 KB of heap per stream, hyper's HTTP/1.1 client connection holds a fixed 8.5 KB read buffer and an 8.5 KB write buffer (70%), its dispatcher 3.5 KB, the Tokio task 0.9 KB, request headers 0.7 KB, timer and service closure 0.2 KB; Wye's own state is not among the top sites. hyper 1.x exposes only a cap on those buffers (`max_buf_size`, set to 32 KiB), not their initial size, so shrinking them needs a hyper change.
 
@@ -116,15 +116,15 @@ Sustainable (≤10 ms added p99): 1,500 streams, ~36,000 events/s per worker. Th
 | 16 B | 21.5 KB | 173 B | 3.5× | 4.5× / 4.6× | 4.6× |
 | 32 B | 14.3 KB | 211 B | 3.1× | 3.6× / 3.7× | 3.7× |
 
-Identity costs 10–30 KB more per response, ~28 kbit/s while streaming: 0.12 ms per event on a 10 Mbit/s link against a 20 ms token gap. Decompressing a copy instead costs 6–11 µs per event (20–90% of Wye's relay cost), needs an attacker-sized decoder window per stream, and ends zero allocations per event. Rejected.
+Identity costs 10-30 KB more per response, ~28 kbit/s while streaming: 0.12 ms per event on a 10 Mbit/s link against a 20 ms token gap. Decompressing a copy instead costs 6-11 µs per event (20-90% of Wye's relay cost), needs an attacker-sized decoder window per stream, and ends zero allocations per event. Rejected.
 
-**TLS uploads** (open gap: KrakenD 2.0 vs Wye 2.6–3.1 ms CPU per MB). Like for like over HTTP/1.1, Wye is ~10% behind; HTTP/2 adds ~9% more. Of HTTP/2 busy samples: 45% rustls `writev`, 16% AES-GCM, 15% `recvfrom`, 10% the h2 mutex; h2 flushes one 16 KiB frame at a time (64 KiB frames: 2.59 ms; 256 KiB: 2.29 ms). Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (~2 MB/s at 30 ms) unless the server grows it; `scripts/upload-latency.sh` measures that against the real API (needs a key). The default stays HTTP/2 until it does.
+**TLS uploads** (open gap: KrakenD 2.0 vs Wye 2.6-3.1 ms CPU per MB). Like for like over HTTP/1.1, Wye is ~10% behind; HTTP/2 adds ~9% more. Of HTTP/2 busy samples: 45% rustls `writev`, 16% AES-GCM, 15% `recvfrom`, 10% the h2 mutex; h2 flushes one 16 KiB frame at a time (64 KiB frames: 2.59 ms; 256 KiB: 2.29 ms). Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (~2 MB/s at 30 ms) unless the server grows it; `scripts/upload-latency.sh` measures that against the real API (needs a key). The default stays HTTP/2 until it does.
 
 ### Against KrakenD
 
 KrakenD 3.0.1 CE in pass-through (`no-op` encoding) at its best case (no access log); Wye keeps its usage log. Single run, all 16 threads, 2026-10-15.
 
-**KrakenD CE cannot stream SSE:** `no-op` buffers the whole response (an event sent at 0 s arrived at 3 s); `sse` encoding is Enterprise-only.
+KrakenD CE cannot stream SSE: `no-op` buffers the whole response (an event sent at 0 s arrived at 3 s); `sse` encoding is Enterprise-only.
 
 | Metric | Wye | KrakenD |
 |---|---|---|
@@ -179,9 +179,9 @@ Bifrost v2.3.2 (Go), the official prebuilt binary (`downloads.getmaxim.ai`, darw
 | Process at idle; after load (default pools) | 15 MB; 179 MB | 328 MB; 3.7 GB |
 
 Where Bifrost leads, and why:
-- **Paced event p50** (1.6 vs 2.1 ms, this run only): Bifrost queues stream starts (time to first byte p99 0.99 s), so fewer of the 2,000 streams overlap and those running see less contention; its p99 is 58 ms. In the other two runs its paced p50 was 129 and 159 ms.
-- **Per-event delay p50** is a tie within noise: Wye's swung from 195 to 375 µs between identical runs, Bifrost's from 190 to 272 µs. Bifrost's upstream is HTTP/1.1 and the direct baseline is HTTP/2, so an HTTP/1.1 relay also skips the mock's HTTP/2 framing. With Wye on HTTP/1.1 as well (`http_version = "1.1"`): 217 vs 243 µs p50, 236 vs 1,502 µs p99. Wye keeps HTTP/2 as the default because one connection per stream costs more under load (paced event p50 3.4 ms on HTTP/1.1).
-- **Memory per paced stream** reads lower (5 vs 9.6 KB), but from an idle process 20 times larger.
+- Paced event p50 (1.6 vs 2.1 ms, this run only): Bifrost queues stream starts (time to first byte p99 0.99 s), so fewer of the 2,000 streams overlap and those running see less contention; its p99 is 58 ms. In the other two runs its paced p50 was 129 and 159 ms.
+- Per-event delay p50 is a tie within noise: Wye's swung from 195 to 375 µs between identical runs, Bifrost's from 190 to 272 µs. Bifrost's upstream is HTTP/1.1 and the direct baseline is HTTP/2, so an HTTP/1.1 relay also skips the mock's HTTP/2 framing. With Wye on HTTP/1.1 as well (`http_version = "1.1"`): 217 vs 243 µs p50, 236 vs 1,502 µs p99. Wye keeps HTTP/2 as the default because one connection per stream costs more under load (paced event p50 3.4 ms on HTTP/1.1).
+- Memory per paced stream reads lower (5 vs 9.6 KB), but from an idle process 20 times larger.
 
 Load generator, mock, and gateway share one laptop (8 physical cores); at 2,000 paced streams Wye alone uses ~3.7 cores and Bifrost all 16 threads, so paced latencies include machine contention. Bifrost's published "11 µs" counts only its internal stages ("excludes JSON marshalling and HTTP calls"); the numbers here are end to end, what a client sees.
 
@@ -195,7 +195,7 @@ All runs send `"stream":true` on streaming requests and name the model `anthropi
 
 ### Benchmark suite: kept, cut, missing
 
-The suite measures the gateway's own cost under agent-shaped load; each part earns its run time or goes. Approved 2026-10-24; the stress scenarios are built, and of the proposed competitors Bifrost has run (M5).
+The suite measures the gateway's own cost under agent-shaped load, and each part has to justify its run time. Approved 2026-10-24; the stress scenarios are built, and of the proposed competitors Bifrost has run (M5).
 
 | Part | Verdict | Why |
 |---|---|---|
@@ -230,7 +230,7 @@ Licenses, versions, and Claude Code support of each are to verify before a run; 
 
 ### Gate method: the parent in alternating rounds
 
-Adopted 2026-10-29. Until then the gate compared each commit with `bench/baseline.json`, recorded once. On 2026-10-28 it failed five times in a row on `sse_ttfb_added_p50_us` (limit 387 µs) for code identical to a commit that had passed that morning. Alternating runs showed the binary that had recorded the 205 µs baseline now measuring 406 µs on the same laptop (11 days up, under load all day); after a reboot the same code measured 264–317 µs. A stored result gates the machine's state as much as the code.
+Adopted 2026-10-29. Until then the gate compared each commit with `bench/baseline.json`, recorded once. On 2026-10-28 it failed five times in a row on `sse_ttfb_added_p50_us` (limit 387 µs) for code identical to a commit that had passed that morning. Alternating runs showed the binary that had recorded the 205 µs baseline now measuring 406 µs on the same laptop (11 days up, under load all day); after a reboot the same code measured 264-317 µs. A stored result measures the machine's state as much as the code.
 
 The gate now runs both commits in alternating rounds, the side that goes first alternating, and compares medians: the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order.
 
@@ -261,7 +261,7 @@ The new floors were not enough under everyday load. Gating this change itself, o
 
 ### OpenAI stream scanners (micro-benchmark)
 
-The gate's mock upstream speaks Anthropic only, so the Responses and Chat Completions usage scanners are measured with a release micro-benchmark: 200,000 token-sized events fed one per call, best of 7, on the baseline laptop (2026-10-26).
+The gate's mock upstream speaks Anthropic only, so the Responses and Chat Completions usage scanners are measured with a release micro-benchmark: 200,000 token-sized events fed one per call, best of 7, on the development laptop (2026-10-26).
 
 | Scanner | Event | ns per event |
 |---|---|---|
@@ -271,7 +271,7 @@ The gate's mock upstream speaks Anthropic only, so the Responses and Chat Comple
 | Chat, first version (searchers built per line) | 180 B content chunk | 106 |
 | Chat, searchers built once per stream | same | 40 |
 
-Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56–0.61 ms per MiB, at 16 or 64 KiB chunks. Through the binary, the `openai_` benchmark variant gates the Responses path (CPU per event and per request). First runs (64-byte events, unpaced, plain path, two runs): 18.5–19.5 µs of CPU per event through Messages, 25.2–25.9 µs through Responses. Explained (2026-10-26, `wye-bench load --scenario events`, sampled with `sample`): the mock's Responses events are ~50 bytes larger than its minimal Messages events, and on the plain HTTP/1.1 path, where each event is its own write, CPU per event grows with bytes. With matched sizes (`WYE_BENCH_EVENT_BYTES=114` on Messages) the two runs read 17.1–17.3 µs for Messages against 17.6–17.9 µs for Responses: about 0.5 µs per event is the Responses scanner in a real relay, more than its 34 ns micro-benchmark (caches, split lines); the profiles are otherwise the same, `writev` first.
+Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56-0.61 ms per MiB, at 16 or 64 KiB chunks. Through the binary, the `openai_` benchmark variant gates the Responses path (CPU per event and per request). First runs (64-byte events, unpaced, plain path, two runs): 18.5-19.5 µs of CPU per event through Messages, 25.2-25.9 µs through Responses. Explained (2026-10-26, `wye-bench load --scenario events`, sampled with `sample`): the mock's Responses events are ~50 bytes larger than its minimal Messages events, and on the plain HTTP/1.1 path, where each event is its own write, CPU per event grows with bytes. With matched sizes (`WYE_BENCH_EVENT_BYTES=114` on Messages) the two runs read 17.1-17.3 µs for Messages against 17.6-17.9 µs for Responses: about 0.5 µs per event is the Responses scanner in a real relay, more than its 34 ns micro-benchmark (caches, split lines); the profiles are otherwise the same, `writev` first.
 
 **Coverage gap: unary JSON responses.** The mock's unary replies carry no `content-type`, so the gate never runs the non-streaming usage scanner that real `application/json` replies get. With the mock sending `application/json` (a full `wye-bench run` per binary, idle machine, 2026-10-26), Wye before JSON usage scanning (f1bf78e) against Wye with it, one allocation per response: `alloc_unary_per_request` 20.6 → 21.6, `alloc_unary_bytes_per_request` 21.8 → 24.4 KB (the boxed scanner with its inline 2 KiB usage buffer), `unary_cpu_us_per_request` 120 → 124.5 (within noise), unary latency unchanged within noise. The mock now sends `application/json` on unary replies, as Anthropic and OpenAI do, and those six allocation values moved in the baseline with it (approved 2026-10-26); no other baseline value changed.
 
@@ -296,7 +296,7 @@ Summaries come from abstracts; check figures against the papers before citing th
 
 ## Feature directions
 
-Request-local, no shared state, config in Git, analysis in the user's backend. Built: cache-miss diagnostics (2), the `policy-diff` check (5), clean stream endings (7), and the [agent-native directions](#agent-native-directions) A1–A4. Aliases and upgrade checks, also built, are in [architecture.md](architecture.md#model-aliases-and-upgrade-checks).
+Request-local, no shared state, config in Git, analysis in the user's backend. Built: cache-miss diagnostics (2), the `policy-diff` check (5), clean stream endings (7), and the [agent-native directions](#agent-native-directions) A1-A4. Aliases and upgrade checks, also built, are in [architecture.md](architecture.md#model-aliases-and-upgrade-checks).
 
 ### 1. Agent-aware routing
 
@@ -304,14 +304,14 @@ Policy such as "auxiliary requests use Haiku", applied as the allowlisted `model
 
 ### 2. Cache-miss diagnostics
 
-**Built**, opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`; fields in [operations.md](operations.md#telemetry)). Per request: keyed hashes of `tools` and `system` with counts, the message count, up to four `cache_control` breakpoints, and the last eight message-prefix hashes. The backend compares consecutive requests of a session in cache order (tools, system, messages); the first mismatch names the cause.
+Built, opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`; fields in [operations.md](operations.md#telemetry)). Per request: keyed hashes of `tools` and `system` with counts, the message count, up to four `cache_control` breakpoints, and the last eight message-prefix hashes. The backend compares consecutive requests of a session in cache order (tools, system, messages); the first mismatch names the cause.
 
 - One hash per section, not one cumulative hash: sections may arrive in any order, and cumulative hashing would need buffering.
 - `cache_control` members and whitespace outside strings are excluded: Claude Code moves the marker every turn.
 - xxh3 in process; every exported hash is HMAC-SHA256 under a shared key, truncated to 64 bits, so hashes compare across replicas but cannot be matched against guessed prompts. The key is required.
 - Constant-memory scanner; a body it cannot follow is recorded `unknown` and forwarded unchanged. Property-tested against random bodies, whitespace, and chunkings.
 
-Cost: the scanner runs 0.61–0.69 ms/MB on Claude Code-shaped bodies, within 15% of a naive lexer (0.54). A SIMD stage-1 prototype reached 0.17–0.24 ms/MB for classification, but a full scanner would land near 0.35–0.4 ms/MB, still above the 10% target, at the price of the first `unsafe` code on the request path. Chosen instead: per-session sampling (`sample_percent`), decided by a hash of the session id so every replica agrees.
+Cost: the scanner runs 0.61-0.69 ms/MB on Claude Code-shaped bodies, within 15% of a naive lexer (0.54). A SIMD stage-1 prototype reached 0.17-0.24 ms/MB for classification, but a full scanner would land near 0.35-0.4 ms/MB, still above the 10% target, at the price of the first `unsafe` code on the request path. Chosen instead: per-session sampling (`sample_percent`), decided by a hash of the session id so every replica agrees.
 
 ### 3. Delegable credentials for agent swarms
 
@@ -331,10 +331,10 @@ M2 ([policy.md](policy.md#provable-cost-ceiling)). Research: tighten it by subtr
 
 ### 7. Reliability
 
-- **Clean stream endings** (built): an upstream stall or break at an event boundary ends with an Anthropic `overloaded_error` event, so Claude Code retries instead of seeing a dropped connection.
-- **Connect-only hedging:** race a second connection attempt, never a second request.
-- **Deterministic simulation testing:** Wye, mock, and clients in a simulated network with seeded faults.
-- **Proof-of-possession credentials:** bind tokens to a client key.
+- Clean stream endings (built): an upstream stall or break at an event boundary ends with an Anthropic `overloaded_error` event, so Claude Code retries instead of seeing a dropped connection.
+- Connect-only hedging: race a second connection attempt, never a second request.
+- Deterministic simulation testing: Wye, mock, and clients in a simulated network with seeded faults.
+- Proof-of-possession credentials: bind tokens to a client key.
 
 ### Agent-native directions
 
@@ -344,10 +344,10 @@ What Claude Code tells a gateway without exposing prompts: session id on every r
 |---|---|---|
 | Retry hygiene: Wye's 529s carry `retry-after: 1`, `x-should-retry: true` | A1 | Built |
 | Model picker from policy (`GET /v1/models`) | A1 | Built |
-| Spend by work type: agent headers in records and `wye.tokens` | A2 | Built; capture 0.04–0.32 µs per request, validation 0.11 µs in the writer task |
+| Spend by work type: agent headers in records and `wye.tokens` | A2 | Built; capture 0.04-0.32 µs per request, validation 0.11 µs in the writer task |
 | Expected versus unexpected cache misses | A2 | Built as `cache_miss`; a session's first request reads `unexplained` and is excluded by session |
 | A session as one trace | A3 | Built flat: trace id from the session id, tool spans; no synthetic parent spans, since no request knows it is first. Checked in Jaeger across two replicas |
-| `wye report`; tool calls from responses | A4 | Built; `content_block_start` parsed borrowed, 0.22–0.33 µs per block, zero allocations |
+| `wye report`; tool calls from responses | A4 | Built; `content_block_start` parsed borrowed, 0.22-0.33 µs per block, zero allocations |
 | Report-only secret detection | A5 | Open: needs a multi-pattern matcher and a sampled body scan. Report-only: blocking would brick a session, redaction would break caching |
 
 Not proposed: loop detection or spend caps per session (cross-request state), response caching (shared state), prompt rewriting for cache efficiency (beyond the allowlist), blocking tool calls (agent control is a non-goal).
@@ -362,27 +362,27 @@ Each is a hypothesis until `wye-bench` measures it.
 
 | Technique | Status |
 |---|---|
-| HTTP/2 to the provider | **In effect**: negotiated by ALPN (verified against `api.anthropic.com`) |
-| Spread streams over 64 connections | **Adopted**: TLS unary added latency −80%, CPU per MB −66%, throughput 4×; RSS after load 10 → 30 MB |
-| 256 lanes instead of 64 | **Rejected** (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%. A profile of the paced load had shown ~10% of busy samples waiting on h2's per-connection lock, but more connections cost more than the contention they remove |
-| Maximum HTTP/2 connection window, 256 KiB per stream | **Adopted** (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643–811 other streams fail; now 0. RSS per stalled stream 3.3 MB (defaults) → 2.0 MB (1 MiB, first fix) → 0.49 MB; bulk CPU per MB relayed +10% against 1 MiB (4.06 → 4.47 ms), token streams unaffected |
-| Client write-stall timeout | **Adopted**: a connection whose writes make no progress for `client_write_timeout_secs` (60) is closed, which ends a stalled stream; zero cost while writes never block (the timer is allocated at the first blocked write) |
-| Per-connection credential cache | **Adopted**: CPU per authenticated request −38% and −44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
-| Shared cached identity (`Arc`) and borrowed log line | **Adopted**: allocations per authenticated request 37.5 → 20.6 |
-| 32 KiB client-connection buffer cap | **Adopted** (approved tradeoff): idle TLS stream after 512 KB 150 → 49 KB; plain uploads +7% CPU; 16 KiB cost +50% plain upload CPU |
-| Client socket send buffer fixed at 128 KiB | **Adopted** (2026-10-29): autotuning let the kernel send buffer of a client that stopped reading grow to 4 MiB, memory outside Wye's own bounds; now 32 MB for 256 stalled clients. Found when the stalled-client test exhausted a 7 GB macOS CI runner's 96 MB network pool. A/B, three alternating rounds: bulk CPU per MB +7.6% TLS (within its noise), −1.3% plain; per-request and per-event costs unchanged within noise |
-| Boxed request-body state | **Adopted**: holding 88 bytes inline cost +2.8 KB per idle plain stream (hyper stores 32 requests per connection inline) |
-| SIMD `memchr` usage scanning | **Adopted**: byte loop +49% CPU per MB (blocked); `memchr` +5.8% |
-| Forced inlining of the prompt lexer | **Adopted**: ~20% faster scanner |
-| Fast cancellation as a metric | **Gated**: release ~80 µs p50, < 0.2 ms max |
-| Adaptive write coalescing | **Rejected**: no gain |
-| Lazy idle deadline | **Rejected**: no gain |
-| SWAR string-end search | **Rejected**: no gain over a byte loop |
-| mimalloc | **Rejected**: idle memory +9%, RSS +12%, CPU per MB +4% |
-| Failover: copy kept bodies into one buffer per request | **Rejected** (2026-10-26, `failover_` variant, two runs): keeping hyper's chunks costs allocations because hyper cannot reuse its read buffer (99.5 per agent upload vs 40.5 without failover), so copying into one buffer reserved from the declared length was tried. Allocations fell to 58.5, but CPU per MB rose 1.86 → 2.08 ms (agent upload) and 1.81 → 1.97 ms (1 MiB upload), heap bytes 1.12 → 1.55 MB per agent upload, and +1 allocation per unary request. The kept chunks stay; failover's upload cost (+25% CPU per MB over plain) is the price of resending without a copy |
-| Fat LTO, one codegen unit | **Not adopted**: CPU per MB −6–8%, worse event p99 in both A/B runs, 2× build time |
-| One h2 lock per frame | **Candidate**: A/B inconclusive (−5%, +12%) |
-| Fewer runtime threads | **Deployment knob** (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises. 2026-10-25, TLS, single runs, 16 / 4 / 2 workers: per-event delay p50 318 / 266 / 305 µs, CPU per paced event 38 / 25 / 18 µs, but unary added p50 237 / 690 / 823 µs |
-| Pre-warmed connections | **Low value**: 32 first requests on a new process add 3.6–8.4 ms p50, mostly first execution of the TLS and h2 code; after one warm-up request ~2 ms (concurrent handshakes), and a single cold connection adds nothing |
+| HTTP/2 to the provider | In effect: negotiated by ALPN (verified against `api.anthropic.com`) |
+| Spread streams over 64 connections | Adopted: TLS unary added latency -80%, CPU per MB -66%, throughput 4×; RSS after load 10 → 30 MB |
+| 256 lanes instead of 64 | Rejected (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%. A profile of the paced load had shown ~10% of busy samples waiting on h2's per-connection lock, but more connections cost more than the contention they remove |
+| Maximum HTTP/2 connection window, 256 KiB per stream | Adopted (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643-811 other streams fail; now 0. RSS per stalled stream 3.3 MB (defaults) → 2.0 MB (1 MiB, first fix) → 0.49 MB; bulk CPU per MB relayed +10% against 1 MiB (4.06 → 4.47 ms), token streams unaffected |
+| Client write-stall timeout | Adopted: a connection whose writes make no progress for `client_write_timeout_secs` (60) is closed, which ends a stalled stream; zero cost while writes never block (the timer is allocated at the first blocked write) |
+| Per-connection credential cache | Adopted: CPU per authenticated request -38% and -44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
+| Shared cached identity (`Arc`) and borrowed log line | Adopted: allocations per authenticated request 37.5 → 20.6 |
+| 32 KiB client-connection buffer cap | Adopted (approved tradeoff): idle TLS stream after 512 KB 150 → 49 KB; plain uploads +7% CPU; 16 KiB cost +50% plain upload CPU |
+| Client socket send buffer fixed at 128 KiB | Adopted (2026-10-29): autotuning let the kernel send buffer of a client that stopped reading grow to 4 MiB, memory outside Wye's own bounds; now 32 MB for 256 stalled clients. Found when the stalled-client test exhausted a 7 GB macOS CI runner's 96 MB network pool. A/B, three alternating rounds: bulk CPU per MB +7.6% TLS (within its noise), -1.3% plain; per-request and per-event costs unchanged within noise |
+| Boxed request-body state | Adopted: holding 88 bytes inline cost +2.8 KB per idle plain stream (hyper stores 32 requests per connection inline) |
+| SIMD `memchr` usage scanning | Adopted: byte loop +49% CPU per MB (blocked); `memchr` +5.8% |
+| Forced inlining of the prompt lexer | Adopted: ~20% faster scanner |
+| Fast cancellation as a metric | Gated: release ~80 µs p50, < 0.2 ms max |
+| Adaptive write coalescing | Rejected: no gain |
+| Lazy idle deadline | Rejected: no gain |
+| SWAR string-end search | Rejected: no gain over a byte loop |
+| mimalloc | Rejected: idle memory +9%, RSS +12%, CPU per MB +4% |
+| Failover: copy kept bodies into one buffer per request | Rejected (2026-10-26, `failover_` variant, two runs): keeping hyper's chunks costs allocations because hyper cannot reuse its read buffer (99.5 per agent upload vs 40.5 without failover), so copying into one buffer reserved from the declared length was tried. Allocations fell to 58.5, but CPU per MB rose 1.86 → 2.08 ms (agent upload) and 1.81 → 1.97 ms (1 MiB upload), heap bytes 1.12 → 1.55 MB per agent upload, and +1 allocation per unary request. The kept chunks stay; failover's upload cost (+25% CPU per MB over plain) is the price of resending without a copy |
+| Fat LTO, one codegen unit | Not adopted: CPU per MB 6-8% lower, but worse event p99 in both A/B runs, 2× build time |
+| One h2 lock per frame | Candidate: A/B inconclusive (-5%, +12%) |
+| Fewer runtime threads | Deployment knob (`TOKIO_WORKER_THREADS`): CPU per MB 3.6 → 1.7 ms from 16 to 1 thread, latency under load rises. 2026-10-25, TLS, single runs, 16 / 4 / 2 workers: per-event delay p50 318 / 266 / 305 µs, CPU per paced event 38 / 25 / 18 µs, but unary added p50 237 / 690 / 823 µs |
+| Pre-warmed connections | Low value: 32 first requests on a new process add 3.6-8.4 ms p50, mostly first execution of the TLS and h2 code; after one warm-up request ~2 ms (concurrent handshakes), and a single cold connection adds nothing |
 | kTLS + splice; thread-per-core runtime | Research only |
-| Transparent stream repair | **Rejected**: changes semantics and billing; Claude Code retries |
+| Transparent stream repair | Rejected: changes semantics and billing; Claude Code retries |
