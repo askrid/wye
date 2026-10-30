@@ -352,6 +352,28 @@ What Claude Code tells a gateway without exposing prompts: session id on every r
 
 Not proposed: loop detection or spend caps per session (cross-request state), response caching (shared state), prompt rewriting for cache efficiency (beyond the allowlist), blocking tool calls (agent control is a non-goal).
 
+### Visibility for one developer
+
+Research (2026-10-30): what a solo developer on Claude Code or Codex sees today, and what only a gateway can add without state between requests.
+
+| For a solo developer | Strongest | What it shows | Blind spots |
+|---|---|---|---|
+| Overall, live | Claude Code itself ([costs](https://code.claude.com/docs/en/costs), [status line](https://code.claude.com/docs/en/statusline), [monitoring](https://code.claude.com/docs/en/monitoring-usage)) | `/usage`: session cost, main-thread cache misses with likely cause and TTL, plan bars with local attribution to skills, subagents, and MCP servers; `/context`; status line with cost, context, and 5h/7d limits; opt-in OTel events with cache writes by TTL and tool result sizes | Per session, reset by `/clear`; cache stats for the main thread only; no history without a backend |
+| History, several agents | [ccusage](https://github.com/ryoppippi/ccusage) | Daily, monthly, session, and 5-hour block reports from transcripts, priced from LiteLLM's table; Codex experimental | Transcripts only: in one checked session, the 59 auxiliary requests, a compaction, and a 429 that Wye logged were missing (about 7.5% of API-equivalent spend over the whole log); no timing, tools, or prompts |
+| Request bodies | [better-ccflare](https://github.com/tombii/better-ccflare), [Bifrost](https://docs.getbifrost.ai/cli-agents/claude-code) | Per-request tokens, cost, and bodies in SQLite; Bifrost groups by session | A database; no subagent, tool, or cache-miss structure documented |
+| Generic gateways | Helicone, Portkey, Cloudflare AI Gateway, OpenRouter, LiteLLM | Request, token, cost, cache analytics; LiteLLM a budget status line | No Claude Code structure; dashboards and stores |
+
+Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or a per-prompt bill. Ideas that fit the design (work in the log writer task or an offline CLI, nothing on the request path), ranked by value to one developer times feasibility; all are research until built:
+
+1. **Cache waste and TTL advice, main thread and subagents.** "Subagent cache writes expired unread: $X; a 1h TTL would save $Y" (Claude Code lets users set `promptCacheTtl` and `subagentPromptCacheTtl`). Needs the 5m and 1h cache-write split in records, which the usage scanner already parses; the rest is offline.
+2. **Carried cost of tool output.** The growth of a conversation's prompt between requests, attributed to the tools that ran in between (the tool-time hint), times the requests that re-read it until compaction, at the cache-read price: "Bash output re-read 180 times cost $41." Offline, from fields logged today.
+3. **A per-prompt bill with labels.** Main, subagent, and auxiliary requests rolled up per prompt, labeled with the prompt's first line by joining Claude Code's local transcripts (which carry `promptId`) in the CLI, so prompt text never enters the log.
+4. **`wye statusline`.** Reads the end of the log for the status line's session and prompt: this prompt's cost with its subagents and retries, the last cache rebuild, the costliest carried tool. The delivery channel for 1-3.
+5. **Complete API-equivalent spend.** Subscription value at API prices including what transcripts miss; prices applied at report time would price old logs too (a log written without `[pricing]` has no `cost_usd`).
+6. **Failure ledger.** 429, 529, and 5xx answers, cancellations, and time lost, with the expected session-start probe separated out.
+
+Not worth building: live 5h/7d headroom, which Claude Code already reads from the headers Wye forwards. Unverified: the status line's `rate_limits` behind Wye (likely, for the same reason).
+
 ### Excluded: needs shared state
 
 Semantic or response caching, global rate limits, redemption-based tokens, adaptive per-node concurrency ([policy.md](policy.md#rejected-approaches)).
