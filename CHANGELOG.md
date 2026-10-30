@@ -33,9 +33,11 @@ What is in it:
   `~/.wye`. `wye claude` turns on Claude Code's gateway hints (request
   class, prompt id, tool times), and `wye claude --bg` starts background
   sessions that go through the gateway too.
+- `wye service install`, `status`, `restart`, and `uninstall`: the gateway
+  as a LaunchAgent (macOS) or systemd user unit (Linux), shown before it is
+  written and checked before it starts.
 - Release archives for Linux and macOS (x86_64, arm64) with checksums and
-  build provenance attestations, and service definitions for a user
-  LaunchAgent (macOS) and systemd unit (Linux) in docs/operations.md.
+  build provenance attestations.
 
 Not yet checked against the real services:
 

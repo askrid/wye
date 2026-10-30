@@ -20,6 +20,8 @@ Release archives and a local OCI image are built; the rest of this list is plann
 ```bash
 wye init [--subscription | --auth] [--openai] [--out <path>]
 wye serve [-c <config>]
+wye service install [-c <config>] [--yes] [--dry-run]
+wye service status | restart | uninstall
 wye validate [-c <config>]
 wye doctor [-c <config>]
 wye claude [--url <url>] [--token-file <path>] [<claude args>...]
@@ -35,7 +37,7 @@ wye probe <url>
 
 **Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `./wye.toml`, else `~/.wye/wye.toml`; `serve` prints the one it loaded. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
 
-**Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, or `policy-diff` widened access.
+**Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
 
 **`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
 
@@ -92,14 +94,15 @@ The gateway's own notices (`wye: listening on ...`, which share stderr) and othe
 
 **`wye claude [--url <url>] [--token-file <path>] [<claude args>...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (`--url`, else `WYE_URL`, else `http://127.0.0.1:8080`) and, with a gateway token (`--token-file`, else `WYE_TOKEN`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a token, Claude Code keeps its own login (subscription passthrough). It also sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` unless the variable is set, so Claude Code sends the request class, prompt id, and tool times that `wye report` and the usage records use; Claude Code sends them to a custom base URL only when asked. `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program). Arguments after `--`, or from the first one wye does not know, go to Claude Code unchanged (`wye claude --resume <id>`; `wye claude -- --help` for Claude Code's own help). A gateway beyond this machine must be `https`: plain http would carry the token, or Claude Code's own login, in the clear. `WYE_TOKEN` is removed from the agent's environment, so the tools it runs do not inherit it. The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The token is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#credential-renewal).
 
-To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; rerun after pulling changes). Then run the gateway in one terminal and Claude Code in another:
+To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; after pulling changes, rerun it and `wye service restart`). Then:
 
 ```bash
 wye init --subscription          # writes ~/.wye/wye.toml; plain `wye init` for an API key
-wye serve 2>>~/.wye/usage.jsonl
+wye service install              # in the background, now and at every login
+                                 # (or in a terminal: wye serve 2>>~/.wye/usage.jsonl)
 
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
-wye claude                       # in another terminal; wye claude --resume <id>, etc.
+wye claude                       # wye claude --resume <id>, etc.
 
 wye report                       # afterwards, or at any time
 ```
@@ -196,9 +199,36 @@ A portable core with a platform adapter can run at the edge, but the edge is not
 
 ### Running as a service
 
-On one machine, a user service keeps the gateway running across logins and restarts it if it exits. The usage log is the service's stderr, so the service appends it to a file. With an API key, put the key in a file (`chmod 600`) and point `upstream.api_key_file` at it, rather than writing it into the service definition.
+On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops, through the operating system's own service manager, as you: a LaunchAgent (launchd) on macOS, a systemd user unit on Linux. It needs no sudo and changes nothing outside your home directory. Before it changes anything it shows what it will do, and asks:
 
-macOS, as a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`; replace `/Users/you`):
+```text
+$ wye service install
+wye service install sets up the gateway as a macOS LaunchAgent: launchd starts it
+now and at every login, as you, and restarts it if it stops. No sudo; nothing
+outside your home directory changes.
+
+  Write    ~/Library/LaunchAgents/dev.wye.gateway.plist
+  Run      ~/.cargo/bin/wye serve --config ~/.wye/wye.toml
+  Log      ~/.wye/usage.jsonl (appended)
+  Then     launchctl bootstrap gui/501 ~/Library/LaunchAgents/dev.wye.gateway.plist
+
+Undo with `wye service uninstall`.
+Install? [y]es, [n]o, [s]how the file:
+```
+
+`[s]how` prints the file before you decide; `--dry-run` prints the plan and the file and changes nothing; `--yes` skips the question (required without a terminal). Each command is printed as it runs, and the install ends by checking that the gateway answers.
+
+Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment. Provider keys go in files next to the config (`api_key_file = "anthropic.key"`, readable only by you), which is how `wye init` writes them. The cache-diagnostics hash key and OTLP headers come only from the environment, so a config that uses them needs a service definition of your own (below). If another gateway already answers on the config's port, such as `wye serve` in a terminal, the install stops.
+
+```bash
+wye service status      # installed? what it runs, the log's size, whether it answers
+wye service restart     # after editing the config or installing a new wye; checks the config first
+wye service uninstall   # stops it and removes the file; the config and the log stay
+```
+
+`restart` refuses a config that would not start and leaves the running service as it was. On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`).
+
+The files it writes, for reference or for a definition of your own. macOS, `~/Library/LaunchAgents/dev.wye.gateway.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -221,34 +251,23 @@ macOS, as a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`; replace
 </plist>
 ```
 
-```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.wye.gateway.plist   # start, and at every login
-launchctl kickstart -k gui/$(id -u)/dev.wye.gateway                              # restart, after installing a new wye
-launchctl bootout gui/$(id -u)/dev.wye.gateway                                   # stop
-```
-
-Linux, as a systemd user unit (`~/.config/systemd/user/wye.service`; not yet tested):
+Linux, `~/.config/systemd/user/wye.service` (`systemctl --user` with `daemon-reload`, `enable`, and `restart`):
 
 ```ini
 [Unit]
 Description=Wye gateway
 
 [Service]
-ExecStart=%h/.cargo/bin/wye serve --config %h/.wye/wye.toml
-StandardError=append:%h/.wye/usage.jsonl
+ExecStart=/home/you/.cargo/bin/wye serve --config /home/you/.wye/wye.toml
 Restart=on-failure
+StandardError=append:/home/you/.wye/usage.jsonl
 TimeoutStopSec=35
 
 [Install]
 WantedBy=default.target
 ```
 
-```bash
-systemctl --user enable --now wye    # start, and at every login
-systemctl --user restart wye         # after installing a new wye
-```
-
-The stop timeouts (35 s) cover the default 30 s shutdown grace. A restart ends open streams after that grace; Claude Code retries them. The log grows without limit: rotate it, or truncate it after `wye report`.
+The stop timeout is the config's drain delay and shutdown grace plus 5 s (35 s by default). A restart ends open streams after that grace; Claude Code retries them. The log grows without limit: rotate it, or truncate it after `wye report`.
 
 ### Without Kubernetes
 

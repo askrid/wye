@@ -57,10 +57,10 @@ With a claude.ai subscription (Pro or Max), Wye forwards your own Claude Code
 login, on this machine only:
 
 ```bash
-wye init --subscription           # writes ~/.wye/wye.toml
-wye serve 2>>~/.wye/usage.jsonl   # the gateway; its stderr is the usage log
-wye claude                        # in another terminal: Claude Code through it
-wye report                        # what it recorded
+wye init --subscription   # writes ~/.wye/wye.toml
+wye service install       # runs it in the background, now and at every login
+wye claude                # Claude Code through the gateway
+wye report                # what it recorded
 ```
 
 With an Anthropic API key, run plain `wye init`, put the key in
@@ -69,8 +69,11 @@ With an Anthropic API key, run plain `wye init`, put the key in
 `wye claude` starts Claude Code with its base URL set to the gateway and its
 gateway hints on (request class, prompt id, and tool times, for the usage
 log), and `wye claude --bg "task"` starts a background session that goes
-through it too. It does not touch your Claude Code settings. To keep the
-gateway running across logins, install it as a service
+through it too. It does not touch your Claude Code settings.
+`wye service install` shows the file it writes (a LaunchAgent on macOS, a
+systemd user unit on Linux) and asks before changing anything;
+`wye service uninstall` removes it, and `wye serve` runs the gateway in a
+terminal instead
 ([docs/operations.md](docs/operations.md#running-as-a-service)).
 
 ### For a team

@@ -9,6 +9,7 @@
 //! - `wrapper`: `wye claude` and `wye codex`, an agent pointed at a gateway
 //! - `probe`: a one-shot health check client
 //! - `doctor`: a config's secrets, files, and endpoints checked before serving
+//! - `service`: the gateway as a per-user launchd or systemd service
 //! - `init`: a minimal working config
 //! - `token`: offline key generation and token issuance
 //! - `args`: every command's options, parsed and rendered as help
@@ -21,6 +22,7 @@ mod policy_diff;
 mod policy_test;
 mod probe;
 mod report;
+pub mod service;
 pub mod token;
 mod wrapper;
 

@@ -78,6 +78,50 @@ pub const COMMANDS: &[Command] = &[
         notes: "Usage records go to stderr, one JSON line per request.",
     },
     Command {
+        name: "service install",
+        summary: "Run the gateway in the background, now and at every login",
+        args: "",
+        arity: (0, 0),
+        options: &[
+            CONFIG,
+            Opt {
+                short: Some('y'),
+                ..Opt::flag("yes", "Install without asking")
+            },
+            Opt::flag("dry-run", "Show the plan and the file; change nothing"),
+        ],
+        passthrough: false,
+        notes: "On macOS a LaunchAgent (launchd), on Linux a systemd user unit: both run \
+                as you, without sudo. Shows what it writes and runs, and asks first.",
+    },
+    Command {
+        name: "service status",
+        summary: "Show whether the background gateway is installed and answering",
+        args: "",
+        arity: (0, 0),
+        options: &[],
+        passthrough: false,
+        notes: "",
+    },
+    Command {
+        name: "service restart",
+        summary: "Restart the background gateway, after checking its config",
+        args: "",
+        arity: (0, 0),
+        options: &[],
+        passthrough: false,
+        notes: "Run it after editing the config or installing a new wye.",
+    },
+    Command {
+        name: "service uninstall",
+        summary: "Stop the background gateway and remove it",
+        args: "",
+        arity: (0, 0),
+        options: &[],
+        passthrough: false,
+        notes: "The config and the usage log stay.",
+    },
+    Command {
         name: "validate",
         summary: "Check a config without starting the gateway",
         args: "",
@@ -121,7 +165,8 @@ pub const COMMANDS: &[Command] = &[
         arity: (0, 1),
         options: &[],
         passthrough: false,
-        notes: "Reads ~/.wye/usage.jsonl unless given a file; `-` reads standard input.",
+        notes: "Reads ~/.wye/usage.jsonl, the log `wye service install` keeps, unless \
+                given a file; `-` reads standard input.",
     },
     Command {
         name: "init",
@@ -258,11 +303,17 @@ const WRAPPER_NOTES: &str = "Without a token the agent keeps its own login. Argu
     gateway beyond this machine must be https.";
 
 /// Commands with subcommands, as the command list shows them.
-const FAMILIES: &[(&str, &str)] = &[("token", "Make signing keys and gateway tokens")];
+const FAMILIES: &[(&str, &str)] = &[
+    (
+        "service",
+        "Run the gateway in the background (launchd or systemd, as you)",
+    ),
+    ("token", "Make signing keys and gateway tokens"),
+];
 
 /// The command list, grouped.
 const GROUPS: &[(&str, &[&str])] = &[
-    ("Run", &["serve"]),
+    ("Run", &["serve", "service"]),
     ("Use", &["claude", "codex", "report"]),
     ("Set up", &["init", "token"]),
     (
