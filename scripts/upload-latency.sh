@@ -24,8 +24,10 @@ PY
 echo "body: $(wc -c < "$body") bytes, model $model, $rounds rounds each"
 
 time_one() { # url, curl protocol flag
+    # The key goes in through stdin, not the command line, where ps shows it.
     curl -s -o /dev/null -w '%{http_code} %{time_starttransfer} %{time_total}\n' "$2" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" \
+        --config - <<<"header = \"x-api-key: $ANTHROPIC_API_KEY\"" \
+        -H "anthropic-version: 2023-06-01" \
         -H "content-type: application/json" --data-binary @"$body" "$1/v1/messages/count_tokens"
 }
 targets=("https://api.anthropic.com --http1.1" "https://api.anthropic.com --http2")

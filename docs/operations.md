@@ -354,7 +354,7 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 | Bad config or missing secret | Fail startup with an actionable diagnostic, without exposing secrets |
 | Invalid or expired credential | Reject locally |
 | No eligible route | Explicit compatibility or policy error |
-| Slow downstream | Bounded flow control: about 0.56 MB of heap per stalled stream (256 KiB upstream window) plus a kernel send buffer fixed at 128 KiB, at most `max_concurrent_requests` of them; streams sharing its upstream connection are unaffected; a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled |
+| Slow downstream | Bounded flow control: about 0.56 MB of heap per stalled stream (256 KiB upstream window) plus a kernel send buffer fixed at 128 KiB (256 KiB on Linux, which doubles the value), at most `max_concurrent_requests` of them; streams sharing its upstream connection are unaffected; a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled |
 | Client body breaks (bad framing, cut off mid-upload) | `400`, recorded as a gateway error; the upstream request is aborted and not failed over |
 | Client stops sending while its body is held | `408` after 60 s without bytes; its held bytes and permit are released |
 | Request body breaks the policy or the size limit mid-upload | The upstream request is aborted before the provider sees the body whole; the client gets the refusal's own `400`, `403`, or `413`, from HTTP/1.1 and HTTP/2 upstreams alike |

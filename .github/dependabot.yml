@@ -13,3 +13,8 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+  # The Dockerfile's base images.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
