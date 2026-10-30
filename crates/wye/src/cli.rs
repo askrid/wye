@@ -10,8 +10,10 @@
 //! - `probe`: a one-shot health check client
 //! - `doctor`: a config's secrets, files, and endpoints checked before serving
 //! - `init`: a minimal working config
-//! - `token`: offline key generation and credential issuance
+//! - `token`: offline key generation and token issuance
+//! - `args`: every command's options, parsed and rendered as help
 
+pub mod args;
 mod doctor;
 mod explain;
 mod init;
@@ -24,12 +26,12 @@ mod wrapper;
 
 pub use doctor::doctor;
 pub use explain::{Credential, Explanation, explain};
-pub use init::{InitOptions, init};
+pub use init::{InitOptions, Mode as InitMode, init};
 pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;
 pub use probe::probe;
 pub use report::report;
-pub use wrapper::{Agent, Launch, claude, codex};
+pub use wrapper::{Agent, Launch, run as run_agent};
 
 /// `n` and the noun in the number it takes: "1 session", "2 sessions".
 fn plural(n: u64, one: &str, many: &str) -> String {

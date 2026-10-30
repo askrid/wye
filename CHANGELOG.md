@@ -26,9 +26,11 @@ What is in it:
   subagent, request class, tool calls and time), OTLP logs, traces, and
   metrics, and optional cache-miss diagnostics.
 - Cost from a price table in config, in exact integer arithmetic.
-- Commands: `init`, `serve`, `check-config`, `doctor`, `explain`,
+- Commands: `init`, `serve`, `validate`, `doctor`, `explain`,
   `policy-test`, `policy-diff`, `report`, `probe`, `claude`, `codex`, and
-  `token`. `wye claude` turns on Claude Code's gateway hints (request
+  `token`, each with `--help`. A config is found without flags
+  (`./wye.toml`, then `~/.wye/wye.toml`), and a user's files live in
+  `~/.wye`. `wye claude` turns on Claude Code's gateway hints (request
   class, prompt id, tool times), and `wye claude --bg` starts background
   sessions that go through the gateway too.
 - Release archives for Linux and macOS (x86_64, arm64) with checksums and

@@ -1,4 +1,4 @@
-# Config for the sample policy tests: `wye policy-test --config wye.toml .`
+# Config for the sample policy tests: `wye policy-test -c wye.toml .`
 [server]
 listen = "0.0.0.0:8080"
 

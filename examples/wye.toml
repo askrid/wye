@@ -3,7 +3,7 @@
 # other section is commented out. On a claude.ai subscription, start from
 # examples/subscription.toml instead.
 #
-#   ANTHROPIC_API_KEY=... wye serve --config examples/wye.toml
+#   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 #
 # Only `listen`, `base_url`, and one credential are required. Unknown fields
@@ -101,10 +101,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # api_key_env = "OPENAI_API_KEY"
 
 # Gateway credentials. Required to listen beyond loopback; incompatible with
-# forward_caller_credential. Create a signing key and credentials offline:
-#   wye token keygen --out issuer.key
-#   wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod \
-#     --subject alice --ttl-secs 86400
+# forward_caller_credential. `wye init --auth` writes this section and a
+# signing key; tokens are issued offline with the key:
+#   wye token issue alice --ttl 1d
 # Claude Code sends the credential with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
 # [auth]
 # issuer = "wye"

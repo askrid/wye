@@ -15,25 +15,39 @@ Release archives and a local OCI image are built; the rest of this list is plann
 
 ## CLI
 
-### Server
+`wye --help` lists the commands, and `wye <command> --help` shows a command's options; both come from the table the parser reads, so help cannot drift from what is accepted. Options follow the GNU conventions: any order, `--name value` or `--name=value`, `-c` for `--config`, and `--` before arguments that start with a dash.
 
 ```bash
-wye init [--subscription] [--anthropic-key-env ANTHROPIC_API_KEY] [--openai-key-env OPENAI_API_KEY] [--out wye.toml]
-wye serve --config wye.toml
-wye check-config wye.toml
-wye doctor --config wye.toml
-wye explain --config wye.toml [--credential token.txt] [--session <id>] [--path <path>] [--target-model <model>]... request.json
-wye policy-test --config wye.toml policy-tests/
-wye policy-diff old.toml wye.toml
-wye report usage.jsonl
-wye probe http://127.0.0.1:8080/readyz
-wye token keygen --out issuer.key
-wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --subject team-research --ttl-secs 3600
+wye init [--subscription | --auth] [--openai] [--out <path>]
+wye serve [-c <config>]
+wye validate [-c <config>]
+wye doctor [-c <config>]
+wye claude [--url <url>] [--token-file <path>] [<claude args>...]
+wye codex [--url <url>] [--token-file <path>] [<codex args>...]
+wye report [<log> | -]
+wye token keygen [--out <path>]
+wye token issue <subject> [--ttl 7d] [--models <list>] [--max-output-tokens <n>] [-c <config>] [--key <path>]
+wye explain [-c <config>] [--token-file <path>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json | ->
+wye policy-test [-c <config>] <dir>
+wye policy-diff <old> <new>
+wye probe <url>
 ```
 
-All of these are built. `init` writes a minimal validated config for an API key or a claude.ai subscription, optionally with `[routes.openai]`, never over an existing file, and prints the next commands; `check-config` parses the config and reads the identity providers' key sets (environment secrets are not checked; `doctor` checks them). `doctor`, `explain`, `policy-test`, and `policy-diff` exit 3 when they find a problem, a refusal, a failed case, or widened access.
+**Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `./wye.toml`, else `~/.wye/wye.toml`; `serve` prints the one it loaded. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
 
-**`wye doctor --config wye.toml`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would:
+**Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, or `policy-diff` widened access.
+
+**`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
+
+- By default, for one developer with an Anthropic API key, read at startup from `anthropic.key` next to the config, where a background service finds it too.
+- `--subscription`: for one developer forwarding Claude Code's own claude.ai login, on loopback only.
+- `--auth`: a shared gateway. It listens on every interface, takes gateway tokens (`[auth]`), reads the provider key from `ANTHROPIC_API_KEY` in the deployment, and creates the signing key `~/.wye/issuer.key` (mode 600, outside the config's directory and Git) unless one is there to reuse.
+
+`--openai` adds `[routes.openai]`, for Codex and the OpenAI SDKs. The config goes to `~/.wye/wye.toml` unless `--out` names another path, such as `wye.toml` in a config repository.
+
+**`wye validate`** parses the config and reads the identity providers' key sets; secrets in the environment are left to `doctor`.
+
+**`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would:
 
 - Each upstream's provider key is present, not blank, and valid in an HTTP header (environment variable or file; never printed), and how it will be sent.
 - A Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is.
@@ -44,7 +58,7 @@ Every check runs, so one pass lists every problem; exit 3 if any failed. Not che
 
 **`wye explain`** prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, output-token ceiling, the route upstream with `[routes.claude]` or `[routes.openai]` (and whether the session id or the credential subject chose it) and the failover order, upstream URL and provider credential (by name, never value), the provider's model id (Bedrock), the `[pricing]` entry that prices the model at that upstream, and whether cache diagnostics would hash it; with `--target-model` (or `[upgrade_check]`), what each target model would reject, the fix, and the source. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. The body is read as the server reads it: up to its `model`, which decides aliases, permissions, and a ceiling already known, then the rest, when permissions or a ceiling apply, as the server checks it while it streams. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the server answers a compressed or non-UTF-8 body under a policy with `415`). With cost ceilings it will also print the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
 
-**`wye policy-test --config wye.toml <dir>`**: each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream` (the route upstream it reaches), `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused, an alias resolved by a canary rollout rule), and the test suite runs them.
+**`wye policy-test <dir>`**: each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream` (the route upstream it reaches), `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused, an alias resolved by a canary rollout rule), and the test suite runs them.
 
 ```text
 policy-tests/
@@ -58,7 +72,7 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 
 **`wye policy-diff <old> <new>`** compares two configs offline and prints what the change widens, narrows, or only changes, then exits 3 when anything widens, so CI can ask for a second review. Identity providers' key sets are read relative to each config, so compare against a checkout of the base, not a copy of its `wye.toml` alone: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`. Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_credential_ttl_secs`, a newly trusted signer (a signing key, Wye's own credentials, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending the operator's key where callers brought their own. Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows. Upstreams added, removed, or moved within a route, and a changed key source, are listed as changes for review: where requests go is not who may send them. Aliases are not compared: permissions apply to the model an alias resolves to. Credentials are not read: a credential can only narrow what config allows.
 
-**`wye report [<usage.jsonl>]`** summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend:
+**`wye report [<log>]`** summarizes a usage log, the JSON lines `wye serve` writes to stderr, with no telemetry backend. It reads `~/.wye/usage.jsonl` unless given a file; `-` reads standard input.
 
 - Requests and outcomes, and the requests answered with an error status (a 429 refusal is an answer, so its outcome reads `completed`).
 - By request class: tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and, with `[pricing]`, cost (summed exactly from `cost_usd`, marked `+` when it includes partial or unknown costs, or records written without `[pricing]`).
@@ -68,53 +82,48 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 - Upgrade issues by target, rule, and client.
 - The ten sessions and prompts with the most tokens.
 
-The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve --config wye.toml 2>>usage.jsonl` keeps the log across restarts; `wye report usage.jsonl` reads it.
+The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve 2>>~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
-**`wye token issue`** signs gateway credentials offline from a private key file ([policy.md](policy.md#gateway-credentials)). It never runs inside the server. `--models <name,prefix*,...>` limits the credential to those models, and `--max-output-tokens <n>` lowers its output-token ceiling.
+**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-credentials)) with `~/.wye/issuer.key`, or `--key`; it never runs inside the server. The issuer, audience, and longest lifetime come from the config's `[auth]`, and the key id from the `[[auth.keys]]` entry whose public half matches the key, so a rotated key needs no flag. `--ttl` takes `30m`, `8h`, or `7d` and defaults to `max_credential_ttl_secs` (one week unless set); a longer one is refused, as the server would refuse the token. `--models <name,prefix*,...>` limits the token to those models, and `--max-output-tokens <n>` lowers its output-token ceiling. Without a config, `--issuer`, `--audience`, and `--kid` give the claims, for a service that mints tokens. `wye token keygen` makes another key, for rotation, and prints the `[[auth.keys]]` entry to add.
 
 ### Client wrapper
 
-**`wye claude [--gateway <url>] [--credential-file <path>] [--] [claude args...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (default `http://127.0.0.1:8080`, or `WYE_GATEWAY_URL`) and, with a gateway credential (`--credential-file` or `WYE_CREDENTIAL`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a credential, Claude Code keeps its own login (subscription passthrough). It also sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` unless the variable is set, so Claude Code sends the request class, prompt id, and tool times that `wye report` and the usage records use; Claude Code sends them to a custom base URL only when asked. `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program), and arguments after `--` go to Claude Code unchanged. A gateway beyond this machine must be `https`: plain http would carry the credential, or Claude Code's own login, in the clear. `WYE_CREDENTIAL` is removed from the agent's environment, so the tools it runs do not inherit it. The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The credential is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its credential from [`apiKeyHelper`](#credential-renewal).
+**`wye claude [--url <url>] [--token-file <path>] [<claude args>...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (`--url`, else `WYE_URL`, else `http://127.0.0.1:8080`) and, with a gateway token (`--token-file`, else `WYE_TOKEN`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a token, Claude Code keeps its own login (subscription passthrough). It also sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` unless the variable is set, so Claude Code sends the request class, prompt id, and tool times that `wye report` and the usage records use; Claude Code sends them to a custom base URL only when asked. `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program). Arguments after `--`, or from the first one wye does not know, go to Claude Code unchanged (`wye claude --resume <id>`; `wye claude -- --help` for Claude Code's own help). A gateway beyond this machine must be `https`: plain http would carry the token, or Claude Code's own login, in the clear. `WYE_TOKEN` is removed from the agent's environment, so the tools it runs do not inherit it. The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The token is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#credential-renewal).
 
 To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; rerun after pulling changes). Then run the gateway in one terminal and Claude Code in another:
 
 ```bash
-mkdir -p ~/.wye
-wye init --subscription --out ~/.wye/wye.toml   # claude.ai subscription; plain `wye init` for an API key
-wye serve --config ~/.wye/wye.toml 2>>~/.wye/usage.jsonl
+wye init --subscription          # writes ~/.wye/wye.toml; plain `wye init` for an API key
+wye serve 2>>~/.wye/usage.jsonl
 
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
-wye claude                                     # wye claude -- --resume, etc.
+wye claude                       # in another terminal; wye claude --resume <id>, etc.
 
-wye report ~/.wye/usage.jsonl                  # afterwards, or at any time
+wye report                       # afterwards, or at any time
 ```
 
 The usage log goes to the gateway's stderr, so redirecting it keeps it; `wye report` skips the startup lines. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
-**`wye codex`** takes the same flags and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway credential (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after the flags go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a credential without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
-
-Proposal, not built: profiles that select a gateway and credential by name.
+**`wye codex`** takes the same options and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway token (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a token without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
 ### SDK integration
 
-Apps and custom agents keep the provider's official SDK and point it at Wye; the gateway credential takes the place of the provider key (Wye reads it from `x-api-key` or `Authorization: Bearer`):
-
-```python
-from anthropic import Anthropic
-
-client = Anthropic(
-    base_url="https://gateway.example.com",
-    api_key="gateway-credential",
-)
-```
-
-The OpenAI SDK connects the same way to `/v1/responses` and `/v1/chat/completions` when the config has `[routes.openai]` (`base_url="https://gateway.example.com/v1"`, the gateway credential as `api_key`). Streamed chat completions report usage only with `stream_options={"include_usage": True}`; Wye does not add it. Claude Code connects through environment variables:
+Apps and custom agents keep the provider's official SDK and change no code: the Anthropic and OpenAI SDKs read the base URL and the key from the environment, and the gateway token takes the place of the provider key (Wye reads it from `x-api-key` or `Authorization: Bearer`):
 
 ```bash
 export ANTHROPIC_BASE_URL=https://gateway.example.com
-export ANTHROPIC_AUTH_TOKEN=gateway-credential   # or apiKeyHelper for automatic renewal
+export ANTHROPIC_API_KEY=<gateway token>
+export OPENAI_BASE_URL=https://gateway.example.com/v1   # with [routes.openai]
+export OPENAI_API_KEY=<gateway token>
+```
+
+Without `[auth]`, any non-empty key will do: the SDKs refuse to send a request without one, and Wye sends its own provider key instead. The OpenAI SDK reaches `/v1/responses` and `/v1/chat/completions`; streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add. Claude Code without the wrapper takes the same two settings:
+
+```bash
+export ANTHROPIC_BASE_URL=https://gateway.example.com
+export ANTHROPIC_AUTH_TOKEN=<gateway token>   # or apiKeyHelper for automatic renewal
 ```
 
 ### Credential renewal

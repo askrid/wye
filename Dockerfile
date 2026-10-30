@@ -19,4 +19,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=6s --start-period=5s \
     CMD ["/usr/local/bin/wye", "probe", "http://127.0.0.1:8080/readyz"]
 ENTRYPOINT ["/usr/local/bin/wye"]
-CMD ["serve", "--config", "/etc/wye/wye.toml"]
+ENV WYE_CONFIG=/etc/wye/wye.toml
+CMD ["serve"]
