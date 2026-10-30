@@ -206,7 +206,14 @@ impl GatewayProcess {
 
     /// CPU time (user + system) of the gateway and every process it started, in seconds.
     pub fn cpu_secs(&self) -> f64 {
-        self.tree_sum("time", parse_cpu_time)
+        #[cfg(target_os = "linux")]
+        {
+            process_tree(self.pid).into_iter().map(proc_cpu_secs).sum()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.tree_sum("time", parse_cpu_time)
+        }
     }
 
     fn tree_sum(&self, field: &str, parse: impl Fn(&str) -> f64) -> f64 {
@@ -223,6 +230,30 @@ impl GatewayProcess {
             .map(parse)
             .sum()
     }
+}
+
+/// User plus system CPU time of `pid` from `/proc/<pid>/stat`, in clock
+/// ticks of 1/100 s (Linux's fixed `USER_HZ`). `ps -o time` from procps
+/// rounds to whole seconds, too coarse for CPU per request.
+#[cfg(target_os = "linux")]
+fn proc_cpu_secs(pid: u32) -> f64 {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return 0.0;
+    };
+    // The fields after the command name, which is parenthesized and may hold
+    // spaces: field 3 (state) first, so utime (14) and stime (15) are 11 and 12.
+    let fields: Vec<&str> = stat
+        .rsplit_once(')')
+        .map_or("", |(_, rest)| rest)
+        .split_whitespace()
+        .collect();
+    let ticks = |i: usize| {
+        fields
+            .get(i)
+            .and_then(|f| f.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    };
+    (ticks(11) + ticks(12)) / 100.0
 }
 
 /// `root` and all of its descendants. Wye and KrakenD are one process; LiteLLM forks workers.
@@ -254,6 +285,7 @@ fn process_tree(root: u32) -> Vec<u32> {
 }
 
 /// `ps -o time` format: `[[dd-]hh:]mm:ss.cc`.
+#[cfg(not(target_os = "linux"))]
 fn parse_cpu_time(raw: &str) -> f64 {
     let (days, rest) = raw
         .split_once('-')

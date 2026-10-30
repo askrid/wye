@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    config::{Config, Provider, Upstream, UpstreamCredential, is_loopback_host},
+    config::{Config, Provider, Telemetry, Upstream, UpstreamCredential, is_loopback_host},
     prompt::HashKey,
 };
 use http::{Request, Uri};
@@ -68,16 +68,8 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
         });
     }
     if let Some(telemetry) = &config.telemetry {
+        checks.extend(headers_in_clear(telemetry));
         if let Some(name) = &telemetry.otlp_headers_env {
-            // The headers are usually a backend's API key.
-            let uri = &telemetry.otlp_logs_uri;
-            if uri.scheme_str() == Some("http") && !uri.host().is_some_and(is_loopback_host) {
-                checks.push(fail(format!(
-                    "telemetry: ${name} would cross the network in the clear to {}; \
-                     use https, or a collector on this machine",
-                    uri.authority().map_or("the collector", |a| a.as_str())
-                )));
-            }
             checks.push(
                 match env(name).ok().map(|v| crate::usage_log::parse_headers(&v)) {
                     Some(Some(_)) => pass(format!("telemetry: ${name} set")),
@@ -103,6 +95,20 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
         n => format!("{n} problems\n"),
     });
     (report, problems == 0)
+}
+
+/// OTLP headers, usually a backend's API key, sent over plain http to
+/// another machine.
+fn headers_in_clear(telemetry: &Telemetry) -> Option<Check> {
+    let name = telemetry.otlp_headers_env.as_ref()?;
+    let uri = &telemetry.otlp_logs_uri;
+    (uri.scheme_str() == Some("http") && !uri.host().is_some_and(is_loopback_host)).then(|| {
+        fail(format!(
+            "telemetry: ${name} would cross the network in the clear to {}; \
+             use https, or a collector on this machine",
+            uri.authority().map_or("the collector", |a| a.as_str())
+        ))
+    })
 }
 
 fn pass(line: impl Into<String>) -> Check {

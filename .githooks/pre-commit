@@ -14,5 +14,13 @@ if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md)$' <<<"$staged
       "stage or stash them" >&2
     exit 1
   fi
+  # A new source file left out of the commit builds here but not from it.
+  untracked=$(git ls-files --others --exclude-standard -- crates scripts examples \
+    .githooks Cargo.toml Cargo.lock)
+  if [[ -n $untracked ]]; then
+    echo "pre-commit: untracked files would be built but not committed:" \
+      $untracked >&2
+    exit 1
+  fi
   exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
 fi

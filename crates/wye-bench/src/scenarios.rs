@@ -18,9 +18,11 @@ use crate::{
 
 /// Reported when an upstream stream is not released at all within this time.
 pub const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
-/// A paced stream that has not ended by then counts as failed: a gateway that
-/// stalls streams is a result, not a hung benchmark.
+/// A stream that has not ended by then counts as failed: a gateway that
+/// stalls streams is a result, not a hung benchmark (and a hung commit hook).
 const STREAM_DEADLINE: Duration = Duration::from_secs(30);
+/// The same for a non-streaming request, upload included.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Per-stream SSE sample.
 pub struct Stream {
@@ -93,10 +95,17 @@ pub async fn upload(
 /// failed: a fast error must never count as a fast response.
 async fn timed(target: &Target, req: Request<Full<Bytes>>) -> Option<u64> {
     let start = Instant::now();
-    let res = target.client().request(req).await.ok()?;
-    let ok = res.status().is_success();
-    let complete = res.into_body().collect().await.is_ok();
-    (ok && complete).then(|| start.elapsed().as_micros() as u64)
+    let answered = async {
+        let res = target.client().request(req).await.ok()?;
+        let ok = res.status().is_success();
+        let complete = res.into_body().collect().await.is_ok();
+        Some(ok && complete)
+    };
+    let ok = tokio::time::timeout(REQUEST_DEADLINE, answered)
+        .await
+        .ok()
+        .flatten()?;
+    ok.then(|| start.elapsed().as_micros() as u64)
 }
 
 /// SSE streams on `concurrency` workers, each worker reading its streams one after another.
@@ -132,17 +141,7 @@ pub async fn paced(
         let delay = ramp.mul_f64(i as f64 / streams as f64);
         set.spawn(async move {
             tokio::time::sleep(delay).await;
-            tokio::time::timeout(
-                STREAM_DEADLINE,
-                read_stream(&target, events, size, interval_us),
-            )
-            .await
-            .unwrap_or(Stream {
-                ttfb_us: 0,
-                event_delays_us: Vec::new(),
-                bytes: 0,
-                failed: true,
-            })
+            read_stream(&target, events, size, interval_us).await
         });
     }
     let mut out = Vec::with_capacity(streams);
@@ -152,8 +151,23 @@ pub async fn paced(
     out
 }
 
-/// Requests one SSE stream from the mock and records its timings.
+/// Requests one SSE stream from the mock and records its timings; failed if
+/// it has not ended within [`STREAM_DEADLINE`].
 async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64) -> Stream {
+    tokio::time::timeout(
+        STREAM_DEADLINE,
+        stream_events(target, events, size, interval_us),
+    )
+    .await
+    .unwrap_or(Stream {
+        ttfb_us: 0,
+        event_delays_us: Vec::new(),
+        bytes: 0,
+        failed: true,
+    })
+}
+
+async fn stream_events(target: &Target, events: u32, size: usize, interval_us: u64) -> Stream {
     let start = Instant::now();
     let req = target.messages(&[
         ("x-bench-events", events.to_string()),

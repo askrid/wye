@@ -67,21 +67,28 @@ async fn a_bedrock_upstream_needs_the_anthropic_path() {
     );
 }
 
-#[tokio::test]
-async fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
+/// Checked without a network: the rule reads only the config.
+#[test]
+fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
     let config = |endpoint: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n\
+             [upstream]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n\
              [telemetry]\notlp_endpoint = \"{endpoint}\"\notlp_headers_env = \"PATH\"\n"
         ))
         .unwrap()
     };
-    let (report, _) = doctor(&config("http://collector.example:4318"), Path::new(".")).await;
-    assert!(
-        report.contains("FAIL  telemetry: $PATH would cross the network in the clear"),
-        "{report}"
+    let in_clear = |endpoint: &str| {
+        let config = config(endpoint);
+        super::headers_in_clear(config.telemetry.as_ref().unwrap()).map(|check| check.line)
+    };
+    assert_eq!(
+        in_clear("http://collector.example:4318").as_deref(),
+        Some(
+            "telemetry: $PATH would cross the network in the clear to collector.example:4318; \
+             use https, or a collector on this machine"
+        )
     );
-    let (report, _) = doctor(&config("http://127.0.0.1:4318"), Path::new(".")).await;
-    assert!(!report.contains("in the clear"), "{report}");
+    assert_eq!(in_clear("https://collector.example:4318"), None);
+    assert_eq!(in_clear("http://127.0.0.1:4318"), None);
 }

@@ -17,7 +17,7 @@ hyper-util = { workspace = true, features = ["http1", "http2", "server", "server
 rcgen = { workspace = true, features = ["crypto", "pem", "ring"] }
 ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-tokio = { workspace = true, features = ["net", "rt"] }
+tokio = { workspace = true, features = ["net", "rt", "time"] }
 tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 
 [lints]
