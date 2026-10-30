@@ -8,7 +8,7 @@ const CONFIG: Opt = Opt {
     long: "config",
     short: Some('c'),
     value: Some("path"),
-    help: "The config (default: $WYE_CONFIG, ./wye.toml, ~/.wye/wye.toml)",
+    help: "The config (default: $WYE_CONFIG, else ~/.wye/wye.toml)",
     repeats: false,
 };
 

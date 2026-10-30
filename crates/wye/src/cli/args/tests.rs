@@ -120,9 +120,7 @@ fn help_shows_options_with_their_values() {
     let help = command("serve").help();
     assert!(help.starts_with("Run the gateway in the foreground.\n\nUsage: wye serve [options]\n"));
     assert!(
-        help.contains(
-            "  -c, --config <path>       The config (default: $WYE_CONFIG, ./wye.toml,\n"
-        ),
+        help.contains("  -c, --config <path>       The config (default: $WYE_CONFIG, else\n"),
         "{help}"
     );
     assert!(
@@ -144,7 +142,7 @@ fn a_typo_gets_the_closest_command() {
 }
 
 #[test]
-fn the_config_is_found_in_order() {
+fn the_config_is_found_in_order_and_never_in_the_working_directory() {
     let env = |vars: &'static [(&str, &str)]| {
         move |name: &str| {
             vars.iter()
@@ -153,32 +151,37 @@ fn the_config_is_found_in_order() {
         }
     };
     let none = |_: &Path| false;
-    let home = env(&[("HOME", "/u"), ("WYE_CONFIG", "/etc/wye.toml")]);
+    let named = env(&[("HOME", "/u"), ("WYE_CONFIG", "/etc/wye.toml")]);
     assert_eq!(
-        find_config(Some("x.toml"), &home, none).unwrap(),
+        find_config(Some("x.toml"), &named, none).unwrap(),
         PathBuf::from("x.toml")
     );
     assert_eq!(
-        find_config(None, &home, none).unwrap(),
+        find_config(None, &named, none).unwrap(),
         PathBuf::from("/etc/wye.toml")
     );
-    let home = env(&[("HOME", "/u")]);
+    let user = env(&[("HOME", "/u")]);
+    // Both exist: the user's own, not the one in the working directory.
     assert_eq!(
-        find_config(None, &home, |p| p == Path::new("/u/.wye/wye.toml")).unwrap(),
+        find_config(None, &user, |_| true).unwrap(),
         PathBuf::from("/u/.wye/wye.toml")
     );
+    // Only the working directory's: not read, and the error says how.
+    let here = find_config(None, &user, |p| p == Path::new("wye.toml")).unwrap_err();
     assert_eq!(
-        find_config(None, &home, |_| true).unwrap(),
-        PathBuf::from("wye.toml"),
-        "the working directory first"
+        here,
+        "no config at ~/.wye/wye.toml, and ./wye.toml is read only when named: -c wye.toml"
     );
-    assert!(
-        find_config(None, &home, none)
-            .unwrap_err()
-            .contains("wye init")
+    assert_eq!(
+        find_config(None, &user, none).unwrap_err(),
+        "no config at ~/.wye/wye.toml: write one with `wye init`, or pass -c <path>"
     );
     let moved = env(&[("HOME", "/u"), ("WYE_HOME", "/data/wye")]);
     assert_eq!(home_of(&moved), "/data/wye");
+    assert_eq!(
+        find_config(None, &moved, |_| true).unwrap(),
+        PathBuf::from("/data/wye/wye.toml")
+    );
     assert_eq!(
         tilde(Path::new("/u/.wye/usage.jsonl"), &moved),
         "~/.wye/usage.jsonl"

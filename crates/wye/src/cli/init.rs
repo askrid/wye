@@ -95,12 +95,10 @@ impl InitOptions {
 
     /// ` -c <out>` when the default lookup would not find the config.
     fn config_flag(&self) -> String {
-        let out = self.out.strip_prefix(".").unwrap_or(&self.out);
-        let found = out == Path::new("wye.toml")
-            || self
-                .home
-                .as_ref()
-                .is_some_and(|h| h.join("wye.toml") == out);
+        let found = self
+            .home
+            .as_ref()
+            .is_some_and(|h| h.join("wye.toml") == self.out);
         if found {
             String::new()
         } else {
@@ -297,6 +295,24 @@ mod tests {
         assert!(!printed.contains("signing key"), "{printed}");
         assert!(printed.contains("\n     wye doctor -c "), "{printed}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_next_steps_name_a_config_the_lookup_would_not_find() {
+        let steps = |out: &str| {
+            let options = InitOptions {
+                home: Some("/h".into()),
+                ..options(Mode::Team, false, Path::new(out))
+            };
+            options.next_steps(|p| p.display().to_string())
+        };
+        assert!(steps("/h/wye.toml").contains("\n     wye doctor\n"));
+        let repo = steps("wye.toml");
+        assert!(repo.contains("\n     wye doctor -c wye.toml\n"), "{repo}");
+        assert!(
+            repo.contains("\n     wye token issue alice -c wye.toml > alice.token\n"),
+            "{repo}"
+        );
     }
 
     #[test]

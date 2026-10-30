@@ -370,7 +370,11 @@ pub fn home(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
 }
 
 /// The config a command reads: `--config`, else `$WYE_CONFIG`, else
-/// `./wye.toml`, else `wye.toml` in the home directory.
+/// `wye.toml` in the home directory.
+///
+/// Never one found in the working directory: a config decides where the
+/// caller's credentials go, so the one in a repository just cloned must not
+/// apply unless it is named.
 pub fn find_config(
     flag: Option<&str>,
     env: &impl Fn(&str) -> Option<String>,
@@ -382,12 +386,16 @@ pub fn find_config(
     {
         return Ok(path.into());
     }
-    let mut candidates = vec![PathBuf::from("wye.toml")];
-    candidates.extend(home(env).map(|home| home.join("wye.toml")));
-    candidates.into_iter().find(|p| exists(p)).ok_or_else(|| {
-        "no config: none in ./wye.toml or ~/.wye/wye.toml. Pass -c <path>, set WYE_CONFIG, \
-         or write one with `wye init`"
-            .to_owned()
+    let home = home(env).map(|home| home.join("wye.toml"));
+    if let Some(path) = home.as_ref().filter(|path| exists(path)) {
+        return Ok(path.clone());
+    }
+    let shown = home.map_or_else(|| "~/.wye/wye.toml".to_owned(), |p| tilde(&p, env));
+    let here = Path::new("wye.toml");
+    Err(if exists(here) {
+        format!("no config at {shown}, and ./wye.toml is read only when named: -c wye.toml")
+    } else {
+        format!("no config at {shown}: write one with `wye init`, or pass -c <path>")
     })
 }
 

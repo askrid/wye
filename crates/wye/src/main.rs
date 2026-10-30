@@ -111,7 +111,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         "validate" => {
             let path = config_path()?;
             // Key sets are files too; secrets in the environment are not checked.
-            wye::verifier(&load(&path)?, config_dir(&path))?;
+            named(&path, wye::verifier(&load(&path)?, config_dir(&path)))?;
             println!(
                 "{}: {}",
                 args::tilde(&path, &env),
@@ -122,6 +122,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         "doctor" => {
             let path = config_path()?;
             let config = load(&path)?;
+            println!("config: {}", args::tilde(&path, &env));
             let (report, ok) = current_thread()?.block_on(wye::doctor(&config, config_dir(&path)));
             print!("{}", Paint::stdout().verdicts(&report));
             Ok(found(ok))
@@ -224,21 +225,22 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             // Without a config, the claims come from flags alone.
             let flags_only =
                 request.issuer.is_some() && request.audience.is_some() && request.kid.is_some();
-            let config = match config_path() {
-                Ok(path) => Some(load(&path)?),
-                Err(_) if flags_only => None,
+            let token = match config_path() {
+                Ok(path) => {
+                    let config = load(&path)?;
+                    let issued = token::issue(&request, &key, Some(&config), unix_secs()?);
+                    named(&path, issued)?
+                }
+                Err(_) if flags_only => token::issue(&request, &key, None, unix_secs()?)?,
                 Err(e) => return Err(e.into()),
             };
-            println!(
-                "{}",
-                token::issue(&request, &key, config.as_ref(), unix_secs()?)?
-            );
+            println!("{token}");
             Ok(0)
         }
         "explain" => {
             let path = config_path()?;
             let config = load(&path)?;
-            let verifier = wye::verifier(&config, config_dir(&path))?;
+            let verifier = named(&path, wye::verifier(&config, config_dir(&path)))?;
             let token = parsed
                 .value("token-file")
                 .map(|file| {
@@ -267,13 +269,16 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 unix_secs()?,
                 &parsed.values("target-model"),
             );
+            println!("config: {}", args::tilde(&path, &env));
             print!("{}", Paint::stdout().verdicts(&explanation.report()));
             Ok(found(explanation.refused.is_none()))
         }
         "policy-test" => {
-            let config = load(&config_path()?)?;
+            let path = config_path()?;
+            let config = load(&path)?;
             let dir = parsed.positional.first().copied().unwrap_or_default();
             let (report, passed) = wye::policy_test(&config, Path::new(dir), unix_secs()?)?;
+            println!("config: {}", args::tilde(&path, &env));
             print!("{}", Paint::stdout().verdicts(&report));
             Ok(found(passed))
         }
@@ -347,7 +352,13 @@ fn unix_secs() -> Result<u64, std::time::SystemTimeError> {
 fn load(path: &Path) -> Result<Config, Box<dyn Error>> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-    Ok(Config::from_toml_str(&source).map_err(|e| format!("{}: {e}", path.display()))?)
+    Ok(named(path, Config::from_toml_str(&source))?)
+}
+
+/// `result`, its error naming the config it came from: the file may not be
+/// the one the user had in mind.
+fn named<T>(path: &Path, result: Result<T, impl std::fmt::Display>) -> Result<T, String> {
+    result.map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn config_dir(path: &Path) -> &Path {
@@ -355,8 +366,8 @@ fn config_dir(path: &Path) -> &Path {
 }
 
 fn serve(config: Config, path: &Path) -> Result<(), Box<dyn Error>> {
-    let resources = Resources::resolve(&config, config_dir(path))?;
-    let gateway = Arc::new(Gateway::new(&config, resources)?);
+    let resources = named(path, Resources::resolve(&config, config_dir(path)))?;
+    let gateway = Arc::new(named(path, Gateway::new(&config, resources))?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;

@@ -7,6 +7,7 @@
 )]
 
 mod aliases;
+mod config_lookup;
 mod credentials;
 mod explain;
 mod failover;
