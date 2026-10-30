@@ -623,6 +623,61 @@ async fn tool_calls_past_eight_names_go_under_other() {
     assert_eq!(calls["(other)"], 2, "{calls}");
 }
 
+/// The process reading stderr exits: records still reach OTLP, and the
+/// lines the log could not take are counted as lost.
+#[tokio::test]
+async fn a_closed_log_leaves_otlp_export_running() {
+    let (collected_tx, mut collected) = mpsc::channel::<Seen>(16);
+    let collector: Handler = Arc::new(move |seen: Seen| {
+        let tx = collected_tx.clone();
+        Box::pin(async move {
+            let _ = tx.send(seen).await;
+            full(StatusCode::OK, "{}")
+        })
+    });
+    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(
+        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        Arc::clone(&hits),
+        None,
+        None,
+    )
+    .await;
+    let resources = with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )]);
+    let h = Harness::launch(
+        &format!("http://{upstream}"),
+        "",
+        &format!("api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\""),
+        resources,
+        hits,
+    )
+    .await;
+    h.close_usage_log().await;
+    // Each record is exported once the log has failed its write.
+    let mut exported = 0;
+    for _ in 0..2 {
+        read_body(h.send(messages(), "{}").await).await;
+        let mut logs = 0;
+        while logs == 0 {
+            let seen = tokio::time::timeout(WAIT, collected.recv())
+                .await
+                .expect("a log export after the log closed")
+                .unwrap();
+            if seen.uri.path() == "/v1/logs" {
+                let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
+                logs = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+                    .as_array()
+                    .map_or(0, Vec::len);
+            }
+        }
+        exported += logs;
+    }
+    assert_eq!(exported, 2);
+}
+
 #[tokio::test]
 async fn spans_a_collector_refuses_are_counted_as_lost() {
     // A collector without a traces pipeline: logs in, traces refused.

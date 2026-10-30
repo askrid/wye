@@ -79,8 +79,9 @@ mod tests {
                 .https_or_http()
                 .enable_http1()
                 .wrap_connector(http);
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .build(https)
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build(
+                super::super::ConnectTimeout::new(https, std::time::Duration::from_secs(1)),
+            )
         })
     }
 

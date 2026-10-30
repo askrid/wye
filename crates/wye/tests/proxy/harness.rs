@@ -215,6 +215,13 @@ impl Harness {
         }
     }
 
+    /// Closes the usage log's reading end, as when the process reading
+    /// stderr exits.
+    pub(crate) async fn close_usage_log(&self) {
+        let (_, closed) = tokio::io::duplex(1);
+        *self.usage.lock().await = BufReader::new(closed).lines();
+    }
+
     /// Triggers shutdown, as a SIGTERM would.
     pub(crate) fn begin_shutdown(&mut self) {
         let _ = self.shutdown.take().unwrap().send(());

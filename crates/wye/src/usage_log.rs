@@ -275,25 +275,29 @@ async fn write_records<W>(
     logs_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut metrics_tick = after(OTLP_METRICS_INTERVAL);
     metrics_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let flush = |otlp: &mut Option<(otlp::Batch, metrics::Metrics)>| {
+        if let Some((batch, _)) = otlp.as_mut() {
+            batch.flush();
+        }
+    };
+    let export = |otlp: &Option<(otlp::Batch, metrics::Metrics)>| {
+        if let Some((batch, metrics)) = otlp.as_ref() {
+            export_metrics(batch, metrics);
+        }
+    };
+    // A log that failed a write (its reader is gone) is not written again;
+    // OTLP export goes on without it.
+    let mut log_open = true;
     loop {
         // Cancel safety: `recv` and the ticks lose nothing when another branch wins.
         let record = tokio::select! {
             record = rx.recv() => record,
-            _ = logs_tick.tick(), if otlp.is_some() => {
-                if let Some((batch, _)) = otlp.as_mut() {
-                    batch.flush();
-                }
-                continue;
-            }
-            _ = metrics_tick.tick(), if otlp.is_some() => {
-                if let Some((batch, metrics)) = otlp.as_ref() {
-                    export_metrics(batch, metrics);
-                }
-                continue;
-            }
+            _ = logs_tick.tick(), if otlp.is_some() => { flush(&mut otlp); continue; }
+            _ = metrics_tick.tick(), if otlp.is_some() => { export(&otlp); continue; }
         };
         let Some(record) = record else { break };
         let mut next = Some(record);
+        let mut lines: u64 = 0;
         // Batch what else is queued into one write.
         for _ in 0..WRITE_BATCH {
             let Some(r) = next.take().or_else(|| rx.try_recv().ok()) else {
@@ -301,6 +305,7 @@ async fn write_records<W>(
             };
             let line = line(&r, &context);
             push_line(&mut buf, &line);
+            lines += 1;
             if let Some((batch, metrics)) = otlp.as_mut() {
                 metrics.record(&line);
                 batch.push(&line);
@@ -309,17 +314,33 @@ async fn write_records<W>(
                 }
             }
         }
-        // A closed log ends the writer, through the shutdown below, so the
-        // exporter task still finishes its queue and is awaited.
-        if out.write_all(&buf).await.is_err() || out.flush().await.is_err() {
-            break;
+        if log_open {
+            // A log that blocks (a full pipe nobody reads) must not stop OTLP
+            // export: the ticks are served while the write waits. Cancel
+            // safety: the write is never dropped before it completes.
+            let write = async {
+                out.write_all(&buf).await?;
+                out.flush().await
+            };
+            tokio::pin!(write);
+            log_open = loop {
+                tokio::select! {
+                    written = &mut write => break written.is_ok(),
+                    _ = logs_tick.tick(), if otlp.is_some() => flush(&mut otlp),
+                    _ = metrics_tick.tick(), if otlp.is_some() => export(&otlp),
+                }
+            };
+        }
+        if !log_open {
+            // Counted like a full queue's losses, so OTLP reports them.
+            dropped.fetch_add(lines, Ordering::Relaxed);
         }
         buf.clear();
     }
     // The log's own losses, written before the exporter's last exports,
     // which a slow collector can hold past shutdown's flush.
     let count = dropped.load(Ordering::Relaxed);
-    if count > 0 {
+    if count > 0 && log_open {
         let line = format!("{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n");
         let _ = out.write_all(line.as_bytes()).await;
         let _ = out.flush().await;
@@ -334,7 +355,7 @@ async fn write_records<W>(
         }
         // After the exporter: the last exports' failures count too.
         let otlp_dropped = otlp_lost.load(Ordering::Relaxed);
-        if otlp_dropped > 0 {
+        if otlp_dropped > 0 && log_open {
             let line = format!("{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n");
             let _ = out.write_all(line.as_bytes()).await;
         }

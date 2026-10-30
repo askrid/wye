@@ -91,6 +91,7 @@ wye/
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── upstream/refusal.rs  refusals the request body raised mid-upload, also over HTTP/2
 │   │   ├── usage_log.rs         per-request records, bounded writer
+│   │   ├── upstream/connect.rs  the connect timeout over TCP and the TLS handshake
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
 │   │   ├── cli/                 explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop
@@ -217,7 +218,7 @@ For OpenAI Responses streams (`gateway-core/src/usage/responses.rs`): usage arri
 
 **Errors.** Before downstream headers are sent, local failures produce a gateway error in the client-facing API's error shape (Anthropic error JSON on the Messages endpoints, OpenAI's on `/v1/responses` and `/v1/chat/completions`). Upstream error bodies pass through unmodified. A refusal Wye's request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike: hyper's HTTP/1.1 client returns the body's error as the cause, while its HTTP/2 client only resets the stream, so on an upstream that may speak HTTP/2 the body also leaves the refusal in a per-request slot. After headers are sent, an upstream failure terminates the stream; it cannot become a new JSON error response.
 
-**Timeouts and shutdown.** Use three timeouts: a short connect timeout; a response-header timeout of several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure); and a streaming-inactivity timeout longer than the provider's `ping` interval. A fourth bounds the client side: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs. No total request timeout: it would kill valid generations. Shutdown has a drain phase (readiness fails, requests still served) and a grace phase that cancels whatever remains ([operations.md](operations.md#health-and-shutdown)).
+**Timeouts and shutdown.** Use three timeouts: a short connect timeout, over the TCP connect and the TLS handshake together (a peer that accepts and then stalls the handshake fails as a refused connection, so failover applies); a response-header timeout of several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure); and a streaming-inactivity timeout longer than the provider's `ping` interval. A fourth bounds the client side: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs. No total request timeout: it would kill valid generations. Shutdown has a drain phase (readiness fails, requests still served) and a grace phase that cancels whatever remains ([operations.md](operations.md#health-and-shutdown)).
 
 ## Retries and fallback
 

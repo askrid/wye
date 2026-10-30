@@ -89,6 +89,48 @@ async fn a_refused_connection_moves_the_request_on() {
     );
 }
 
+/// An upstream that accepts connections and never answers the TLS
+/// handshake: the connect timeout covers the handshake, so the request moves
+/// on as a refused connection instead of waiting out the response header
+/// timeout.
+#[tokio::test]
+async fn a_stalled_tls_handshake_moves_the_request_on() {
+    let silent = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let a = silent.local_addr().unwrap();
+    let _accepting = tokio::spawn(async move {
+        let mut open = Vec::new();
+        while let Ok((stream, _)) = silent.accept().await {
+            open.push(stream);
+        }
+    });
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [routes.claude]\nselect = \"ordered\"\nfailover = [\"connect\"]\n\
+         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://{a}\"\n\
+         api_key_env = \"UNUSED\"\nconnect_timeout_secs = 1\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\n\
+         api_key_env = \"UNUSED\"\n"
+    );
+    let resources = with_upstreams(vec![
+        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
+        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
+    ]);
+    let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
+    let res = tokio::time::timeout(WAIT, h.send(messages(), BODY))
+        .await
+        .expect("answered within the connect timeout, not the header timeout");
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
+    assert_eq!(seen_b.recv().await.unwrap(), BODY);
+    let record = h.usage_record().await;
+    assert_eq!(
+        record["failovers"],
+        serde_json::json!([{"upstream": "a", "error": "connect"}])
+    );
+}
+
 #[tokio::test]
 async fn other_failures_and_large_bodies_are_answered_as_they_are() {
     // A 500 may already have been processed: never resent.

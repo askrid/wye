@@ -10,6 +10,7 @@
 //! Platform on AWS) are changed.
 
 mod body;
+mod connect;
 mod pool;
 mod refusal;
 
@@ -33,6 +34,7 @@ use hyper_util::{
 use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 
 pub(crate) use body::{BoxError, UpstreamBody};
+use connect::ConnectTimeout;
 use pool::ClientPool;
 pub(crate) use refusal::PolicyRefusal;
 use refusal::{RefusalSlot, Refusing, policy_refusal};
@@ -54,7 +56,7 @@ pub(crate) type SendBody = FailoverBody<RequestBody<ClientBody>>;
 /// Sends a [`SendBody`], read for upgrade checks and prompt hashes in
 /// passing.
 type UpstreamClient = Client<
-    HttpsConnector<HttpConnector>,
+    ConnectTimeout<HttpsConnector<HttpConnector>>,
     ScannedBody<ScannedBody<Refusing<SendBody>, UpgradeScanner>, PromptScanner>,
 >;
 
@@ -174,6 +176,7 @@ impl Upstream {
     ) -> Result<Self, StartupError> {
         let mut http = HttpConnector::new();
         http.enforce_http(false);
+        // Per address; ConnectTimeout bounds the whole connect, TLS included.
         http.set_connect_timeout(Some(config.connect_timeout));
         http.set_nodelay(true);
         // Plain http is accepted by config validation only for loopback hosts.
@@ -181,10 +184,13 @@ impl Upstream {
             .with_tls_config(tls_config(extra_roots)?)
             .https_or_http()
             .enable_http1();
-        let https = match config.http_version {
-            config::UpstreamHttpVersion::Auto => protocols.enable_http2().wrap_connector(http),
-            config::UpstreamHttpVersion::Http1 => protocols.wrap_connector(http),
-        };
+        let https = ConnectTimeout::new(
+            match config.http_version {
+                config::UpstreamHttpVersion::Auto => protocols.enable_http2().wrap_connector(http),
+                config::UpstreamHttpVersion::Http1 => protocols.wrap_connector(http),
+            },
+            config.connect_timeout,
+        );
         Ok(Self {
             id: config.id.as_deref().map(Arc::from),
             model_prefix: config.provider.model_prefix(),
