@@ -170,6 +170,7 @@ From the CLI review (2026-10-30), not fixed:
 - `policy-diff` takes no `-` for a config (`git show main:wye.toml | wye policy-diff - wye.toml`): key sets are read relative to each config, so a worktree remains the right way.
 - No `--json` on `report`, and no shell completions; both could come from what exists when someone needs them.
 - `wye claude` does not read the config's `listen`, on purpose: the config is the server's, and the gateway may be remote. A changed port needs `WYE_URL`.
+- A `gateway_error` record does not say why: `wye report` shows `502 6` on a real log, and neither the record nor the report tells a refused connection from a broken stream. Six in a burst of auxiliary requests (2026-10-30) stay unexplained for that reason.
 - The report has no cost column until the config has `[pricing]`, and `wye init` writes none, since a table in the binary would need upkeep ([visibility ideas](research.md#visibility-for-one-developer)).
 
 ## Release acceptance checklist
