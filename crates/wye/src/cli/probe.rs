@@ -43,7 +43,10 @@ pub async fn probe(url: &str) -> Result<String, String> {
         .body(Empty::new())
         .map_err(|e| format!("{url}: {e}"))?;
     let status = tokio::time::timeout(PROBE_TIMEOUT, async {
-        let res = client.request(request).await.map_err(|e| e.to_string())?;
+        let res = client
+            .request(request)
+            .await
+            .map_err(|e| super::error_chain(&e))?;
         let status = res.status();
         res.into_body().collect().await.map_err(|e| e.to_string())?;
         Ok::<_, String>(status)

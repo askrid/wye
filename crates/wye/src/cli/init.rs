@@ -16,11 +16,12 @@ use super::{args, token};
 /// Who the gateway is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// One developer with an Anthropic API key, read from a file next to the
-    /// config, so a background service finds it too.
+    /// One developer: each caller's own credential goes through, whether
+    /// Claude Code's login or an API key, so the gateway holds no secret.
+    Forward,
+    /// One developer whose gateway holds an Anthropic API key, read from a
+    /// file next to the config, so a background service finds it too.
     ApiKey,
-    /// One developer forwarding Claude Code's own claude.ai login.
-    Subscription,
     /// A shared gateway: gateway tokens (`[auth]`), all interfaces, and the
     /// provider key from the deployment's environment.
     Team,
@@ -33,7 +34,7 @@ pub struct InitOptions {
     /// Also serve OpenAI Responses and Chat Completions (for Codex).
     pub openai: bool,
     pub out: PathBuf,
-    /// Wye's home directory, where `--auth` keeps the signing key.
+    /// Wye's home directory, where `--team` keeps the signing key.
     pub home: Option<PathBuf>,
 }
 
@@ -42,16 +43,17 @@ impl InitOptions {
     /// half, for `Mode::Team`.
     pub fn config(&self, public_key: &str) -> Result<String, String> {
         let (listen, credential, openai_key) = match self.mode {
+            Mode::Forward => (
+                "127.0.0.1:8080",
+                "# Each caller's own credential goes through, whether Claude Code's\n\
+                 # login or an API key: this machine only, no [auth].\n\
+                 forward_caller_credential = true",
+                "api_key_file = \"openai.key\"",
+            ),
             Mode::ApiKey => (
                 "127.0.0.1:8080",
                 "# Read at startup from this file, next to this config:\n\
                  api_key_file = \"anthropic.key\"",
-                "api_key_file = \"openai.key\"",
-            ),
-            Mode::Subscription => (
-                "127.0.0.1:8080",
-                "# Claude Code's own login is forwarded: loopback only, no [auth].\n\
-                 forward_caller_credential = true",
                 "api_key_file = \"openai.key\"",
             ),
             Mode::Team => (
@@ -85,7 +87,7 @@ impl InitOptions {
         Ok(text)
     }
 
-    /// Where `--auth` keeps the signing key.
+    /// Where `--team` keeps the signing key.
     fn key_path(&self) -> Result<PathBuf, String> {
         self.home
             .as_ref()
@@ -112,23 +114,28 @@ impl InitOptions {
         let dir = self.out.parent().unwrap_or(Path::new("."));
         let mut steps: Vec<(String, String)> = vec![];
         let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
+        let private = ", readable only by you (chmod 600).";
         match (self.mode, self.openai) {
-            (Mode::ApiKey, openai) => {
-                let mut keys = format!("Put your {}", key("Anthropic API key", "anthropic.key"));
-                if openai {
-                    keys.push_str(&format!(" and your {}", key("OpenAI key", "openai.key")));
-                }
-                keys.push_str(", readable only by you (chmod 600).");
-                steps.push((keys, String::new()));
-            }
-            (Mode::Subscription, true) => steps.push((
+            (Mode::ApiKey, false) => steps.push((
                 format!(
-                    "Put your {}, readable only by you (chmod 600).",
+                    "Put your {}{private}",
+                    key("Anthropic API key", "anthropic.key")
+                ),
+                String::new(),
+            )),
+            (Mode::ApiKey, true) => steps.push((
+                format!(
+                    "Put your {} and your {}{private}",
+                    key("Anthropic API key", "anthropic.key"),
                     key("OpenAI key", "openai.key")
                 ),
                 String::new(),
             )),
-            (Mode::Subscription, false) => {}
+            (Mode::Forward, true) => steps.push((
+                format!("Put your {}{private}", key("OpenAI key", "openai.key")),
+                String::new(),
+            )),
+            (Mode::Forward, false) => {}
             (Mode::Team, openai) => {
                 let keys = if openai {
                     "ANTHROPIC_API_KEY and OPENAI_API_KEY"
@@ -144,8 +151,8 @@ impl InitOptions {
         ));
         if self.mode == Mode::Team {
             steps.push((
-                "Issue a token for each person or service:".to_owned(),
-                format!("wye token issue alice{c} > alice.token"),
+                "Issue a token for each person or app:".to_owned(),
+                format!("wye token issue alice{c} --out alice.token"),
             ));
             steps.push((
                 "Deploy it: https://github.com/askrid/wye/blob/main/docs/operations.md#deployment-modes"
@@ -159,10 +166,17 @@ impl InitOptions {
                     .to_owned(),
                 format!("wye service install{c}"),
             ));
-            let agents = if self.openai {
-                "Start Claude Code, or Codex, through it:"
-            } else {
-                "Start Claude Code through it:"
+            let agents = match (self.mode, self.openai) {
+                (Mode::Forward, false) => {
+                    "Start Claude Code through it, signed in as usual (an exported \
+                     ANTHROPIC_API_KEY takes over from your login, and bills the API):"
+                }
+                (Mode::Forward, true) => {
+                    "Start Claude Code, or Codex, through it (an exported \
+                     ANTHROPIC_API_KEY takes over from your login, and bills the API):"
+                }
+                (_, true) => "Start Claude Code, or Codex, through it:",
+                (_, false) => "Start Claude Code through it:",
             };
             steps.push((agents.to_owned(), "wye claude".to_owned()));
             steps.push(("See what it recorded:".to_owned(), "wye report".to_owned()));
@@ -182,7 +196,7 @@ impl InitOptions {
 }
 
 /// Writes the starter config to `options.out`, never over an existing file
-/// (or through a symlink); with `--auth`, also the signing key, unless one is
+/// (or through a symlink); with `--team`, also the signing key, unless one is
 /// there to reuse.
 pub fn init(
     options: &InitOptions,
@@ -201,9 +215,6 @@ pub fn init(
     let mut wrote_key = None;
     let public_key = if options.mode == Mode::Team {
         let path = options.key_path()?;
-        if let Some(dir) = path.parent() {
-            create_dir(dir)?;
-        }
         let (key, created) = token::signing_key(&path)?;
         if created {
             wrote_key = Some(path);
@@ -214,7 +225,7 @@ pub fn init(
     };
     let text = options.config(&public_key)?;
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        create_dir(dir)?;
+        super::create_private_dir(dir)?;
     }
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -238,17 +249,6 @@ pub fn init(
     Ok(format!("{done}\n{}", options.next_steps(show)))
 }
 
-/// Creates `dir` if missing, readable only by its owner: it holds keys.
-fn create_dir(dir: &Path) -> Result<(), String> {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    builder
-        .create(dir)
-        .map_err(|e| format!("cannot create {}: {e}", dir.display()))
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn writes_a_valid_config_for_each_mode_and_never_overwrites() {
         let key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        for mode in [Mode::ApiKey, Mode::Subscription, Mode::Team] {
+        for mode in [Mode::Forward, Mode::ApiKey, Mode::Team] {
             for openai in [false, true] {
                 let text = options(mode, openai, Path::new("/h/wye.toml"))
                     .config(key)
@@ -285,7 +285,7 @@ mod tests {
         let printed = init(&team, &env).unwrap();
         assert!(printed.contains("signing key"), "{printed}");
         assert!(
-            printed.contains("\n     wye token issue alice > alice.token\n"),
+            printed.contains("\n     wye token issue alice --out alice.token\n"),
             "{printed}"
         );
         assert!(init(&team, &env).unwrap_err().contains("exists"));
@@ -310,9 +310,25 @@ mod tests {
         let repo = steps("wye.toml");
         assert!(repo.contains("\n     wye doctor -c wye.toml\n"), "{repo}");
         assert!(
-            repo.contains("\n     wye token issue alice -c wye.toml > alice.token\n"),
+            repo.contains("\n     wye token issue alice -c wye.toml --out alice.token\n"),
             "{repo}"
         );
+    }
+
+    #[test]
+    fn the_default_needs_no_key_and_says_what_an_exported_one_does() {
+        let options = options(Mode::Forward, false, Path::new("/h/wye.toml"));
+        let config = Config::from_toml_str(&options.config("").unwrap()).unwrap();
+        assert!(config.auth.is_none());
+        assert_eq!(config.server.listen.ip().to_string(), "127.0.0.1");
+        let steps = options.next_steps(|p| p.display().to_string());
+        assert!(!steps.contains(".key"), "{steps}");
+        let flat = steps.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("an exported ANTHROPIC_API_KEY takes over"),
+            "{steps}"
+        );
+        assert!(steps.contains("  1. Check the keys"), "{steps}");
     }
 
     #[test]

@@ -170,3 +170,114 @@ fn without_a_config_of_your_own_the_error_says_what_to_do() {
         "wye: no config at ~/.wye/wye.toml: write one with `wye init`, or pass -c <path>\n"
     );
 }
+
+/// The commands that need no argument, on a fresh home.
+#[test]
+fn the_defaults_work_on_a_fresh_home() {
+    let setup = Setup::new("fresh");
+    std::fs::remove_dir_all(setup.home.join(".wye")).unwrap();
+    // keygen's default path is in a home nothing has made yet.
+    let keygen = setup.run(&["token", "keygen"]);
+    assert!(keygen.status.success(), "{}", err(&keygen));
+    std::fs::remove_file(setup.home.join(".wye/issuer.key")).unwrap();
+
+    // `init` is for you on this machine, and needs no key.
+    let init = setup.run(&["init"]);
+    assert!(init.status.success(), "{}", err(&init));
+    let config = std::fs::read_to_string(setup.home.join(".wye/wye.toml")).unwrap();
+    assert!(
+        config.contains("forward_caller_credential = true"),
+        "{config}"
+    );
+    assert!(setup.run(&["validate"]).status.success());
+    // `service status` when not installed is a state a script can test.
+    assert_eq!(setup.run(&["service", "status"]).status.code(), Some(3));
+    // The next steps' `wye report` has nothing yet, and says how to get it.
+    let report = err(&setup.run(&["report"]));
+    assert!(report.contains("wye service install"), "{report}");
+
+    // `init --team` writes where a team reviews it, and keeps the key out.
+    std::fs::remove_file(setup.repo.join("wye.toml")).unwrap();
+    assert!(setup.run(&["init", "--team"]).status.success());
+    assert!(setup.repo.join("wye.toml").exists());
+    assert!(setup.home.join(".wye/issuer.key").exists());
+    let issued = setup.run(&["token", "issue", "alice", "-c", "wye.toml"]);
+    assert!(out(&issued).starts_with("eyJ"), "{}", err(&issued));
+    let written = setup.run(&[
+        "token",
+        "issue",
+        "bob",
+        "-c",
+        "wye.toml",
+        "--out",
+        "bob.token",
+    ]);
+    assert!(written.status.success(), "{}", err(&written));
+    assert!(
+        out(&written).is_empty(),
+        "a token file, not a token on screen"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(setup.repo.join("bob.token"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
+    }
+    // A bad signing key is not the config's fault.
+    let no_key = err(&setup.run(&["token", "issue", "a", "-c", "wye.toml", "--key", "nokey"]));
+    assert!(no_key.starts_with("wye: cannot read nokey"), "{no_key}");
+
+    // `policy-test` looks next to the config.
+    let cases = setup.repo.join("policy-tests");
+    std::fs::create_dir_all(&cases).unwrap();
+    std::fs::write(cases.join("a.json"), r#"{"model":"m","max_tokens":1}"#).unwrap();
+    std::fs::write(cases.join("a.expect.toml"), "decision = \"refuse\"\n").unwrap();
+    let tested = out(&setup.run(&["policy-test", "-c", "wye.toml"]));
+    assert!(tested.contains("1 passed"), "{tested}");
+}
+
+#[test]
+fn a_reader_going_away_is_not_a_failure() {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let status = Command::new(env!("CARGO_BIN_EXE_wye"))
+        .arg("--help")
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(status.status.code(), Some(0), "{}", err(&status));
+}
+
+#[test]
+fn help_answers_the_usual_ways_of_asking() {
+    let setup = Setup::new("help");
+    for args in [
+        &["help", "doctor"][..],
+        &["--help", "doctor"][..],
+        &["doctor", "--help"][..],
+    ] {
+        assert!(
+            out(&setup.run(args)).starts_with("Check a config's keys"),
+            "{args:?}"
+        );
+    }
+    for args in [
+        &["token", "help", "issue"][..],
+        &["help", "token", "issue"][..],
+    ] {
+        assert!(
+            out(&setup.run(args)).starts_with("Issue a gateway token"),
+            "{args:?}"
+        );
+    }
+    assert!(out(&setup.run(&["version"])).starts_with("wye "));
+    let leading = err(&setup.run(&["-c", "x", "doctor"]));
+    assert!(
+        leading.contains("options go after the command"),
+        "{leading}"
+    );
+}

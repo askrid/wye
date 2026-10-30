@@ -18,7 +18,7 @@ Release archives and a local OCI image are built; the rest of this list is plann
 `wye --help` lists the commands, and `wye <command> --help` shows a command's options; both come from the table the parser reads, so help cannot drift from what is accepted. Options follow the GNU conventions: any order, `--name value` or `--name=value`, `-c` for `--config`, and `--` before arguments that start with a dash.
 
 ```bash
-wye init [--subscription | --auth] [--openai] [--out <path>]
+wye init [--api-key | --team] [--openai] [--out <path>]
 wye serve [-c <config>]
 wye service install [-c <config>] [--yes] [--dry-run]
 wye service status | restart | uninstall
@@ -28,11 +28,11 @@ wye claude [--url <url>] [--token-file <path>] [<claude args>...]
 wye codex [--url <url>] [--token-file <path>] [<codex args>...]
 wye report [<log> | -]
 wye token keygen [--out <path>]
-wye token issue <subject> [--ttl 7d] [--models <list>] [--max-output-tokens <n>] [-c <config>] [--key <path>]
+wye token issue <subject> [--ttl 7d] [--models <list>] [--max-output-tokens <n>] [--out <path>] [-c <config>] [--key <path>]
 wye explain [-c <config>] [--token-file <path>] [--session <id>] [--path <path>] [--target-model <model>]... <request.json | ->
-wye policy-test [-c <config>] <dir>
+wye policy-test [-c <config>] [<dir>]
 wye policy-diff <old> <new>
-wye probe <url>
+wye probe [<url>]
 ```
 
 **Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
@@ -43,11 +43,11 @@ wye probe <url>
 
 **`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
 
-- By default, for one developer with an Anthropic API key, read at startup from `anthropic.key` next to the config, where a background service finds it too.
-- `--subscription`: for one developer forwarding Claude Code's own claude.ai login, on loopback only.
-- `--auth`: a shared gateway. It listens on every interface, takes gateway tokens (`[auth]`), reads the provider key from `ANTHROPIC_API_KEY` in the deployment, and creates the signing key `~/.wye/issuer.key` (mode 600, outside the config's directory and Git) unless one is there to reuse.
+- By default, for one developer on this machine: each caller's own credential goes through, whether Claude Code's claude.ai login or an API key, and the gateway holds no secret. Loopback only.
+- `--api-key`: for one developer whose gateway holds an Anthropic API key, read at startup from `anthropic.key` next to the config, where a background service finds it too.
+- `--team`: a shared gateway. It listens on every interface, takes gateway tokens (`[auth]`), reads the provider key from `ANTHROPIC_API_KEY` in the deployment, and creates the signing key `~/.wye/issuer.key` (mode 600, outside the config's directory and Git) unless one is there to reuse.
 
-`--openai` adds `[routes.openai]`, for Codex and the OpenAI SDKs. The config goes to `~/.wye/wye.toml` unless `--out` names another path, such as `wye.toml` in a config repository; the next steps then carry `-c`.
+`--openai` adds `[routes.openai]`, for Codex and the OpenAI SDKs, with the OpenAI key in `openai.key` next to the config (with `--team`, in `OPENAI_API_KEY`). The config goes to `~/.wye/wye.toml`, or with `--team` to `./wye.toml`, for the repository it is reviewed in, unless `--out` names another path; the next steps carry `-c` when the lookup would not find it.
 
 **`wye validate`** parses the config and reads the identity providers' key sets; secrets in the environment are left to `doctor`.
 
@@ -62,7 +62,7 @@ Every check runs, so one pass lists every problem; exit 3 if any failed. Not che
 
 **`wye explain`** prints each check `serve` would make for one request, calling the same functions in the same order, offline: endpoint, credential (verified at the current time), body size, alias resolution, model permission, output-token ceiling, the route upstream with `[routes.claude]` or `[routes.openai]` (and whether the session id or the credential subject chose it) and the failover order, upstream URL and provider credential (by name, never value), the provider's model id (Bedrock), the `[pricing]` entry that prices the model at that upstream, and whether cache diagnostics would hash it; with `--target-model` (or `[upgrade_check]`), what each target model would reject, the fix, and the source. Exit 0 for forward, 3 for a refusal, with the status and error the server would send. The body is read as the server reads it: up to its `model`, which decides aliases, permissions, and a ceiling already known, then the rest, when permissions or a ceiling apply, as the server checks it while it streams. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the server answers a compressed or non-UTF-8 body under a policy with `415`). With cost ceilings it will also print the cost bound. Routing is a pure function of request, credential, and config, so the answer is what every replica would do, and committed sample requests make policy testable in CI: a change that reroutes traffic or raises a cost bound fails review.
 
-**`wye policy-test <dir>`**: each `<name>.json` in the directory is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream` (the route upstream it reaches), `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused, an alias resolved by a canary rollout rule), and the test suite runs them.
+**`wye policy-test [<dir>]`**: each `<name>.json` in the directory (by default `policy-tests`, next to the config) is a request body and `<name>.expect.toml` states the decision: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream` (the route upstream it reaches), `path`, `session`, and a `[credential]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the credential's claims and only the signature check is skipped; every later check is the server's, through `explain`. It prints one line per case and exits 3 if any fails. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases (the background Haiku model allowed, Opus above the configured ceiling refused, no credential refused, an alias resolved by a canary rollout rule), and the test suite runs them.
 
 ```text
 policy-tests/
@@ -88,9 +88,9 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 
 Every line fits 80 columns: token counts are compact (`635M`), times read as `4h01m`, long names are cut, and a session's subject and compactions sit on the line under it. Other lines are skipped and counted. `wye serve >> ~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
 
-**`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway, and asks its `/healthz` (the gateway's `/` serves nothing), so `wye probe http://127.0.0.1:8080` is the check `wye claude` and `wye service` make; a path is asked as given, such as `/readyz` for a load balancer's view in images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`).
+**`wye probe [<url>]`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s. The default is the gateway `wye claude` would use (`$WYE_URL`, else this machine's). A URL without a path names a gateway, and asks its `/healthz` (the gateway's `/` serves nothing), so `wye probe http://127.0.0.1:8080` is the check `wye claude` and `wye service` make; a path is asked as given, such as `/readyz` for a load balancer's view in images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`).
 
-**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-credentials)) with `~/.wye/issuer.key`, or `--key`; it never runs inside the server. The issuer, audience, and longest lifetime come from the config's `[auth]`, and the key id from the `[[auth.keys]]` entry whose public half matches the key, so a rotated key needs no flag. `--ttl` takes `30m`, `8h`, or `7d` and defaults to `max_credential_ttl_secs` (one week unless set); a longer one is refused, as the server would refuse the token. `--models <name,prefix*,...>` limits the token to those models, and `--max-output-tokens <n>` lowers its output-token ceiling. Without a config, `--issuer`, `--audience`, and `--kid` give the claims, for a service that mints tokens. `wye token keygen` makes another key, for rotation, and prints the `[[auth.keys]]` entry to add.
+**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-credentials)) with `~/.wye/issuer.key`, or `--key`; it never runs inside the server. The issuer, audience, and longest lifetime come from the config's `[auth]`, and the key id from the `[[auth.keys]]` entry whose public half matches the key, so a rotated key needs no flag. `--ttl` takes `30m`, `8h`, or `7d` and defaults to `max_credential_ttl_secs` (one week unless set); a longer one is refused, as the server would refuse the token. `--models <name,prefix*,...>` limits the token to those models, and `--max-output-tokens <n>` lowers its output-token ceiling. The token goes to stdout, or with `--out` to a new file only you can read. A service that mints tokens does the same with a config of its own. `wye token keygen` makes another key, for rotation, and prints the `[[auth.keys]]` entry to add.
 
 ### Client wrapper
 
@@ -99,11 +99,11 @@ Every line fits 80 columns: token counts are compact (`635M`), times read as `4h
 To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; after pulling changes, rerun it and `wye service restart`). Then:
 
 ```bash
-wye init --subscription          # writes ~/.wye/wye.toml; plain `wye init` for an API key
+wye init                         # writes ~/.wye/wye.toml
 wye service install              # in the background, now and at every login
                                  # (or in a terminal: wye serve >> ~/.wye/usage.jsonl)
 
-unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # on a subscription: either one replaces your login
 wye claude                       # wye claude --resume <id>, etc.
 
 wye report                       # afterwards, or at any time
@@ -182,12 +182,21 @@ Developers use the same setting with a helper that prints a token from an issuer
 
 | User | Topology | Integration |
 |---|---|---|
-| Solo developer | Local subprocess / native binary | `wye claude` |
+| Solo developer | Native binary, as a user service | `wye service install`, then `wye claude` |
 | Small team | Internal container or VM behind HTTPS | SDK base URL + gateway credential |
 | Web backend on multi-region Kubernetes | Deployment + ClusterIP Service per cluster/region | Backend → cluster-local Wye DNS |
 | Public AI app | Backend sidecar or shared internal Service | App owns user quotas; Wye routes inference |
 | Serverless (e.g. Vercel) | Compatible serverless adapter or separate gateway service | Backend → Wye |
 | Edge | Future WASM adapter | Platform-managed transport and scaling |
+
+Wye itself speaks plain HTTP, so a gateway beyond one machine goes behind something that terminates TLS: a platform's load balancer, an ingress, or a proxy on the same host. `wye claude` and `wye codex` refuse a remote gateway over plain http, since it would carry the token in the clear. With [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy), which gets a certificate on its own and flushes event streams as they arrive (not yet run against Wye):
+
+```text
+wye.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
 
 For a public app, a shared internal Deployment is preferred when many app replicas share a gateway; a sidecar per Pod gives stronger locality and independence.
 
@@ -229,7 +238,7 @@ wye service restart     # after editing the config or installing a new wye; chec
 wye service uninstall   # stops it and removes the file; the config and the log stay
 ```
 
-`restart` refuses a config that would not start and leaves the running service as it was. On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`).
+`status` exits 3 when the service is not running, installed or not. `restart` refuses a config that would not start and leaves the running service as it was. On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`).
 
 The files it writes, for reference or for a definition of your own. macOS, `~/Library/LaunchAgents/dev.wye.gateway.plist`:
 

@@ -8,13 +8,15 @@
 //! command a step runs is printed as it runs.
 
 use std::{
-    io::{BufRead, IsTerminal, Write},
+    io::{BufRead, IsTerminal},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use gateway_core::config::{Config, UpstreamCredential};
+
+use super::say;
 
 mod unit;
 
@@ -176,22 +178,26 @@ pub fn install(
     }
     let uid = uid()?;
     let commands = start_commands(context.manager, &uid, &file, replacing);
-    print!(
-        "{}",
-        plan(context.manager, &service, &file, replacing, &commands, show)
-    );
+    super::emit(&plan(
+        context.manager,
+        &service,
+        &file,
+        replacing,
+        &commands,
+        show,
+    ));
     if matches!(installed, Installed::Foreign) {
-        println!(
+        say!(
             "{} was not written by wye service install; it is replaced.",
             show(&file)
         );
     }
     if dry_run {
-        println!("\n{}:\n\n{definition}", show(&file));
+        say!("\n{}:\n\n{definition}", show(&file));
         return Ok(());
     }
     if !yes && !confirm(&file, &definition, show)? {
-        println!("Nothing changed.");
+        say!("Nothing changed.");
         return Ok(());
     }
     if let Some(dir) = file.parent() {
@@ -200,7 +206,7 @@ pub fn install(
     std::fs::create_dir_all(&context.wye_home)
         .map_err(|e| format!("cannot create {}: {e}", show(&context.wye_home)))?;
     write_atomically(&file, &definition)?;
-    println!("Wrote {}", show(&file));
+    say!("Wrote {}", show(&file));
     run_all(&commands, show)?;
     wait_for(&url, &service.errors, show)
 }
@@ -215,8 +221,7 @@ fn confirm(file: &Path, definition: &str, show: &dyn Fn(&Path) -> String) -> Res
         );
     }
     loop {
-        print!("Install? [y]es, [n]o, [s]how the file: ");
-        std::io::stdout().flush().map_err(|e| e.to_string())?;
+        super::emit("Install? [y]es, [n]o, [s]how the file: ");
         let mut answer = String::new();
         std::io::stdin()
             .lock()
@@ -224,35 +229,35 @@ fn confirm(file: &Path, definition: &str, show: &dyn Fn(&Path) -> String) -> Res
             .map_err(|e| e.to_string())?;
         match answer.trim().to_ascii_lowercase().as_str() {
             "y" | "yes" => return Ok(true),
-            "s" | "show" => println!("\n{}:\n\n{definition}", show(file)),
+            "s" | "show" => say!("\n{}:\n\n{definition}", show(file)),
             _ => return Ok(false),
         }
     }
 }
 
 /// `wye service status`: whether it is installed and answering; `false`
-/// when installed but not answering.
+/// when it is not running, for whatever reason.
 pub fn status(context: &Context) -> Result<bool, String> {
     let show = &context.show;
     let service = match context.installed()? {
         Installed::Ours(service) => service,
         Installed::None => {
-            println!("Not installed. `wye service install` sets it up.");
-            return Ok(true);
+            say!("Not installed. `wye service install` sets it up.");
+            return Ok(false);
         }
         Installed::Foreign => {
-            println!(
+            say!(
                 "{} exists but was not written by wye service install; \
                  `wye service install` offers to replace it.",
                 show(&context.file())
             );
-            return Ok(true);
+            return Ok(false);
         }
     };
     let log_size = std::fs::metadata(&service.log)
         .map(|m| format!(" ({})", file_size(m.len())))
         .unwrap_or_default();
-    println!(
+    say!(
         "{:<9} {}\n{:<9} {} serve --config {}\n{:<9} {}{log_size}",
         "Installed",
         show(&context.file()),
@@ -269,11 +274,11 @@ pub fn status(context: &Context) -> Result<bool, String> {
         .map(|url| (probe(&url).is_ok(), url));
     match answering {
         Some((true, url)) => {
-            println!("{:<9} answering at {url}", "State");
+            say!("{:<9} answering at {url}", "State");
             Ok(true)
         }
         Some((false, url)) => {
-            println!(
+            say!(
                 "{:<9} not answering at {url}; the end of {} may say why",
                 "State",
                 show(&service.errors)
@@ -281,7 +286,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
             Ok(false)
         }
         None => {
-            println!(
+            say!(
                 "{:<9} its config does not parse; `wye validate -c {}`",
                 "State",
                 show(&service.config)
@@ -307,18 +312,18 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
     let file = context.file();
     let service = match context.installed()? {
         Installed::None => {
-            println!("Not installed; nothing changed.");
+            say!("Not installed; nothing changed.");
             return Ok(());
         }
         _ => context.ours()?,
     };
     run_all(&stop_commands(context.manager, &uid()?), show)?;
     std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", show(&file)))?;
-    println!("Removed {}", show(&file));
+    say!("Removed {}", show(&file));
     if context.manager == Manager::Systemd {
         run_all(&vec![systemctl(&["daemon-reload"])], show)?;
     }
-    println!(
+    say!(
         "The config {} and the log {} stay.",
         show(&service.config),
         show(&service.log)
@@ -330,7 +335,7 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
 /// not loaded is not an error.
 fn run_all(commands: &Commands, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
     for command in commands {
-        println!("  $ {}", shell(command, show));
+        say!("  $ {}", shell(command, show));
         let (program, args) = command.split_first().ok_or("an empty command")?;
         // launchd may still be tearing the old service down after `bootout`.
         let attempts = if args.first().map(String::as_str) == Some("bootstrap") {
@@ -367,7 +372,7 @@ fn wait_for(url: &str, errors: &Path, show: &dyn Fn(&Path) -> String) -> Result<
     let deadline = std::time::Instant::now() + START_WAIT;
     while std::time::Instant::now() < deadline {
         if probe(url).is_ok() {
-            println!("The gateway answers at {url}.");
+            say!("The gateway answers at {url}.");
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(250));
