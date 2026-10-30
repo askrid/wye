@@ -155,9 +155,14 @@ async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
 #[tokio::test]
 async fn probe_succeeds_only_for_a_2xx_answer() {
     let h = Harness::api_key(ok()).await;
-    wye::probe(&format!("http://{}/healthz", h.gateway))
-        .await
-        .unwrap();
+    let base = format!("http://{}", h.gateway);
+    let health = format!("{base}/healthz");
+    assert_eq!(wye::probe(&health).await.unwrap(), health);
+    // Without a path, a URL names a gateway: its `/` serves nothing.
+    assert_eq!(wye::probe(&base).await.unwrap(), health);
+    assert_eq!(wye::probe(&format!("{base}/")).await.unwrap(), health);
+    let ready = format!("{base}/readyz");
+    assert_eq!(wye::probe(&ready).await.unwrap(), ready);
     let not_found = wye::probe(&format!("http://{}/nope", h.gateway))
         .await
         .unwrap_err();

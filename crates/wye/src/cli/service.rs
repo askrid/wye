@@ -82,14 +82,14 @@ fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> 
     Ok(config)
 }
 
-/// Where the gateway answers its health check on this machine.
-fn health_url(listen: SocketAddr) -> String {
+/// The URL of a gateway listening on `listen`, from this machine.
+fn local_url(listen: SocketAddr) -> String {
     let ip = match listen.ip() {
         ip if ip.is_unspecified() && ip.is_ipv4() => Ipv4Addr::LOCALHOST.into(),
         ip if ip.is_unspecified() => Ipv6Addr::LOCALHOST.into(),
         ip => ip,
     };
-    format!("http://{}/healthz", SocketAddr::new(ip, listen.port()))
+    format!("http://{}", SocketAddr::new(ip, listen.port()))
 }
 
 /// What the service definition file holds.
@@ -165,13 +165,12 @@ pub fn install(
     let file = context.file();
     let installed = context.installed()?;
     let replacing = !matches!(installed, Installed::None);
-    let health = health_url(config.server.listen);
+    let url = local_url(config.server.listen);
     // A gateway that answers when none is installed is another one, such
     // as `wye serve` in a terminal: the service could not take its port.
-    if !replacing && probe(&health).is_ok() {
+    if !replacing && probe(&url).is_ok() {
         return Err(format!(
-            "a gateway already answers at {} (a wye serve in a terminal?); stop it first",
-            health.trim_end_matches("/healthz")
+            "a gateway already answers at {url} (a wye serve in a terminal?); stop it first"
         ));
     }
     let uid = uid()?;
@@ -202,7 +201,7 @@ pub fn install(
     write_atomically(&file, &definition)?;
     println!("Wrote {}", show(&file));
     run_all(&commands, show)?;
-    wait_for(&health, &service.log, show)
+    wait_for(&url, &service.log, show)
 }
 
 /// Asks before installing; `[s]how` prints the file and asks again.
@@ -265,22 +264,17 @@ pub fn status(context: &Context) -> Result<bool, String> {
     let answering = std::fs::read_to_string(&service.config)
         .ok()
         .and_then(|source| Config::from_toml_str(&source).ok())
-        .map(|config| health_url(config.server.listen))
+        .map(|config| local_url(config.server.listen))
         .map(|url| (probe(&url).is_ok(), url));
     match answering {
         Some((true, url)) => {
-            println!(
-                "{:<9} answering at {}",
-                "State",
-                url.trim_end_matches("/healthz")
-            );
+            println!("{:<9} answering at {url}", "State");
             Ok(true)
         }
         Some((false, url)) => {
             println!(
-                "{:<9} not answering at {}; the end of the log may say why",
-                "State",
-                url.trim_end_matches("/healthz")
+                "{:<9} not answering at {url}; the end of the log may say why",
+                "State"
             );
             Ok(false)
         }
@@ -302,7 +296,7 @@ pub fn restart(context: &Context) -> Result<(), String> {
     let config = check(&service.config, show)
         .map_err(|e| format!("{e}\nThe service keeps running as it was."))?;
     run_all(&restart_commands(context.manager, &uid()?), show)?;
-    wait_for(&health_url(config.server.listen), &service.log, show)
+    wait_for(&local_url(config.server.listen), &service.log, show)
 }
 
 /// `wye service uninstall`: stops the service and removes its definition.
@@ -367,11 +361,10 @@ fn run_all(commands: &Commands, show: &dyn Fn(&Path) -> String) -> Result<(), St
 }
 
 /// Waits for the gateway to answer, and says so.
-fn wait_for(health: &str, log: &Path, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
+fn wait_for(url: &str, log: &Path, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
     let deadline = std::time::Instant::now() + START_WAIT;
-    let url = health.trim_end_matches("/healthz");
     while std::time::Instant::now() < deadline {
-        if probe(health).is_ok() {
+        if probe(url).is_ok() {
             println!("The gateway answers at {url}.");
             return Ok(());
         }
@@ -383,7 +376,7 @@ fn wait_for(health: &str, log: &Path, show: &dyn Fn(&Path) -> String) -> Result<
     ))
 }
 
-fn probe(url: &str) -> Result<(), String> {
+fn probe(url: &str) -> Result<String, String> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

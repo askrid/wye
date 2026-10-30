@@ -32,6 +32,10 @@ pub use startup::{Resources, StartupError, UpstreamAuth, UpstreamResources, veri
 /// An error from a request body or the connection under it.
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
+/// Where the gateway answers that it is up; `wye probe`, `wye claude`, and
+/// `wye service` ask here.
+pub(crate) const HEALTH_PATH: &str = "/healthz";
+
 /// Anthropic's API-key header: a gateway credential arrives in it, and
 /// Wye's own key leaves in it.
 pub(crate) const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");

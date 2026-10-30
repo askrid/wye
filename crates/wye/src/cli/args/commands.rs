@@ -222,12 +222,13 @@ pub const COMMANDS: &[Command] = &[
     },
     Command {
         name: "probe",
-        summary: "Check that a URL answers 2xx, for container health checks",
+        summary: "Check that a gateway or URL answers 2xx",
         args: "<url>",
         arity: (1, 1),
         options: &[],
         passthrough: false,
-        notes: "",
+        notes: "A URL without a path names a gateway, and asks its /healthz; give /readyz \
+                for a load balancer's view. For images without curl.",
     },
 ];
 
