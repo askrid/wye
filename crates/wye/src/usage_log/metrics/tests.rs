@@ -9,7 +9,7 @@ fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -
         path,
         system: "anthropic",
         status,
-        outcome: "completed",
+        outcome: crate::usage_log::Outcome::Completed,
         duration_ms: ms,
         headers_ms: None,
         upstream: None,
@@ -116,9 +116,9 @@ fn series_beyond_the_limit_are_counted_not_kept() {
 fn cache_misses_are_counted_by_reason() {
     let mut metrics = Metrics::new(0);
     for miss in [
-        Some("unexplained"),
-        Some("after_compaction"),
-        Some("unexplained"),
+        Some(CacheMiss::Unexplained),
+        Some(CacheMiss::AfterCompaction),
+        Some(CacheMiss::Unexplained),
         None,
     ] {
         metrics.record(&Line {

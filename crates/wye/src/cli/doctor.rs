@@ -71,7 +71,7 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
         checks.extend(headers_in_clear(telemetry));
         if let Some(name) = &telemetry.otlp_headers_env {
             checks.push(
-                match env(name).ok().map(|v| crate::usage_log::parse_headers(&v)) {
+                match env(name).ok().map(|v| crate::startup::parse_headers(&v)) {
                     Some(Some(_)) => pass(format!("telemetry: ${name} set")),
                     Some(None) => fail(format!(
                         "telemetry: ${name} must hold key=value pairs separated by commas"
@@ -196,7 +196,7 @@ async fn head(
     uri: &Uri,
     roots: &[rustls::pki_types::CertificateDer<'static>],
 ) -> Check {
-    let https = match crate::upstream::https_connector(roots) {
+    let https = match crate::tls::https_connector(roots) {
         Ok(https) => https,
         Err(e) => return fail(format!("{name}: {e}")),
     };

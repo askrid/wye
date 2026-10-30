@@ -6,7 +6,9 @@
 //! `wye.telemetry.lost` instead of growing memory. Per-process telemetry is
 //! not shared state: replicas never compare or merge these numbers.
 
-use super::Line;
+use gateway_core::agent::CacheMiss;
+
+use super::{Line, Outcome};
 
 /// Attribute sets kept per metric.
 const MAX_SERIES: usize = 256;
@@ -21,13 +23,13 @@ struct RequestSeries {
     route: Box<str>,
     upstream: Option<Box<str>>,
     status: u16,
-    outcome: &'static str,
+    outcome: Outcome,
     count: u64,
 }
 
 struct DurationSeries {
     route: Box<str>,
-    outcome: &'static str,
+    outcome: Outcome,
     buckets: [u64; DURATION_BOUNDS_MS.len() + 1],
     count: u64,
     sum: f64,
@@ -67,9 +69,6 @@ struct FailoverSeries {
     count: u64,
 }
 
-/// Cache-miss reasons, in [`CACHE_MISS_REASONS`] order.
-const CACHE_MISS_REASONS: [&str; 3] = ["compaction", "after_compaction", "unexplained"];
-
 /// Cumulative totals since `start_ns`.
 pub(super) struct Metrics {
     start_ns: u64,
@@ -82,7 +81,8 @@ pub(super) struct Metrics {
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<(Box<str>, u64)>,
     /// Requests that wrote the prompt cache without reading it, by reason.
-    cache_misses: [u64; CACHE_MISS_REASONS.len()],
+    /// Per reason, in [`CacheMiss::ALL`] order.
+    cache_misses: [u64; CacheMiss::ALL.len()],
     overflow: u64,
 }
 
@@ -97,7 +97,7 @@ impl Metrics {
             upgrades: Vec::new(),
             failovers: Vec::new(),
             tool_calls: Vec::new(),
-            cache_misses: [0; CACHE_MISS_REASONS.len()],
+            cache_misses: [0; CacheMiss::ALL.len()],
             overflow: 0,
         }
     }
@@ -158,7 +158,7 @@ impl Metrics {
         }
         if let Some(count) = line
             .cache_miss
-            .and_then(|miss| CACHE_MISS_REASONS.iter().position(|&r| r == miss))
+            .and_then(|miss| CacheMiss::ALL.iter().position(|&r| r == miss))
             .and_then(|i| self.cache_misses.get_mut(i))
         {
             *count += 1;

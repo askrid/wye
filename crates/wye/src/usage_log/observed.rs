@@ -159,7 +159,7 @@ impl<B> Drop for Observed<B> {
         let (model, usage, tool_calls) = match self.scanner.take() {
             Some(mut scanner) => (
                 scanner.model().map(Box::from),
-                Some((scanner.usage(), scanner.status().as_str())),
+                Some((scanner.usage(), scanner.status())),
                 scanner.take_tool_calls(),
             ),
             None => (None, None, None),

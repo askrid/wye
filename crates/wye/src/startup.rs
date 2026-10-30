@@ -13,7 +13,7 @@ use gateway_core::{
 };
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 
-use crate::UpstreamAuth;
+use http::{HeaderMap, HeaderValue};
 
 /// Failures that prevent the gateway from starting.
 #[derive(Debug)]
@@ -94,7 +94,7 @@ pub struct Resources {
     /// Keys the prompt hashes in the usage log; present when cache diagnostics are on.
     pub prompt_key: Option<HashKey>,
     /// Extra headers for OTLP export requests, from `telemetry.otlp_headers_env`.
-    pub otlp_headers: http::HeaderMap,
+    pub otlp_headers: HeaderMap,
 }
 
 /// What one upstream's configuration references.
@@ -150,9 +150,9 @@ impl Resources {
             .as_ref()
             .and_then(|t| t.otlp_headers_env.as_ref())
         {
-            Some(name) => crate::usage_log::parse_headers(&env(name)?)
+            Some(name) => parse_headers(&env(name)?)
                 .ok_or_else(|| StartupError::InvalidOtlpHeaders(name.clone()))?,
-            None => http::HeaderMap::new(),
+            None => HeaderMap::new(),
         };
         Ok(Self {
             upstreams,
@@ -234,4 +234,71 @@ pub(crate) fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'stati
         return Err(error("no PEM certificates found".into()));
     }
     Ok(certs)
+}
+
+/// Credential Wye presents upstream.
+pub enum UpstreamAuth {
+    /// Replace the caller's credential headers with this `x-api-key` value
+    /// (Anthropic, Bedrock).
+    ApiKey(HeaderValue),
+    /// Replace the caller's credential headers with this `Authorization`
+    /// value, `Bearer` and the key (OpenAI, Claude Platform on AWS).
+    Bearer(HeaderValue),
+    /// Forward the caller's credential headers unchanged.
+    ForwardCaller,
+}
+
+impl UpstreamAuth {
+    pub fn api_key(key: &str) -> Result<Self, StartupError> {
+        Ok(Self::ApiKey(secret(key)?))
+    }
+
+    pub fn bearer(key: &str) -> Result<Self, StartupError> {
+        Ok(Self::Bearer(secret(&format!("Bearer {key}"))?))
+    }
+}
+
+fn secret(value: &str) -> Result<HeaderValue, StartupError> {
+    let mut value = HeaderValue::from_str(value).map_err(|_| StartupError::InvalidApiKey)?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+impl fmt::Debug for UpstreamAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
+            Self::Bearer(_) => f.write_str("Bearer(<redacted>)"),
+            Self::ForwardCaller => f.write_str("ForwardCaller"),
+        }
+    }
+}
+
+/// Parses `key1=value1,key2=value2` (the `OTEL_EXPORTER_OTLP_HEADERS` format)
+/// into headers whose values are marked sensitive.
+pub(crate) fn parse_headers(spec: &str) -> Option<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    for pair in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let (name, value) = pair.split_once('=')?;
+        let name = http::HeaderName::from_bytes(name.trim().as_bytes()).ok()?;
+        let mut value = HeaderValue::from_str(value.trim()).ok()?;
+        value.set_sensitive(true);
+        headers.append(name, value);
+    }
+    Some(headers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn headers_parse_and_are_sensitive() {
+        let headers = parse_headers("api-key=secret, x-team = research").unwrap();
+        assert_eq!(headers["api-key"], "secret");
+        assert!(headers["api-key"].is_sensitive());
+        assert_eq!(headers["x-team"], "research");
+        assert!(parse_headers("no-equals-sign").is_none());
+        assert!(parse_headers("").unwrap().is_empty());
+    }
 }

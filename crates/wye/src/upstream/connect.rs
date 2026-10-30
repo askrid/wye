@@ -18,7 +18,7 @@ use std::{
 use http::Uri;
 use tower_service::Service;
 
-use super::BoxError;
+use crate::BoxError;
 
 /// `inner`, failing any connect that takes longer than `timeout`.
 #[derive(Clone)]

@@ -271,32 +271,3 @@ async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped
         }
     }
 }
-
-/// Parses `key1=value1,key2=value2` (the `OTEL_EXPORTER_OTLP_HEADERS` format)
-/// into headers whose values are marked sensitive.
-pub(crate) fn parse_headers(spec: &str) -> Option<HeaderMap> {
-    let mut headers = HeaderMap::new();
-    for pair in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
-        let (name, value) = pair.split_once('=')?;
-        let name = http::HeaderName::from_bytes(name.trim().as_bytes()).ok()?;
-        let mut value = HeaderValue::from_str(value.trim()).ok()?;
-        value.set_sensitive(true);
-        headers.append(name, value);
-    }
-    Some(headers)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn headers_parse_and_are_sensitive() {
-        let headers = parse_headers("api-key=secret, x-team = research").unwrap();
-        assert_eq!(headers["api-key"], "secret");
-        assert!(headers["api-key"].is_sensitive());
-        assert_eq!(headers["x-team"], "research");
-        assert!(parse_headers("no-equals-sign").is_none());
-        assert!(parse_headers("").unwrap().is_empty());
-    }
-}

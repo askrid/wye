@@ -6,11 +6,11 @@ use gateway_core::{
     agent::CacheMiss,
     pricing::{CostStatus, Pico, Pricing, Usd},
     prompt::HashKey,
-    usage::ToolCalls,
+    usage::{ToolCalls, UsageStatus},
 };
 use serde::{Serialize, Serializer};
 
-use super::{Record, RefusedAttempt, agent::ToolDurations};
+use super::{Outcome, Record, RefusedAttempt, agent::ToolDurations};
 use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
 
 /// What the writer adds to every record: keys, prices, upgrade targets.
@@ -31,7 +31,8 @@ pub(super) struct Line<'a> {
     #[serde(skip)]
     pub(super) system: &'static str,
     pub(super) status: u16,
-    pub(super) outcome: &'static str,
+    #[serde(serialize_with = "outcome")]
+    pub(super) outcome: Outcome,
     pub(super) duration_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) headers_ms: Option<f64>,
@@ -92,8 +93,8 @@ pub(super) struct Line<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tool_calls: Option<ToolCallsField<'a>>,
     /// Why the request wrote the prompt cache without reading it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) cache_miss: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "cache_miss")]
+    pub(super) cache_miss: Option<CacheMiss>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) prompt: Option<PromptRecord>,
     /// For a checked request, the target models that would reject it and why.
@@ -102,6 +103,16 @@ pub(super) struct Line<'a> {
     /// Upstreams that refused the request before `upstream` answered.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub(super) failovers: &'a [RefusedAttempt],
+}
+
+/// An outcome by its name.
+fn outcome<S: Serializer>(outcome: &Outcome, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(outcome.as_str())
+}
+
+/// A cache-miss reason by its name.
+fn cache_miss<S: Serializer>(miss: &Option<CacheMiss>, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(miss.map_or("", CacheMiss::as_str))
 }
 
 /// A cost as an exact decimal string, written without an intermediate String.
@@ -121,11 +132,11 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
     let cost = pricing.map(|pricing| match (&r.model, &r.usage) {
-        (Some(model), Some((usage, status))) if *status != "unknown" => pricing.cost(
+        (Some(model), Some((usage, status))) if *status != UsageStatus::Unknown => pricing.cost(
             model,
             r.info.upstream.as_deref(),
             usage,
-            *status == "complete",
+            *status == UsageStatus::Complete,
         ),
         _ => gateway_core::pricing::Cost {
             pico: None,
@@ -139,7 +150,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         path: r.info.endpoint.path,
         system: r.info.endpoint.api.system(),
         status: r.status.as_u16(),
-        outcome: r.outcome.as_str(),
+        outcome: r.outcome,
         duration_ms: ms(r.duration),
         headers_ms: r.headers_after.map(ms),
         upstream: r.info.upstream.as_deref(),
@@ -164,7 +175,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         usage_status: r
             .usage
             .as_ref()
-            .map_or("not_observed", |(_, status)| status),
+            .map_or("not_observed", |(_, status)| status.as_str()),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
@@ -178,8 +189,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             usage.cache_creation_input_tokens,
             agent.compaction,
             agent.context_compacted,
-        )
-        .map(CacheMiss::as_str),
+        ),
         prompt: r
             .info
             .prompt

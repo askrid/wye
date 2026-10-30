@@ -2,7 +2,9 @@
 
 use std::io::Write;
 
-use super::{CACHE_MISS_REASONS, DURATION_BOUNDS_MS, Metrics};
+use gateway_core::agent::CacheMiss;
+
+use super::{DURATION_BOUNDS_MS, Metrics};
 use crate::usage_log::otlp::{Value, write_attribute};
 
 impl Metrics {
@@ -40,7 +42,7 @@ impl Metrics {
                         "http.response.status_code",
                         Some(Value::Int(u64::from(s.status))),
                     ),
-                    ("wye.outcome", Some(Value::Str(s.outcome))),
+                    ("wye.outcome", Some(Value::Str(s.outcome.as_str()))),
                 ],
             );
         }
@@ -69,7 +71,7 @@ impl Metrics {
                 &mut buf,
                 &[
                     ("http.route", Some(Value::Str(&s.route))),
-                    ("wye.outcome", Some(Value::Str(s.outcome))),
+                    ("wye.outcome", Some(Value::Str(s.outcome.as_str()))),
                 ],
             );
         }
@@ -175,9 +177,12 @@ impl Metrics {
             "{request}",
             "Requests that wrote the prompt cache without reading it, by reason",
         );
-        for (i, (reason, count)) in CACHE_MISS_REASONS.iter().zip(self.cache_misses).enumerate() {
+        for (i, (reason, count)) in CacheMiss::ALL.iter().zip(self.cache_misses).enumerate() {
             point_start(&mut buf, i, &times, count);
-            attributes(&mut buf, &[("wye.cache_miss", Some(Value::Str(reason)))]);
+            attributes(
+                &mut buf,
+                &[("wye.cache_miss", Some(Value::Str(reason.as_str())))],
+            );
         }
         buf.extend_from_slice(b"]}},");
 

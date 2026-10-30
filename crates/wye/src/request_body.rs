@@ -25,6 +25,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
+    admission::TokenLimitError,
     api::Api,
     policy::{PolicyError, PolicyScanner},
 };
@@ -34,8 +35,8 @@ use hyper::body::{Body, Frame, Incoming, SizeHint};
 use self::chunks::Chunks;
 pub(crate) use self::chunks::splice_chunks;
 use crate::{
+    BoxError,
     gauge::{Gauge, Held},
-    upstream::BoxError,
 };
 
 mod chunks;
@@ -97,52 +98,6 @@ struct Hold {
     /// applies.
     check_rest: bool,
 }
-
-/// An output-token maximum above the request's ceiling, or missing where
-/// the ceiling requires it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TokenLimitError {
-    /// The field's name: `max_tokens`, `max_output_tokens`, or
-    /// `max_completion_tokens`.
-    pub(crate) field: &'static str,
-    /// `None`: the request did not set the field.
-    pub(crate) requested: Option<u64>,
-    pub(crate) limit: u64,
-}
-
-impl TokenLimitError {
-    /// The refusal for `requested` under `limit` on `api`, if any.
-    pub(crate) fn check(api: Api, limit: u64, requested: Option<u64>) -> Option<Self> {
-        let refused = match requested {
-            Some(requested) => requested > limit,
-            None => api.token_field_required(),
-        };
-        refused.then_some(Self {
-            field: api.token_field(),
-            requested,
-            limit,
-        })
-    }
-}
-
-impl std::fmt::Display for TokenLimitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.requested {
-            Some(requested) => write!(
-                f,
-                "{} {requested} exceeds this credential's limit of {}",
-                self.field, self.limit
-            ),
-            None => write!(
-                f,
-                "{} is required: this credential's limit is {}",
-                self.field, self.limit
-            ),
-        }
-    }
-}
-
-impl std::error::Error for TokenLimitError {}
 
 /// The start of a request body, read until its model was known.
 ///

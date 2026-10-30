@@ -5,7 +5,11 @@
 use std::{ops::Range, time::Duration};
 
 use bytes::Bytes;
-use gateway_core::{api::Api, prompt, route};
+use gateway_core::{
+    api::Api,
+    prompt,
+    route::{self, affinity_key},
+};
 use http::{
     HeaderValue, Request, Response,
     header::{CONTENT_LENGTH, CONTENT_TYPE},
@@ -102,13 +106,10 @@ impl Gateway {
         info: &mut RequestInfo,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         // Session affinity: prompt caches are per provider account.
-        let key = info
-            .session_id
-            .as_ref()
-            .map(HeaderValue::as_bytes)
-            .or(info.identity.as_ref().map(|i| i.subject.as_bytes()))
-            .unwrap_or_default();
-        let ranking = route.route.rank(key);
+        let ranking = route.route.rank(affinity_key(
+            info.session_id.as_ref().map(HeaderValue::as_bytes),
+            info.identity.as_ref().map(|i| &*i.subject),
+        ));
         // Failover keeps the body for resending, unless it is declared too large.
         let failover = route
             .route

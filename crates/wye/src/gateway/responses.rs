@@ -1,7 +1,7 @@
 //! Responses Wye generates itself, in the error shape of the request's API.
 
 use bytes::Bytes;
-use gateway_core::api::Api;
+use gateway_core::{admission::Refusal, api::Api};
 use http::{HeaderName, HeaderValue, Response, StatusCode, header::CONTENT_TYPE};
 use http_body_util::{Either, Full};
 
@@ -22,12 +22,7 @@ const SHOULD_RETRY: HeaderName = HeaderName::from_static("x-should-retry");
 
 pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
     match e {
-        HoldError::Model(e) => error(
-            api,
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            e.as_str(),
-        ),
+        HoldError::Model(e) => refuse(api, &Refusal::Invalid(e)),
         HoldError::Overloaded => overloaded(api, "gateway is holding too many request bytes"),
         HoldError::TooLarge => too_large(api),
         HoldError::Stalled => error(
@@ -64,21 +59,18 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "api_error",
             "upstream request failed",
         ),
-        ForwardError::Policy(PolicyRefusal::Invalid(e)) => error(
-            api,
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            e.as_str(),
-        ),
-        ForwardError::Policy(PolicyRefusal::TokenLimit(e)) => error(
-            api,
-            StatusCode::FORBIDDEN,
-            "permission_error",
-            &e.to_string(),
-        ),
+        ForwardError::Policy(PolicyRefusal::Invalid(e)) => refuse(api, &Refusal::Invalid(e)),
+        ForwardError::Policy(PolicyRefusal::TokenLimit(e)) => refuse(api, &Refusal::TokenLimit(e)),
         ForwardError::Policy(PolicyRefusal::TooLarge) => too_large(api),
         ForwardError::Policy(PolicyRefusal::Broken) => unreadable_body(api),
     }
+}
+
+/// A policy refusal: the same status, type, and message `wye explain`
+/// reports.
+pub(super) fn refuse(api: Api, refusal: &Refusal) -> Response<ResBody> {
+    let status = StatusCode::from_u16(refusal.status()).unwrap_or(StatusCode::FORBIDDEN);
+    error(api, status, refusal.kind(), &refusal.to_string())
 }
 
 /// A body past `server.max_request_body_bytes`, declared or sent.

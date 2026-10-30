@@ -28,7 +28,7 @@ use gateway_core::{
     credential::Identity,
     pricing::Pricing,
     prompt::HashKey,
-    usage::{ToolCalls, Usage},
+    usage::{ToolCalls, Usage, UsageStatus},
 };
 use http::{HeaderValue, StatusCode};
 use tokio::{
@@ -42,7 +42,7 @@ use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
 pub(crate) use agent::AgentHeaders;
 use line::{Line, line, push_line};
 pub(crate) use observed::{BodyKind, Observed};
-pub(crate) use otlp::{OtlpTarget, parse_headers};
+pub(crate) use otlp::OtlpTarget;
 
 /// Records buffered before new ones are dropped.
 const QUEUE_CAPACITY: usize = 4096;
@@ -69,7 +69,7 @@ pub(crate) enum Outcome {
 }
 
 impl Outcome {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Completed => "completed",
             Self::Failed => "failed",
@@ -117,7 +117,7 @@ pub(crate) struct Record {
     duration: Duration,
     outcome: Outcome,
     model: Option<Box<str>>,
-    usage: Option<(Usage, &'static str)>,
+    usage: Option<(Usage, UsageStatus)>,
     /// `tool_use` blocks the response started.
     tool_calls: Option<Box<ToolCalls>>,
     unix_ms: u128,

@@ -4,7 +4,10 @@
 
 use std::{ops::Range, sync::Arc};
 
-use gateway_core::policy;
+use gateway_core::{
+    admission::{BodyChecks, Refusal},
+    policy::PolicyError,
+};
 use http::{
     HeaderMap, HeaderValue, Response, StatusCode,
     header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE},
@@ -14,10 +17,10 @@ use hyper::body::{Body, Incoming};
 
 use super::{
     Gateway, ResBody, content_length,
-    responses::{error, hold_error},
+    responses::{self, error, hold_error},
 };
 use crate::{
-    request_body::{ClientBody, RequestBody, TokenLimitError, hold_until_model},
+    request_body::{ClientBody, RequestBody, hold_until_model},
     usage_log::RequestInfo,
 };
 
@@ -42,27 +45,16 @@ impl Gateway {
     ) -> Result<(RequestBody<ClientBody>, Option<ModelSpan>), Box<Response<ResBody>>> {
         let api = info.endpoint.api;
         let mut body = Limited::new(body, self.max_request_body_bytes);
-        let credential_models = info.identity.as_ref().and_then(|i| i.models.as_deref());
-        // The ceiling bounds generation; count_tokens generates nothing.
-        let token_limit = info
-            .endpoint
-            .generates
-            .then(|| {
-                policy::token_limit(
-                    self.max_output_tokens,
-                    info.identity.as_ref().and_then(|i| i.max_output_tokens),
-                )
-            })
-            .flatten();
-        // A provider with its own model ids on the route: the model's
-        // place in the body is needed.
-        let prefixes_model_ids = self.route(api).is_some_and(|r| r.prefixes_model_ids);
-        if self.models.is_none()
-            && credential_models.is_none()
-            && token_limit.is_none()
-            && self.aliases.is_none()
-            && !prefixes_model_ids
-        {
+        let route = self.route(api);
+        let checks = BodyChecks::new(
+            self.models.as_deref(),
+            self.max_output_tokens,
+            self.aliases.as_ref(),
+            info.identity.as_deref(),
+            info.endpoint.generates,
+            route.is_some_and(|r| r.prefixes_model_ids),
+        );
+        if !checks.hold() {
             return Ok((RequestBody::new(body), None));
         }
         if let Some(reason) = unreadable(headers) {
@@ -78,24 +70,28 @@ impl Gateway {
             api,
             &self.held_bytes,
             self.max_held_request_bytes,
-            token_limit,
+            checks.token_limit,
         )
         .await
         .map_err(|e| Box::new(hold_error(api, e)))?;
+        if !checks.checks_rest() {
+            held.skip_rest_check();
+        }
+        let refuse = |refusal| Box::new(responses::refuse(api, &refusal));
+        let Some(sent) = held.model() else {
+            return Err(refuse(Refusal::Invalid(PolicyError::Missing)));
+        };
         // Permissions and pricing apply to the model that runs.
-        let alias = self
-            .aliases
-            .as_ref()
-            .zip(held.model())
-            .and_then(|(aliases, model)| aliases.get(model));
-        let resolved = alias.map(|alias| {
-            let subject = info.identity.as_ref().map(|i| &*i.subject);
-            (
-                Arc::clone(alias.name()),
-                Arc::clone(alias.model_for(subject)),
-            )
-        });
-        if let Some((name, model)) = &resolved {
+        let subject = info.identity.as_ref().map(|i| &*i.subject);
+        let resolved = checks
+            .resolve(sent, subject)
+            .map(|(name, model)| (Arc::clone(name), Arc::clone(model)));
+        if let Some((name, _)) = &resolved {
+            info.requested_model = Some(Arc::clone(name));
+        }
+        let model = resolved.as_ref().map_or(sent, |(_, model)| &**model);
+        checks.permit(model, sent).map_err(refuse)?;
+        if let Some((_, model)) = &resolved {
             let spliced = self
                 .alias_models
                 .get(model)
@@ -109,44 +105,13 @@ impl Gateway {
                 )));
             };
             adjust_content_length(headers, delta);
-            info.requested_model = Some(Arc::clone(name));
         }
-        if self.models.is_none() && credential_models.is_none() && token_limit.is_none() {
-            held.skip_rest_check();
-        }
-        let model = resolved.as_ref().map(|(_, m)| &**m).or(held.model());
-        let allowed =
-            model.is_some_and(|m| policy::permitted(self.models.as_deref(), credential_models, m));
-        if !allowed {
-            // The name the client sent: an alias's model stays config's business.
-            let sent = resolved
-                .as_ref()
-                .map(|(name, _)| &**name)
-                .or(held.model())
-                .unwrap_or_default();
-            return Err(Box::new(error(
-                api,
-                StatusCode::FORBIDDEN,
-                "permission_error",
-                &format!("this credential may not use the model {sent:?}"),
-            )));
-        }
-        // A value is final now; a missing field only once the whole body was read.
-        let requested = held.max_output_tokens();
         let body_read = held.ended() || body.is_end_stream();
-        if let Some(limit) = token_limit
-            && (requested.is_some() || body_read)
-            && let Some(refusal) = TokenLimitError::check(api, limit, requested)
-        {
-            let message = refusal.to_string();
-            return Err(Box::new(error(
-                api,
-                StatusCode::FORBIDDEN,
-                "permission_error",
-                &message,
-            )));
-        }
-        let model_span = prefixes_model_ids
+        checks
+            .check_tokens(api, held.max_output_tokens(), body_read)
+            .map_err(refuse)?;
+        let model_span = checks
+            .prefixes_model_ids
             .then(|| {
                 let start = held.model_span()?.start;
                 let model: Arc<str> = match &resolved {
