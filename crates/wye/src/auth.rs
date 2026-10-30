@@ -131,7 +131,7 @@ mod tests {
                 }],
             }),
             issuers: Vec::new(),
-            max_credential_ttl: Duration::from_secs(86_400),
+            max_token_ttl: Duration::from_secs(86_400),
         };
         Verifier::new(&auth, Vec::new()).unwrap()
     }

@@ -100,21 +100,21 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "https://api.openai.com"  # without /v1
 # api_key_env = "OPENAI_API_KEY"
 
-# Gateway credentials. Required to listen beyond loopback; incompatible with
+# Gateway tokens. Required to listen beyond loopback; incompatible with
 # forward_caller_credential. `wye init --team` writes this section and a
 # signing key; tokens are issued offline with the key:
 #   wye token issue alice --ttl 1d
-# Claude Code sends the credential with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
+# Claude Code sends the token with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
 # [auth]
 # issuer = "wye"
 # audience = "wye-prod"
-# max_credential_ttl_secs = 604800     # longest accepted exp - iat: one week
-# Models any credential may use (exact names, or prefixes ending in *); a
-# credential issued with --models narrows this further. Omit to allow all:
+# max_token_ttl_secs = 604800     # longest accepted exp - iat: one week
+# Models any token may use (exact names, or prefixes ending in *); a
+# token issued with --models narrows this further. Omit to allow all:
 # models = ["claude-sonnet-*", "claude-haiku-*"]
 # Output-token ceiling: the largest output-token value a request may ask for
 # (max_tokens, max_output_tokens, or max_completion_tokens per API)
-# (credentials issued with --max-output-tokens can only lower it):
+# (tokens issued with --max-output-tokens can only lower it):
 # max_output_tokens = 32000
 # Below the [auth] fields: in TOML, every key after a table header belongs
 # to that table.
@@ -164,7 +164,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Model catalog for GET /v1/models (absent without this section): Claude
 # Code's /model picker lists these when developers set
 # CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1. Up to 1000 models; each
-# caller sees only those its credential may use. Claude Code keeps ids that
+# caller sees only those its token may use. Claude Code keeps ids that
 # contain "claude" or "anthropic".
 # [discovery]
 # models = [
@@ -176,7 +176,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # the model, and a model upgrade is one reviewed change here. Permissions
 # apply to the model that runs; usage records show both (requested_model,
 # model). `when` rules (up to 32, first match by subject) move matching
-# credential subjects first. Claude Code's /model picker lists only ids
+# token subjects first. Claude Code's /model picker lists only ids
 # containing "claude" or "anthropic", so name aliases it should show
 # accordingly.
 # [[aliases]]

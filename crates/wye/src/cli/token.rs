@@ -168,11 +168,11 @@ pub fn issue(
                 public_key(key)
             )
         })?;
-    let longest = auth.max_credential_ttl.as_secs();
+    let longest = auth.max_token_ttl.as_secs();
     let ttl = issue.ttl_secs.unwrap_or(longest);
     if ttl > longest {
         return Err(format!(
-            "--ttl {} is longer than it accepts ({}, max_credential_ttl_secs)",
+            "--ttl {} is longer than it accepts ({}, max_token_ttl_secs)",
             show_duration(ttl),
             show_duration(longest)
         ));
@@ -224,7 +224,7 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o077, 0, "{mode:o}");
         }
-        let config = config("max_credential_ttl_secs = 3600", &public_key(&key));
+        let config = config("max_token_ttl_secs = 3600", &public_key(&key));
         let alice = Issue {
             subject: "alice",
             ..Issue::default()
@@ -246,7 +246,7 @@ mod tests {
         };
         assert_eq!(
             issue(&long, &key, &config, 0).unwrap_err(),
-            "--ttl 2h is longer than it accepts (1h, max_credential_ttl_secs)"
+            "--ttl 2h is longer than it accepts (1h, max_token_ttl_secs)"
         );
         let bad = Issue {
             models: Some("claude-*,a*b"),

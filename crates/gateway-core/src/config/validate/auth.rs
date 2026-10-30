@@ -11,7 +11,7 @@ use super::*;
 pub(crate) struct RawAuth {
     pub(crate) issuer: Option<String>,
     pub(crate) audience: Option<String>,
-    pub(crate) max_credential_ttl_secs: Option<u64>,
+    pub(crate) max_token_ttl_secs: Option<u64>,
     #[serde(default)]
     pub(crate) keys: Vec<RawPublicKey>,
     #[serde(default)]
@@ -93,10 +93,10 @@ pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
             .max_output_tokens
             .map(|n| nonzero(n, "auth.max_output_tokens"))
             .transpose()?,
-        max_credential_ttl: secs(
-            raw.max_credential_ttl_secs
+        max_token_ttl: secs(
+            raw.max_token_ttl_secs
                 .unwrap_or(DEFAULT_MAX_CREDENTIAL_TTL_SECS),
-            "auth.max_credential_ttl_secs",
+            "auth.max_token_ttl_secs",
         )?,
     })
 }

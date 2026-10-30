@@ -13,12 +13,12 @@
 //! path = "/v1/messages"      # optional, the default
 //! session = "s-1"            # optional Claude Code session id
 //!
-//! [credential]               # optional; claims taken as verified
+//! [token]               # optional; claims taken as verified
 //! subject = "alice"
 //! models = ["claude-haiku-*"]
 //! ```
 //!
-//! Tokens would expire in CI, so a case states the credential's claims and
+//! Tokens would expire in CI, so a case states the token's claims and
 //! only the signature check is skipped; every later check is the server's.
 
 use std::{fmt::Write as _, path::Path};
@@ -38,7 +38,7 @@ struct Expect {
     upstream: Option<String>,
     path: Option<String>,
     session: Option<String>,
-    credential: Option<Claims>,
+    token: Option<Claims>,
 }
 
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
@@ -98,7 +98,7 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
     )
     .map_err(|e| format!("{}: {e}", expect_path.display()))?;
     let body = std::fs::read(request).map_err(|e| e.to_string())?;
-    let credential = match expect.credential {
+    let credential = match expect.token {
         None => Credential::None,
         Some(claims) => Credential::Trusted(Identity {
             subject: claims.subject.into(),
@@ -111,7 +111,7 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
                     list.iter()
                         .map(|p| {
                             ModelPattern::parse(p)
-                                .ok_or_else(|| format!("credential model {p:?} is not a pattern"))
+                                .ok_or_else(|| format!("token model {p:?} is not a pattern"))
                         })
                         .collect::<Result<Box<[_]>, _>>()
                 })
@@ -201,7 +201,7 @@ mod tests {
             std::fs::write(dir.join(format!("{name}.json")), body).unwrap();
             std::fs::write(dir.join(format!("{name}.expect.toml")), expect).unwrap();
         };
-        let haiku_only = "[credential]\nsubject = \"ci\"\nmodels = [\"claude-haiku-*\"]";
+        let haiku_only = "[token]\nsubject = \"ci\"\nmodels = [\"claude-haiku-*\"]";
         case(
             "a-haiku",
             r#"{"model":"claude-haiku-4-5"}"#,
@@ -227,7 +227,7 @@ mod tests {
         case(
             "d-wrong",
             r#"{"model":"gpt-5"}"#,
-            "decision = \"forward\"\n[credential]\nsubject = \"ci\"",
+            "decision = \"forward\"\n[token]\nsubject = \"ci\"",
         );
         let (report, passed) = policy_test(&config, &dir, 0).unwrap();
         assert!(!passed, "{report}");

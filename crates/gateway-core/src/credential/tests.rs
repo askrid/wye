@@ -23,7 +23,7 @@ fn verifier(key: &Ed25519KeyPair) -> Verifier {
                 }],
             }),
             issuers: Vec::new(),
-            max_credential_ttl: Duration::from_secs(86_400),
+            max_token_ttl: Duration::from_secs(86_400),
         },
         Vec::new(),
     )

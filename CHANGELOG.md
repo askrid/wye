@@ -17,9 +17,9 @@ What is in it:
   never after the first response byte.
 - Providers for Claude: Anthropic, Claude Platform on AWS, and Amazon Bedrock,
   with API keys.
-- Gateway credentials: Wye's own Ed25519 tokens, or identity-provider tokens
+- Gateway tokens: Wye's own Ed25519 tokens, or identity-provider tokens
   (RS256, ES256, EdDSA) with keys pinned in config. Model permissions and
-  output-token ceilings, which a credential can narrow but never widen.
+  output-token ceilings, which a token can narrow but never widen.
 - Model aliases with per-subject rollout, and upgrade checks that report
   which requests a target model would reject.
 - Usage records per request (tokens, cost, cache hits and misses, session,

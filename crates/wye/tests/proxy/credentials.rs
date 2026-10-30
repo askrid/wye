@@ -250,7 +250,7 @@ async fn max_tokens_above_the_stricter_limit_is_refused() {
     let text = read_body(res).await;
     assert!(
         String::from_utf8_lossy(&text)
-            .contains("max_tokens 6000 exceeds this credential's limit of 4000"),
+            .contains("max_tokens 6000 exceeds this gateway token's limit of 4000"),
         "{text:?}"
     );
     assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 1);

@@ -236,7 +236,7 @@ impl Summary {
                     .entry((target.clone(), rule.clone()))
                     .or_default();
                 entry.0 += 1;
-                let client = r.subject.as_deref().unwrap_or("(no credential)");
+                let client = r.subject.as_deref().unwrap_or("(no token)");
                 if !entry.1.iter().any(|c| c == client) {
                     entry.1.push(client.to_owned());
                 }

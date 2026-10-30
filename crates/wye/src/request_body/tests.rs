@@ -266,7 +266,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
     assert_eq!(missing.requested, None);
     assert_eq!(
         missing.to_string(),
-        "max_output_tokens is required: this credential's limit is 4000"
+        "max_output_tokens is required: this gateway token's limit is 4000"
     );
 
     // Present and within the limit: forwarded unchanged.

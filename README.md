@@ -99,7 +99,7 @@ wye claude
 Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`, or an `apiKeyHelper` that fetches short-lived tokens
 from your identity provider
-([docs/operations.md](docs/operations.md#credential-renewal)). `wye codex` needs
+([docs/operations.md](docs/operations.md#token-renewal)). `wye codex` needs
 `[routes.openai]` in the config (`wye init --team --openai`, and
 `-e OPENAI_API_KEY` for the container).
 
@@ -219,13 +219,13 @@ calling the same functions in the same order:
 $ wye explain -c wye.toml --session session-a request.json
 config: wye.toml
 endpoint: POST /v1/messages
-credential: not required (no [auth])
+token: not required (no [auth])
 body: 90 bytes (limit 32 MiB)
-model: claude-opus-5-5; allowed by config: any; by credential: any
+model: claude-opus-5-5; allowed by config: any; by token: any
 route: upstream bedrock-us of 2 (cache_affine by session id)
 failover: on 429, 529, connect to anthropic in that order, for bodies up to 8 MiB
 upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages
-provider credential: x-api-key from $BEDROCK_API_KEY
+provider key: x-api-key from $BEDROCK_API_KEY
 model id: the body names anthropic.claude-opus-5-5 upstream, the provider's id for claude-opus-5-5
 price: claude-opus-5-5 at bedrock-us: input $4.00, output $20.00, cache read $0.40, cache write 5m $5.00, cache write 1h $8.00 per million tokens (pricing version anthropic-2026-10-06)
 decision: forward
@@ -247,14 +247,14 @@ Routing
   process-wide memory limits.
 
 Access control
-- Wye's own Ed25519 credentials (compact JWTs with the algorithm pinned), or
+- Wye's own Ed25519 tokens (compact JWTs with the algorithm pinned), or
   tokens from your identity provider such as GitHub Actions OIDC or your SSO,
   with keys pinned in config.
-- Model permissions and output-token ceilings. A credential can only narrow
+- Model permissions and output-token ceilings. A token can only narrow
   what config allows, never widen it.
 
 Model changes
-- Aliases (`coding-default` → a model), rolled out per team or credential.
+- Aliases (`coding-default` → a model), rolled out per team or token.
 - Upgrade checks: a sample of live requests is checked against the next
   model's breaking changes, and Wye reports which clients would fail. It never
   changes the requests.
@@ -270,7 +270,7 @@ Tooling
   sample requests with expected decisions, so routing and permission changes
   can be tested in CI.
 - `wye policy-diff old.toml new.toml` exits non-zero when a config change
-  widens access: a model newly allowed, a ceiling raised, a longer credential
+  widens access: a model newly allowed, a ceiling raised, a longer token
   lifetime, a new trusted key, auth removed, a listener opened wider, a new API route, or the operator's
   key where callers brought their own.
 - `wye init` for one developer or a team, `wye validate` and `wye doctor`,
@@ -343,7 +343,7 @@ Inside a container Wye has to listen on `0.0.0.0`, and Wye refuses to listen
 beyond loopback without `[auth]`. Health checks are `/healthz` and `/readyz`.
 On shutdown, readiness fails first and in-flight streams get a grace period to
 finish. [docs/operations.md](docs/operations.md) covers deployment with and
-without Kubernetes, telemetry, and credential renewal.
+without Kubernetes, telemetry, and token renewal.
 
 ## Development
 
@@ -372,7 +372,7 @@ helpers.
 - [docs/product.md](docs/product.md): scope, who it is for, strengths and weaknesses
 - [examples/wye.toml](examples/wye.toml): every configuration option
 - [docs/architecture.md](docs/architecture.md): how it works
-- [docs/policy.md](docs/policy.md): credentials, permissions, pricing
+- [docs/policy.md](docs/policy.md): tokens, permissions, pricing
 - [docs/operations.md](docs/operations.md): CLI, deployment, telemetry
 - [docs/roadmap.md](docs/roadmap.md): status and what is next
 - [docs/research.md](docs/research.md): benchmarks, experiments, open questions

@@ -63,7 +63,7 @@ fn explains_forwarding_and_each_refusal() {
     assert!(ok.refused.is_none(), "{}", ok.report());
     let report = ok.report();
     assert!(report.contains("subject alice"), "{report}");
-    assert!(report.contains("by credential: claude-haiku-*"), "{report}");
+    assert!(report.contains("by token: claude-haiku-*"), "{report}");
     assert!(
         report.contains("upstream: POST https://api.anthropic.com/v1/messages"),
         "{report}"
@@ -76,7 +76,7 @@ fn explains_forwarding_and_each_refusal() {
     // The server's message: the model as the client sent it.
     assert_eq!(
         forbidden.refused.as_ref().map(|r| r.2.as_str()),
-        Some("this credential may not use the model \"claude-sonnet-4-5\"")
+        Some("this gateway token may not use the model \"claude-sonnet-4-5\"")
     );
     assert_eq!(refused(forbidden), Some((403, "permission_error")));
     assert_eq!(
@@ -314,7 +314,7 @@ fn explains_responses_on_the_openai_route() {
         "{report}"
     );
     assert!(
-        report.contains("provider credential: Authorization: Bearer from $OPENAI_API_KEY"),
+        report.contains("provider key: Authorization: Bearer from $OPENAI_API_KEY"),
         "{report}"
     );
     assert!(
@@ -325,7 +325,7 @@ fn explains_responses_on_the_openai_route() {
     let missing = run("/v1/responses", br#"{"model":"gpt-5.5","input":[]}"#);
     assert_eq!(
         missing.refused.as_ref().map(|r| r.2.as_str()),
-        Some("max_output_tokens is required: this credential's limit is 1000")
+        Some("max_output_tokens is required: this gateway token's limit is 1000")
     );
 
     let no_claude = run(
@@ -428,7 +428,7 @@ fn chat_completions_carries_no_session_to_route_by() {
     )
     .report();
     assert!(
-        report.contains("cache_affine by nothing: no session id or credential"),
+        report.contains("cache_affine by nothing: no session id or token"),
         "{report}"
     );
 }
