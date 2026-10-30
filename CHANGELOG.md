@@ -28,9 +28,9 @@ What is in it:
 - Cost from a price table in config, in exact integer arithmetic.
 - Commands: `init`, `serve`, `validate`, `doctor`, `explain`,
   `policy-test`, `policy-diff`, `report`, `probe`, `claude`, `codex`, and
-  `token`, each with `--help`. A config is found without flags
-  (`./wye.toml`, then `~/.wye/wye.toml`), and a user's files live in
-  `~/.wye`. `wye claude` turns on Claude Code's gateway hints (request
+  `token`, each with `--help`. A user's files live in `~/.wye`, and a
+  command reads `~/.wye/wye.toml` unless told otherwise (`-c`,
+  `$WYE_CONFIG`), never a config it merely finds in the working directory. `wye claude` turns on Claude Code's gateway hints (request
   class, prompt id, tool times), and `wye claude --bg` starts background
   sessions that go through the gateway too.
 - `wye service install`, `status`, `restart`, and `uninstall`: the gateway

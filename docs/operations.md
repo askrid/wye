@@ -35,7 +35,7 @@ wye policy-diff <old> <new>
 wye probe <url>
 ```
 
-**Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `./wye.toml`, else `~/.wye/wye.toml`; `serve` prints the one it loaded. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
+**Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
 
 **Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
 
@@ -47,7 +47,7 @@ wye probe <url>
 - `--subscription`: for one developer forwarding Claude Code's own claude.ai login, on loopback only.
 - `--auth`: a shared gateway. It listens on every interface, takes gateway tokens (`[auth]`), reads the provider key from `ANTHROPIC_API_KEY` in the deployment, and creates the signing key `~/.wye/issuer.key` (mode 600, outside the config's directory and Git) unless one is there to reuse.
 
-`--openai` adds `[routes.openai]`, for Codex and the OpenAI SDKs. The config goes to `~/.wye/wye.toml` unless `--out` names another path, such as `wye.toml` in a config repository.
+`--openai` adds `[routes.openai]`, for Codex and the OpenAI SDKs. The config goes to `~/.wye/wye.toml` unless `--out` names another path, such as `wye.toml` in a config repository; the next steps then carry `-c`.
 
 **`wye validate`** parses the config and reads the identity providers' key sets; secrets in the environment are left to `doctor`.
 

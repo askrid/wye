@@ -83,7 +83,7 @@ repository:
 
 ```bash
 wye init --auth --out wye.toml     # [auth], and a signing key in ~/.wye/issuer.key
-wye token issue alice > alice.token  # a gateway token, valid for a week
+wye token issue alice -c wye.toml > alice.token  # a gateway token, valid for a week
 docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
 
@@ -211,7 +211,8 @@ By request class
 calling the same functions in the same order:
 
 ```console
-$ wye explain --session session-a request.json
+$ wye explain -c wye.toml --session session-a request.json
+config: wye.toml
 endpoint: POST /v1/messages
 credential: not required (no [auth])
 body: 90 bytes (limit 32 MiB)
@@ -269,8 +270,8 @@ Tooling
   key where callers brought their own.
 - `wye init` for one developer or a team, `wye validate` and `wye doctor`,
   `wye token` to issue gateway tokens, and `wye probe` (a health check for
-  images without curl). Every command has `--help`, and finds its config
-  without flags (`./wye.toml`, then `~/.wye/wye.toml`).
+  images without curl). Every command has `--help`, and reads
+  `~/.wye/wye.toml` unless told otherwise (`-c`, `$WYE_CONFIG`).
 
 ## Performance
 

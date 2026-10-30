@@ -117,7 +117,7 @@ pub fn issue(
     let auth = config.and_then(|c| c.auth.as_ref());
     let own = auth.and_then(|a| a.own.as_ref());
     let missing = |what: &str, flag: &str| match config {
-        Some(_) => format!("the config has no [auth] {what}; pass --{flag}"),
+        Some(_) => format!("it has no [auth] {what}; name another with -c, or pass --{flag}"),
         None => format!("no config to read the {what} from; pass --{flag} or -c"),
     };
     let issuer = issue
