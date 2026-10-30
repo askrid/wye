@@ -95,7 +95,7 @@ wye/
 │   │   ├── upstream/connect.rs  the connect timeout over TCP and the TLS handshake
 │   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
-│   │   ├── cli/                 args (every command's options and help), explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
+│   │   ├── cli/                 args (the command table, parsing, help), service (launchd or systemd unit), paint (terminal color), explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA, mock upstream, test signing keys and IdP tokens
