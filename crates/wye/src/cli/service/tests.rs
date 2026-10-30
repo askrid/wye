@@ -136,3 +136,10 @@ fn the_health_check_goes_to_this_machine() {
         "http://127.0.0.1:8080/healthz"
     );
 }
+
+#[test]
+fn a_log_size_reads_as_people_write_it() {
+    assert_eq!(file_size(934_719), "912 KB");
+    assert_eq!(file_size(4_404_019), "4.2 MB");
+    assert_eq!(file_size(512), "512 bytes");
+}
