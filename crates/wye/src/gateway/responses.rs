@@ -105,7 +105,7 @@ pub(super) fn empty(status: StatusCode) -> Response<ResBody> {
     res
 }
 
-/// A missing or invalid gateway credential. One message for every failure:
+/// A missing or invalid gateway token. One message for every failure:
 /// the reason is not the caller's business.
 pub(super) fn unauthorized(api: Api) -> Response<ResBody> {
     error(

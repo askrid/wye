@@ -198,7 +198,7 @@ impl Upstream {
         strip_hop_by_hop(&mut parts.headers);
         parts.headers.remove(HOST);
         parts.headers.insert(ACCEPT_ENCODING, IDENTITY);
-        // The caller's headers carried the gateway credential, in either
+        // The caller's headers carried the gateway token, in either
         // header: neither may reach the provider. With the operator's key,
         // the caller does not choose what it bills either.
         match &self.auth {

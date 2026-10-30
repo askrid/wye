@@ -55,7 +55,7 @@ impl Agent {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Launch {
     pub gateway: String,
-    /// A gateway credential, sent as `Authorization: Bearer`; `None` keeps
+    /// A gateway token, sent as `Authorization: Bearer`; `None` keeps
     /// Claude Code's own login (subscription passthrough), or lets Codex
     /// reach a gateway without `[auth]`.
     pub credential: Option<String>,

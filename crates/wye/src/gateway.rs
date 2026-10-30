@@ -48,7 +48,7 @@ const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 /// Per-process gateway state shared by every connection. Immutable after
 /// startup except the in-flight counter and the draining flag.
 pub struct Gateway {
-    /// Checks gateway credentials; `None` on a loopback-only gateway without `[auth]`.
+    /// Checks gateway tokens; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
     /// Anthropic Messages, when `[upstream]` or `[routes.claude]` is set.
     claude: Option<ApiRoute>,

@@ -192,7 +192,7 @@ async fn count_tokens_is_forwarded() {
 #[tokio::test]
 async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected() {
     let h = Harness::api_key(ok()).await;
-    // An 8 KiB gateway credential plus other headers fits the connection buffer.
+    // An 8 KiB gateway token plus other headers fits the connection buffer.
     let credential = "x".repeat(8 * 1024);
     let res = h
         .send(

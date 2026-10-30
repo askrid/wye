@@ -21,7 +21,7 @@ use gateway_core::{
 
 use super::size;
 
-/// The gateway credential a request carries.
+/// The gateway token a request carries.
 pub enum Credential<'a> {
     None,
     /// A bearer token, verified as the server would, with the server's verifier.

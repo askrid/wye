@@ -274,7 +274,7 @@ wye service restart     # after editing the config or installing a new wye; chec
 wye service uninstall   # stops it and removes the file; the config and the log stay
 ```
 
-`status` exits 3 when the service is not running, installed or not. `restart` refuses a config that would not start and leaves the running service as it was. On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`).
+Replacing a running service waits for its gateway to finish its requests, up to the stop timeout below; new connections are refused until then. `status` exits 3 when the service is not running, installed or not. `restart` refuses a config that would not start and leaves the running service as it was. On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`).
 
 The files it writes, for reference or for a definition of your own. macOS, `~/Library/LaunchAgents/dev.wye.gateway.plist`:
 

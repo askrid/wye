@@ -167,7 +167,7 @@ pub struct CacheDiagnostics {
     pub sample_percent: u8,
 }
 
-/// Signed gateway credentials (see [`crate::credential`]): Wye's own, from
+/// Signed gateway tokens (see [`crate::credential`]): Wye's own, from
 /// identity providers, or both.
 #[derive(Debug, Clone)]
 pub struct Auth {
@@ -485,7 +485,7 @@ impl Config {
         {
             return Err(ConfigError::Auth(
                 "cannot be combined with upstream.forward_caller_credential: the caller's \
-                 credential would be the gateway credential, not a provider credential"
+                 credential would be the gateway token, not a provider credential"
                     .into(),
             ));
         }

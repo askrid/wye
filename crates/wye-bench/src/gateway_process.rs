@@ -14,7 +14,7 @@ use launch::{Launch, Setup};
 #[derive(Clone, Copy)]
 pub enum Gateway<'a> {
     Wye(&'a str),
-    /// Wye with `[auth]`: every request carries a gateway credential to verify.
+    /// Wye with `[auth]`: every request carries a gateway token to verify.
     WyeAuth(&'a str),
     /// Wye with `[cache_diagnostics]`: every request body is scanned and hashed.
     WyeDiag(&'a str),
