@@ -50,3 +50,7 @@ Known limits:
   refresh.
 - No cumulative budgets or rate limits, by design: those stay with the
   provider.
+- Model permissions read the request's top-level `model`; a model named
+  inside the body (an OpenAI `image_generation` tool's) is not checked.
+- Findings from review rounds that are still open are listed in
+  docs/roadmap.md, "Open findings".
