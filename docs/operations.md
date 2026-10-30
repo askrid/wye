@@ -133,7 +133,7 @@ export ANTHROPIC_AUTH_TOKEN=<gateway token>   # or apiKeyHelper for automatic re
 
 ### Credential renewal
 
-Short-lived credentials need a command that fetches a fresh one, so nobody pastes tokens. Claude Code's [`apiKeyHelper`](https://code.claude.com/docs/en/llm-gateway-connect) setting runs a shell command that prints the credential, sends its output as both `Authorization: Bearer` and `x-api-key`, caches it for five minutes (`CLAUDE_CODE_API_KEY_HELPER_TTL_MS` changes that), and re-runs it after the cache lifetime. `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over the helper, so leave both unset (and run `wye claude` without `--credential-file`). The helper can be distributed through managed settings. Wye only verifies: each new credential costs one full verification per connection, then the [per-connection cache](policy.md#gateway-credentials) applies.
+Short-lived credentials need a command that fetches a fresh one, so nobody pastes tokens. Claude Code's [`apiKeyHelper`](https://code.claude.com/docs/en/llm-gateway-connect) setting runs a shell command that prints the credential, sends its output as both `Authorization: Bearer` and `x-api-key`, caches it for five minutes (`CLAUDE_CODE_API_KEY_HELPER_TTL_MS` changes that), and re-runs it after the cache lifetime. `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over the helper, so leave both unset (and run `wye claude` without `--token-file` or `WYE_TOKEN`). The helper can be distributed through managed settings. Wye only verifies: each new credential costs one full verification per connection, then the [per-connection cache](policy.md#gateway-credentials) applies.
 
 In GitHub Actions, the job's OIDC token is the gateway credential, so the repository holds no secret. Wye trusts the issuer ([`[[auth.issuers]]`](policy.md#gateway-credentials)):
 
@@ -286,7 +286,7 @@ Because Wye keeps no state, every multi-node setup has the same shape: a load ba
 
 For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`. Load balancers in front must not buffer SSE, and their idle timeout must exceed silent gaps in a stream (around 300 s; the AWS ALB default of 60 s is too short).
 
-For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup (Docker and Kubernetes secrets, systemd credentials; relative to the config file, surrounding whitespace trimmed), and [`wye probe`](#server) is the health check for images without `curl`. Both are startup or client-side, so the gateway stays stateless.
+For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup (Docker and Kubernetes secrets, systemd credentials; relative to the config file, surrounding whitespace trimmed), and [`wye probe`](#cli) is the health check for images without `curl`. Both are startup or client-side, so the gateway stays stateless.
 
 ### Sizing (estimate)
 
