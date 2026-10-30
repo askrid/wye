@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// `out` with runs of whitespace as one space: lines wrap at 80 columns.
+fn flat(out: &str) -> String {
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 const LOG: &str = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":1500.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"main","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":100,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
 {"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","agent_id":"agent-1","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}],"tool_calls":{"Bash":2,"Grep":1}}
 {"event":"request","unix_ms":5000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":900.0,"session_id":"session-aaaa-1","request_class":"compaction","compaction":"auto","usage_status":"complete","input_tokens":20,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":6000}
@@ -13,19 +18,19 @@ wye: listening on http://127.0.0.1:8080
 
 #[test]
 fn summarizes_sessions_classes_and_cache_misses() {
-    let out = report(LOG.as_bytes()).unwrap();
+    let out = report(LOG.as_bytes(), Paint::OFF).unwrap();
     assert!(
-        out.starts_with(
+        flat(&out).starts_with(
             "4 requests in 2 sessions (1 gateway notice and 2 other lines skipped); \
-             outcomes: completed 3, gateway_error 1\nerror statuses: 529 1\n"
+             outcomes: completed 3, gateway_error 1 error statuses: 529 1 "
         ),
         "{out}"
     );
     // The first cache writes of session aaaa and of its subagent are
     // expected misses: each is a conversation of its own.
     assert!(
-        out.contains(
-            "0 unexplained; expected: 1 session starts, 1 subagent starts, 0 compactions, \
+        flat(&out).contains(
+            "0 unexplained; expected: 1 session start, 1 subagent start, 0 compactions, \
              0 after compaction"
         ),
         "{out}"
@@ -41,14 +46,14 @@ fn summarizes_sessions_classes_and_cache_misses() {
     // Nothing is priced, so there is no cost column.
     assert!(!out.contains(" cost "), "{out}");
     // all: 4 requests, input 40, output 450, cache read 6000, write 5800.
-    assert_eq!(row("all")[1..6], ["4", "40", "450", "6000", "5800"]);
+    assert_eq!(row("all")[1..6], ["4", "40", "450", "6.0K", "5.8K"]);
     assert_eq!(row("all")[6], "50.7%");
     assert_eq!(row("compaction")[1], "1");
     assert_eq!(row("(no")[2], "1", "the request without hints");
     assert_eq!(row("Bash")[1..], ["2", "1", "0.7s"]);
-    assert_eq!(row("Grep")[1..], ["1", "0", "0.0s"]);
-    let session = row("session-");
-    assert_eq!(session[1], "(alice)");
+    assert_eq!(row("Grep")[1..], ["1", "0", "-"]);
+    // The subject on a line of its own, under the session's row.
+    assert!(flat(&out).contains(" session- 3 "), "{out}");
     // Session bbbb has no tokens, so it is not ranked.
     assert_eq!(
         out.lines()
@@ -57,7 +62,7 @@ fn summarizes_sessions_classes_and_cache_misses() {
         1,
         "{out}"
     );
-    assert!(out.contains("    1 compaction\n"), "{out}");
+    assert!(out.contains("\n    alice, 1 compaction\n"), "{out}");
     assert_eq!(row("prompt-1")[1], "2");
 }
 
@@ -70,9 +75,9 @@ fn a_session_starts_at_its_first_cache_write() {
 {"event":"request","unix_ms":1200,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"complete","input_tokens":1172,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}
 {"event":"request","unix_ms":1300,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"main","usage_status":"complete","input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":36820,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
 "#;
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     assert!(
-        out.contains("0 unexplained; expected: 1 session starts, 0 subagent starts"),
+        flat(&out).contains("0 unexplained; expected: 1 session start, 0 subagent starts"),
         "{out}"
     );
 }
@@ -92,27 +97,30 @@ fn a_subagent_misses_once_at_its_start() {
         line(4000, r#""agent_id":"a1","#),
     ]
     .join("\n");
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     assert!(
-        out.contains("1 unexplained; expected: 1 session starts, 2 subagent starts"),
+        flat(&out).contains("1 unexplained; expected: 1 session start, 2 subagent starts"),
         "{out}"
     );
 }
 
 #[test]
 fn a_log_without_requests_says_where_they_come_from() {
-    let out = report(&b"not json\n"[..]).unwrap();
+    let out = report(&b"not json\n"[..], Paint::OFF).unwrap();
     assert!(
-        out.starts_with("no request records (1 other line skipped)"),
+        out.starts_with("No request records (1 other line skipped)"),
         "{out}"
     );
-    assert!(out.contains("2>>usage.jsonl"), "{out}");
+    assert!(
+        flat(&out).contains("`wye service install` keeps them"),
+        "{out}"
+    );
 }
 
 #[test]
 fn a_request_without_tokens_has_no_hit_rate() {
     let failed = LOG.lines().nth(3).unwrap();
-    let out = report(failed.as_bytes()).unwrap();
+    let out = report(failed.as_bytes(), Paint::OFF).unwrap();
     assert!(out.starts_with("1 request in 1 session"), "{out}");
     assert!(
         out.contains(" - "),
@@ -127,7 +135,7 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
 {"event":"request","outcome":"completed","request_class":"subagent","cost_usd":"0.05","cost_status":"partial"}
 {"event":"request","outcome":"gateway_error","request_class":"subagent","cost_status":"unknown"}
 "#;
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let cost = |name: &str| {
         out.lines()
             .find(|l| l.trim_start().starts_with(name))
@@ -141,7 +149,7 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
     assert_eq!(cost("main"), "$0.3000");
     assert_eq!(cost("subagent"), "$0.0500+");
     assert_eq!(cost("all"), "$0.3500+");
-    let unpriced = report(LOG.as_bytes()).unwrap();
+    let unpriced = report(LOG.as_bytes(), Paint::OFF).unwrap();
     assert!(!unpriced.contains('$'), "{unpriced}");
 
     // Records written before `[pricing]` was added are missing from the sum.
@@ -150,7 +158,7 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
         r#"{"event":"request","request_class":"main","cost_usd":"0.1","cost_status":"complete"}"#,
         "\n{\"event\":\"request\",\"request_class\":\"main\",\"output_tokens\":5}\n"
     );
-    let out = report(mixed.as_bytes()).unwrap();
+    let out = report(mixed.as_bytes(), Paint::OFF).unwrap();
     assert!(out.contains("$0.1000+"), "{out}");
 }
 
@@ -160,7 +168,7 @@ fn lists_upgrade_issues_by_target_rule_and_client() {
 {"event":"request","subject":"svc-b","upgrade_issues":{"claude-opus-5-5":["budget_tokens"]}}
 {"event":"request","subject":"svc-a","upgrade_issues":{}}
 "#;
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let line = |rule: &str| {
         out.lines()
             .find(|l| l.contains(rule))
@@ -169,11 +177,13 @@ fn lists_upgrade_issues_by_target_rule_and_client() {
             .collect::<Vec<_>>()
             .join(" ")
     };
-    assert_eq!(
-        line("budget_tokens"),
-        "claude-opus-5-5 budget_tokens 2 svc-a, svc-b"
+    assert_eq!(line("budget_tokens"), "claude-opus-5-5 budget_tokens 2");
+    assert_eq!(line("sampling"), "claude-opus-5-5 sampling 1");
+    // The clients on the line below each issue.
+    assert!(
+        flat(&out).contains("budget_tokens 2 from svc-a, svc-b "),
+        "{out}"
     );
-    assert_eq!(line("sampling"), "claude-opus-5-5 sampling 1 svc-a");
 }
 
 #[test]
@@ -182,7 +192,7 @@ fn splits_cost_by_upstream_when_records_name_one() {
 {"event":"request","outcome":"completed","upstream":"team-b","cost_usd":"0.2","cost_status":"complete"}
 {"event":"request","outcome":"completed","upstream":"team-a","cost_usd":"0.3","cost_status":"complete"}
 "#;
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let section = out.split("\nBy upstream\n").nth(1).unwrap();
     let cost = |name: &str| {
         section
@@ -197,7 +207,11 @@ fn splits_cost_by_upstream_when_records_name_one() {
     assert_eq!(cost("team-a"), "$0.4000");
     assert_eq!(cost("team-b"), "$0.2000");
     // Without upstream names, no section.
-    assert!(!report(LOG.as_bytes()).unwrap().contains("By upstream"));
+    assert!(
+        !report(LOG.as_bytes(), Paint::OFF)
+            .unwrap()
+            .contains("By upstream")
+    );
 }
 
 #[test]
@@ -206,7 +220,7 @@ fn counts_failovers_by_upstream_and_reason() {
 {"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","status":429}]}
 {"event":"request","outcome":"completed","upstream":"a","failovers":[{"upstream":"c","error":"connect"}]}
 "#;
-    let out = report(log.as_bytes()).unwrap();
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let section = out.split("\nFailovers:").nth(1).unwrap();
     let rows: Vec<String> = section
         .lines()
@@ -215,7 +229,11 @@ fn counts_failovers_by_upstream_and_reason() {
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect();
     assert_eq!(rows, ["a 429 2", "c connect 1"]);
-    assert!(!report(LOG.as_bytes()).unwrap().contains("Failovers"));
+    assert!(
+        !report(LOG.as_bytes(), Paint::OFF)
+            .unwrap()
+            .contains("Failovers")
+    );
 }
 
 #[test]
@@ -225,6 +243,7 @@ fn the_summary_line_counts_in_the_singular_too() {
 not a record
 "#
         .as_bytes(),
+        Paint::OFF,
     )
     .unwrap();
     assert!(

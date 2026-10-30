@@ -17,6 +17,7 @@ use wye::{
     cli::{
         Agent, InitMode, InitOptions, Launch,
         args::{self, ArgsError, Command},
+        paint::Paint,
         service, token,
     },
 };
@@ -29,7 +30,7 @@ fn main() -> ExitCode {
     match run(std::env::args_os().skip(1).collect()) {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
-            eprintln!("wye: {e}");
+            eprintln!("{} {e}", Paint::stderr().red("wye:"));
             ExitCode::FAILURE
         }
     }
@@ -111,14 +112,18 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let path = config_path()?;
             // Key sets are files too; secrets in the environment are not checked.
             wye::verifier(&load(&path)?, config_dir(&path))?;
-            println!("{}: ok", args::tilde(&path, &env));
+            println!(
+                "{}: {}",
+                args::tilde(&path, &env),
+                Paint::stdout().green("ok")
+            );
             Ok(0)
         }
         "doctor" => {
             let path = config_path()?;
             let config = load(&path)?;
             let (report, ok) = current_thread()?.block_on(wye::doctor(&config, config_dir(&path)));
-            print!("{report}");
+            print!("{}", Paint::stdout().verdicts(&report));
             Ok(found(ok))
         }
         "claude" | "codex" => {
@@ -137,9 +142,10 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             std::process::exit(code);
         }
         "report" => {
+            let paint = Paint::stdout();
             let report = match parsed.positional.first() {
-                Some(&"-") => wye::report(std::io::stdin().lock())?,
-                Some(path) => wye::report(open(Path::new(path))?)?,
+                Some(&"-") => wye::report(std::io::stdin().lock(), paint)?,
+                Some(path) => wye::report(open(Path::new(path))?, paint)?,
                 None => {
                     let home = args::home(&env).ok_or("no home directory: pass a log file")?;
                     let path = home.join("usage.jsonl");
@@ -150,7 +156,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                         )
                         .into());
                     }
-                    wye::report(open(&path)?)?
+                    wye::report(open(&path)?, paint)?
                 }
             };
             print!("{report}");
@@ -261,14 +267,14 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 unix_secs()?,
                 &parsed.values("target-model"),
             );
-            print!("{}", explanation.report());
+            print!("{}", Paint::stdout().verdicts(&explanation.report()));
             Ok(found(explanation.refused.is_none()))
         }
         "policy-test" => {
             let config = load(&config_path()?)?;
             let dir = parsed.positional.first().copied().unwrap_or_default();
             let (report, passed) = wye::policy_test(&config, Path::new(dir), unix_secs()?)?;
-            print!("{report}");
+            print!("{}", Paint::stdout().verdicts(&report));
             Ok(found(passed))
         }
         "policy-diff" => {
@@ -279,7 +285,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let (before, after) = (load(old)?, load(new)?);
             let mut diff = wye::policy_diff(&before, &after);
             diff.key_sets(&before, config_dir(old), &after, config_dir(new))?;
-            print!("{}", diff.report());
+            print!("{}", Paint::stdout().verdicts(&diff.report()));
             Ok(found(!diff.widens()))
         }
         "probe" => {
