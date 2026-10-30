@@ -20,6 +20,7 @@ use std::{
     ops::Range,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use bytes::Bytes;
@@ -43,6 +44,26 @@ mod chunks;
 /// counts what the client sent, not a `model` spliced in.
 pub(crate) type ClientBody = Limited<Incoming>;
 
+/// The least a held chunk counts against the hold and failover budgets.
+/// Beyond its bytes, a chunk costs its handle, its queue slot, and the
+/// framing it pins in the client connection's read buffer: a body sent in
+/// tiny chunks (1-byte HTTP/1.1 chunks, small HTTP/2 frames) would hold tens
+/// of bytes of memory per byte counted. Counting a small chunk as 1 KiB keeps
+/// each budget an upper bound on memory; ordinary chunks count their length.
+pub(crate) const MIN_CHUNK_CHARGE: usize = 1024;
+
+/// How long a held body may send nothing before its request is refused
+/// (408). A client that stops mid-upload, or vanished without closing its
+/// connection, would otherwise keep its permit and its share of the hold
+/// budget for good: nothing else reads a request body against a clock, and
+/// a connection to a peer that is gone stays open while Wye only reads.
+pub(crate) const HOLD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// What a held chunk of `len` bytes counts against a budget.
+pub(crate) fn charge(len: usize) -> usize {
+    len.max(MIN_CHUNK_CHARGE)
+}
+
 /// Why a request was refused while its model was read.
 #[derive(Debug)]
 pub(crate) enum HoldError {
@@ -52,6 +73,8 @@ pub(crate) enum HoldError {
     Overloaded,
     /// The body exceeded the request size limit while being held.
     TooLarge,
+    /// The client sent nothing for [`HOLD_IDLE_TIMEOUT`].
+    Stalled,
     /// The client's body failed (for example, the connection dropped).
     Body,
 }
@@ -59,7 +82,7 @@ pub(crate) enum HoldError {
 /// What a held request carries until its body is fully sent.
 struct Hold {
     chunks: Chunks,
-    /// Bytes of `chunks`, counted against the hold budget.
+    /// The [`charge`] of each of `chunks`, counted against the hold budget.
     budget: Held,
     scanner: PolicyScanner,
     /// The whole body is in `chunks`.
@@ -173,18 +196,19 @@ impl Hold {
     /// the model's value.
     fn splice(&mut self, span: &Range<u64>, value: Bytes) -> i64 {
         let delta = value.len() as i64 - (span.end - span.start) as i64;
+        let before = self.chunks.charged();
         let mut out = Chunks::default();
         splice_chunks(std::iter::from_fn(|| self.chunks.pop()), span, value, |c| {
             out.push(c);
         });
         self.chunks = out;
-        let grown = delta.unsigned_abs() as usize;
-        if delta > 0 {
-            // At most MAX_MODEL_BYTES per request, so the hold limit is not
-            // re-checked for it.
-            self.budget.try_grow(grown, usize::MAX);
+        let after = self.chunks.charged();
+        if after > before {
+            // At most MAX_MODEL_BYTES and two new chunks per request, so the
+            // hold limit is not re-checked for it.
+            self.budget.try_grow(after - before, usize::MAX);
         } else {
-            self.budget.release(grown);
+            self.budget.release(before - after);
         }
         delta
     }
@@ -215,7 +239,10 @@ where
         check_rest: true,
     });
     while hold.scanner.model().is_none() {
-        let Some(frame) = body.frame().await else {
+        let frame = tokio::time::timeout(HOLD_IDLE_TIMEOUT, body.frame())
+            .await
+            .map_err(|_| HoldError::Stalled)?;
+        let Some(frame) = frame else {
             hold.ended = true;
             hold.scanner.finish().map_err(HoldError::Model)?;
             break;
@@ -224,7 +251,7 @@ where
         let Ok(data) = frame.map_err(held_body_error)?.into_data() else {
             continue;
         };
-        if !hold.budget.try_grow(data.len(), max_held) {
+        if !hold.budget.try_grow(charge(data.len()), max_held) {
             return Err(HoldError::Overloaded);
         }
         hold.scanner.feed(&data);
@@ -295,7 +322,7 @@ where
         if let Some(hold) = this.hold.as_mut()
             && let Some(chunk) = hold.chunks.pop()
         {
-            hold.budget.release(chunk.len());
+            hold.budget.release(charge(chunk.len()));
             return Poll::Ready(Some(Ok(Frame::data(chunk))));
         }
         let Some(inner) = this.inner.as_mut() else {

@@ -23,7 +23,7 @@ async fn a_sent_body_comes_back_whole() {
     let (body, handback) = FailoverBody::kept(Client::of(&["ab", "cd", "ef"]), &held, ROOMY);
     assert_eq!(collect(body).await, "abcdef");
     let resend = handback.await.unwrap();
-    assert_eq!(held.current(), 6);
+    assert_eq!(held.current(), 3 * crate::request_body::MIN_CHUNK_CHARGE);
     let (again, next) = FailoverBody::resume(resend, ROOMY);
     assert_eq!(collect(again).await, "abcdef");
     // Once the request is answered, nothing waits for the hand-back: the
@@ -69,6 +69,25 @@ async fn a_body_beyond_either_bound_is_not_kept() {
     let (body, handback) = FailoverBody::kept(Client::of(&["ab"]), &busy, process);
     assert_eq!(collect(body).await, "ab");
     assert!(handback.await.is_err(), "the process-wide bound is full");
+}
+
+/// Tiny chunks count at least the minimum charge each, so a body sent a
+/// byte at a time stops being kept long before its bytes reach the bound.
+#[tokio::test]
+async fn tiny_chunks_stop_being_kept_early() {
+    let held = Gauge::default();
+    let bounds = Bounds {
+        max_body: 1 << 20,
+        max_held: 4 * crate::request_body::MIN_CHUNK_CHARGE,
+    };
+    let (body, handback) = FailoverBody::kept(Client::of(&["a"; 10]), &held, bounds);
+    assert_eq!(
+        collect(body).await,
+        "a".repeat(10),
+        "forwarded all the same"
+    );
+    assert!(handback.await.is_err(), "not kept");
+    assert_eq!(held.current(), 0);
 }
 
 #[tokio::test]

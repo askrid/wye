@@ -25,7 +25,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     gauge::{Gauge, Held},
-    request_body::{RequestBody, splice_chunks},
+    request_body::{RequestBody, charge, splice_chunks},
 };
 
 /// What a dropped attempt hands back: the bytes it sent, in order, then the
@@ -33,7 +33,8 @@ use crate::{
 pub(crate) struct Resend<B> {
     chunks: VecDeque<Bytes>,
     rest: Option<B>,
-    /// The kept bytes, counted against the process-wide bound.
+    /// The [`charge`] of the kept chunks, counted against the process-wide
+    /// bound.
     budget: Held,
     bytes: usize,
     /// The attempt delivered every byte: nothing was left to replay and the
@@ -58,16 +59,24 @@ impl<B> Resend<RequestBody<B>> {
         let sent: u64 = self.chunks.iter().map(|c| c.len() as u64).sum();
         let delta = value.len() as i64 - (span.end - span.start) as i64;
         if span.end <= sent {
+            let charged = |chunks: &VecDeque<Bytes>| -> usize {
+                chunks.iter().map(|c| charge(c.len())).sum()
+            };
+            let before = charged(&self.chunks);
             let mut out = VecDeque::with_capacity(self.chunks.len() + 2);
             splice_chunks(self.chunks.drain(..), span, value, |c| out.push_back(c));
             self.chunks = out;
-            // At most a model name's length: the bound is not re-checked.
+            // At most a model name's length and two new chunks: the bound is
+            // not re-checked.
+            let after = charged(&self.chunks);
+            if after > before {
+                self.budget.try_grow(after - before, usize::MAX);
+            } else {
+                self.budget.release(before - after);
+            }
             if delta > 0 {
-                self.budget
-                    .try_grow(delta.unsigned_abs() as usize, usize::MAX);
                 self.bytes += delta.unsigned_abs() as usize;
             } else {
-                self.budget.release(delta.unsigned_abs() as usize);
                 self.bytes = self.bytes.saturating_sub(delta.unsigned_abs() as usize);
             }
             true
@@ -192,7 +201,9 @@ where
             Poll::Ready(Some(Ok(frame))) => {
                 if let (Some(data), Some(keep)) = (frame.data_ref(), this.keep.as_mut()) {
                     let fits = keep.bytes + data.len() <= keep.bounds.max_body
-                        && keep.budget.try_grow(data.len(), keep.bounds.max_held);
+                        && keep
+                            .budget
+                            .try_grow(charge(data.len()), keep.bounds.max_held);
                     if fits {
                         keep.bytes += data.len();
                         keep.sent.push(data.clone());

@@ -167,23 +167,30 @@ impl Gateway {
 /// UTF-8 JSON, and a provider that honours a content encoding or another
 /// charset could find other keys in the same bytes.
 fn unreadable(headers: &HeaderMap) -> Option<&'static str> {
-    if headers
-        .get(CONTENT_ENCODING)
-        .is_some_and(|v| !v.as_bytes().eq_ignore_ascii_case(b"identity"))
-    {
+    // Every line and every listed coding: a provider may apply any of them.
+    let encoded = headers.get_all(CONTENT_ENCODING).iter().any(|v| {
+        v.to_str().map_or(true, |v| {
+            v.split(',')
+                .any(|coding| !coding.trim().eq_ignore_ascii_case("identity"))
+        })
+    });
+    if encoded {
         return Some("the request body must not be compressed");
     }
-    let charset = headers
-        .get(CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| {
-            v.split(';').skip(1).find_map(|param| {
-                let (name, value) = param.split_once('=')?;
-                name.trim()
-                    .eq_ignore_ascii_case("charset")
-                    .then(|| value.trim().trim_matches('"'))
-            })
-        });
+    let mut types = headers.get_all(CONTENT_TYPE).iter();
+    let content_type = types.next();
+    if types.next().is_some() {
+        // Which one a provider reads is not defined.
+        return Some("the request body must be UTF-8 JSON");
+    }
+    let charset = content_type.and_then(|v| v.to_str().ok()).and_then(|v| {
+        v.split(';').skip(1).find_map(|param| {
+            let (name, value) = param.split_once('=')?;
+            name.trim()
+                .eq_ignore_ascii_case("charset")
+                .then(|| value.trim().trim_matches('"'))
+        })
+    });
     match charset {
         Some(c) if !c.eq_ignore_ascii_case("utf-8") && !c.eq_ignore_ascii_case("utf8") => {
             Some("the request body must be UTF-8 JSON")

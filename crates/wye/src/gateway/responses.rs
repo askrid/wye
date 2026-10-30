@@ -30,13 +30,24 @@ pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
         ),
         HoldError::Overloaded => overloaded(api, "gateway is holding too many request bytes"),
         HoldError::TooLarge => too_large(api),
-        HoldError::Body => error(
+        HoldError::Stalled => error(
             api,
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            "request body could not be read",
+            StatusCode::REQUEST_TIMEOUT,
+            "timeout_error",
+            "request body stalled while the gateway read its model",
         ),
+        HoldError::Body => unreadable_body(api),
     }
+}
+
+/// The client's body failed: bad framing, or cut off mid-upload.
+fn unreadable_body(api: Api) -> Response<ResBody> {
+    error(
+        api,
+        StatusCode::BAD_REQUEST,
+        "invalid_request_error",
+        "request body could not be read",
+    )
 }
 
 pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
@@ -66,6 +77,7 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             &e.to_string(),
         ),
         ForwardError::Policy(PolicyRefusal::TooLarge) => too_large(api),
+        ForwardError::Policy(PolicyRefusal::Broken) => unreadable_body(api),
     }
 }
 
