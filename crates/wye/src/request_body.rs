@@ -65,6 +65,33 @@ pub(crate) fn charge(len: usize) -> usize {
     len.max(MIN_CHUNK_CHARGE)
 }
 
+/// What `chunks` count against a budget together.
+pub(crate) fn charged<'c>(chunks: impl IntoIterator<Item = &'c Bytes>) -> usize {
+    chunks.into_iter().map(|c| charge(c.len())).sum()
+}
+
+/// Moves `budget` from `before` to `after` charged bytes once a splice
+/// changed the held chunks. At most a model name's length and two new chunks
+/// per request, so the limit is not re-checked.
+pub(crate) fn recharge(budget: &mut Held, before: usize, after: usize) {
+    if after > before {
+        budget.try_grow(after - before, usize::MAX);
+    } else {
+        budget.release(before - after);
+    }
+}
+
+/// The size of `prefix` bytes followed by `rest` (`None`: ended).
+pub(crate) fn hint_after<B: Body>(prefix: u64, rest: Option<&B>) -> SizeHint {
+    let rest = rest.map_or_else(|| SizeHint::with_exact(0), B::size_hint);
+    let mut hint = SizeHint::new();
+    hint.set_lower(rest.lower().saturating_add(prefix));
+    if let Some(upper) = rest.upper() {
+        hint.set_upper(upper.saturating_add(prefix));
+    }
+    hint
+}
+
 /// Why a request was refused while its model was read.
 #[derive(Debug)]
 pub(crate) enum HoldError {
@@ -157,14 +184,7 @@ impl Hold {
             out.push(c);
         });
         self.chunks = out;
-        let after = self.chunks.charged();
-        if after > before {
-            // At most MAX_MODEL_BYTES and two new chunks per request, so the
-            // hold limit is not re-checked for it.
-            self.budget.try_grow(after - before, usize::MAX);
-        } else {
-            self.budget.release(before - after);
-        }
+        recharge(&mut self.budget, before, self.chunks.charged());
         delta
     }
 }
@@ -331,16 +351,7 @@ where
 
     fn size_hint(&self) -> SizeHint {
         let held = self.hold.as_ref().map_or(0, |h| h.chunks.bytes());
-        let rest = self
-            .inner
-            .as_ref()
-            .map_or_else(|| SizeHint::with_exact(0), B::size_hint);
-        let mut hint = SizeHint::new();
-        hint.set_lower(rest.lower().saturating_add(held));
-        if let Some(upper) = rest.upper() {
-            hint.set_upper(upper.saturating_add(held));
-        }
-        hint
+        hint_after(held, self.inner.as_ref())
     }
 }
 

@@ -6,7 +6,10 @@ use ring::rand::{SecureRandom, SystemRandom};
 
 use gateway_core::pricing::Usd;
 
-use super::super::{Line, Outcome};
+use super::{
+    super::{Line, Outcome},
+    attr,
+};
 
 #[derive(Clone, Copy)]
 pub(in crate::usage_log) enum Value<'a> {
@@ -61,27 +64,24 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         write_attribute(buf, key, value);
     };
     attribute("gen_ai.system", Value::Str(line.system));
-    attribute("http.route", Value::Str(line.path));
-    attribute(
-        "http.response.status_code",
-        Value::Int(u64::from(line.status)),
-    );
-    attribute("wye.outcome", Value::Str(line.outcome.as_str()));
+    attribute(attr::ROUTE, Value::Str(line.path));
+    attribute(attr::STATUS, Value::Int(u64::from(line.status)));
+    attribute(attr::OUTCOME, Value::Str(line.outcome.as_str()));
     attribute("wye.duration_ms", Value::Double(line.duration_ms));
     if let Some(ms) = line.headers_ms {
         attribute("wye.headers_ms", Value::Double(ms));
     }
     if let Some(upstream) = line.upstream {
-        attribute("wye.upstream", Value::Str(upstream));
+        attribute(attr::UPSTREAM, Value::Str(upstream));
     }
     if let Some(subject) = line.subject {
-        attribute("enduser.id", Value::Str(subject));
+        attribute(attr::SUBJECT, Value::Str(subject));
     }
     if let Some(session) = line.session_id {
         attribute("session.id", Value::Str(session));
     }
     for (key, value) in [
-        ("wye.request_class", line.request_class),
+        (attr::REQUEST_CLASS, line.request_class),
         ("gen_ai.agent.name", line.agent_type),
         ("gen_ai.agent.id", line.agent_id),
         ("wye.parent_agent_id", line.parent_agent_id),
@@ -97,7 +97,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         attribute("wye.requested_model", Value::Str(alias));
     }
     if let Some(model) = line.model {
-        attribute("gen_ai.response.model", Value::Str(model));
+        attribute(attr::MODEL, Value::Str(model));
     }
     attribute("wye.usage_status", Value::Str(line.usage_status));
     let tokens = [
@@ -140,7 +140,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         attribute("wye.failovers", Value::Str(&json));
     }
     if let Some(miss) = line.cache_miss {
-        attribute("wye.cache_miss", Value::Str(miss.as_str()));
+        attribute(attr::CACHE_MISS, Value::Str(miss.as_str()));
     }
     if let Some(prompt) = &line.prompt {
         // Nested and variable-length: one JSON string the backend can parse.
@@ -217,7 +217,7 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
             buf,
             r#","kind":1,"startTimeUnixNano":"{tool_start}","endTimeUnixNano":"{start_ns}","attributes":["#
         );
-        write_attribute(buf, "gen_ai.tool.name", Value::Str(&name));
+        write_attribute(buf, attr::TOOL, Value::Str(&name));
         buf.push(b',');
         write_attribute(buf, "wye.tool.duration_ms", Value::Int(ms));
         for (key, value) in [

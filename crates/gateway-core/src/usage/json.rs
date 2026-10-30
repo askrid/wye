@@ -56,7 +56,7 @@ impl JsonUsageScanner {
         }
         // The tier that served an OpenAI request; others are priced differently.
         if self.api != Api::Messages {
-            usage.unpriced |= self.fields.service_tier().is_some_and(|t| t != "default");
+            usage.unpriced |= super::unpriced_tier(self.fields.service_tier());
         }
         usage.unpriced |= self.fields.hosted_tool;
         Some(usage)

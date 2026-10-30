@@ -141,15 +141,11 @@ fn validate_issuer(raw: RawIssuer, index: usize) -> Result<Issuer, ConfigError> 
     if raw.issuer.is_empty() || raw.audience.is_empty() {
         return Err(err("issuer and audience must not be empty".into()));
     }
-    let algorithm = match raw.algorithm.as_str() {
-        "RS256" => Algorithm::Rs256,
-        "ES256" => Algorithm::Es256,
-        "EdDSA" => Algorithm::EdDsa,
-        other => {
-            return Err(err(format!(
-                "algorithm {other:?} is not RS256, ES256, or EdDSA"
-            )));
-        }
+    let Some(algorithm) = Algorithm::parse(&raw.algorithm) else {
+        return Err(err(format!(
+            "algorithm {:?} is not RS256, ES256, or EdDSA",
+            raw.algorithm
+        )));
     };
     if raw.jwks_file.as_os_str().is_empty() {
         return Err(err("jwks_file must not be empty".into()));

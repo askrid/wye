@@ -204,45 +204,44 @@ pub enum PriceError {
     Overflow,
 }
 
+/// Pico-USD in one USD: costs are integers in this unit.
+pub const PICO_PER_USD: u64 = 1_000_000_000_000;
+
 /// Parses USD per million tokens (`"4.00"`) into pico-USD per token: the
 /// value times 10^6, exact for at most six decimals.
 pub(crate) fn parse_price(text: &str) -> Result<Pico, PriceError> {
-    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > 6 {
-        return Err(PriceError::Format);
-    }
-    let whole: u64 = whole.parse().map_err(|_| PriceError::Overflow)?;
-    // At most six digits, padded to six: below 10^6, no overflow.
-    let scaled = fraction
-        .bytes()
-        .chain(std::iter::repeat(b'0'))
-        .take(6)
-        .fold(0u64, |acc, b| acc * 10 + u64::from(b - b'0'));
-    whole
-        .checked_mul(1_000_000)
-        .and_then(|w| w.checked_add(scaled))
-        .ok_or(PriceError::Overflow)
+    parse_fixed(text, 6)
 }
 
 /// Parses a cost written by [`Usd`] (a decimal with at most 12 decimals)
 /// back into pico-USD; `None` for anything else or an overflow.
 pub fn parse_usd(text: &str) -> Option<Pico> {
+    parse_fixed(text, 12).ok()
+}
+
+/// A non-negative decimal with at most `decimals` decimals, times
+/// 10^`decimals`, exact.
+fn parse_fixed(text: &str, decimals: usize) -> Result<u64, PriceError> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > 12 {
-        return None;
+    if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > decimals {
+        return Err(PriceError::Format);
     }
-    let fraction = fraction
+    let whole: u64 = whole.parse().map_err(|_| PriceError::Overflow)?;
+    // At most `decimals` digits, padded to that many: no overflow for 12.
+    let mut scale = 1u64;
+    let scaled = fraction
         .bytes()
         .chain(std::iter::repeat(b'0'))
-        .take(12)
-        .fold(0u64, |acc, b| acc * 10 + u64::from(b - b'0'));
+        .take(decimals)
+        .fold(0u64, |acc, b| {
+            scale *= 10;
+            acc * 10 + u64::from(b - b'0')
+        });
     whole
-        .parse::<u64>()
-        .ok()?
-        .checked_mul(1_000_000_000_000)?
-        .checked_add(fraction)
+        .checked_mul(scale)
+        .and_then(|w| w.checked_add(scaled))
+        .ok_or(PriceError::Overflow)
 }
 
 /// A cost in USD as a decimal string, exact: pico-USD with trailing zeros
@@ -251,8 +250,7 @@ pub struct Usd(pub Pico);
 
 impl fmt::Display for Usd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const PER_USD: u64 = 1_000_000_000_000;
-        let (whole, mut fraction) = (self.0 / PER_USD, self.0 % PER_USD);
+        let (whole, mut fraction) = (self.0 / PICO_PER_USD, self.0 % PICO_PER_USD);
         write!(f, "{whole}")?;
         if fraction > 0 {
             // Trim trailing zeros arithmetically: no intermediate string.

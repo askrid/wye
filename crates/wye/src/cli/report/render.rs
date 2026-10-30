@@ -3,6 +3,8 @@
 
 use std::fmt::Write as _;
 
+use gateway_core::agent::CacheMiss;
+
 use super::{Group, Summary, TOP};
 use crate::cli::plural;
 
@@ -85,13 +87,13 @@ pub(super) fn render(s: &Summary) -> String {
         out,
         "\nCache misses (cache written, nothing read): {} unexplained; expected: \
          {} session starts, {} subagent starts, {} compactions, {} after compaction",
-        count("unexplained")
+        count(CacheMiss::Unexplained.as_str())
             .saturating_sub(starts.sessions)
             .saturating_sub(starts.subagents),
         starts.sessions,
         starts.subagents,
-        count("compaction"),
-        count("after_compaction"),
+        count(CacheMiss::Compaction.as_str()),
+        count(CacheMiss::AfterCompaction.as_str()),
     );
 
     if !s.upgrades.is_empty() {

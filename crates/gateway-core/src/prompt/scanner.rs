@@ -578,7 +578,7 @@ impl PromptScanner {
         if self.in_content_array() {
             self.block = self.block.saturating_add(1);
         }
-        self.expect_key = self.nest.depth() > 0 && !self.is_array(self.nest.depth());
+        self.expect_key = self.nest.in_object();
     }
 
     /// Ends the section element whose last byte precedes `end`.

@@ -37,6 +37,12 @@ pub const MAX_TOOL_NAMES: usize = 8;
 /// Longest tool name counted by name.
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
 
+/// Whether an OpenAI `service_tier` is billed outside the token prices:
+/// any tier but `default` makes the cost partial.
+fn unpriced_tier(tier: Option<&str>) -> bool {
+    tier.is_some_and(|tier| tier != "default")
+}
+
 /// Token counts reported by the provider. `None` when the response did not report the field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {

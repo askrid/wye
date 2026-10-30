@@ -9,7 +9,10 @@
 
 use std::{collections::HashMap, io::BufRead};
 
-use gateway_core::pricing::parse_usd;
+use gateway_core::{
+    agent::CacheMiss,
+    pricing::{CostStatus, PICO_PER_USD, parse_usd},
+};
 use serde::Deserialize;
 
 /// Rows shown in the session and prompt rankings.
@@ -122,7 +125,7 @@ impl Cost {
         };
         self.priced += 1;
         let pico = r.cost_usd.as_deref().and_then(parse_usd);
-        self.lower_bound |= status != "complete" || pico.is_none();
+        self.lower_bound |= status != CostStatus::Complete.as_str() || pico.is_none();
         self.pico = self.pico.saturating_add(pico.unwrap_or(0));
     }
 
@@ -131,7 +134,7 @@ impl Cost {
         if self.priced == 0 {
             return "-".into();
         }
-        let usd = self.pico as f64 / 1e12;
+        let usd = self.pico as f64 / PICO_PER_USD as f64;
         format!("${usd:.4}{}", if self.lower_bound { "+" } else { "" })
     }
 }
@@ -268,7 +271,7 @@ impl Summary {
     fn starts(&self) -> Starts {
         let mut starts = Starts::default();
         for ((_, agent), (_, miss)) in &self.first_writes {
-            if miss.as_deref() == Some("unexplained") {
+            if miss.as_deref() == Some(CacheMiss::Unexplained.as_str()) {
                 match agent {
                     None => starts.sessions += 1,
                     Some(_) => starts.subagents += 1,

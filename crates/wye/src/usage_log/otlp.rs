@@ -271,3 +271,17 @@ async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped
         }
     }
 }
+
+/// OTLP attribute names both encoders write (logs and spans, metrics), so
+/// a query on one matches the other.
+pub(super) mod attr {
+    pub(crate) const ROUTE: &str = "http.route";
+    pub(crate) const STATUS: &str = "http.response.status_code";
+    pub(crate) const MODEL: &str = "gen_ai.response.model";
+    pub(crate) const TOOL: &str = "gen_ai.tool.name";
+    pub(crate) const SUBJECT: &str = "enduser.id";
+    pub(crate) const UPSTREAM: &str = "wye.upstream";
+    pub(crate) const OUTCOME: &str = "wye.outcome";
+    pub(crate) const REQUEST_CLASS: &str = "wye.request_class";
+    pub(crate) const CACHE_MISS: &str = "wye.cache_miss";
+}

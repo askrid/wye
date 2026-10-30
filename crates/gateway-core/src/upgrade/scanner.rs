@@ -144,10 +144,7 @@ impl UpgradeScanner {
                     }
                     self.expect_key = false;
                 }
-                b',' => {
-                    let depth = self.nest.depth();
-                    self.expect_key = depth > 0 && !self.nest.is_array(depth);
-                }
+                b',' => self.expect_key = self.nest.in_object(),
                 b':' => self.expect_key = false,
                 _ => {}
             }

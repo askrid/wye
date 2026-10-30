@@ -14,7 +14,7 @@ use gateway_core::{
     policy::{self, PolicyScanner},
     pricing::{Pico, PricedModels, Usd},
     prompt,
-    route::{self, Select},
+    route::{self, FailoverReason, Select},
     upgrade::{self, UpgradeScanner},
 };
 
@@ -230,12 +230,15 @@ pub fn explain(
         }
     }
 
-    let key = route::affinity_key(
-        session.map(str::as_bytes),
-        identity.as_ref().map(|i| &*i.subject),
+    let ranking = route.rank(
+        route::affinity_key(
+            session.map(str::as_bytes),
+            identity.as_ref().map(|i| &*i.subject),
+        )
+        .unwrap_or_default(),
     );
     let upstreams = route.upstreams();
-    let Some(upstream) = upstreams.get(route.rank(key).first()) else {
+    let Some(upstream) = upstreams.get(ranking.first()) else {
         unreachable!("a route has at least one upstream")
     };
     if let Some(id) = &upstream.id {
@@ -254,20 +257,12 @@ pub fn explain(
         ));
     }
     if let Some(failover) = route.failover() {
-        let next: Vec<&str> = route
-            .rank(key)
+        let next: Vec<&str> = ranking
             .iter()
             .skip(1)
             .filter_map(|i| upstreams.get(i)?.id.as_deref())
             .collect();
-        let reasons: Vec<&str> = [
-            (failover.on_429, "429"),
-            (failover.on_529, "529"),
-            (failover.on_connect, "connect"),
-        ]
-        .into_iter()
-        .filter_map(|(on, name)| on.then_some(name))
-        .collect();
+        let reasons: Vec<&str> = failover.reasons().map(FailoverReason::as_str).collect();
         out.step(format!(
             "failover: on {} to {} in that order, for bodies up to {}",
             reasons.join(", "),
@@ -275,10 +270,7 @@ pub fn explain(
             size(failover.max_body_bytes)
         ));
     }
-    out.step(format!(
-        "upstream: POST {}://{}{}{path}",
-        upstream.scheme, upstream.authority, upstream.path_prefix
-    ));
+    out.step(format!("upstream: POST {}{path}", upstream.base_url()));
     let header = upstream.provider.key_header();
     if let Some(workspace) = &upstream.workspace_id {
         out.step(format!(
@@ -286,13 +278,8 @@ pub fn explain(
         ));
     }
     out.step(match &upstream.credential {
-        UpstreamCredential::ApiKeyEnv(name) => {
-            format!("provider credential: {header} from ${name}")
-        }
-        UpstreamCredential::ApiKeyFile(path) => {
-            format!("provider credential: {header} from {}", path.display())
-        }
         UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
+        source => format!("provider credential: {header} from {source}"),
     });
     // The gateway reads the model on a route that rewrites its id even when no
     // policy does; explain reads it for the price too.

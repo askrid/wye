@@ -6,7 +6,7 @@
 //! `wye.telemetry.lost` instead of growing memory. Per-process telemetry is
 //! not shared state: replicas never compare or merge these numbers.
 
-use gateway_core::agent::CacheMiss;
+use gateway_core::{agent::CacheMiss, route::FailoverReason};
 
 use super::{Line, Outcome};
 
@@ -65,7 +65,7 @@ struct UpgradeSeries {
 struct FailoverSeries {
     /// The upstream that refused.
     upstream: Option<Box<str>>,
-    reason: &'static str,
+    reason: FailoverReason,
     count: u64,
 }
 
@@ -105,56 +105,49 @@ impl Metrics {
     /// Adds one usage record. Series are few (routes × statuses × outcomes,
     /// models × token kinds), so a linear search beats hashing here.
     pub(super) fn record(&mut self, line: &Line<'_>) {
-        let found = self.requests.iter().position(|s| {
-            &*s.route == line.path
-                && s.upstream.as_deref() == line.upstream
-                && s.status == line.status
-                && s.outcome == line.outcome
-        });
-        if let Some(series) = found.and_then(|i| self.requests.get_mut(i)) {
-            series.count += 1;
-        } else if self.requests.len() < MAX_SERIES {
-            self.requests.push(RequestSeries {
+        let overflow = &mut self.overflow;
+        let request = series(
+            &mut self.requests,
+            overflow,
+            |s| {
+                &*s.route == line.path
+                    && s.upstream.as_deref() == line.upstream
+                    && s.status == line.status
+                    && s.outcome == line.outcome
+            },
+            || RequestSeries {
                 route: line.path.into(),
                 upstream: line.upstream.map(Into::into),
                 status: line.status,
                 outcome: line.outcome,
-                count: 1,
-            });
-        } else {
-            self.overflow += 1;
+                count: 0,
+            },
+        );
+        if let Some(s) = request {
+            s.count += 1;
         }
         let bucket = DURATION_BOUNDS_MS
             .iter()
             .position(|&bound| line.duration_ms <= bound)
             .unwrap_or(DURATION_BOUNDS_MS.len());
-        let series = match self
-            .durations
-            .iter()
-            .position(|s| &*s.route == line.path && s.outcome == line.outcome)
-        {
-            Some(i) => self.durations.get_mut(i),
-            None if self.durations.len() < MAX_SERIES => {
-                self.durations.push(DurationSeries {
-                    route: line.path.into(),
-                    outcome: line.outcome,
-                    buckets: [0; DURATION_BOUNDS_MS.len() + 1],
-                    count: 0,
-                    sum: 0.0,
-                });
-                self.durations.last_mut()
+        let duration = series(
+            &mut self.durations,
+            overflow,
+            |s| &*s.route == line.path && s.outcome == line.outcome,
+            || DurationSeries {
+                route: line.path.into(),
+                outcome: line.outcome,
+                buckets: [0; DURATION_BOUNDS_MS.len() + 1],
+                count: 0,
+                sum: 0.0,
+            },
+        );
+        if let Some(s) = duration {
+            if let Some(count) = s.buckets.get_mut(bucket) {
+                *count += 1;
             }
-            None => None,
-        };
-        match series {
-            Some(series) => {
-                if let Some(count) = series.buckets.get_mut(bucket) {
-                    *count += 1;
-                }
-                series.count += 1;
-                series.sum += line.duration_ms;
-            }
-            None => self.overflow += 1,
+            s.count += 1;
+            s.sum += line.duration_ms;
         }
         if let Some(count) = line
             .cache_miss
@@ -164,74 +157,66 @@ impl Metrics {
             *count += 1;
         }
         for (name, count) in line.tool_calls.into_iter().flat_map(|t| t.iter()) {
-            let count = u64::from(count);
-            if let Some(series) = self.tool_calls.iter_mut().find(|(n, _)| &**n == name) {
-                series.1 = series.1.saturating_add(count);
-            } else if self.tool_calls.len() < MAX_SERIES {
-                self.tool_calls.push((name.into(), count));
-            } else {
-                self.overflow += 1;
+            let tool = series(
+                &mut self.tool_calls,
+                overflow,
+                |(n, _)| &**n == name,
+                || (name.into(), 0),
+            );
+            if let Some(s) = tool {
+                s.1 = s.1.saturating_add(u64::from(count));
             }
         }
         for (target, rule) in line.upgrade_issues.iter().flat_map(|i| i.iter()) {
-            let found = self.upgrades.iter().position(|s| {
-                &*s.target == target && s.rule == rule && s.subject.as_deref() == line.subject
-            });
-            if let Some(series) = found.and_then(|i| self.upgrades.get_mut(i)) {
-                series.count += 1;
-            } else if self.upgrades.len() < MAX_SERIES {
-                self.upgrades.push(UpgradeSeries {
+            let upgrade = series(
+                &mut self.upgrades,
+                overflow,
+                |s| &*s.target == target && s.rule == rule && s.subject.as_deref() == line.subject,
+                || UpgradeSeries {
                     target: target.into(),
                     rule,
                     subject: line.subject.map(Into::into),
-                    count: 1,
-                });
-            } else {
-                self.overflow += 1;
+                    count: 0,
+                },
+            );
+            if let Some(s) = upgrade {
+                s.count += 1;
             }
         }
         for failover in line.failovers {
-            let reason = match failover.status {
-                Some(429) => "429",
-                Some(529) => "529",
-                Some(_) => "other",
-                None => "connect",
-            };
             let upstream = failover.upstream.as_deref();
-            let found = self
-                .failovers
-                .iter()
-                .position(|s| s.upstream.as_deref() == upstream && s.reason == reason);
-            if let Some(series) = found.and_then(|i| self.failovers.get_mut(i)) {
-                series.count += 1;
-            } else if self.failovers.len() < MAX_SERIES {
-                self.failovers.push(FailoverSeries {
+            let refused = series(
+                &mut self.failovers,
+                overflow,
+                |s| s.upstream.as_deref() == upstream && s.reason == failover.reason,
+                || FailoverSeries {
                     upstream: upstream.map(Into::into),
-                    reason,
-                    count: 1,
-                });
-            } else {
-                self.overflow += 1;
+                    reason: failover.reason,
+                    count: 0,
+                },
+            );
+            if let Some(s) = refused {
+                s.count += 1;
             }
         }
         let Some(model) = line.model else { return };
+        let of_model = |m: &str, class: Option<&str>, upstream: Option<&str>| {
+            m == model && class == line.request_class && upstream == line.upstream
+        };
         if let Some(pico) = line.cost.filter(|&c| c > 0) {
-            let found = self.costs.iter().position(|s| {
-                &*s.model == model
-                    && s.request_class == line.request_class
-                    && s.upstream.as_deref() == line.upstream
-            });
-            if let Some(series) = found.and_then(|i| self.costs.get_mut(i)) {
-                series.pico = series.pico.saturating_add(pico);
-            } else if self.costs.len() < MAX_SERIES {
-                self.costs.push(CostSeries {
+            let cost = series(
+                &mut self.costs,
+                overflow,
+                |s| of_model(&s.model, s.request_class, s.upstream.as_deref()),
+                || CostSeries {
                     model: model.into(),
                     upstream: line.upstream.map(Into::into),
                     request_class: line.request_class,
-                    pico,
-                });
-            } else {
-                self.overflow += 1;
+                    pico: 0,
+                },
+            );
+            if let Some(s) = cost {
+                s.pico = s.pico.saturating_add(pico);
             }
         }
         for (kind, count) in [
@@ -243,25 +228,42 @@ impl Metrics {
             let Some(count) = count.filter(|&c| c > 0) else {
                 continue;
             };
-            let found = self.tokens.iter().position(|s| {
-                s.kind == kind
-                    && &*s.model == model
-                    && s.request_class == line.request_class
-                    && s.upstream.as_deref() == line.upstream
-            });
-            if let Some(series) = found.and_then(|i| self.tokens.get_mut(i)) {
-                series.count = series.count.saturating_add(count);
-            } else if self.tokens.len() < MAX_SERIES {
-                self.tokens.push(TokenSeries {
+            let tokens = series(
+                &mut self.tokens,
+                overflow,
+                |s| s.kind == kind && of_model(&s.model, s.request_class, s.upstream.as_deref()),
+                || TokenSeries {
                     kind,
                     model: model.into(),
                     upstream: line.upstream.map(Into::into),
                     request_class: line.request_class,
-                    count,
-                });
-            } else {
-                self.overflow += 1;
+                    count: 0,
+                },
+            );
+            if let Some(s) = tokens {
+                s.count = s.count.saturating_add(count);
             }
+        }
+    }
+}
+
+/// The series in `list` that `matches`, or a new one from `new` while fewer
+/// than [`MAX_SERIES`] exist; beyond that `None`, counted in `overflow`.
+fn series<'s, S>(
+    list: &'s mut Vec<S>,
+    overflow: &mut u64,
+    matches: impl Fn(&S) -> bool,
+    new: impl FnOnce() -> S,
+) -> Option<&'s mut S> {
+    match list.iter().position(matches) {
+        Some(i) => list.get_mut(i),
+        None if list.len() < MAX_SERIES => {
+            list.push(new());
+            list.last_mut()
+        }
+        None => {
+            *overflow += 1;
+            None
         }
     }
 }

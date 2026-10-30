@@ -51,12 +51,7 @@ impl Chunks {
 
     /// What the chunks count against a budget ([`super::charge`]).
     pub(super) fn charged(&self) -> usize {
-        self.inline
-            .iter()
-            .flatten()
-            .chain(&self.rest)
-            .map(|c| super::charge(c.len()))
-            .sum()
+        super::charged(self.inline.iter().flatten().chain(&self.rest))
     }
 
     pub(super) fn bytes(&self) -> u64 {

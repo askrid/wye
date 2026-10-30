@@ -141,12 +141,16 @@ pub(super) fn error(
             )
         }
     };
-    let mut res = Response::new(Either::Left(Full::new(Bytes::from(body))));
+    let mut res = json(Bytes::from(body));
     *res.status_mut() = status;
-    res.headers_mut().insert(
-        CONTENT_TYPE,
-        http::HeaderValue::from_static("application/json"),
-    );
+    res
+}
+
+/// A `200` JSON response with `body`.
+pub(super) fn json(body: Bytes) -> Response<ResBody> {
+    let mut res = Response::new(Either::Left(Full::new(body)));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     res
 }
 

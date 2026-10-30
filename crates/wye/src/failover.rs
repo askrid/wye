@@ -25,7 +25,7 @@ use tokio::sync::oneshot;
 
 use crate::{
     gauge::{Gauge, Held},
-    request_body::{RequestBody, charge, splice_chunks},
+    request_body::{RequestBody, charge, charged, hint_after, recharge, splice_chunks},
 };
 
 /// What a dropped attempt hands back: the bytes it sent, in order, then the
@@ -59,26 +59,12 @@ impl<B> Resend<RequestBody<B>> {
         let sent: u64 = self.chunks.iter().map(|c| c.len() as u64).sum();
         let delta = value.len() as i64 - (span.end - span.start) as i64;
         if span.end <= sent {
-            let charged = |chunks: &VecDeque<Bytes>| -> usize {
-                chunks.iter().map(|c| charge(c.len())).sum()
-            };
             let before = charged(&self.chunks);
             let mut out = VecDeque::with_capacity(self.chunks.len() + 2);
             splice_chunks(self.chunks.drain(..), span, value, |c| out.push_back(c));
             self.chunks = out;
-            // At most a model name's length and two new chunks: the bound is
-            // not re-checked.
-            let after = charged(&self.chunks);
-            if after > before {
-                self.budget.try_grow(after - before, usize::MAX);
-            } else {
-                self.budget.release(before - after);
-            }
-            if delta > 0 {
-                self.bytes += delta.unsigned_abs() as usize;
-            } else {
-                self.bytes = self.bytes.saturating_sub(delta.unsigned_abs() as usize);
-            }
+            recharge(&mut self.budget, before, charged(&self.chunks));
+            self.bytes = self.bytes.saturating_add_signed(delta as isize);
             true
         } else if span.start >= sent {
             // The rest's held chunks start where the sent ones end.
@@ -239,16 +225,7 @@ where
             .flat_map(|k| &k.replay)
             .map(|c| c.len() as u64)
             .sum();
-        let rest = self
-            .rest
-            .as_ref()
-            .map_or_else(|| SizeHint::with_exact(0), B::size_hint);
-        let mut hint = SizeHint::new();
-        hint.set_lower(rest.lower().saturating_add(replay));
-        if let Some(upper) = rest.upper() {
-            hint.set_upper(upper.saturating_add(replay));
-        }
-        hint
+        hint_after(replay, self.rest.as_ref())
     }
 }
 

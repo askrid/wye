@@ -28,6 +28,7 @@ use gateway_core::{
     credential::Identity,
     pricing::Pricing,
     prompt::HashKey,
+    route::FailoverReason,
     usage::{ToolCalls, Usage, UsageStatus},
 };
 use http::{HeaderValue, StatusCode};
@@ -106,8 +107,7 @@ pub(crate) struct RequestInfo {
 /// An upstream that refused a request, which then went to the next one.
 pub(crate) struct RefusedAttempt {
     pub upstream: Option<Arc<str>>,
-    /// The refusal's status; `None`: the connection could not be made.
-    pub status: Option<u16>,
+    pub reason: FailoverReason,
 }
 
 pub(crate) struct Record {

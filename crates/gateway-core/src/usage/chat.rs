@@ -111,7 +111,7 @@ impl ChatUsageScanner {
                     if let Some(model) = chunk.model {
                         self.model = Some(model.into());
                     }
-                    if chunk.service_tier.is_some_and(|tier| tier != "default") {
+                    if super::unpriced_tier(chunk.service_tier) {
                         self.usage.unpriced = true;
                     }
                     if let Some(usage) = chunk.usage {
