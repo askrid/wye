@@ -29,8 +29,8 @@ Each document owns one concern. Other documents link to it instead of restating 
 | Provider | Who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai` |
 | Affinity | The choice of upstream from the session id (`cache_affine`), so a session keeps one account and its prompt cache |
 | Failover | Resending a request to the route's next upstream after a refusal that proves it was not processed, before any output |
-| Alias | A model name clients send that config maps to a real model, per credential subject |
-| Gateway credential | What a caller presents to Wye (a JWT from Wye or an identity provider); Wye replaces it with the provider key |
+| Alias | A model name clients send that config maps to a real model, per token subject |
+| Gateway token | What a caller presents to Wye (a JWT from Wye or an identity provider); Wye replaces it with the provider key |
 | Hold | Reading the start of a request body until its `model` is known, for permissions, output-token ceilings, aliases, and provider model ids |
 | Usage record | One JSON line per proxied request: tokens, cost, session, request class, outcome; also an OTLP log record and span |
 

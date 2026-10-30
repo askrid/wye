@@ -8,7 +8,7 @@ Each stage leaves a runnable system with focused tests. Order of the next work: 
 |---|---|
 | M0: Claude Code stream proxy | Done and gated. Exit check half done: the first real session through subscription passthrough (2026-10-17) exposed compressed responses, since fixed; since 2026-10-30 full sessions run through it (streaming, tool use, prompt caching, extended thinking, token counting, background sessions), which found `count_tokens` replies recorded as cancelled and background sessions bypassing `wye claude`, both fixed. The check with an API key is open |
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, stress scenarios, KrakenD, LiteLLM, and Bifrost comparisons |
-| M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 credentials, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#credential-renewal)). Stages 5-6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Release archives for Linux and macOS from a `v*` tag (dist; first release pending). Open: published images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
+| M1: team-ready Claude Code | Stage 4 done: Wye's own Ed25519 tokens, model permissions and output-token ceilings, identity-provider tokens, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)). Stages 5-6 done: usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test. Release archives for Linux and macOS from a `v*` tag (dist; first release pending). Open: published images, Compose example and the Swarm rolling-update check, the M1 exit check against a real team setup |
 | M1b: agent-aware visibility | A1-A4 done (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). A5 (secret detection) open: needs a dependency decision |
 | M2: cost policy | Pricing done ([policy.md](policy.md#pricing-metadata)): cost, cost status, and pricing version in usage records, `wye.cost` in OTLP, dollars in `wye report`; cache-miss diagnostics done early (opt-in, sampled per session). `wye explain` prints the price that applies; cost bound and provider-held budgets not started |
 | M2b: model aliases and upgrade checks | Done: `[[aliases]]` with per-subject rollout (stage A) and upgrade checks with a sourced rule table, sampled body scan, `upgrade_issues` in records and OTLP, `explain --target-model`, `wye report` by client (stage B) ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Exit check (a real alias move) open |
@@ -49,13 +49,13 @@ Status: stages 1-3 are implemented and covered by integration tests against a mo
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| 4 | 4a done: Ed25519 JWT credentials from `Authorization` or `x-api-key`, `wye token keygen`/`issue`, `max_credential_ttl_secs`, `[auth]` lifts the loopback-only restriction, subject in the usage log. 4b done: model permissions from config and the credential's `models` claim, read from the held start of the body; output-token ceilings from config and the `max_output_tokens` claim, the stricter applying. 4c done: identity-provider JWTs (`[[auth.issuers]]`: pinned algorithm, JWKS file, subject claim, claim → model grants). `apiKeyHelper` renewal examples done. Stage 4 is complete | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
+| 4 | 4a done: Ed25519 JWT tokens from `Authorization` or `x-api-key`, `wye token keygen`/`issue`, `max_token_ttl_secs`, `[auth]` lifts the loopback-only restriction, subject in the usage log. 4b done: model permissions from config and the token's `models` claim, read from the held start of the body; output-token ceilings from config and the `max_output_tokens` claim, the stricter applying. 4c done: identity-provider JWTs (`[[auth.issuers]]`: pinned algorithm, JWKS file, subject claim, claim → model grants). `apiKeyHelper` renewal examples done. Stage 4 is complete | Invalid, expired, wrong-audience, unknown-key, and unauthorized tokens rejected before contacting upstream; token limits only narrow config; background-model requests covered by permissions |
 | 5 | Usage observer (`message_start`, `message_delta`; done), minimal OTLP telemetry with developer and Claude Code session attribution (done: usage records as logs with session and subject attribution, cumulative request, duration, token, and active-request metrics, and one span per request joined to the caller's `traceparent`), OCI image (done locally with a smoke test; publishing open), baseline benchmark (done) | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
 | 6 | `wye claude` and `wye service` (done; the systemd path is tested but has not run on a real Linux machine), prebuilt binaries (done: release archives from a `v*` tag; first release pending), Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes); both done) | Wrapper launches Claude Code against Wye without writing anything; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
 
-Exit: a team runs Claude Code through a shared Wye with per-developer credentials and sees usage per developer and session in its existing OTel backend.
+Exit: a team runs Claude Code through a shared Wye with per-developer tokens and sees usage per developer and session in its existing OTel backend.
 
 ### M1b: agent-aware visibility
 
@@ -63,7 +63,7 @@ Turns the signals Claude Code sends gateways into attribution and explanations (
 
 | Stage | Scope | Acceptance evidence |
 | --- | --- | --- |
-| A1 (done) | Retry hygiene: Wye's own 529s carry `retry-after` (integer seconds, at most 60) and `x-should-retry: true`. Model picker: `GET /v1/models` lists the models the caller's credential may use, in the shape Claude Code's discovery expects | Integration tests for both; Claude Code's picker shows only permitted models |
+| A1 (done) | Retry hygiene: Wye's own 529s carry `retry-after` (integer seconds, at most 60) and `x-should-retry: true`. Model picker: `GET /v1/models` lists the models the caller's token may use, in the shape Claude Code's discovery expects | Integration tests for both; Claude Code's picker shows only permitted models |
 | A2 (done) | Spend by work type: request class, agent type, compaction trigger, agent and prompt ids in the usage log, OTLP logs, and `wye.tokens`. Expected versus unexpected cache misses from `x-claude-code-context-compacted` | Header values bounded and validated before they become attributes; metric series stay within their limit; gate unchanged |
 | A3 (done) | Session traces: trace id derived from the session id; tool durations as tool spans; prompt and agent structure as attributes (no synthetic parent spans) | One Claude Code session appears as one trace in a reference backend (Jaeger) across two replicas |
 | A4 (done) | `wye report` over the usage log; tool names and counts from `tool_use` events in the response scanner | `alloc_sse_per_event` stays at zero; report output tested on recorded logs |
@@ -145,7 +145,7 @@ Deterministic integration tests use a local mock upstream. Normal CI never makes
 - Reject oversized requests; exercise timeout and upstream failure paths.
 - Drain or cancel active streams according to the shutdown deadline.
 
-Core unit tests and property tests cover configuration validation, credential verification, model permissions and output-token ceilings, routing and failover order, pricing, and the request and response scanners. A small opt-in real-provider smoke test checks SDK compatibility; it does not replace deterministic protocol tests.
+Core unit tests and property tests cover configuration validation, token verification, model permissions and output-token ceilings, routing and failover order, pricing, and the request and response scanners. A small opt-in real-provider smoke test checks SDK compatibility; it does not replace deterministic protocol tests.
 
 ## Open findings
 
@@ -156,12 +156,21 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 | No minimum read rate: a client that accepts one window update a minute keeps its stream, permit, and about 0.7 MB, since the write timeout resets on any progress | Bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate |
 | Client connections are not capped, and `/healthz` and `/readyz` take no permit, so a connection flood is bounded only by the open-file limit | A connection cap is a new limit to size and document; accept errors already pause instead of spinning |
 | Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s) | Some front ends answer frequent pings with `GOAWAY`; needs a check against each provider |
-| Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-credentials)) | Each such field is provider-specific; a list of them is a design change |
+| Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-tokens)) | Each such field is provider-specific; a list of them is a design change |
 | OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process | The excess is counted in `wye.telemetry.lost`; per-attribute caps need a design |
 | Tests: some negative checks (`try_recv` on an empty channel) race the upstream, and a few tests wait with fixed sleeps | Test cleanup; none has flaked on the laptop or CI |
 | Test and benchmark code repeats setup (recording upstreams, SSE responses, leaked `'static` bodies, CPU before-and-after pairs), and `wye-bench` leaves its gateways running when interrupted | Cleanup with no behavior change; next round |
 | CI's benchmark rebuilds the reference commit from scratch on every run: its cache holds the build, but `bench-against.sh` removes a reference tree without a worktree | CI time only; the fix is a build directory outside the worktree |
 | No `cargo-fuzz` targets for the parsers of untrusted input (AGENTS.md asks for them); property tests cover the scanners | Needs a nightly toolchain: a decision for the maintainer |
+
+From the CLI review (2026-10-30), not fixed:
+
+- `wye doctor` does not warn about a provider key file others can read: mounted secrets are often 0444, so it would need to tell them apart.
+- `wye claude` starts the agent with an expired gateway token, which then gets 401s. The token's `exp` could be read locally first.
+- `policy-diff` takes no `-` for a config (`git show main:wye.toml | wye policy-diff - wye.toml`): key sets are read relative to each config, so a worktree remains the right way.
+- No `--json` on `report`, and no shell completions; both could come from what exists when someone needs them.
+- `wye claude` does not read the config's `listen`, on purpose: the config is the server's, and the gateway may be remote. A changed port needs `WYE_URL`.
+- The report has no cost column until the config has `[pricing]`, and `wye init` writes none, since a table in the binary would need upkeep ([visibility ideas](research.md#visibility-for-one-developer)).
 
 ## Release acceptance checklist
 
@@ -188,7 +197,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - [ ] Hard per-request cost mode rejects unbounded or unknown billable dimensions.
 - [ ] Hard cost mode is enabled only for models whose tokens-≤-bytes bound and reasoning-token billing are verified.
 - [ ] Only allowlisted fields are rewritten; caller limits are never raised.
-- [ ] `wye explain` output matches `serve` decisions for the same request, credential, and config.
+- [ ] `wye explain` output matches `serve` decisions for the same request, token, and config.
 - [ ] Token replay documented and not represented as preventable without redemption state.
 - [ ] No global/monthly budget or global RPM enforcement advertised.
 
@@ -197,7 +206,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - [ ] `wye serve` works from a prebuilt binary.
 - [ ] OCI image and Compose example need no gateway datastore.
 - [ ] Helm release exposes Wye internally with health probes and secret references.
-- [ ] An SDK backend switches using base URL plus gateway credential.
+- [ ] An SDK backend switches using base URL plus gateway token.
 - [ ] `wye claude` and `wye codex` launch their agents against the gateway without changing the user's own configuration.
 - [ ] An OTel backend shows usage and cost by subject, model, and session without a custom dashboard.
 - [ ] Rollout and shutdown drain streams within a configured deadline.

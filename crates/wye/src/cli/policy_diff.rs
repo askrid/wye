@@ -103,10 +103,10 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
     match (&old.auth, &new.auth) {
         (Some(_), None) => diff
             .widens
-            .push("[auth] removed: no credential is required".into()),
+            .push("[auth] removed: no token is required".into()),
         (None, Some(_)) => diff
             .narrows
-            .push("[auth] added: a credential is required".into()),
+            .push("[auth] added: a token is required".into()),
         (Some(old), Some(new)) => auth(&mut diff, old, new),
         (None, None) => {}
     }
@@ -141,24 +141,19 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             .push(format!("[auth] max_output_tokens: no ceiling -> {b}")),
         _ => {}
     }
-    let (a, b) = (
-        old.max_credential_ttl.as_secs(),
-        new.max_credential_ttl.as_secs(),
-    );
+    let (a, b) = (old.max_token_ttl.as_secs(), new.max_token_ttl.as_secs());
     if b > a {
         diff.widens
-            .push(format!("[auth] max_credential_ttl_secs: {a} -> {b}"));
+            .push(format!("[auth] max_token_ttl_secs: {a} -> {b}"));
     } else if b < a {
         diff.narrows
-            .push(format!("[auth] max_credential_ttl_secs: {a} -> {b}"));
+            .push(format!("[auth] max_token_ttl_secs: {a} -> {b}"));
     }
     match (&old.own, &new.own) {
-        (None, Some(_)) => diff
-            .widens
-            .push("[auth] Wye's own credentials accepted".into()),
+        (None, Some(_)) => diff.widens.push("[auth] Wye's own tokens accepted".into()),
         (Some(_), None) => diff
             .narrows
-            .push("[auth] Wye's own credentials no longer accepted".into()),
+            .push("[auth] Wye's own tokens no longer accepted".into()),
         (Some(old), Some(new)) => {
             if (&old.issuer, &old.audience) != (&new.issuer, &new.audience) {
                 diff.widens.push(format!(

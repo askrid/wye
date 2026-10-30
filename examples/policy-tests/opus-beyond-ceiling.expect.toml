@@ -1,7 +1,7 @@
-# Opus is outside the configured ceiling, even for a credential that names it.
+# Opus is outside the configured ceiling, even for a token that names it.
 decision = "refuse"
 status = 403
 error = "permission_error"
-[credential]
+[token]
 subject = "team-research"
 models = ["claude-*"]

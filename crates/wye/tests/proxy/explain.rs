@@ -57,7 +57,7 @@ async fn explain_and_the_server_answer_alike() {
             r#"{"model":"coding","max_tokens":5}"#,
         ),
         (
-            "beyond the credential",
+            "beyond the token",
             &haiku_only,
             r#"{"model":"claude-sonnet-4-5","max_tokens":5}"#,
         ),
@@ -67,7 +67,7 @@ async fn explain_and_the_server_answer_alike() {
             r#"{"model":"claude-haiku-4-5","max_tokens":5000}"#,
         ),
         (
-            "over the credential's ceiling",
+            "over the token's ceiling",
             &capped,
             r#"{"max_tokens":50,"model":"claude-haiku-4-5"}"#,
         ),

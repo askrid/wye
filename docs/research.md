@@ -80,7 +80,7 @@ Variants (plain path):
 
 | Variant | Cost against plain Wye |
 |---|---|
-| `auth_`: Ed25519 credentials | +88 µs CPU per full verification (the check itself 55-62 µs); on a reused connection the per-connection cache makes it free |
+| `auth_`: Ed25519 tokens | +88 µs CPU per full verification (the check itself 55-62 µs); on a reused connection the per-connection cache makes it free |
 | `models_`: model permissions | +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies |
 | `diag_`: cache diagnostics | +2 allocations per request; +75% upload CPU on Claude Code-shaped bodies (2.6 vs 1.49 ms/MB), hence per-session sampling |
 | `otlp_`: OTLP export | within noise (121.5 vs 120.5 µs CPU per request) |
@@ -323,7 +323,7 @@ Proposal: a signed receipt per request (subject, session, model, status, reporte
 
 ### 5. Queryable and provable policy
 
-Beyond `wye explain` for one request: "who can reach Opus?", and a CI check that fails when a config change widens access (Zelkova-style analysis over static config). The CI check is built as `wye policy-diff` ([operations.md](operations.md#cli)): model patterns compare by coverage, ceilings and trusted signers by value. Open: the question form ("which subjects or grants reach this model?"), which needs the credential side as data.
+Beyond `wye explain` for one request: "who can reach Opus?", and a CI check that fails when a config change widens access (Zelkova-style analysis over static config). The CI check is built as `wye policy-diff` ([operations.md](operations.md#cli)): model patterns compare by coverage, ceilings and trusted signers by value. Open: the question form ("which subjects or grants reach this model?"), which needs the token side as data.
 
 ### 6. Provable cost bound
 
@@ -389,7 +389,7 @@ Each is a hypothesis until `wye-bench` measures it.
 | 256 lanes instead of 64 | Rejected (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%. A profile of the paced load had shown ~10% of busy samples waiting on h2's per-connection lock, but more connections cost more than the contention they remove |
 | Maximum HTTP/2 connection window, 256 KiB per stream | Adopted (bug fix, 2026-10-24): with hyper's defaults (5 MiB connection, 2 MiB stream) 200 stalled clients made 643-811 other streams fail; now 0. RSS per stalled stream 3.3 MB (defaults) → 2.0 MB (1 MiB, first fix) → 0.49 MB; bulk CPU per MB relayed +10% against 1 MiB (4.06 → 4.47 ms), token streams unaffected |
 | Client write-stall timeout | Adopted: a connection whose writes make no progress for `client_write_timeout_secs` (60) is closed, which ends a stalled stream; zero cost while writes never block (the timer is allocated at the first blocked write) |
-| Per-connection credential cache | Adopted: CPU per authenticated request -38% and -44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
+| Per-connection token cache | Adopted: CPU per authenticated request -38% and -44% in two A/B runs, equal to unauthenticated; ~0.3 KB per connection |
 | Shared cached identity (`Arc`) and borrowed log line | Adopted: allocations per authenticated request 37.5 → 20.6 |
 | 32 KiB client-connection buffer cap | Adopted (approved tradeoff): idle TLS stream after 512 KB 150 → 49 KB; plain uploads +7% CPU; 16 KiB cost +50% plain upload CPU |
 | Client socket send buffer fixed at 128 KiB | Adopted (2026-10-29): autotuning let the kernel send buffer of a client that stopped reading grow to 4 MiB, memory outside Wye's own bounds; now 32 MB for 256 stalled clients (64 MB on Linux, which doubles the value set). Found when the stalled-client test exhausted a 7 GB macOS CI runner's 96 MB network pool. A/B, three alternating rounds: bulk CPU per MB +7.6% TLS (within its noise), -1.3% plain; per-request and per-event costs unchanged within noise |

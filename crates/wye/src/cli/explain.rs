@@ -154,15 +154,15 @@ pub fn explain(
 
     let mut identity = None;
     match &config.auth {
-        None => out.step("credential: not required (no [auth])".into()),
+        None => out.step("token: not required (no [auth])".into()),
         Some(_) => match credential {
             Credential::None => {
-                return out.refuse(401, "authentication_error", "no gateway credential".into());
+                return out.refuse(401, "authentication_error", "no gateway token".into());
             }
             Credential::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
                     out.step(format!(
-                        "credential: valid; subject {}, key {}, expires at {}",
+                        "token: valid; subject {}, key {}, expires at {}",
                         verified.subject, verified.key_id, verified.expires_at
                     ));
                     identity = Some(verified);
@@ -171,7 +171,7 @@ pub fn explain(
             },
             Credential::Trusted(claims) => {
                 out.step(format!(
-                    "credential: taken as verified (signature not checked); subject {}",
+                    "token: taken as verified (signature not checked); subject {}",
                     claims.subject
                 ));
                 identity = Some(claims);
@@ -245,7 +245,7 @@ pub fn explain(
         };
         out.model = Some(model.clone());
         out.step(format!(
-            "model: {model}; allowed by config: {}; by credential: {}",
+            "model: {model}; allowed by config: {}; by token: {}",
             list(configured),
             list(checks.granted)
         ));
@@ -293,10 +293,8 @@ pub fn explain(
         let how = match (route.select(), session, &identity) {
             (Select::Ordered, _, _) => "ordered: the first in config",
             (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
-            (Select::CacheAffine, None, Some(_)) => "cache_affine by credential subject",
-            (Select::CacheAffine, None, None) => {
-                "cache_affine by nothing: no session id or credential"
-            }
+            (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
+            (Select::CacheAffine, None, None) => "cache_affine by nothing: no session id or token",
         };
         out.step(format!(
             "route: upstream {id} of {} ({how})",
@@ -325,8 +323,8 @@ pub fn explain(
         ));
     }
     out.step(match &upstream.credential {
-        UpstreamCredential::ForwardCaller => "provider credential: the caller's own".into(),
-        source => format!("provider credential: {header} from {source}"),
+        UpstreamCredential::ForwardCaller => "provider key: the caller's own".into(),
+        source => format!("provider key: {header} from {source}"),
     });
     // The gateway reads the model on a route that rewrites its id even when no
     // policy does; explain reads it for the price too.

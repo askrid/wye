@@ -35,7 +35,7 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 /// Local use needs no drain; behind a load balancer, set it above the
 /// health-check interval.
 const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
-/// Default `max_credential_ttl_secs`: one week.
+/// Default `max_token_ttl_secs`: one week.
 const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
 /// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
 pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
@@ -178,7 +178,7 @@ pub struct Auth {
     pub issuers: Vec<Issuer>,
     /// Longest accepted `exp - iat`: without a revocation list, offboarding
     /// takes effect when the person's last credential expires.
-    pub max_credential_ttl: Duration,
+    pub max_token_ttl: Duration,
     /// Models any credential may use; `None` allows every model. A
     /// credential's `models` claim, or an issuer's grants, narrow this, never
     /// widen it.

@@ -80,7 +80,7 @@ fn permissions_apply_to_the_resolved_model_and_name_the_sent_one() {
     assert_eq!(refusal.kind(), "permission_error");
     assert_eq!(
         refusal.to_string(),
-        "this credential may not use the model \"coding\""
+        "this gateway token may not use the model \"coding\""
     );
     assert!(checks.resolve("claude-sonnet-5-5", None).is_none());
 }
@@ -97,7 +97,7 @@ fn a_token_value_is_final_when_read_and_a_missing_one_at_the_end() {
         .unwrap_err();
     assert_eq!(
         refusal.to_string(),
-        "max_tokens 101 exceeds this credential's limit of 100"
+        "max_tokens 101 exceeds this gateway token's limit of 100"
     );
     // The OpenAI APIs let the field out; under a ceiling it is required,
     // once the whole body shows it is missing.

@@ -63,7 +63,7 @@ fn auth_allows_network_listen_and_validates_keys() {
     let config = with_auth("0.0.0.0:8080", "api_key_env = \"K\"", &keys).unwrap();
     let auth = config.auth.unwrap();
     assert_eq!(auth.own.unwrap().keys.len(), 1);
-    assert_eq!(auth.max_credential_ttl, Duration::from_secs(7 * 24 * 3600));
+    assert_eq!(auth.max_token_ttl, Duration::from_secs(7 * 24 * 3600));
 
     assert!(matches!(
         with_auth("0.0.0.0:8080", "forward_caller_credential = true", &keys),

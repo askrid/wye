@@ -112,7 +112,7 @@ pub(super) fn unauthorized(api: Api) -> Response<ResBody> {
         api,
         StatusCode::UNAUTHORIZED,
         "authentication_error",
-        "invalid or missing gateway credential",
+        "invalid or missing gateway token",
     )
 }
 

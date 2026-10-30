@@ -27,7 +27,7 @@ fn auth(issuers: Vec<Issuer>) -> Auth {
     Auth {
         own: None,
         issuers,
-        max_credential_ttl: Duration::from_secs(86_400),
+        max_token_ttl: Duration::from_secs(86_400),
         models: None,
         max_output_tokens: None,
     }

@@ -75,7 +75,7 @@ fn ceilings_signers_and_exposure_widen() {
         "127.0.0.1:8080",
         Some(&own(
             "",
-            "max_output_tokens = 32000\nmax_credential_ttl_secs = 86400",
+            "max_output_tokens = 32000\nmax_token_ttl_secs = 86400",
         )),
         "",
     );
@@ -83,10 +83,7 @@ fn ceilings_signers_and_exposure_widen() {
         "0.0.0.0:8080",
         Some(&format!(
             "{}[[auth.keys]]\nid = \"k2\"\ned25519_public_key = \"{}\"\n",
-            own(
-                "",
-                "max_output_tokens = 64000\nmax_credential_ttl_secs = 604800"
-            ),
+            own("", "max_output_tokens = 64000\nmax_token_ttl_secs = 604800"),
             credential::encode_public_key(&[8; 32])
         )),
         "",
@@ -95,7 +92,7 @@ fn ceilings_signers_and_exposure_widen() {
     for line in [
         "widens: server.listen: 127.0.0.1:8080 -> 0.0.0.0:8080, reachable beyond this machine",
         "widens: [auth] max_output_tokens: 32000 -> 64000",
-        "widens: [auth] max_credential_ttl_secs: 86400 -> 604800",
+        "widens: [auth] max_token_ttl_secs: 86400 -> 604800",
         "widens: [[auth.keys]] k2: a new signing key is trusted",
         "result: access widened (4)",
     ] {
@@ -108,7 +105,7 @@ fn ceilings_signers_and_exposure_widen() {
     let open = config("127.0.0.1:8080", None, "");
     let report = policy_diff(&old, &open).report();
     assert!(
-        report.contains("widens: [auth] removed: no credential is required"),
+        report.contains("widens: [auth] removed: no token is required"),
         "{report}"
     );
 }

@@ -72,17 +72,17 @@ pub enum CredentialError {
 impl fmt::Display for CredentialError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::TooLarge => "credential too large",
-            Self::Malformed => "credential is not a well-formed token",
-            Self::UnsupportedAlgorithm => "credential algorithm is not the one its issuer uses",
-            Self::UnknownKey => "credential signed by an unknown key",
-            Self::BadSignature => "credential signature is invalid",
-            Self::WrongIssuer => "credential issuer is not accepted",
-            Self::WrongAudience => "credential audience does not match",
-            Self::Expired => "credential has expired",
-            Self::NotYetValid => "credential is not yet valid",
-            Self::LifetimeTooLong => "credential lifetime exceeds the configured maximum",
-            Self::MissingSubject => "credential lacks its subject claim",
+            Self::TooLarge => "token too large",
+            Self::Malformed => "token is not well formed",
+            Self::UnsupportedAlgorithm => "token algorithm is not the one its issuer uses",
+            Self::UnknownKey => "token signed by an unknown key",
+            Self::BadSignature => "token signature is invalid",
+            Self::WrongIssuer => "token issuer is not accepted",
+            Self::WrongAudience => "token audience does not match",
+            Self::Expired => "token has expired",
+            Self::NotYetValid => "token is not yet valid",
+            Self::LifetimeTooLong => "token lifetime exceeds the configured maximum",
+            Self::MissingSubject => "token lacks its subject claim",
         })
     }
 }
@@ -190,7 +190,7 @@ impl Verifier {
     /// in any two sets, is an error: a token's `kid` must name one key.
     pub fn new(auth: &Auth, provider_keys: Vec<ProviderKeys>) -> Result<Self, KeySetError> {
         let mut verifier = Self {
-            max_ttl_secs: auth.max_credential_ttl.as_secs(),
+            max_ttl_secs: auth.max_token_ttl.as_secs(),
             keys: HashMap::new(),
             sources: Vec::new(),
         };

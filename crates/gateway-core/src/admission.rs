@@ -154,7 +154,7 @@ impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Invalid(e) => f.write_str(e.as_str()),
-            Self::Model(model) => write!(f, "this credential may not use the model {model:?}"),
+            Self::Model(model) => write!(f, "this gateway token may not use the model {model:?}"),
             Self::TokenLimit(e) => e.fmt(f),
             // Names the sections that would serve it.
             Self::NoRoute { api, path } => {
@@ -196,12 +196,12 @@ impl fmt::Display for TokenLimitError {
         match self.requested {
             Some(requested) => write!(
                 f,
-                "{} {requested} exceeds this credential's limit of {}",
+                "{} {requested} exceeds this gateway token's limit of {}",
                 self.field, self.limit
             ),
             None => write!(
                 f,
-                "{} is required: this credential's limit is {}",
+                "{} is required: this gateway token's limit is {}",
                 self.field, self.limit
             ),
         }
