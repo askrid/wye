@@ -7,7 +7,7 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, Issuer, UpstreamCredential},
+    config::{Config, Issuer, Upstream, UpstreamCredential},
     credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
 };
@@ -19,6 +19,8 @@ use http::{HeaderMap, HeaderValue};
 #[derive(Debug)]
 pub enum StartupError {
     MissingEnv(String),
+    /// A secret's environment variable is set but blank.
+    EmptyEnv(String),
     InvalidApiKey,
     HashKeyTooShort(String),
     KeyFile {
@@ -48,9 +50,11 @@ impl fmt::Display for StartupError {
                 f,
                 "environment variable {name} is not set or not valid UTF-8"
             ),
-            Self::InvalidApiKey => {
-                f.write_str("upstream API key contains characters not allowed in an HTTP header")
-            }
+            Self::EmptyEnv(name) => write!(f, "environment variable {name} is empty"),
+            Self::InvalidApiKey => f.write_str(
+                "upstream API key contains characters not allowed in an HTTP header \
+                 (a trailing newline, for example)",
+            ),
             Self::HashKeyTooShort(name) => write!(
                 f,
                 "environment variable {name} must hold at least {} bytes (for example `openssl rand -hex 32`)",
@@ -120,38 +124,24 @@ impl Resources {
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
         let mut upstreams = Vec::with_capacity(config.routes.upstreams().count());
         for upstream in config.routes.upstreams() {
-            let key = match &upstream.credential {
-                UpstreamCredential::ApiKeyEnv(name) => Some(env(name)?),
-                UpstreamCredential::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
-                UpstreamCredential::ForwardCaller => None,
-            };
-            let auth = match key {
-                Some(key) if upstream.provider.bearer_key() => UpstreamAuth::bearer(&key)?,
-                Some(key) => UpstreamAuth::api_key(&key)?,
-                None => UpstreamAuth::ForwardCaller,
-            };
+            let auth = upstream_auth(upstream, config_dir)?;
             let extra_roots = match &upstream.ca_file {
                 Some(path) => load_certificates(&config_dir.join(path))?,
                 None => Vec::new(),
             };
             upstreams.push(UpstreamResources { auth, extra_roots });
         }
-        let prompt_key = match &config.cache_diagnostics {
-            Some(diagnostics) => {
-                let name = &diagnostics.hash_key_env;
-                let key = HashKey::new(env(name)?.as_bytes())
-                    .ok_or_else(|| StartupError::HashKeyTooShort(name.clone()))?;
-                Some(key)
-            }
-            None => None,
-        };
+        let prompt_key = config
+            .cache_diagnostics
+            .as_ref()
+            .map(|diagnostics| prompt_key(&diagnostics.hash_key_env))
+            .transpose()?;
         let otlp_headers = match config
             .telemetry
             .as_ref()
             .and_then(|t| t.otlp_headers_env.as_ref())
         {
-            Some(name) => parse_headers(&env(name)?)
-                .ok_or_else(|| StartupError::InvalidOtlpHeaders(name.clone()))?,
+            Some(name) => otlp_headers(name)?,
             None => HeaderMap::new(),
         };
         Ok(Self {
@@ -201,6 +191,48 @@ pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<ProviderKeys
     };
     let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
     ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
+}
+
+// One resolver per secret, so `wye doctor` checks exactly what `serve`
+// will do with it.
+
+/// The credential Wye presents to `upstream`: its key from the environment
+/// or a file (relative to `config_dir`), or the caller's own.
+pub(crate) fn upstream_auth(
+    upstream: &Upstream,
+    config_dir: &Path,
+) -> Result<UpstreamAuth, StartupError> {
+    let key = match &upstream.credential {
+        UpstreamCredential::ApiKeyEnv(name) => Some(env_secret(name)?),
+        UpstreamCredential::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
+        UpstreamCredential::ForwardCaller => None,
+    };
+    match key {
+        Some(key) if upstream.provider.bearer_key() => UpstreamAuth::bearer(&key),
+        Some(key) => UpstreamAuth::api_key(&key),
+        None => Ok(UpstreamAuth::ForwardCaller),
+    }
+}
+
+/// The key prompt hashes are made with, from the variable `name`.
+pub(crate) fn prompt_key(name: &str) -> Result<HashKey, StartupError> {
+    HashKey::new(env(name)?.as_bytes())
+        .ok_or_else(|| StartupError::HashKeyTooShort(name.to_owned()))
+}
+
+/// Extra OTLP export headers from the variable `name`.
+pub(crate) fn otlp_headers(name: &str) -> Result<HeaderMap, StartupError> {
+    parse_headers(&env(name)?).ok_or_else(|| StartupError::InvalidOtlpHeaders(name.to_owned()))
+}
+
+/// The variable `name` as a secret: set and not blank. A blank key would
+/// start the server and fail every request upstream.
+fn env_secret(name: &str) -> Result<String, StartupError> {
+    let value = env(name)?;
+    if value.trim().is_empty() {
+        return Err(StartupError::EmptyEnv(name.to_owned()));
+    }
+    Ok(value)
 }
 
 /// A secret file's contents without surrounding whitespace (mounted secrets

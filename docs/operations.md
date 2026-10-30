@@ -33,9 +33,9 @@ wye token issue --key issuer.key --kid k1 --issuer wye --audience wye-prod --sub
 
 All of these are built. `init` writes a minimal validated config for an API key or a claude.ai subscription, optionally with `[routes.openai]`, never over an existing file, and prints the next commands; `check-config` parses the config and reads the identity providers' key sets (environment secrets are not checked; `doctor` checks them). `doctor`, `explain`, `policy-test`, and `policy-diff` exit 3 when they find a problem, a refusal, a failed case, or widened access.
 
-**`wye doctor --config wye.toml`** checks what `serve` will need and says what to change, one line per check:
+**`wye doctor --config wye.toml`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would:
 
-- Each upstream's provider key is present (environment variable or file; never printed), and how it will be sent.
+- Each upstream's provider key is present, not blank, and valid in an HTTP header (environment variable or file; never printed), and how it will be sent.
 - A Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is.
 - Each upstream answers at its base URL: one unauthenticated `HEAD`, trusting its `ca_file`, proves DNS, TCP, TLS, and HTTP without a model request, so nothing is billed.
 - The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP header variable and endpoint; headers sent over plain http beyond this machine are a problem, since they usually carry a backend's API key.

@@ -14,15 +14,14 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::{
-    config::{Config, Provider, Telemetry, Upstream, UpstreamCredential, is_loopback_host},
-    prompt::HashKey,
+use gateway_core::config::{
+    Config, Provider, Telemetry, Upstream, UpstreamCredential, is_loopback_host,
 };
 use http::{Request, Uri};
 use http_body_util::Empty;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 
-use crate::startup::{env, load_certificates, read_secret, verifier};
+use crate::startup::{load_certificates, otlp_headers, prompt_key, upstream_auth, verifier};
 
 /// Each network check, including the connection, must finish within this.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -56,29 +55,18 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
     }
     if let Some(diagnostics) = &config.cache_diagnostics {
         let name = &diagnostics.hash_key_env;
-        checks.push(match env(name) {
-            Ok(key) if HashKey::new(key.as_bytes()).is_some() => {
-                pass(format!("cache_diagnostics: ${name} set"))
-            }
-            Ok(_) => fail(format!(
-                "cache_diagnostics: ${name} must hold at least {} bytes (openssl rand -hex 32)",
-                HashKey::MIN_LEN
-            )),
-            Err(_) => fail(format!("cache_diagnostics: ${name} is not set")),
+        checks.push(match prompt_key(name) {
+            Ok(_) => pass(format!("cache_diagnostics: ${name} set")),
+            Err(e) => fail(format!("cache_diagnostics: {e}")),
         });
     }
     if let Some(telemetry) = &config.telemetry {
         checks.extend(headers_in_clear(telemetry));
         if let Some(name) = &telemetry.otlp_headers_env {
-            checks.push(
-                match env(name).ok().map(|v| crate::startup::parse_headers(&v)) {
-                    Some(Some(_)) => pass(format!("telemetry: ${name} set")),
-                    Some(None) => fail(format!(
-                        "telemetry: ${name} must hold key=value pairs separated by commas"
-                    )),
-                    None => fail(format!("telemetry: ${name} is not set")),
-                },
-            );
+            checks.push(match otlp_headers(name) {
+                Ok(_) => pass(format!("telemetry: ${name} set")),
+                Err(e) => fail(format!("telemetry: {e}")),
+            });
         }
         checks.push(head("telemetry", &telemetry.otlp_logs_uri, &[]).await);
     }
@@ -144,22 +132,17 @@ fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
 /// The provider credential is present, without printing it.
 fn credential(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
     let header = upstream.provider.key_header();
+    if let Err(e) = upstream_auth(upstream, config_dir) {
+        return fail(format!("{name}: {e}"));
+    }
     match &upstream.credential {
-        UpstreamCredential::ApiKeyEnv(var) => match env(var) {
-            Ok(key) if !key.trim().is_empty() => {
-                pass(format!("{name}: ${var} set (sent as {header})"))
-            }
-            _ => fail(format!(
-                "{name}: ${var} is not set; export the provider key"
-            )),
-        },
-        UpstreamCredential::ApiKeyFile(path) => match read_secret(&config_dir.join(path)) {
-            Ok(_) => pass(format!(
-                "{name}: {} read (sent as {header})",
-                path.display()
-            )),
-            Err(e) => fail(format!("{name}: {e}")),
-        },
+        UpstreamCredential::ApiKeyEnv(var) => {
+            pass(format!("{name}: ${var} set (sent as {header})"))
+        }
+        UpstreamCredential::ApiKeyFile(path) => pass(format!(
+            "{name}: {} read (sent as {header})",
+            path.display()
+        )),
         UpstreamCredential::ForwardCaller => pass(format!(
             "{name}: forwards the caller's own credential (loopback only)"
         )),

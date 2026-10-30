@@ -32,7 +32,9 @@ async fn reports_each_problem_and_what_works() {
         "{report}"
     );
     assert!(
-        report.contains("FAIL  upstream down: $WYE_DOCTOR_SURELY_UNSET is not set"),
+        report.contains(
+            "FAIL  upstream down: environment variable WYE_DOCTOR_SURELY_UNSET is not set"
+        ),
         "{report}"
     );
     assert!(
@@ -91,4 +93,27 @@ fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
     );
     assert_eq!(in_clear("https://collector.example:4318"), None);
     assert_eq!(in_clear("http://127.0.0.1:4318"), None);
+}
+
+/// doctor resolves a key as `serve` does: a key file whose contents cannot
+/// be an HTTP header fails here, not first at startup.
+#[tokio::test]
+async fn a_key_serve_would_refuse_fails_the_check() {
+    let dir = std::env::temp_dir().join(format!("wye-doctor-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("key"), "sk-\u{1}broken\n").unwrap();
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [upstream]\nbase_url = \"http://127.0.0.1:1\"\napi_key_file = \"key\"\n",
+    )
+    .unwrap();
+    let (report, ok) = doctor(&config, &dir).await;
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(!ok, "{report}");
+    assert!(
+        report.contains(
+            "FAIL  [upstream]: upstream API key contains characters not allowed in an HTTP header"
+        ),
+        "{report}"
+    );
 }
