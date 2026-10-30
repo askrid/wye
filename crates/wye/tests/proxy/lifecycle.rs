@@ -212,9 +212,9 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     };
     let output = run(vec![
         "claude".into(),
-        "--gateway".into(),
+        "--url".into(),
         gateway.clone().into(),
-        "--credential-file".into(),
+        "--token-file".into(),
         credential.clone().into(),
         "-p".into(),
         "fix tests".into(),
@@ -238,7 +238,7 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     // Without a reachable gateway, claude is not started.
     let output = run(vec![
         "claude".into(),
-        "--gateway".into(),
+        "--url".into(),
         "http://127.0.0.1:9".into(),
     ])
     .await
@@ -269,7 +269,7 @@ fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
     };
     let help = wye(&["--help"]);
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stdout).contains("wye serve --config"));
+    assert!(String::from_utf8_lossy(&help.stdout).contains("\n  serve        Run the gateway"));
     let version = wye(&["--version"]);
     assert_eq!(
         String::from_utf8_lossy(&version.stdout),
@@ -277,13 +277,18 @@ fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
     );
     let typo = wye(&["srve"]);
     assert_eq!(typo.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&typo.stderr).starts_with("wye: unknown command `srve`"));
+    assert_eq!(
+        String::from_utf8_lossy(&typo.stderr),
+        "wye: unknown command `srve`; did you mean `serve`?\n"
+    );
     // A known command with wrong arguments gets its own usage.
-    let wrong = wye(&["serve"]);
+    let wrong = wye(&["serve", "--confg", "x"]);
     assert_eq!(
         String::from_utf8_lossy(&wrong.stderr),
-        "wye: usage:\n  wye serve --config <path>\nall commands: `wye --help`\n"
+        "wye: unknown option --confg\nusage: wye serve [options]\nmore: wye serve --help\n"
     );
+    let help = wye(&["help", "token", "issue"]);
+    assert!(String::from_utf8_lossy(&help.stdout).starts_with("Issue a gateway token.\n"));
 }
 
 #[test]

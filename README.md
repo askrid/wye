@@ -51,49 +51,64 @@ cargo install --git https://github.com/askrid/wye wye --locked
 Prebuilt Linux and macOS archives come with the first release, which is not
 published yet.
 
+### For yourself
+
 With a claude.ai subscription (Pro or Max), Wye forwards your own Claude Code
-login, on loopback only:
+login, on this machine only:
 
 ```bash
-wye init --subscription         # writes ./wye.toml and prints the next steps
-wye serve --config wye.toml 2>>usage.jsonl &
-wye claude                      # Claude Code, pointed at the gateway
-wye report usage.jsonl
+wye init --subscription           # writes ~/.wye/wye.toml
+wye serve 2>>~/.wye/usage.jsonl   # the gateway; its stderr is the usage log
+wye claude                        # in another terminal: Claude Code through it
+wye report                        # what it recorded
 ```
 
-With an Anthropic API key instead:
-
-```bash
-wye init
-export ANTHROPIC_API_KEY=sk-ant-...
-wye doctor --config wye.toml    # checks the key, files, and endpoints
-wye serve --config wye.toml 2>>usage.jsonl &
-wye claude
-```
+With an Anthropic API key, run plain `wye init`, put the key in
+`~/.wye/anthropic.key` (`chmod 600`), and check it with `wye doctor`.
 
 `wye claude` starts Claude Code with its base URL set to the gateway and its
 gateway hints on (request class, prompt id, and tool times, for the usage
 log), and `wye claude --bg "task"` starts a background session that goes
-through it too. It does not touch your Claude Code settings. To keep the gateway running
-across logins, install it as a service
+through it too. It does not touch your Claude Code settings. To keep the
+gateway running across logins, install it as a service
 ([docs/operations.md](docs/operations.md#running-as-a-service)).
 
-Apps on the official SDKs only change their base URL:
+### For a team
 
-```python
-import anthropic
+One gateway for every developer and service, deployed from a config
+repository:
 
-client = anthropic.Anthropic(base_url="http://127.0.0.1:8080")
+```bash
+wye init --auth --out wye.toml     # [auth], and a signing key in ~/.wye/issuer.key
+wye token issue alice > alice.token  # a gateway token, valid for a week
+docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
 
-For OpenAI clients the base URL is `http://127.0.0.1:8080/v1`, and the config
-needs a `[routes.openai]` section (`wye init --openai-key-env OPENAI_API_KEY`
-adds one). `wye codex` launches Codex against the gateway the same way
-`wye claude` does.
+Each developer then points their agent at it:
 
-With `[auth]` on, the SDK's API key is a gateway credential (see
-[docs/policy.md](docs/policy.md#gateway-credentials)). Without it, Wye sends
-its own provider key and ignores whatever the client sends.
+```bash
+export WYE_URL=https://wye.example.com WYE_TOKEN=<their token>
+wye claude                         # or: wye codex
+```
+
+Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and
+`ANTHROPIC_AUTH_TOKEN`, or an `apiKeyHelper` that fetches short-lived tokens
+from your identity provider
+([docs/operations.md](docs/operations.md#credential-renewal)).
+
+### For apps
+
+The official SDKs read their base URL and key from the environment, so an app
+changes no code:
+
+```bash
+ANTHROPIC_BASE_URL=https://wye.example.com ANTHROPIC_API_KEY=<gateway token> python app.py
+OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<gateway token> node app.js
+```
+
+The OpenAI APIs need `[routes.openai]` in the config (`wye init --openai`).
+Without `[auth]`, the key can be any placeholder, and Wye sends its own
+provider key instead.
 
 ## Configuration
 
@@ -178,7 +193,7 @@ near money. A model with no price is recorded as `unknown`, never as $0.
 `wye report` summarizes a log without any backend:
 
 ```console
-$ wye report usage.jsonl
+$ wye report
 3 requests in 1 session (2 other lines skipped); outcomes: completed 3
 
 By request class
@@ -192,7 +207,7 @@ By request class
 calling the same functions in the same order:
 
 ```console
-$ wye explain --config wye.toml --session session-a request.json
+$ wye explain --session session-a request.json
 endpoint: POST /v1/messages
 credential: not required (no [auth])
 body: 90 bytes (limit 32 MiB)
@@ -248,8 +263,10 @@ Tooling
   widens access: a model newly allowed, a ceiling raised, a longer credential
   lifetime, a new trusted key, auth removed, a listener opened wider, a new API route, or the operator's
   key where callers brought their own.
-- `wye init`, `wye doctor`, `wye probe` (a health check for images without
-  curl), and `wye token`.
+- `wye init` for one developer or a team, `wye validate` and `wye doctor`,
+  `wye token` to issue gateway tokens, and `wye probe` (a health check for
+  images without curl). Every command has `--help`, and finds its config
+  without flags (`./wye.toml`, then `~/.wye/wye.toml`).
 
 ## Performance
 
