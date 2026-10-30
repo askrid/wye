@@ -28,18 +28,60 @@ pub enum Select {
     Ordered,
 }
 
-/// Retrying another upstream when one refused a request before it was
-/// processed. Only refusals that prove that qualify: an ambiguous `5xx`
-/// may already be billed.
+/// A refusal that proves a request was not processed, so it may go to the
+/// next upstream: an ambiguous `5xx` may already be billed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Failover {
+pub enum FailoverReason {
     /// `429`: rate limited.
-    pub on_429: bool,
+    RateLimited,
     /// `529`: Anthropic overloaded.
-    pub on_529: bool,
+    Overloaded,
     /// The connection failed, or was cut before the request body was
     /// delivered whole.
-    pub on_connect: bool,
+    Connect,
+}
+
+impl FailoverReason {
+    pub const ALL: [Self; 3] = [Self::RateLimited, Self::Overloaded, Self::Connect];
+
+    /// Its name in config, usage records, and metrics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RateLimited => "429",
+            Self::Overloaded => "529",
+            Self::Connect => "connect",
+        }
+    }
+
+    /// The refusing status; `None` for a connection.
+    pub fn status(self) -> Option<u16> {
+        match self {
+            Self::RateLimited => Some(429),
+            Self::Overloaded => Some(529),
+            Self::Connect => None,
+        }
+    }
+
+    /// The reason a response with `status` gives, if any.
+    pub fn of_status(status: u16) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.status() == Some(status))
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == name)
+    }
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+/// Retrying another upstream when one refused a request before it was
+/// processed ([`FailoverReason`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Failover {
+    /// The reasons config enabled, one bit per [`FailoverReason`].
+    pub(crate) on: u8,
     /// Larger request bodies are forwarded without failover: resending needs
     /// the bytes already sent.
     pub max_body_bytes: u64,
@@ -49,9 +91,18 @@ pub struct Failover {
 }
 
 impl Failover {
-    /// Whether an upstream answer with `status` moves the request on.
-    pub fn retries_status(&self, status: u16) -> bool {
-        (status == 429 && self.on_429) || (status == 529 && self.on_529)
+    /// Whether `reason` moves a request on.
+    pub fn retries(&self, reason: FailoverReason) -> bool {
+        self.on & reason.bit() != 0
+    }
+
+    /// The reasons that move a request on, in [`FailoverReason::ALL`] order.
+    pub fn reasons(&self) -> impl Iterator<Item = FailoverReason> + '_ {
+        FailoverReason::ALL.into_iter().filter(|&r| self.retries(r))
+    }
+
+    pub(crate) fn enable(&mut self, reason: FailoverReason) {
+        self.on |= reason.bit();
     }
 }
 
@@ -76,12 +127,12 @@ impl Ranking {
     }
 }
 
-/// The key a request is routed (and sampled) by: the client's session id,
-/// else the credential subject, else nothing (without `[auth]`, one loopback
-/// user). Every replica computes the same key, so a session keeps its
-/// upstream across them.
-pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> &'k [u8] {
-    session.or(subject.map(str::as_bytes)).unwrap_or_default()
+/// The key a request is routed and sampled by: the client's session id,
+/// else the credential subject. Every replica computes the same key, so a
+/// session keeps its upstream across them. Without either (no `[auth]`: one
+/// loopback user), [`Route::rank`] takes the empty key and sampling none.
+pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> Option<&'k [u8]> {
+    session.or(subject.map(str::as_bytes))
 }
 
 /// The upstreams that serve one API, and how a request picks one.

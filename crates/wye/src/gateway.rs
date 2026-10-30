@@ -20,7 +20,7 @@ use gateway_core::{
     prompt::HashKey,
     route::Route,
 };
-use http::{HeaderName, HeaderValue, Method, Request, Response, StatusCode, header::CONTENT_TYPE};
+use http::{HeaderName, Method, Request, Response, StatusCode};
 use http_body_util::{Either, Full};
 use hyper::body::Incoming;
 
@@ -191,14 +191,7 @@ impl Gateway {
             (&Method::GET, "/readyz") => empty(StatusCode::OK),
             #[cfg(feature = "alloc-stats")]
             (&Method::GET, "/debug/alloc") => {
-                let mut res = Response::new(Either::Left(Full::new(Bytes::from(
-                    crate::alloc_stats::snapshot().to_json(),
-                ))));
-                res.headers_mut().insert(
-                    CONTENT_TYPE,
-                    http::HeaderValue::from_static("application/json"),
-                );
-                res
+                responses::json(Bytes::from(crate::alloc_stats::snapshot().to_json()))
             }
             _ => error(
                 Api::Messages,
@@ -303,10 +296,7 @@ impl Gateway {
             identity.as_ref().and_then(|i| i.models.as_deref()),
             identity.as_ref().map(|i| &*i.subject),
         );
-        let mut res = Response::new(Either::Left(Full::new(body)));
-        res.headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        res
+        responses::json(body)
     }
 }
 

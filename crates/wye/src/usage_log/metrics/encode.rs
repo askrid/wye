@@ -2,10 +2,10 @@
 
 use std::io::Write;
 
-use gateway_core::agent::CacheMiss;
+use gateway_core::{agent::CacheMiss, pricing::PICO_PER_USD};
 
 use super::{DURATION_BOUNDS_MS, Metrics};
-use crate::usage_log::otlp::{Value, write_attribute};
+use crate::usage_log::otlp::{Value, attr, write_attribute};
 
 impl Metrics {
     /// The totals as an OTLP `ExportMetricsServiceRequest` (JSON) at `now_ns`.
@@ -36,13 +36,10 @@ impl Metrics {
             attributes(
                 &mut buf,
                 &[
-                    ("http.route", Some(Value::Str(&s.route))),
-                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
-                    (
-                        "http.response.status_code",
-                        Some(Value::Int(u64::from(s.status))),
-                    ),
-                    ("wye.outcome", Some(Value::Str(s.outcome.as_str()))),
+                    (attr::ROUTE, Some(Value::Str(&s.route))),
+                    (attr::UPSTREAM, s.upstream.as_deref().map(Value::Str)),
+                    (attr::STATUS, Some(Value::Int(u64::from(s.status)))),
+                    (attr::OUTCOME, Some(Value::Str(s.outcome.as_str()))),
                 ],
             );
         }
@@ -70,8 +67,8 @@ impl Metrics {
             attributes(
                 &mut buf,
                 &[
-                    ("http.route", Some(Value::Str(&s.route))),
-                    ("wye.outcome", Some(Value::Str(s.outcome.as_str()))),
+                    (attr::ROUTE, Some(Value::Str(&s.route))),
+                    (attr::OUTCOME, Some(Value::Str(s.outcome.as_str()))),
                 ],
             );
         }
@@ -89,9 +86,9 @@ impl Metrics {
                 &mut buf,
                 &[
                     ("gen_ai.token.type", Some(Value::Str(s.kind))),
-                    ("gen_ai.response.model", Some(Value::Str(&s.model))),
-                    ("wye.request_class", s.request_class.map(Value::Str)),
-                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                    (attr::MODEL, Some(Value::Str(&s.model))),
+                    (attr::REQUEST_CLASS, s.request_class.map(Value::Str)),
+                    (attr::UPSTREAM, s.upstream.as_deref().map(Value::Str)),
                 ],
             );
         }
@@ -109,14 +106,14 @@ impl Metrics {
                 buf.push(b',');
             }
             let _ = write!(buf, r#"{{{times},"asDouble":"#);
-            let _ = serde_json::to_writer(&mut buf, &(s.pico as f64 / 1e12));
+            let _ = serde_json::to_writer(&mut buf, &(s.pico as f64 / PICO_PER_USD as f64));
             buf.push(b',');
             attributes(
                 &mut buf,
                 &[
-                    ("gen_ai.response.model", Some(Value::Str(&s.model))),
-                    ("wye.request_class", s.request_class.map(Value::Str)),
-                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
+                    (attr::MODEL, Some(Value::Str(&s.model))),
+                    (attr::REQUEST_CLASS, s.request_class.map(Value::Str)),
+                    (attr::UPSTREAM, s.upstream.as_deref().map(Value::Str)),
                 ],
             );
         }
@@ -135,7 +132,7 @@ impl Metrics {
                 &[
                     ("wye.upgrade.target", Some(Value::Str(&s.target))),
                     ("wye.upgrade.rule", Some(Value::Str(s.rule))),
-                    ("enduser.id", s.subject.as_deref().map(Value::Str)),
+                    (attr::SUBJECT, s.subject.as_deref().map(Value::Str)),
                 ],
             );
         }
@@ -152,8 +149,8 @@ impl Metrics {
             attributes(
                 &mut buf,
                 &[
-                    ("wye.upstream", s.upstream.as_deref().map(Value::Str)),
-                    ("wye.failover.reason", Some(Value::Str(s.reason))),
+                    (attr::UPSTREAM, s.upstream.as_deref().map(Value::Str)),
+                    ("wye.failover.reason", Some(Value::Str(s.reason.as_str()))),
                 ],
             );
         }
@@ -167,7 +164,7 @@ impl Metrics {
         );
         for (i, (name, count)) in self.tool_calls.iter().enumerate() {
             point_start(&mut buf, i, &times, *count);
-            attributes(&mut buf, &[("gen_ai.tool.name", Some(Value::Str(name)))]);
+            attributes(&mut buf, &[(attr::TOOL, Some(Value::Str(name)))]);
         }
         buf.extend_from_slice(b"]}},");
 
@@ -181,7 +178,7 @@ impl Metrics {
             point_start(&mut buf, i, &times, count);
             attributes(
                 &mut buf,
-                &[("wye.cache_miss", Some(Value::Str(reason.as_str())))],
+                &[(attr::CACHE_MISS, Some(Value::Str(reason.as_str())))],
             );
         }
         buf.extend_from_slice(b"]}},");

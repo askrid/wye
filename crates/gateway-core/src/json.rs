@@ -91,6 +91,13 @@ impl Nesting {
     }
 
     #[inline(always)]
+    /// Whether the innermost open container is an object: after a `,`
+    /// there, the next string is a key.
+    pub(crate) fn in_object(&self) -> bool {
+        let depth = self.depth();
+        depth > 0 && !self.is_array(depth)
+    }
+
     pub(crate) fn open(&mut self, is_array: bool) {
         self.depth = self.depth.saturating_add(1);
         if self.depth < Self::TRACKED {

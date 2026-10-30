@@ -244,9 +244,9 @@ impl Serialize for RefusedAttempt {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;
         map.serialize_entry("upstream", &self.upstream.as_deref())?;
-        match self.status {
+        match self.reason.status() {
             Some(status) => map.serialize_entry("status", &status)?,
-            None => map.serialize_entry("error", "connect")?,
+            None => map.serialize_entry("error", self.reason.as_str())?,
         }
         map.end()
     }

@@ -255,7 +255,7 @@ impl Verifier {
             SourceKind::Own => {
                 serde_json::from_slice::<Header<'_>>(&header_json)
                     .map_err(|_| CredentialError::Malformed)?;
-                "EdDSA"
+                Algorithm::EdDsa.as_str()
             }
             SourceKind::Provider { algorithm, .. } => {
                 if header.crit.is_some() {
@@ -372,7 +372,7 @@ pub struct NewCredential<'a> {
 /// Signs `claims` with `key` under key id `kid`.
 pub fn issue(key: &Ed25519KeyPair, kid: &str, claims: &NewCredential<'_>) -> String {
     let header = Header {
-        alg: "EdDSA",
+        alg: Algorithm::EdDsa.as_str(),
         kid,
         typ: Some("JWT"),
     };

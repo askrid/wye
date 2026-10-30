@@ -8,7 +8,7 @@ use bytes::Bytes;
 use gateway_core::{
     api::Api,
     prompt,
-    route::{self, affinity_key},
+    route::{self, FailoverReason, affinity_key},
 };
 use http::{
     HeaderValue, Request, Response,
@@ -106,10 +106,13 @@ impl Gateway {
         info: &mut RequestInfo,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         // Session affinity: prompt caches are per provider account.
-        let ranking = route.route.rank(affinity_key(
-            info.session_id.as_ref().map(HeaderValue::as_bytes),
-            info.identity.as_ref().map(|i| &*i.subject),
-        ));
+        let ranking = route.route.rank(
+            affinity_key(
+                info.session_id.as_ref().map(HeaderValue::as_bytes),
+                info.identity.as_ref().map(|i| &*i.subject),
+            )
+            .unwrap_or_default(),
+        );
         // Failover keeps the body for resending, unless it is declared too large.
         let failover = route
             .route
@@ -165,7 +168,7 @@ impl Gateway {
                 )
                 .await;
             let next = order.peek().and_then(|&i| route.upstreams.get(i));
-            if let (Some(status), Some(f), Some(handback), Some(next)) = (
+            if let (Some(reason), Some(f), Some(handback), Some(next)) = (
                 refusal(&result, failover.as_ref()),
                 &failover,
                 handback.as_mut(),
@@ -178,7 +181,7 @@ impl Gateway {
                     drop(result);
                     info.failovers.push(RefusedAttempt {
                         upstream: upstream.id.clone(),
-                        status,
+                        reason,
                     });
                     (body, *handback) = FailoverBody::resume(resend, bounds(f));
                     continue;
@@ -189,23 +192,20 @@ impl Gateway {
     }
 }
 
-/// What failover may act on in `result`: `Some(status)` for a refusing
-/// status, `Some(None)` for a connection refused or lost. A lost connection
+/// The failover reason `result` gives, if the route acts on it. A lost connection
 /// qualifies only if the attempt did not deliver the whole body (checked by
 /// [`handed_back`]): a provider can refuse early and close while the upload
 /// runs, and an incomplete request cannot have been processed.
 fn refusal(
     result: &Result<Response<UpstreamBody<Incoming>>, ForwardError>,
     failover: Option<&route::Failover>,
-) -> Option<Option<u16>> {
-    let failover = failover?;
-    match result {
-        Ok(res) if failover.retries_status(res.status().as_u16()) => {
-            Some(Some(res.status().as_u16()))
-        }
-        Err(ForwardError::Connect | ForwardError::Upstream) if failover.on_connect => Some(None),
-        _ => None,
-    }
+) -> Option<FailoverReason> {
+    let reason = match result {
+        Ok(res) => FailoverReason::of_status(res.status().as_u16())?,
+        Err(ForwardError::Connect | ForwardError::Upstream) => FailoverReason::Connect,
+        Err(_) => return None,
+    };
+    failover?.retries(reason).then_some(reason)
 }
 
 /// The body a refused attempt hands back: the bytes it sent plus the unread
@@ -266,7 +266,7 @@ impl Gateway {
         }
         if let Some(check) = &self.upgrade_check
             && prompt::session_sampled(
-                session.or(info.identity.as_ref().map(|i| i.subject.as_bytes())),
+                affinity_key(session, info.identity.as_ref().map(|i| &*i.subject)),
                 check.sample_percent,
             )
         {

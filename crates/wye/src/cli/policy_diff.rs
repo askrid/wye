@@ -315,7 +315,7 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
                                 || "[upstream]".to_owned(),
                                 |id| format!("routes.{name}: upstream {id}"),
                             ),
-                            format!("{}://{}{}", u.scheme, u.authority, u.path_prefix),
+                            u.base_url(),
                             u.credential.clone(),
                         )
                     })
@@ -340,10 +340,7 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
             (_, UpstreamCredential::ForwardCaller) => diff
                 .narrows
                 .push(format!("{at} forwards each caller's own credential")),
-            (a, b) if a != b => {
-                diff.changes
-                    .push(format!("{at} key: {} -> {}", key_source(a), key_source(b)))
-            }
+            (a, b) if a != b => diff.changes.push(format!("{at} key: {a} -> {b}")),
             _ => {}
         }
     }
@@ -351,15 +348,6 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
         if !after.iter().any(|(i, ..)| i == at) {
             diff.changes.push(format!("{at} removed"));
         }
-    }
-}
-
-/// Where an upstream's key comes from, by name.
-fn key_source(credential: &UpstreamCredential) -> String {
-    match credential {
-        UpstreamCredential::ApiKeyEnv(name) => format!("${name}"),
-        UpstreamCredential::ApiKeyFile(path) => path.display().to_string(),
-        UpstreamCredential::ForwardCaller => "the caller's own".to_owned(),
     }
 }
 

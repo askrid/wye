@@ -284,7 +284,7 @@ impl ResponseFields {
                 }
                 b',' => {
                     let depth = self.nest.depth();
-                    self.expect_key = depth > 0 && !self.nest.is_array(depth);
+                    self.expect_key = self.nest.in_object();
                     if depth <= fields {
                         self.field = Field::Other;
                     }

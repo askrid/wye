@@ -240,7 +240,7 @@ impl ResponsesUsageScanner {
         }
         // The tier that served the request; a tier other than default is
         // priced differently.
-        if fields.service_tier().is_some_and(|tier| tier != "default") {
+        if super::unpriced_tier(fields.service_tier()) {
             self.usage.unpriced = true;
         }
         match fields.openai_usage() {

@@ -243,8 +243,7 @@ impl PolicyScanner {
                         self.error = Some(PolicyError::Invalid);
                         break;
                     }
-                    let depth = self.nest.depth();
-                    self.expect_key = depth > 0 && !self.nest.is_array(depth);
+                    self.expect_key = self.nest.in_object();
                 }
                 b':' => {}
                 // A number, `true`, `false`, or `null`. Any other byte is not

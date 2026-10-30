@@ -152,8 +152,9 @@ fn ordered_selection_goes_in_config_order() {
 fn failover_settings_are_validated() {
     let ok = route_with("failover = [\"429\", \"connect\"]", &["a", "b"]);
     let f = ok.failover().unwrap();
-    assert!(f.retries_status(429) && !f.retries_status(529) && !f.retries_status(500));
-    assert!(f.on_connect);
+    assert!(f.retries(FailoverReason::RateLimited) && !f.retries(FailoverReason::Overloaded));
+    assert!(f.retries(FailoverReason::Connect));
+    assert_eq!(FailoverReason::of_status(500), None);
     assert_eq!(f.max_body_bytes, DEFAULT_FAILOVER_MAX_BODY_BYTES);
     assert_eq!(f.max_held_bytes, DEFAULT_FAILOVER_MAX_HELD_BYTES);
     let parse = |extra: &str, ids: &[&str]| {

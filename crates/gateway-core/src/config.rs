@@ -238,6 +238,8 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
+    pub const ALL: [Self; 3] = [Self::Rs256, Self::Es256, Self::EdDsa];
+
     /// The JOSE `alg` name.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -245,6 +247,10 @@ impl Algorithm {
             Self::Es256 => "ES256",
             Self::EdDsa => "EdDSA",
         }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.as_str() == name)
     }
 }
 
@@ -368,6 +374,24 @@ pub enum UpstreamCredential {
     ApiKeyFile(PathBuf),
     /// Forward the caller's own credential (loopback only).
     ForwardCaller,
+}
+
+/// Where the key comes from: `$NAME`, a file, or the caller.
+impl fmt::Display for UpstreamCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ApiKeyEnv(name) => write!(f, "${name}"),
+            Self::ApiKeyFile(path) => write!(f, "{}", path.display()),
+            Self::ForwardCaller => f.write_str("the caller's own"),
+        }
+    }
+}
+
+impl Upstream {
+    /// The base URL, without a trailing slash, as reports show it.
+    pub fn base_url(&self) -> String {
+        format!("{}://{}{}", self.scheme, self.authority, self.path_prefix)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

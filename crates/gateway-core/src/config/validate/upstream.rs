@@ -4,7 +4,7 @@
 use serde::Deserialize;
 
 use super::*;
-use crate::route::{Failover, MAX_UPSTREAMS, MAX_WEIGHT, Select};
+use crate::route::{Failover, FailoverReason, MAX_UPSTREAMS, MAX_WEIGHT, Select};
 
 /// `[routes]`: one route per native API.
 #[derive(Deserialize)]
@@ -127,9 +127,7 @@ fn validate_route(raw: RawRoute, api: Api) -> Result<Route, ConfigError> {
         }
         Some(on) => {
             let mut failover = Failover {
-                on_429: false,
-                on_529: false,
-                on_connect: false,
+                on: 0,
                 max_body_bytes: nonzero(
                     raw.failover_max_body_bytes
                         .unwrap_or(DEFAULT_FAILOVER_MAX_BODY_BYTES),
@@ -144,17 +142,13 @@ fn validate_route(raw: RawRoute, api: Api) -> Result<Route, ConfigError> {
             for reason in &on {
                 // Only refusals that prove the request was not processed:
                 // an ambiguous 5xx may already be billed.
-                match reason.as_str() {
-                    "429" => failover.on_429 = true,
-                    "529" => failover.on_529 = true,
-                    "connect" => failover.on_connect = true,
-                    _ => {
-                        return Err(ConfigError::Invalid(
-                            "failover takes \"429\", \"529\", and \"connect\" only: other \
-                             failures may already have been processed and billed",
-                        ));
-                    }
-                }
+                let Some(reason) = FailoverReason::parse(reason) else {
+                    return Err(ConfigError::Invalid(
+                        "failover takes \"429\", \"529\", and \"connect\" only: other \
+                         failures may already have been processed and billed",
+                    ));
+                };
+                failover.enable(reason);
             }
             if on.is_empty() {
                 return Err(ConfigError::Invalid(
