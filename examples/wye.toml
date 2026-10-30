@@ -101,7 +101,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # api_key_env = "OPENAI_API_KEY"
 
 # Gateway credentials. Required to listen beyond loopback; incompatible with
-# forward_caller_credential. `wye init --auth` writes this section and a
+# forward_caller_credential. `wye init --team` writes this section and a
 # signing key; tokens are issued offline with the key:
 #   wye token issue alice --ttl 1d
 # Claude Code sends the credential with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).

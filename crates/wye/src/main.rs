@@ -17,6 +17,7 @@ use wye::{
     cli::{
         Agent, InitMode, InitOptions, Launch,
         args::{self, ArgsError, Command},
+        emit, gateway_url,
         paint::Paint,
         service, token,
     },
@@ -47,13 +48,14 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         .collect::<Result<_, _>>()?;
     let help = match args.as_slice() {
         [] | ["--help" | "-h" | "help"] => Some(args::overview()),
-        ["--version" | "-V"] => Some(format!("wye {}\n", env!("CARGO_PKG_VERSION"))),
-        ["help", topic @ ..] => Some(help_for(topic)?),
-        [family] | [family, "--help" | "-h"] => args::family_help(family),
+        ["--version" | "-V" | "version"] => Some(format!("wye {}\n", env!("CARGO_PKG_VERSION"))),
+        ["help" | "--help" | "-h", topic @ ..] => Some(help_for(topic)?),
+        [family] | [family, "--help" | "-h" | "help"] => args::family_help(family),
+        [family, "help", sub] => Some(help_for(&[family, sub])?),
         _ => None,
     };
     if let Some(text) = help {
-        print!("{text}");
+        emit(&text);
         return Ok(0);
     }
     let Some((command, rest)) = Command::find(&args) else {
@@ -62,7 +64,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     let parsed = match command.parse(rest) {
         Ok(parsed) => parsed,
         Err(ArgsError::Help) => {
-            print!("{}", command.help());
+            emit(&command.help());
             return Ok(0);
         }
         Err(ArgsError::Usage(why)) => {
@@ -112,19 +114,19 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let path = config_path()?;
             // Key sets are files too; secrets in the environment are not checked.
             named(&path, wye::verifier(&load(&path)?, config_dir(&path)))?;
-            println!(
-                "{}: {}",
+            emit(&format!(
+                "{}: {}\n",
                 args::tilde(&path, &env),
                 Paint::stdout().green("ok")
-            );
+            ));
             Ok(0)
         }
         "doctor" => {
             let path = config_path()?;
             let config = load(&path)?;
-            println!("config: {}", args::tilde(&path, &env));
+            emit(&format!("config: {}\n", args::tilde(&path, &env)));
             let (report, ok) = current_thread()?.block_on(wye::doctor(&config, config_dir(&path)));
-            print!("{}", Paint::stdout().verdicts(&report));
+            emit(&Paint::stdout().verdicts(&report));
             Ok(found(ok))
         }
         "claude" | "codex" => {
@@ -151,34 +153,37 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                     let home = args::home(&env).ok_or("no home directory: pass a log file")?;
                     let path = home.join("usage.jsonl");
                     if !path.exists() {
+                        let log = args::tilde(&path, &env);
                         return Err(format!(
-                            "no usage log at {}: pass a file, or - for standard input",
-                            args::tilde(&path, &env)
+                            "no usage log at {log}. `wye service install` keeps one, as does \
+                             `wye serve >> {log}`; or pass a file, or - for standard input"
                         )
                         .into());
                     }
                     wye::report(open(&path)?, paint)?
                 }
             };
-            print!("{report}");
+            emit(&report);
             Ok(0)
         }
         "init" => {
-            let mode = match (parsed.flag("subscription"), parsed.flag("auth")) {
+            let mode = match (parsed.flag("api-key"), parsed.flag("team")) {
                 (true, true) => {
-                    return Err("--subscription and --auth do not mix: a subscription \
-                                login is forwarded on loopback only"
+                    return Err("--api-key and --team do not mix: a team's gateway reads \
+                                its key from the deployment's environment"
                         .into());
                 }
-                (true, false) => InitMode::Subscription,
+                (true, false) => InitMode::ApiKey,
                 (false, true) => InitMode::Team,
-                (false, false) => InitMode::ApiKey,
+                (false, false) => InitMode::Forward,
             };
             let home = args::home(&env);
-            let out = match (parsed.value("out"), &home) {
-                (Some(out), _) => PathBuf::from(out),
-                (None, Some(home)) => home.join("wye.toml"),
-                (None, None) => return Err("no home directory: pass --out".into()),
+            // A team's config belongs in the repository it is reviewed in.
+            let out = match (parsed.value("out"), mode, &home) {
+                (Some(out), ..) => PathBuf::from(out),
+                (None, InitMode::Team, _) => PathBuf::from("wye.toml"),
+                (None, _, Some(home)) => home.join("wye.toml"),
+                (None, _, None) => return Err("no home directory: pass --out".into()),
             };
             let options = InitOptions {
                 mode,
@@ -186,7 +191,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 out,
                 home,
             };
-            print!("{}", wye::init(&options, &env)?);
+            emit(&wye::init(&options, &env)?);
             Ok(0)
         }
         "token keygen" => {
@@ -196,7 +201,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                     .ok_or("no home directory: pass --out")?
                     .join("issuer.key"),
             };
-            print!("{}", token::keygen(&out)?);
+            emit(&token::keygen(&out)?);
             Ok(0)
         }
         "token issue" => {
@@ -218,23 +223,18 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 ttl_secs,
                 models: parsed.value("models"),
                 max_output_tokens: parsed.value("max-output-tokens"),
-                issuer: parsed.value("issuer"),
-                audience: parsed.value("audience"),
-                kid: parsed.value("kid"),
             };
-            // Without a config, the claims come from flags alone.
-            let flags_only =
-                request.issuer.is_some() && request.audience.is_some() && request.kid.is_some();
-            let token = match config_path() {
-                Ok(path) => {
-                    let config = load(&path)?;
-                    let issued = token::issue(&request, &key, Some(&config), unix_secs()?);
-                    named(&path, issued)?
+            let key = token::read_key(&key)?;
+            let path = config_path()?;
+            let config = load(&path)?;
+            let issued = named(&path, token::issue(&request, &key, &config, unix_secs()?))?;
+            match parsed.value("out") {
+                Some(out) => {
+                    wye::cli::write_secret(Path::new(out), &issued)?;
+                    eprintln!("wrote {out}, readable only by you");
                 }
-                Err(_) if flags_only => token::issue(&request, &key, None, unix_secs()?)?,
-                Err(e) => return Err(e.into()),
-            };
-            println!("{token}");
+                None => emit(&format!("{issued}\n")),
+            }
             Ok(0)
         }
         "explain" => {
@@ -269,17 +269,20 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 unix_secs()?,
                 &parsed.values("target-model"),
             );
-            println!("config: {}", args::tilde(&path, &env));
-            print!("{}", Paint::stdout().verdicts(&explanation.report()));
+            emit(&format!("config: {}\n", args::tilde(&path, &env)));
+            emit(&Paint::stdout().verdicts(&explanation.report()));
             Ok(found(explanation.refused.is_none()))
         }
         "policy-test" => {
             let path = config_path()?;
             let config = load(&path)?;
-            let dir = parsed.positional.first().copied().unwrap_or_default();
-            let (report, passed) = wye::policy_test(&config, Path::new(dir), unix_secs()?)?;
-            println!("config: {}", args::tilde(&path, &env));
-            print!("{}", Paint::stdout().verdicts(&report));
+            let dir = match parsed.positional.first() {
+                Some(dir) => PathBuf::from(dir),
+                None => config_dir(&path).join("policy-tests"),
+            };
+            let (report, passed) = wye::policy_test(&config, &dir, unix_secs()?)?;
+            emit(&format!("config: {}\n", args::tilde(&path, &env)));
+            emit(&Paint::stdout().verdicts(&report));
             Ok(found(passed))
         }
         "policy-diff" => {
@@ -290,13 +293,13 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let (before, after) = (load(old)?, load(new)?);
             let mut diff = wye::policy_diff(&before, &after);
             diff.key_sets(&before, config_dir(old), &after, config_dir(new))?;
-            print!("{}", Paint::stdout().verdicts(&diff.report()));
+            emit(&Paint::stdout().verdicts(&diff.report()));
             Ok(found(!diff.widens()))
         }
         "probe" => {
-            let url = parsed.positional.first().copied().unwrap_or_default();
-            let checked = current_thread()?.block_on(wye::probe(url))?;
-            println!("{checked}: {}", Paint::stdout().green("ok"));
+            let url = gateway_url(parsed.positional.first().copied(), &env);
+            let checked = current_thread()?.block_on(wye::probe(&url))?;
+            emit(&format!("{checked}: {}\n", Paint::stdout().green("ok")));
             Ok(0)
         }
         other => Err(format!("`{other}` is listed but not handled").into()),

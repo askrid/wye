@@ -53,18 +53,18 @@ published yet.
 
 ### For yourself
 
-With a claude.ai subscription (Pro or Max), Wye forwards your own Claude Code
-login, on this machine only:
-
 ```bash
-wye init --subscription   # writes ~/.wye/wye.toml
-wye service install       # runs it in the background, now and at every login
-wye claude                # Claude Code through the gateway
-wye report                # what it recorded
+wye init              # writes ~/.wye/wye.toml; needs no key
+wye service install   # shows what it sets up and asks; runs the gateway in the background
+wye claude            # Claude Code through the gateway, signed in as usual
+wye report            # what it recorded
 ```
 
-With an Anthropic API key, run plain `wye init`, put the key in
-`~/.wye/anthropic.key` (`chmod 600`), and check it with `wye doctor`.
+Your claude.ai login (Pro or Max) or API key goes through the gateway, on this
+machine only, and the gateway holds no secret. As without Wye, an exported
+`ANTHROPIC_API_KEY` takes over from your login and bills the API. `wye init
+--api-key` has the gateway hold a key instead, and `wye serve >>
+~/.wye/usage.jsonl` runs it in a terminal instead of as a service.
 
 `wye claude` starts Claude Code with its base URL set to the gateway and its
 gateway hints on (request class, prompt id, and tool times, for the usage
@@ -72,46 +72,52 @@ log), and `wye claude --bg "task"` starts a background session that goes
 through it too. It does not touch your Claude Code settings.
 `wye service install` shows the file it writes (a LaunchAgent on macOS, a
 systemd user unit on Linux) and asks before changing anything;
-`wye service uninstall` removes it, and `wye serve` runs the gateway in a
-terminal instead
+`wye service uninstall` removes it
 ([docs/operations.md](docs/operations.md#running-as-a-service)).
 
 ### For a team
 
-One gateway for every developer and service, deployed from a config
-repository:
+One gateway for every developer and app, configured from a repository. No image
+is published yet, so build one from a clone of this repository:
 
 ```bash
-wye init --auth --out wye.toml     # [auth], and a signing key in ~/.wye/issuer.key
-wye token issue alice -c wye.toml > alice.token  # a gateway token, valid for a week
+docker build -t wye .                               # in a clone of Wye
+
+wye init --team                                     # in your config repository: ./wye.toml,
+                                                    # and a signing key in ~/.wye/issuer.key
+wye token issue alice -c wye.toml --out alice.token # a token, valid for a week
 docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
 
+Put it behind HTTPS ([docs/operations.md](docs/operations.md#deployment-modes)).
 Each developer then points their agent at it:
 
 ```bash
 export WYE_URL=https://wye.example.com WYE_TOKEN=<their token>
-wye claude                         # or: wye codex
+wye claude
 ```
 
 Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and
 `ANTHROPIC_AUTH_TOKEN`, or an `apiKeyHelper` that fetches short-lived tokens
 from your identity provider
-([docs/operations.md](docs/operations.md#credential-renewal)).
+([docs/operations.md](docs/operations.md#credential-renewal)). `wye codex` needs
+`[routes.openai]` in the config (`wye init --team --openai`, and
+`-e OPENAI_API_KEY` for the container).
 
 ### For apps
 
 The official SDKs read their base URL and key from the environment, so an app
-changes no code:
+changes no code. Against a team's gateway, the key is a gateway token:
 
 ```bash
 ANTHROPIC_BASE_URL=https://wye.example.com ANTHROPIC_API_KEY=<gateway token> python app.py
 OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<gateway token> node app.js
 ```
 
-The OpenAI APIs need `[routes.openai]` in the config (`wye init --openai`).
-Without `[auth]`, the key can be any placeholder, and Wye sends its own
-provider key instead.
+Against the gateway on your own machine, only the URL changes
+(`ANTHROPIC_BASE_URL=http://127.0.0.1:8080`): the app's own key goes through.
+With `wye init --api-key` the gateway holds the key, and the app's can be any
+placeholder.
 
 ## Configuration
 

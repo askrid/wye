@@ -194,25 +194,15 @@ async fn head(
             started.elapsed().as_millis(),
             res.status().as_u16()
         )),
-        Ok(Err(e)) => fail(format!("{name}: {uri} unreachable: {}", error_chain(&e))),
+        Ok(Err(e)) => fail(format!(
+            "{name}: {uri} unreachable: {}",
+            super::error_chain(&e)
+        )),
         Err(_) => fail(format!(
             "{name}: {uri} did not answer within {}s",
             CHECK_TIMEOUT.as_secs()
         )),
     }
-}
-
-/// An error with its causes, which carry the useful part (refused,
-/// certificate, DNS).
-fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
-    let mut text = error.to_string();
-    let mut cause = error.source();
-    while let Some(e) = cause {
-        text.push_str(": ");
-        text.push_str(&e.to_string());
-        cause = e.source();
-    }
-    text
 }
 
 #[cfg(test)]

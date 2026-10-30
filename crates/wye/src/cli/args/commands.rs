@@ -122,22 +122,24 @@ pub const COMMANDS: &[Command] = &[
         arity: (0, 0),
         options: &[
             Opt::flag(
-                "subscription",
-                "Forward Claude Code's own claude.ai login instead of an API key",
+                "api-key",
+                "The gateway holds an Anthropic API key, in a file",
             ),
             Opt::flag(
-                "auth",
-                "For a team: gateway tokens, a signing key, listen on all interfaces",
+                "team",
+                "A shared gateway: tokens, a signing key, listens on all interfaces",
             ),
             Opt::flag("openai", "Also serve the OpenAI APIs (for Codex)"),
             Opt::value(
                 "out",
                 "path",
-                "Where to write it (default: ~/.wye/wye.toml)",
+                "Where to write it (default: ~/.wye/wye.toml; with --team, ./wye.toml)",
             ),
         ],
         passthrough: false,
-        notes: "Never overwrites a file.",
+        notes: "By default, for you on this machine: Claude Code's login, or any API key a \
+                caller sends, goes through, and the gateway holds no secret. Never \
+                overwrites a file.",
     },
     Command {
         name: "token keygen",
@@ -150,7 +152,7 @@ pub const COMMANDS: &[Command] = &[
             "Where to write it (default: ~/.wye/issuer.key)",
         )],
         passthrough: false,
-        notes: "Prints the public half for [[auth.keys]]. `wye init --auth` makes the first \
+        notes: "Prints the public half for [[auth.keys]]. `wye init --team` makes the first \
                 key; this one is for rotation.",
     },
     Command {
@@ -172,9 +174,11 @@ pub const COMMANDS: &[Command] = &[
                 "Models it may use: names, or prefixes ending in *",
             ),
             Opt::value("max-output-tokens", "n", "A lower output-token ceiling"),
-            Opt::value("issuer", "iss", "Without a config: the issuer"),
-            Opt::value("audience", "aud", "Without a config: the audience"),
-            Opt::value("kid", "id", "Without a config: the key's id"),
+            Opt::value(
+                "out",
+                "path",
+                "Write it to a new file only you can read (default: stdout)",
+            ),
         ],
         passthrough: false,
         notes: "The issuer, audience, and key id come from the config's [auth], the key id \
@@ -206,11 +210,12 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "policy-test",
         summary: "Check sample requests against expected decisions",
-        args: "<dir>",
-        arity: (1, 1),
+        args: "[<dir>]",
+        arity: (0, 1),
         options: &[CONFIG],
         passthrough: false,
-        notes: "",
+        notes: "Each <name>.json is a request and <name>.expect.toml its decision. The \
+                default directory is policy-tests, next to the config.",
     },
     Command {
         name: "policy-diff",
@@ -224,12 +229,13 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "probe",
         summary: "Check that a gateway or URL answers 2xx",
-        args: "<url>",
-        arity: (1, 1),
+        args: "[<url>]",
+        arity: (0, 1),
         options: &[],
         passthrough: false,
-        notes: "A URL without a path names a gateway, and asks its /healthz; give /readyz \
-                for a load balancer's view. For images without curl.",
+        notes: "The default is the gateway `wye claude` would use: $WYE_URL, else this \
+                machine's. A URL without a path names a gateway, and asks its /healthz; \
+                give /readyz for a load balancer's view. For images without curl.",
     },
 ];
 

@@ -35,7 +35,9 @@ impl Agent {
             Self::Claude => "claude",
             Self::Codex => "codex",
         };
-        std::env::var_os(self.program_variable()).unwrap_or_else(|| default.into())
+        std::env::var_os(self.program_variable())
+            .filter(|program| !program.is_empty())
+            .unwrap_or_else(|| default.into())
     }
 
     /// The variable that names another path to the program.
@@ -81,12 +83,7 @@ impl Launch {
             ),
             None => env("WYE_TOKEN"),
         };
-        let gateway = url
-            .map(str::to_owned)
-            .or_else(|| env("WYE_URL"))
-            .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
-            .trim_end_matches('/')
-            .to_owned();
+        let gateway = gateway_url(url, &env);
         // Plain http beyond this machine would carry the gateway token, or
         // the agent's own login, in the clear.
         if let Ok(uri) = gateway.parse::<http::Uri>()
@@ -178,6 +175,15 @@ fn toml_string(value: &str) -> String {
     out
 }
 
+/// The gateway to use: `url` (`--url`), else `$WYE_URL`, else this machine's.
+pub fn gateway_url(url: Option<&str>, env: &impl Fn(&str) -> Option<String>) -> String {
+    url.map(str::to_owned)
+        .or_else(|| env("WYE_URL").filter(|v| !v.is_empty()))
+        .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
+        .trim_end_matches('/')
+        .to_owned()
+}
+
 /// Runs the agent through the gateway, as the module docs describe. On
 /// Unix the process becomes the agent and this returns only if it cannot
 /// start; elsewhere it returns the agent's exit code.
@@ -190,8 +196,8 @@ pub fn run(agent: Agent, launch: &Launch) -> Result<i32, String> {
         .block_on(super::probe(&health))
         .map_err(|e| {
             format!(
-                "no gateway at {} ({e}); start one with `wye serve`, or name another \
-                 with --url",
+                "no gateway at {} ({e}); start one with `wye service install` or \
+                 `wye serve`, or name another with --url",
                 launch.gateway
             )
         })?;

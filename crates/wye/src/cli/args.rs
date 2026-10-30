@@ -44,6 +44,16 @@ impl Opt {
     }
 }
 
+/// What the overview says about the environment; docs/operations.md has the
+/// full table.
+const ENVIRONMENT: &str = "Environment:
+  WYE_CONFIG   The config, when -c is not given
+  WYE_HOME     Your files (default: ~/.wye)
+  WYE_URL      The gateway for claude, codex, and probe
+  WYE_TOKEN    The gateway token for claude and codex
+  NO_COLOR     No color, even on a terminal
+";
+
 /// Help is wrapped to this width, which fits a split terminal.
 pub const WIDTH: usize = 80;
 /// Where option descriptions start.
@@ -291,10 +301,13 @@ pub fn overview() -> String {
         }
     }
     out.push('\n');
+    out.push_str(ENVIRONMENT);
+    out.push('\n');
     out.push_str(&wrap(
-        "`wye <command> --help` shows a command's options. Your files live in ~/.wye \
-         ($WYE_HOME). Exit status 3: a check found a problem, a request would be refused, \
-         a policy test failed, or a config change widens access.",
+        "`wye <command> --help` shows a command's options. Exit status: 1 for an error, \
+         including a config that does not parse; 3 when a check found what it looks for: a \
+         problem, a refused request, a failed policy test, widened access, or a service \
+         that is not running.",
         0,
         WIDTH,
     ));
@@ -328,6 +341,9 @@ fn summary(name: &str) -> &'static str {
 
 /// The error for an unknown command, with the closest known one.
 pub fn unknown_command(typed: &str) -> String {
+    if typed.starts_with('-') {
+        return format!("options go after the command: `wye <command> {typed}`");
+    }
     let names = GROUPS.iter().flat_map(|(_, names)| names.iter());
     let closest = names
         .map(|name| (distance(typed, name), *name))
