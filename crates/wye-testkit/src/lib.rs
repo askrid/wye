@@ -1,7 +1,7 @@
 //! Test and benchmark support shared by `wye`'s tests and `wye-bench`.
 //!
 //! - [`TestCa`]: a throwaway CA and a server certificate for `127.0.0.1`.
-//! - [`ed25519_keypair`]: a fresh signing key for gateway credentials.
+//! - [`ed25519_keypair`]: a fresh signing key for gateway tokens.
 //! - [`jwt`]: identity-provider signing keys, JWKS documents, and tokens.
 //! - [`spawn_upstream`]: a mock upstream over plain HTTP/1.1, or over TLS with
 //!   HTTP/2 or HTTP/1.1 negotiated by ALPN, like a real provider.
@@ -155,7 +155,7 @@ where
     addr
 }
 
-/// A fresh Ed25519 key, for issuing test and benchmark gateway credentials.
+/// A fresh Ed25519 key, for issuing test and benchmark gateway tokens.
 pub fn ed25519_keypair() -> Ed25519KeyPair {
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).expect("key generation");
     Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("generated key")

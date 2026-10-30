@@ -89,7 +89,7 @@ pub(crate) struct RequestInfo {
     pub traceparent: Option<HeaderValue>,
     /// Claude Code's agent structure and gateway hint headers.
     pub agent: AgentHeaders,
-    /// Verified gateway credential, when credentials are configured.
+    /// Verified gateway token, when tokens are configured.
     pub identity: Option<Arc<Identity>>,
     /// Filled with the request body's prompt hashes when cache diagnostics are on.
     pub prompt: Option<PromptSlot>,

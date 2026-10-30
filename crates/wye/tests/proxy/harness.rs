@@ -461,7 +461,7 @@ pub(crate) fn now() -> u64 {
         .as_secs()
 }
 
-/// Claims the tests' gateway credentials share: issuer `wye`, audience
+/// Claims the tests' gateway tokens share: issuer `wye`, audience
 /// `wye-prod`, valid for ten minutes, no model list or ceiling.
 pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
     NewCredential {
@@ -475,7 +475,7 @@ pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
     }
 }
 
-/// A gateway credential signed with `key` as key `k1`.
+/// A gateway token signed with `key` as key `k1`.
 pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewCredential<'_>) -> String {
     credential::issue(key, "k1", claims)
 }

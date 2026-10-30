@@ -38,7 +38,7 @@ const GATES: &[(&str, f64, f64)] = &[
     ("tls_sse_event_added_p99_us", 0.50, 300.0),
     ("tls_throughput_cpu_ms_per_mb", 0.25, 0.05),
     ("tls_idle_rss_kb_per_stream", 0.15, 2.0),
-    // CPU per request, and Wye with gateway credentials (plain path): the
+    // CPU per request, and Wye with gateway tokens (plain path): the
     // credential check costs per request, so these catch auth regressions.
     ("unary_cpu_us_per_request", 0.20, 10.0),
     ("tls_unary_cpu_us_per_request", 0.25, 10.0),

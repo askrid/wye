@@ -96,7 +96,7 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     let auth = auth_section(&key, "");
     let (h, mut seen) = harness(&auth).await;
 
-    // Codex sends its env_key value as a bearer token: here, a gateway credential.
+    // Codex sends its env_key value as a bearer token: here, a gateway token.
     let t = token(&key, Some(&["gpt-5.5-*"]), None);
     let res = h
         .send(

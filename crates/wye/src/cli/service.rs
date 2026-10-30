@@ -28,8 +28,11 @@ use unit::UNIT;
 use unit::{Commands, plan, restart_commands, shell, start_commands, stop_commands, systemctl};
 pub use unit::{Manager, Service};
 
-/// How long `install` and `restart` wait for the gateway to answer.
+/// How long the gateway may take to answer once started.
 const START_WAIT: Duration = Duration::from_secs(5);
+/// How often `install` asks launchd to load the service while the old gateway
+/// finishes its requests.
+const RETRY_EVERY: Duration = Duration::from_millis(500);
 
 /// Environment variables a config's secrets come from: a service does not
 /// inherit the shell's environment, so they would be missing.
@@ -221,8 +224,14 @@ pub fn install(
         .map_err(|e| format!("cannot create {}: {e}", show(&context.wye_home)))?;
     write_atomically(&file, &definition)?;
     say!("Wrote {}", show(&file));
-    run_all(&commands, show)?;
-    wait_for(&url, &service.errors, show)
+    if replacing {
+        say!(
+            "The running gateway finishes its requests first, for up to {} s.",
+            service.stop_secs
+        );
+    }
+    run_all(&commands, show, stopping(&service))?;
+    wait_for(&url, &service.errors, show, START_WAIT)
 }
 
 /// Asks before installing; `[s]how` prints the file and asks again.
@@ -316,8 +325,17 @@ pub fn restart(context: &Context) -> Result<(), String> {
     let service = context.ours()?;
     let config = check(&service.config, show)
         .map_err(|e| format!("{e}\nThe service keeps running as it was."))?;
-    run_all(&restart_commands(context.manager, &uid()?), show)?;
-    wait_for(&local_url(config.server.listen), &service.errors, show)
+    run_all(
+        &restart_commands(context.manager, &uid()?),
+        show,
+        stopping(&service),
+    )?;
+    wait_for(
+        &local_url(config.server.listen),
+        &service.errors,
+        show,
+        stopping(&service) + START_WAIT,
+    )
 }
 
 /// `wye service uninstall`: stops the service and removes its definition.
@@ -331,11 +349,19 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
         }
         _ => context.ours()?,
     };
-    run_all(&stop_commands(context.manager, &uid()?), show)?;
+    run_all(
+        &stop_commands(context.manager, &uid()?),
+        show,
+        stopping(&service),
+    )?;
     std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", show(&file)))?;
     say!("Removed {}", show(&file));
     if context.manager == Manager::Systemd {
-        run_all(&vec![systemctl(&["daemon-reload"])], show)?;
+        run_all(
+            &vec![systemctl(&["daemon-reload"])],
+            show,
+            stopping(&service),
+        )?;
     }
     say!(
         "The config {} and the log {} stay.",
@@ -345,35 +371,37 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs each command, printing it first; a `bootout` of a service that is
-/// not loaded is not an error.
-fn run_all(commands: &Commands, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
+/// Runs each command, printing it first. A `bootout` of a service that is not
+/// loaded is not an error. launchd reports `bootout` done while the old gateway
+/// still finishes its requests, and refuses `bootstrap` until it has exited, so
+/// that one is retried for as long as the old gateway may take: `settle`.
+fn run_all(
+    commands: &Commands,
+    show: &dyn Fn(&Path) -> String,
+    settle: Duration,
+) -> Result<(), String> {
     for command in commands {
         say!("  $ {}", shell(command, show));
         let (program, args) = command.split_first().ok_or("an empty command")?;
-        // launchd may still be tearing the old service down after `bootout`.
-        let attempts = if args.first().map(String::as_str) == Some("bootstrap") {
-            10
-        } else {
-            1
-        };
-        let mut result = None;
-        for _ in 0..attempts {
+        let verb = args.first().map(String::as_str);
+        let run = || {
             let output = std::process::Command::new(program)
                 .args(args)
                 .output()
                 .map_err(|e| format!("cannot run {program}: {e}"))?;
             if output.status.success() {
-                result = Some(Ok(()));
-                break;
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
             }
-            result = Some(Err(String::from_utf8_lossy(&output.stderr)
-                .trim()
-                .to_owned()));
-            std::thread::sleep(Duration::from_millis(300));
-        }
-        if let Some(Err(why)) = result
-            && args.first().map(String::as_str) != Some("bootout")
+        };
+        let result = if verb == Some("bootstrap") {
+            retry(run, settle, RETRY_EVERY)
+        } else {
+            run()
+        };
+        if let Err(why) = result
+            && verb != Some("bootout")
         {
             return Err(format!("{} failed: {why}", shell(command, show)));
         }
@@ -381,9 +409,35 @@ fn run_all(commands: &Commands, show: &dyn Fn(&Path) -> String) -> Result<(), St
     Ok(())
 }
 
-/// Waits for the gateway to answer, and says so.
-fn wait_for(url: &str, errors: &Path, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + START_WAIT;
+/// `attempt` until it succeeds or `settle` has passed; the last error then.
+fn retry(
+    mut attempt: impl FnMut() -> Result<(), String>,
+    settle: Duration,
+    every: Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + settle;
+    loop {
+        match attempt() {
+            Ok(()) => return Ok(()),
+            Err(_) if std::time::Instant::now() < deadline => std::thread::sleep(every),
+            Err(why) => return Err(why),
+        }
+    }
+}
+
+/// How long the running gateway may take to stop.
+fn stopping(service: &Service) -> Duration {
+    Duration::from_secs(service.stop_secs)
+}
+
+/// Waits up to `wait` for the gateway to answer, and says so.
+fn wait_for(
+    url: &str,
+    errors: &Path,
+    show: &dyn Fn(&Path) -> String,
+    wait: Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + wait;
     while std::time::Instant::now() < deadline {
         if probe(url).is_ok() {
             say!("The gateway answers at {url}.");

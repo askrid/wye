@@ -34,6 +34,6 @@ pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 /// `wye service` ask here.
 pub(crate) const HEALTH_PATH: &str = "/healthz";
 
-/// Anthropic's API-key header: a gateway credential arrives in it, and
+/// Anthropic's API-key header: a gateway token arrives in it, and
 /// Wye's own key leaves in it.
 pub(crate) const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");

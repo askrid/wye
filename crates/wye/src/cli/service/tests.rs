@@ -143,3 +143,33 @@ fn a_log_size_reads_as_people_write_it() {
     assert_eq!(file_size(4_404_019), "4.2 MB");
     assert_eq!(file_size(512), "512 bytes");
 }
+
+#[test]
+fn loading_the_service_waits_out_the_old_gateway_shutting_down() {
+    let every = Duration::from_millis(1);
+    let mut left = 3;
+    let busy = |left: &mut i32| {
+        *left -= 1;
+        if *left > 0 {
+            Err("Bootstrap failed: 5: Input/output error".to_owned())
+        } else {
+            Ok(())
+        }
+    };
+    assert_eq!(
+        retry(|| busy(&mut left), Duration::from_secs(5), every),
+        Ok(())
+    );
+    assert_eq!(left, 0, "kept trying until the old gateway had gone");
+    let mut tries = 0;
+    let never = || {
+        tries += 1;
+        Err("still busy".to_owned())
+    };
+    assert_eq!(
+        retry(never, Duration::from_millis(5), every),
+        Err("still busy".to_owned()),
+        "a real failure still comes out"
+    );
+    assert!(tries > 1);
+}
