@@ -156,8 +156,10 @@ impl InitOptions {
             ));
         } else {
             steps.push((
-                "Run the gateway, keeping its usage log:".to_owned(),
-                format!("wye serve{c} 2>> ~/.wye/usage.jsonl"),
+                "Run the gateway in the background, now and at every login (it shows \
+                 what it sets up and asks first; or run `wye serve` in a terminal):"
+                    .to_owned(),
+                format!("wye service install{c}"),
             ));
             let agents = if self.openai {
                 "Start Claude Code, or Codex, through it:"

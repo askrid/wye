@@ -17,7 +17,7 @@ use wye::{
     cli::{
         Agent, InitMode, InitOptions, Launch,
         args::{self, ArgsError, Command},
-        token,
+        service, token,
     },
 };
 
@@ -82,6 +82,29 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         "serve" => {
             let path = config_path()?;
             serve(load(&path)?, &path)?;
+            Ok(0)
+        }
+        "service install" | "service status" | "service restart" | "service uninstall" => {
+            let user_home = env("HOME")
+                .filter(|h| !h.is_empty())
+                .ok_or("no home directory ($HOME)")?;
+            let context = service::Context {
+                manager: service::Manager::here()?,
+                user_home: user_home.into(),
+                wye_home: args::home(&env).ok_or("no home directory ($HOME)")?,
+                show: Box::new(move |path: &Path| args::tilde(path, &env)),
+            };
+            match command.name {
+                "service install" => service::install(
+                    &context,
+                    &config_path()?,
+                    parsed.flag("yes"),
+                    parsed.flag("dry-run"),
+                )?,
+                "service status" => return Ok(found(service::status(&context)?)),
+                "service restart" => service::restart(&context)?,
+                _ => service::uninstall(&context)?,
+            }
             Ok(0)
         }
         "validate" => {
