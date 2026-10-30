@@ -113,7 +113,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Models any credential may use (exact names, or prefixes ending in *); a
 # credential issued with --models narrows this further. Omit to allow all:
 # models = ["claude-sonnet-*", "claude-haiku-*"]
-# Output-token ceiling: the largest max_tokens a request may ask for
+# Output-token ceiling: the largest output-token value a request may ask for
+# (max_tokens, max_output_tokens, or max_completion_tokens per API)
 # (credentials issued with --max-output-tokens can only lower it):
 # max_output_tokens = 32000
 # Below the [auth] fields: in TOML, every key after a table header belongs

@@ -7,9 +7,10 @@
 //! top-level `model` string as soon as it has been read, so the caller holds
 //! only the bytes up to it, and keeps checking the rest: JSON allows a
 //! repeated key, and a provider may honor a later `"model"` than the one that
-//! was checked. A second top-level `model` key, or a top-level key written
-//! with escapes (which could spell `model`), is an error the caller turns into
-//! an aborted request.
+//! was checked. A second top-level `model` key (compared ignoring ASCII case),
+//! or a top-level key written with escapes or non-ASCII bytes (which could
+//! spell `model` to some decoder), is an error the caller turns into an
+//! aborted request.
 
 mod scanner;
 

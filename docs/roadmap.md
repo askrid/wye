@@ -1,6 +1,6 @@
 # Roadmap
 
-Each stage leaves a runnable system with focused tests. Order of the next work: verification against the real services, the rest of M2, a published image, then the rest of M4 ([product.md](product.md#next)). Client phases (P0-P3) are defined in [product.md](product.md#phases).
+Each stage leaves a runnable system with focused tests. Order of the next work: [product.md](product.md#next). Client phases (P0-P3) are defined in [product.md](product.md#phases).
 
 ## Status
 
@@ -51,7 +51,7 @@ Status: stages 1-3 are implemented and covered by integration tests against a mo
 | --- | --- | --- |
 | 4 | 4a done: Ed25519 JWT credentials from `Authorization` or `x-api-key`, `wye token keygen`/`issue`, `max_credential_ttl_secs`, `[auth]` lifts the loopback-only restriction, subject in the usage log. 4b done: model permissions from config and the credential's `models` claim, read from the held start of the body; output-token ceilings from config and the `max_output_tokens` claim, the stricter applying. 4c done: identity-provider JWTs (`[[auth.issuers]]`: pinned algorithm, JWKS file, subject claim, claim → model grants). `apiKeyHelper` renewal examples done. Stage 4 is complete | Invalid, expired, wrong-audience, unknown-key, and unauthorized credentials rejected before contacting upstream; credential limits only narrow config; background-model requests covered by permissions |
 | 5 | Usage observer (`message_start`, `message_delta`; done), minimal OTLP telemetry with developer and Claude Code session attribution (done: usage records as logs with session and subject attribution, cumulative request, duration, token, and active-request metrics, and one span per request joined to the caller's `traceparent`), OCI image (done locally with a smoke test; publishing open), baseline benchmark (done) | Usage extracted from split and oversized events without altering forwarded bytes; outcomes and latency observable without logging prompts or secrets; image smoke test and benchmark recorded |
-| 6 | `wye claude` (done), prebuilt binaries (done: release archives from a `v*` tag; first release pending), Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes); both done) | Wrapper launches Claude Code against Wye and cleans up; a Docker Swarm service updates without dropping streams |
+| 6 | `wye claude` (done), prebuilt binaries (done: release archives from a `v*` tag; first release pending), Compose example; `upstream.api_key_file` and `wye probe` for container platforms without Kubernetes ([operations.md](operations.md#without-kubernetes); both done) | Wrapper launches Claude Code against Wye without writing anything; a Docker Swarm service updates without dropping streams |
 
 Stage 4 is required before any non-loopback deployment.
 
