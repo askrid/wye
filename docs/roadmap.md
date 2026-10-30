@@ -147,6 +147,22 @@ Deterministic integration tests use a local mock upstream. Normal CI never makes
 
 Core unit tests and property tests cover configuration validation, credential verification, model permissions and output-token ceilings, routing and failover order, pricing, and the request and response scanners. A small opt-in real-provider smoke test checks SDK compatibility; it does not replace deterministic protocol tests.
 
+## Open findings
+
+Found by review rounds ([development.md](development.md#review-rounds)) and not fixed yet, with the reason. The next round starts here.
+
+| Finding | Why it is open |
+|---|---|
+| No minimum read rate: a client that accepts one window update a minute keeps its stream, permit, and about 0.7 MB, since the write timeout resets on any progress | Bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate |
+| Client connections are not capped, and `/healthz` and `/readyz` take no permit, so a connection flood is bounded only by the open-file limit | A connection cap is a new limit to size and document; accept errors already pause instead of spinning |
+| Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s) | Some front ends answer frequent pings with `GOAWAY`; needs a check against each provider |
+| Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-credentials)) | Each such field is provider-specific; a list of them is a design change |
+| OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process | The excess is counted in `wye.telemetry.lost`; per-attribute caps need a design |
+| Tests: some negative checks (`try_recv` on an empty channel) race the upstream, and a few tests wait with fixed sleeps | Test cleanup; none has flaked on the laptop or CI |
+| Test and benchmark code repeats setup (recording upstreams, SSE responses, leaked `'static` bodies, CPU before-and-after pairs), and `wye-bench` leaves its gateways running when interrupted | Cleanup with no behavior change; next round |
+| CI's benchmark rebuilds the reference commit from scratch on every run: its cache holds the build, but `bench-against.sh` removes a reference tree without a worktree | CI time only; the fix is a build directory outside the worktree |
+| No `cargo-fuzz` targets for the parsers of untrusted input (AGENTS.md asks for them); property tests cover the scanners | Needs a nightly toolchain: a decision for the maintainer |
+
 ## Release acceptance checklist
 
 ### Functional / API

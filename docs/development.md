@@ -89,3 +89,30 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 - A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
 - Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
 - `unwrap`, `expect`, panics, and indexing are denied outside tests; `unsafe` is forbidden in `gateway-core` and denied elsewhere.
+
+## Design principles
+
+How the code is structured, beyond the rules in [Code changes](#code-changes). Each principle names where the code follows it, so a review can check new code against an example.
+
+- **Functional core, imperative shell.** Decisions are pure functions in `gateway-core`, with no I/O, clock, or Tokio: policy and the output-token ceiling, the route choice, pricing, cache-miss classification, upgrade rules, credential checks. `crates/wye` reads sockets, feeds the core bytes and headers, and acts on the answer. Like a sans-I/O protocol library, the core is tested without a socket, and property tests cover its parsers ([Bernhardt](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell), [sans-I/O in Rust](https://www.firezone.dev/blog/sans-io)).
+- **One implementation of each decision.** `wye explain` and `wye policy-test` decide through `gateway-core`'s `admission::BodyChecks`, as `serve` does, and `wye doctor` resolves secrets with `startup`'s functions, instead of restating them: an offline answer that can drift from the server's is worse than none. A proxy test sends the same requests to a gateway and to `explain` and requires the same answers. The same holds for vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP); and one function, `responses::refuse`, that turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
+- **Parse, don't validate.** Config, credentials, model patterns, and prices become types at the boundary, so later code cannot meet an invalid value; fields that only make sense together live in one type ([King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)).
+- **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Held`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
+- **A bound bounds what it names.** A memory budget counts memory, not payload: a held chunk counts at least `MIN_CHUNK_CHARGE`, since a body sent a byte at a time pins far more than its bytes. A deadline covers every wait it names: the connect timeout covers the TLS handshake too.
+- **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never server internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
+- **Closed sets are enums, dispatch is static.** `Api`, `Provider`, and `UsageScanner` are enums matched per chunk; a trait needs two implementations; the data path is generic, and `dyn` stays at cold boundaries such as startup.
+
+## Review rounds
+
+The review pass at the end of every change sees only the files it touched. A review round reads the whole repository: after a run of feature work, before a release, and when asked. It covers code, tests, the benchmark, scripts, CI, dependencies, configuration, examples, comments, the README, and the docs.
+
+1. Review by concern, reading each area in full rather than sampling it:
+   - **Malformed and adversarial requests:** HTTP framing, methods, paths, headers, credentials, JSON that a policy could read differently from the provider, and the status each case gets.
+   - **Stress and misbehaving peers:** slow, endless, or oversized upstream responses; slow or flooding clients; full queues; a stalled collector; shutdown under load. Every buffer stays bounded and every task has an owner.
+   - **Text against code:** every default, limit, flag, message, metric, record field, and status a document names, checked at its source in the code. Names removed since the last round (`git log`) must leave no trace. Every relative link and anchor must resolve.
+   - **Tests, benchmark, scripts, CI, dependencies:** assertions that cannot fail, test names that promise more than the test checks, real-time waits, gated metrics never produced, and dependencies without `default-features = false`.
+   - **Structure:** the code against the [design principles](#design-principles): duplicated decisions, stringly-typed vocabularies, resources released by hand, dependency cycles.
+2. A finding counts only after it is traced through the code. A bug gets a test that fails before the fix. After the fix, undo it once and confirm the test fails again (a mutation check), so the test is known to guard the fix.
+3. Run `wye report` on a real usage log. A number the report hides or mislabels is a bug like any other.
+4. Each fix is its own commit through the gate. Refactors are separate commits and change no behavior.
+5. Record each finding that is not fixed, with the reason, where the next round will find it: open work in [roadmap.md](roadmap.md), open questions in [research.md](research.md).
