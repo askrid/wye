@@ -114,10 +114,7 @@ impl Gateway {
                 .map(|(upstream, r)| Upstream::new(upstream, r.auth, &r.extra_roots))
                 .collect::<Result<_, _>>()?;
             Ok(ApiRoute {
-                prefixes_model_ids: route
-                    .upstreams()
-                    .iter()
-                    .any(|u| u.provider.model_prefix().is_some()),
+                prefixes_model_ids: route.prefixes_model_ids(),
                 route: route.clone(),
                 upstreams,
             })
@@ -333,7 +330,7 @@ fn otlp_target(
     headers: http::HeaderMap,
 ) -> Result<OtlpTarget, StartupError> {
     let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build(crate::upstream::https_connector(extra_roots)?);
+        .build(crate::tls::https_connector(extra_roots)?);
     Ok(OtlpTarget::new(
         telemetry.otlp_logs_uri.clone(),
         telemetry.otlp_metrics_uri.clone(),

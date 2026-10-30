@@ -6,7 +6,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 
 use gateway_core::pricing::Usd;
 
-use super::super::Line;
+use super::super::{Line, Outcome};
 
 #[derive(Clone, Copy)]
 pub(in crate::usage_log) enum Value<'a> {
@@ -66,7 +66,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         "http.response.status_code",
         Value::Int(u64::from(line.status)),
     );
-    attribute("wye.outcome", Value::Str(line.outcome));
+    attribute("wye.outcome", Value::Str(line.outcome.as_str()));
     attribute("wye.duration_ms", Value::Double(line.duration_ms));
     if let Some(ms) = line.headers_ms {
         attribute("wye.headers_ms", Value::Double(ms));
@@ -140,7 +140,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         attribute("wye.failovers", Value::Str(&json));
     }
     if let Some(miss) = line.cache_miss {
-        attribute("wye.cache_miss", Value::Str(miss));
+        attribute("wye.cache_miss", Value::Str(miss.as_str()));
     }
     if let Some(prompt) = &line.prompt {
         // Nested and variable-length: one JSON string the backend can parse.
@@ -196,7 +196,8 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
             r#"{{"timeUnixNano":"{at}","name":"response headers"}}"#
         );
     }
-    let failed = matches!(line.outcome, "failed" | "gateway_error") || line.status >= 500;
+    let failed =
+        matches!(line.outcome, Outcome::Failed | Outcome::GatewayError) || line.status >= 500;
     // STATUS_CODE_ERROR = 2, STATUS_CODE_UNSET = 0.
     let _ = write!(
         buf,
@@ -297,7 +298,7 @@ mod tests {
             path: "/v1/messages",
             system: "anthropic",
             status: 200,
-            outcome: "completed",
+            outcome: Outcome::Completed,
             duration_ms: 2_000.0,
             headers_ms: None,
             upstream: None,

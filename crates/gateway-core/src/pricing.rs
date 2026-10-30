@@ -206,7 +206,7 @@ pub enum PriceError {
 
 /// Parses USD per million tokens (`"4.00"`) into pico-USD per token: the
 /// value times 10^6, exact for at most six decimals.
-pub fn parse_price(text: &str) -> Result<Pico, PriceError> {
+pub(crate) fn parse_price(text: &str) -> Result<Pico, PriceError> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > 6 {

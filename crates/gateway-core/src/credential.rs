@@ -390,7 +390,7 @@ pub fn encode_public_key(key: &[u8]) -> String {
 }
 
 /// Decodes `ed25519_public_key` from the config.
-pub fn decode_public_key(encoded: &str) -> Option<[u8; 32]> {
+pub(crate) fn decode_public_key(encoded: &str) -> Option<[u8; 32]> {
     B64.decode(encoded).ok()?.try_into().ok()
 }
 

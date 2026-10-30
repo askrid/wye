@@ -14,12 +14,11 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::policy::PolicyError;
+use gateway_core::{admission::TokenLimitError, policy::PolicyError};
 use http_body_util::LengthLimitError;
 use hyper::body::{Body, Frame, SizeHint};
 
-use super::BoxError;
-use crate::{request_body::TokenLimitError, scanned_body::Slot};
+use crate::{BoxError, scanned_body::Slot};
 
 /// A refusal raised after forwarding began; the upstream request was aborted.
 #[derive(Debug, Clone, Copy)]

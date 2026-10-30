@@ -200,6 +200,9 @@ impl CacheMiss {
         })
     }
 
+    /// Every reason, in the order metrics list them.
+    pub const ALL: [Self; 3] = [Self::Compaction, Self::AfterCompaction, Self::Unexplained];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Compaction => "compaction",

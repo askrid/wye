@@ -18,9 +18,9 @@ use std::{
 };
 
 use gateway_core::credential::{CredentialError, Identity, Verifier};
-use http::{HeaderMap, HeaderName, header::AUTHORIZATION};
+use http::{HeaderMap, header::AUTHORIZATION};
 
-const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
+use crate::X_API_KEY;
 
 /// The last credential verified on one connection.
 #[derive(Default)]

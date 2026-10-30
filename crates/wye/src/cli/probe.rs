@@ -22,7 +22,7 @@ pub async fn probe(url: &str) -> Result<(), String> {
             "{url}: the URL must start with http:// or https://"
         ));
     }
-    let https = crate::upstream::https_connector(&[]).map_err(|e| e.to_string())?;
+    let https = crate::tls::https_connector(&[]).map_err(|e| e.to_string())?;
     let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
     let request = Request::get(uri)
         .body(Empty::new())

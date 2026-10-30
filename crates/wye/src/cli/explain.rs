@@ -1,24 +1,24 @@
 //! `wye explain`: what `wye serve` would decide for one request, offline.
 //!
 //! The checks call the same functions the server uses (credential
-//! verification, the policy scanner, the permission rule, session sampling)
-//! in the server's order, and make no network calls. Routing is a pure
+//! verification, the policy scanner, body admission's [`BodyChecks`],
+//! session sampling) in the server's order, and make no network calls. Routing is a pure
 //! function of request, credential, and config, so the answer is what every
 //! replica would do.
 
 use gateway_core::{
+    admission::{BodyChecks, Refusal},
     api::{self, Api},
     config::{Config, UpstreamCredential},
     credential::{Identity, Verifier},
     policy::{self, PolicyScanner},
     pricing::{Pico, PricedModels, Usd},
     prompt,
-    route::Select,
+    route::{self, Select},
     upgrade::{self, UpgradeScanner},
 };
 
 use super::size;
-use crate::request_body::TokenLimitError;
 
 /// The gateway credential a request carries.
 pub enum Credential<'a> {
@@ -54,6 +54,11 @@ impl Explanation {
             .push(format!("decision: refuse {status} {kind}: {message}"));
         self.refused = Some((status, kind, message));
         self
+    }
+
+    /// A policy refusal, worded as the server words it.
+    fn refuse_policy(self, refusal: &Refusal) -> Self {
+        self.refuse(refusal.status(), refusal.kind(), refusal.to_string())
     }
 
     pub fn report(&self) -> String {
@@ -142,7 +147,6 @@ pub fn explain(
     ));
 
     let configured = config.auth.as_ref().and_then(|a| a.models.as_deref());
-    let granted = identity.as_ref().and_then(|i| i.models.as_deref());
     let list = |patterns: Option<&[policy::ModelPattern]>| match patterns {
         None => "any".to_owned(),
         // An identity provider's token that matched no grant.
@@ -153,28 +157,18 @@ pub fn explain(
             .collect::<Vec<_>>()
             .join(", "),
     };
-    // The server reads the body once, for every check, whenever one applies.
-    let token_limit = endpoint
-        .generates
-        .then(|| {
-            policy::token_limit(
-                config.auth.as_ref().and_then(|a| a.max_output_tokens),
-                identity.as_ref().and_then(|i| i.max_output_tokens),
-            )
-        })
-        .flatten();
-    // A provider with its own model ids on the route: the model is read.
-    let prefixes_model_ids = config.routes.get(api).is_some_and(|r| {
-        r.upstreams()
-            .iter()
-            .any(|u| u.provider.model_prefix().is_some())
-    });
-    if configured.is_none()
-        && granted.is_none()
-        && token_limit.is_none()
-        && config.aliases.is_none()
-        && !prefixes_model_ids
-    {
+    let checks = BodyChecks::new(
+        configured,
+        config.auth.as_ref().and_then(|a| a.max_output_tokens),
+        config.aliases.as_ref(),
+        identity.as_ref(),
+        endpoint.generates,
+        config
+            .routes
+            .get(api)
+            .is_some_and(|r| r.prefixes_model_ids()),
+    );
+    if !checks.hold() {
         out.step(
             "model aliases, permissions, and output-token ceiling: none apply; the body is not read"
                 .into(),
@@ -187,54 +181,46 @@ pub fn explain(
         let held = held_len(api, body);
         let (start, rest) = body.split_at(held);
         scanner.feed(start);
-        let mut requested = match scanner.finish() {
+        let sent = match scanner.finish() {
             Ok(m) => m.to_owned(),
-            Err(e) => return out.refuse(400, "invalid_request_error", e.to_string()),
+            Err(e) => return out.refuse_policy(&Refusal::Invalid(e)),
         };
-        // The server's refusal names the model as the client sent it.
-        let sent = requested.clone();
-        if let Some(alias) = config.aliases.as_ref().and_then(|a| a.get(&requested)) {
-            let subject = identity.as_ref().map(|i| &*i.subject);
-            let resolved = alias.model_for(subject);
-            out.step(format!(
-                "alias: {requested} resolves to {resolved}{}; the body names {resolved} upstream",
-                subject.map_or(String::new(), |s| format!(" for subject {s}"))
-            ));
-            requested = resolved.to_string();
-        }
-        out.model = Some(requested.clone());
+        let subject = identity.as_ref().map(|i| &*i.subject);
+        let model = match checks.resolve(&sent, subject) {
+            Some((_, resolved)) => {
+                out.step(format!(
+                    "alias: {sent} resolves to {resolved}{}; the body names {resolved} upstream",
+                    subject.map_or(String::new(), |s| format!(" for subject {s}"))
+                ));
+                resolved.to_string()
+            }
+            None => sent.clone(),
+        };
+        out.model = Some(model.clone());
         out.step(format!(
-            "model: {requested}; allowed by config: {}; by credential: {}",
+            "model: {model}; allowed by config: {}; by credential: {}",
             list(configured),
-            list(granted)
+            list(checks.granted)
         ));
-        if !policy::permitted(configured, granted, &requested) {
-            return out.refuse(
-                403,
-                "permission_error",
-                format!("this credential may not use the model {sent:?}"),
-            );
+        if let Err(refusal) = checks.permit(&model, &sent) {
+            return out.refuse_policy(&refusal);
         }
-        // A value is final at the hold; a missing field only at the end.
-        if let Some(limit) = token_limit
-            && (scanner.max_output_tokens().is_some() || rest.is_empty())
-            && let Some(refusal) = TokenLimitError::check(api, limit, scanner.max_output_tokens())
+        if let Err(refusal) = checks.check_tokens(api, scanner.max_output_tokens(), rest.is_empty())
         {
-            return out.refuse(403, "permission_error", refusal.to_string());
+            return out.refuse_policy(&refusal);
         }
-        // The rest is checked only for permissions and ceilings, not for an
-        // alias or a provider's model id alone. A refusal there aborts the
-        // upstream request mid-body, with the same answer.
-        if configured.is_some() || granted.is_some() || token_limit.is_some() {
+        // A refusal in the rest aborts the upstream request mid-body, with
+        // the same answer.
+        if checks.checks_rest() {
             scanner.feed(rest);
             if let Some(e) = scanner.error() {
-                return out.refuse(400, "invalid_request_error", e.to_string());
+                return out.refuse_policy(&Refusal::Invalid(e));
             }
         }
-        if let Some(limit) = token_limit {
+        if let Some(limit) = checks.token_limit {
             let requested = scanner.max_output_tokens();
-            if let Some(refusal) = TokenLimitError::check(api, limit, requested) {
-                return out.refuse(403, "permission_error", refusal.to_string());
+            if let Err(refusal) = checks.check_tokens(api, requested, true) {
+                return out.refuse_policy(&refusal);
             }
             let field = api.token_field();
             out.step(match requested {
@@ -244,11 +230,10 @@ pub fn explain(
         }
     }
 
-    // The server's affinity key: the session id, else the credential subject.
-    let key = session
-        .map(str::as_bytes)
-        .or(identity.as_ref().map(|i| i.subject.as_bytes()))
-        .unwrap_or_default();
+    let key = route::affinity_key(
+        session.map(str::as_bytes),
+        identity.as_ref().map(|i| &*i.subject),
+    );
     let upstreams = route.upstreams();
     let Some(upstream) = upstreams.get(route.rank(key).first()) else {
         unreachable!("a route has at least one upstream")

@@ -16,6 +16,7 @@ mod server;
 mod startup;
 #[cfg(test)]
 mod test_body;
+mod tls;
 mod upgrade_check;
 mod upstream;
 mod usage_log;
@@ -26,5 +27,11 @@ pub use cli::{
 };
 pub use gateway::Gateway;
 pub use server::serve;
-pub use startup::{Resources, StartupError, UpstreamResources, verifier};
-pub use upstream::UpstreamAuth;
+pub use startup::{Resources, StartupError, UpstreamAuth, UpstreamResources, verifier};
+
+/// An error from a request body or the connection under it.
+pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Anthropic's API-key header: a gateway credential arrives in it, and
+/// Wye's own key leaves in it.
+pub(crate) const X_API_KEY: http::HeaderName = http::HeaderName::from_static("x-api-key");

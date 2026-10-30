@@ -14,7 +14,7 @@ mod connect;
 mod pool;
 mod refusal;
 
-use std::{fmt, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use gateway_core::config;
 use http::{
@@ -31,9 +31,9 @@ use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
-use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
+use rustls::pki_types::CertificateDer;
 
-pub(crate) use body::{BoxError, UpstreamBody};
+pub(crate) use body::UpstreamBody;
 use connect::ConnectTimeout;
 use pool::ClientPool;
 pub(crate) use refusal::PolicyRefusal;
@@ -42,11 +42,12 @@ use refusal::{RefusalSlot, Refusing, policy_refusal};
 use gateway_core::{prompt::PromptScanner, upgrade::UpgradeScanner};
 
 use crate::{
-    StartupError,
+    StartupError, X_API_KEY,
     diagnostics::PromptSlot,
     failover::FailoverBody,
     request_body::{ClientBody, RequestBody},
     scanned_body::ScannedBody,
+    startup::UpstreamAuth,
     upgrade_check::UpgradeSlot,
 };
 
@@ -60,7 +61,6 @@ type UpstreamClient = Client<
     ScannedBody<ScannedBody<Refusing<SendBody>, UpgradeScanner>, PromptScanner>,
 >;
 
-const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const WORKSPACE_ID: HeaderName = HeaderName::from_static("anthropic-workspace-id");
 /// Choose which organization or project an OpenAI key bills: the operator's
 /// key decides that, not the caller.
@@ -85,44 +85,6 @@ const HOP_BY_HOP: [HeaderName; 9] = [
     TRANSFER_ENCODING,
     UPGRADE,
 ];
-
-/// Credential Wye presents upstream.
-pub enum UpstreamAuth {
-    /// Replace the caller's credential headers with this `x-api-key` value
-    /// (Anthropic, Bedrock).
-    ApiKey(HeaderValue),
-    /// Replace the caller's credential headers with this `Authorization`
-    /// value, `Bearer` and the key (OpenAI, Claude Platform on AWS).
-    Bearer(HeaderValue),
-    /// Forward the caller's credential headers unchanged.
-    ForwardCaller,
-}
-
-impl UpstreamAuth {
-    pub fn api_key(key: &str) -> Result<Self, StartupError> {
-        Ok(Self::ApiKey(secret(key)?))
-    }
-
-    pub fn bearer(key: &str) -> Result<Self, StartupError> {
-        Ok(Self::Bearer(secret(&format!("Bearer {key}"))?))
-    }
-}
-
-fn secret(value: &str) -> Result<HeaderValue, StartupError> {
-    let mut value = HeaderValue::from_str(value).map_err(|_| StartupError::InvalidApiKey)?;
-    value.set_sensitive(true);
-    Ok(value)
-}
-
-impl fmt::Debug for UpstreamAuth {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ApiKey(_) => f.write_str("ApiKey(<redacted>)"),
-            Self::Bearer(_) => f.write_str("Bearer(<redacted>)"),
-            Self::ForwardCaller => f.write_str("ForwardCaller"),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub(crate) enum ForwardError {
@@ -181,7 +143,7 @@ impl Upstream {
         http.set_nodelay(true);
         // Plain http is accepted by config validation only for loopback hosts.
         let protocols = HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config(extra_roots)?)
+            .with_tls_config(crate::tls::client_config(extra_roots)?)
             .https_or_http()
             .enable_http1();
         let https = ConnectTimeout::new(
@@ -303,37 +265,6 @@ impl Upstream {
             .build()
             .map_err(|_| ForwardError::Upstream)
     }
-}
-
-/// An HTTP/1.1 client connector for `http` and `https` URLs, trusting
-/// `extra_roots` besides the built-in roots: the OTLP exporter and `wye probe`.
-pub(crate) fn https_connector(
-    extra_roots: &[CertificateDer<'static>],
-) -> Result<HttpsConnector<HttpConnector>, StartupError> {
-    Ok(HttpsConnectorBuilder::new()
-        .with_tls_config(tls_config(extra_roots)?)
-        .https_or_http()
-        .enable_http1()
-        .build())
-}
-
-/// Built-in web PKI roots plus the configured extra roots.
-fn tls_config(extra_roots: &[CertificateDer<'static>]) -> Result<ClientConfig, StartupError> {
-    let mut roots = RootCertStore {
-        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-    };
-    for cert in extra_roots {
-        roots
-            .add(cert.clone())
-            .map_err(|e| StartupError::Tls(format!("invalid CA certificate: {e}")))?;
-    }
-    Ok(
-        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| StartupError::Tls(e.to_string()))?
-            .with_root_certificates(roots)
-            .with_no_client_auth(),
-    )
 }
 
 fn strip_hop_by_hop(headers: &mut HeaderMap) {

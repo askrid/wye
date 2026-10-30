@@ -56,6 +56,7 @@ wye/
 ├── crates/
 │   ├── gateway-core/src/        portable policy, no I/O
 │   │   ├── config.rs            wye.toml parsing and validation (config/validate/)
+│   │   ├── admission.rs         body admission decisions: hold or not, alias, permission, output-token ceiling, the refusal
 │   │   ├── alias.rs             model aliases and per-subject rollout
 │   │   ├── api.rs               the native APIs and what differs between them
 │   │   ├── credential.rs        gateway credential verification (own and identity-provider) and issuance
@@ -72,11 +73,11 @@ wye/
 │   │                            response lexer in usage/fields.rs), Chat Completions streams (usage/chat.rs), non-streaming JSON (usage/json.rs)
 │   ├── wye/src/                 the binary
 │   │   ├── main.rs              command-line entry
-│   │   ├── startup.rs           secrets and files the config references
+│   │   ├── startup.rs           secrets and files the config references, and the upstream credential they make
 │   │   ├── server.rs            listener, connections, two-phase shutdown
 │   │   ├── server/write_timeout.rs  closes connections whose writes stall
 │   │   ├── gateway.rs           the request entry point, routes and their upstreams
-│   │   ├── gateway/admit.rs     body admission: aliases, permissions, the output-token ceiling, the model's position
+│   │   ├── gateway/admit.rs     body admission: holds the body and applies admission.rs's decisions; the model's position
 │   │   ├── gateway/forward.rs   a proxied request: permit, admission, sampling, attempts and failover
 │   │   ├── gateway/responses.rs gateway-generated responses in the request's API shape
 │   │   ├── auth.rs              credential checks, cached per connection
@@ -85,13 +86,14 @@ wye/
 │   │   ├── scanned_body.rs      request bodies read by a scanner as they are sent
 │   │   ├── diagnostics.rs       prompt hashes of forwarded request bodies
 │   │   ├── upgrade_check.rs     upgrade-check findings of forwarded request bodies
-│   │   ├── upstream.rs          forwarding to a provider, the TLS client
+│   │   ├── upstream.rs          forwarding to a provider
+│   │   ├── tls.rs               the TLS client every outbound connection uses (upstreams, OTLP, doctor, probe)
 │   │   ├── failover.rs          request bodies kept and handed back for failover
 │   │   ├── upstream/pool.rs     upstream connection lanes
 │   │   ├── upstream/body.rs     response body: idle timeout, connection slot
 │   │   ├── upstream/refusal.rs  refusals the request body raised mid-upload, also over HTTP/2
-│   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── upstream/connect.rs  the connect timeout over TCP and the TLS handshake
+│   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
 │   │   ├── cli/                 explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop

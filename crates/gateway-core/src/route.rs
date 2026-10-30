@@ -76,6 +76,14 @@ impl Ranking {
     }
 }
 
+/// The key a request is routed (and sampled) by: the client's session id,
+/// else the credential subject, else nothing (without `[auth]`, one loopback
+/// user). Every replica computes the same key, so a session keeps its
+/// upstream across them.
+pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> &'k [u8] {
+    session.or(subject.map(str::as_bytes)).unwrap_or_default()
+}
+
 /// The upstreams that serve one API, and how a request picks one.
 #[derive(Debug, Clone)]
 pub struct Route {
@@ -110,6 +118,14 @@ impl Route {
     /// In config order.
     pub fn upstreams(&self) -> &[Upstream] {
         &self.upstreams
+    }
+
+    /// Whether an upstream's provider has its own model ids (Bedrock's
+    /// `anthropic.` prefix), so the model's place in the body is needed.
+    pub fn prefixes_model_ids(&self) -> bool {
+        self.upstreams()
+            .iter()
+            .any(|u| u.provider.model_prefix().is_some())
     }
 
     pub fn select(&self) -> Select {

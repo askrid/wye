@@ -51,7 +51,7 @@ impl Api {
     /// Every top-level field that bounds generated tokens: Chat Completions
     /// keeps the older `max_tokens` beside `max_completion_tokens`. A body
     /// naming two of them is refused, as one naming the same twice.
-    pub fn token_fields(self) -> &'static [&'static str] {
+    pub(crate) fn token_fields(self) -> &'static [&'static str] {
         match self {
             Self::Messages => &["max_tokens"],
             Self::Responses => &["max_output_tokens"],

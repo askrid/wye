@@ -8,6 +8,7 @@
 
 mod aliases;
 mod credentials;
+mod explain;
 mod failover;
 mod forwarding;
 mod harness;

@@ -13,9 +13,7 @@ use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 use tokio::time::{Instant, Sleep};
 
-use crate::gauge::Held;
-
-pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
+use crate::{BoxError, gauge::Held};
 
 /// Response body from the upstream.
 ///

@@ -9,6 +9,7 @@
 //! later back a WASM adapter.
 #![forbid(unsafe_code)]
 
+pub mod admission;
 pub mod agent;
 pub mod alias;
 pub mod api;
