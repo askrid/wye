@@ -158,9 +158,9 @@ pub(crate) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeChec
     }
     let mut targets: Vec<Box<str>> = Vec::with_capacity(raw.targets.len());
     for target in raw.targets {
-        if target.contains('*') || ModelPattern::parse(&target).is_none() {
+        if !policy::is_model_name(&target) {
             return Err(ConfigError::Invalid(
-                "upgrade_check.targets: a target is a model name of 1-256 bytes without *",
+                "upgrade_check.targets: a target is a model name of 1-256 bytes without * or escapes",
             ));
         }
         if targets.iter().any(|t| **t == *target) {

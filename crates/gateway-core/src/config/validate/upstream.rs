@@ -347,29 +347,16 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
 }
 
 fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError> {
-    let invalid = |reason| ConfigError::InvalidBaseUrl {
+    const FIELD: &str = "upstream.base_url";
+    let invalid = |reason| ConfigError::InvalidUrl {
+        field: FIELD,
         url: url.to_owned(),
         reason,
     };
-    let uri: Uri = url.parse().map_err(|_| invalid("not a valid URL"))?;
-    let parts = uri.into_parts();
-    let scheme = parts.scheme.ok_or_else(|| invalid("missing scheme"))?;
-    let authority = parts.authority.ok_or_else(|| invalid("missing host"))?;
-    if authority.as_str().contains('@') {
-        return Err(invalid("credentials in the URL are not allowed"));
+    let (scheme, authority, path_prefix) = parse_url(FIELD, url)?;
+    if scheme == Scheme::HTTP && !is_loopback_host(authority.host()) {
+        return Err(invalid("plain http is allowed only for loopback hosts"));
     }
-    if scheme == Scheme::HTTP {
-        if !is_loopback_host(authority.host()) {
-            return Err(invalid("plain http is allowed only for loopback hosts"));
-        }
-    } else if scheme != Scheme::HTTPS {
-        return Err(invalid("scheme must be https"));
-    }
-    let path_prefix = match parts.path_and_query {
-        Some(pq) if pq.query().is_some() => return Err(invalid("query strings are not allowed")),
-        Some(pq) => pq.path().trim_end_matches('/').to_owned(),
-        None => String::new(),
-    };
     if path_prefix.ends_with("/v1") {
         return Err(invalid(
             "drop the trailing /v1: Wye forwards the client's /v1/... path after it",

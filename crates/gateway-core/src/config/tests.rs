@@ -340,6 +340,8 @@ fn telemetry_endpoint_gets_the_logs_path() {
         "otlp_endpoint = \"ftp://c\"",
         "otlp_endpoint = \"http://c/?x=1\"",
         "otlp_endpoint = \"/relative\"",
+        // Secrets come from otlp_headers_env, never from config.
+        "otlp_endpoint = \"https://user:secret@collector\"",
     ] {
         assert!(
             matches!(with(bad), Err(ConfigError::InvalidUrl { .. })),
@@ -411,6 +413,8 @@ fn discovery_lists_unique_model_names() {
         "",
         r#"{ id = "" }"#,
         r#"{ id = "claude-*" }"#,
+        // Listed, but a request naming it would be refused.
+        r#"{ id = "claude\"x" }"#,
         r#"{ id = "a" }, { id = "a" }"#,
         r#"{ id = "a", extra = 1 }"#,
     ] {
@@ -553,6 +557,7 @@ fn upgrade_check_targets_are_unique_model_names() {
     for bad in [
         "targets = []",
         "targets = [\"claude-*\"]",
+        "targets = [\"claude\\\\x\"]",
         "targets = [\"a\", \"a\"]",
         "targets = [\"a\"]\nsample_percent = 0",
     ] {
