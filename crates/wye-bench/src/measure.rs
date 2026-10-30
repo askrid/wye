@@ -25,7 +25,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios::{self, Stream},
-    stats::{PERCENTILES, percentile, phase, put, sorted},
+    stats::{PERCENTILES, add, percentile, phase, put, sorted},
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -81,7 +81,7 @@ pub(crate) struct Direct {
 impl Direct {
     pub(crate) async fn measure(target: &Target, paced: bool) -> Self {
         let latency = Latency::measure(target).await;
-        let (mb_s, _) = throughput(target).await;
+        let (mb_s, _, _) = throughput(target).await;
         let upload = upload(target, upload_body(), UPLOAD_REQUESTS).await;
         let agent_upload = if paced {
             None
@@ -220,7 +220,7 @@ pub(crate) async fn measure(
         let cpu_after = process.cpu_secs();
         sse_failed += streams.iter().filter(|s| s.failed).count();
         let events: usize = streams.iter().map(|s| s.event_delays_us.len()).sum();
-        // `ps` reports CPU time in 10 ms steps; 128,000 events make that < 0.1 µs per event.
+        // CPU time comes in 10 ms steps; 128,000 events make that < 0.1 µs per event.
         put(
             metrics,
             prefix,
@@ -244,11 +244,13 @@ pub(crate) async fn measure(
     }
 
     let cpu_before = process.cpu_secs();
-    let (mb_s, mb) = phase(format!("{prefix}throughput"), throughput(process.target())).await;
+    let (mb_s, mb, failed) =
+        phase(format!("{prefix}throughput"), throughput(process.target())).await;
     let cpu_after = process.cpu_secs();
+    add(metrics, prefix, "sse_failed_streams", failed as f64);
     put(metrics, prefix, "via_throughput_mb_s", mb_s);
-    // `ps` reports CPU time in 10 ms steps; the scenario streams enough data
-    // to make that negligible.
+    // CPU time comes in 10 ms steps; the scenario streams enough data to
+    // make that negligible.
     put(
         metrics,
         prefix,
@@ -362,8 +364,8 @@ fn successes(samples: Vec<Option<u64>>) -> (Vec<u64>, usize) {
     (ok, failed)
 }
 
-/// Returns (MB/s, MB streamed) for large back-to-back events.
-async fn throughput(target: &Target) -> (f64, f64) {
+/// Returns (MB/s, MB streamed, failed streams) for large back-to-back events.
+async fn throughput(target: &Target) -> (f64, f64, usize) {
     let start = std::time::Instant::now();
     let streams: Vec<Stream> = scenarios::sse(
         target,
@@ -375,5 +377,6 @@ async fn throughput(target: &Target) -> (f64, f64) {
     )
     .await;
     let mb = streams.iter().map(|s| s.bytes).sum::<u64>() as f64 / 1e6;
-    (mb / start.elapsed().as_secs_f64(), mb)
+    let failed = streams.iter().filter(|s| s.failed).count();
+    (mb / start.elapsed().as_secs_f64(), mb, failed)
 }

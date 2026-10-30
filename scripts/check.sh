@@ -34,10 +34,14 @@ step() {
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 
 step fmt cargo fmt --all --check
-step clippy cargo clippy --all-targets --quiet -- -D warnings
-step test cargo test --quiet
-step "build release" cargo build --release --quiet -p wye -p wye-bench
+# --locked: a stale Cargo.lock fails here, as in CI, instead of being
+# rewritten and left out of the commit.
+step clippy cargo clippy --locked --all-targets --quiet -- -D warnings
+# The only unsafe code (alloc_stats.rs) builds only with this feature.
+step "clippy alloc-stats" cargo clippy --locked --quiet -p wye --features alloc-stats -- -D warnings
+step test cargo test --locked --quiet
+step "build release" cargo build --locked --release --quiet -p wye -p wye-bench
 # Allocation-counting build, in its own target dir so it never replaces the measured binary.
-step "build alloc-stats" cargo build --release --quiet -p wye --features alloc-stats --target-dir target/alloc
+step "build alloc-stats" cargo build --locked --release --quiet -p wye --features alloc-stats --target-dir target/alloc
 
 step bench scripts/bench-gate.sh "$against" target/bench --allow-new ${accept:+--accept "$accept"}

@@ -8,6 +8,11 @@ pub(crate) fn put(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str,
     metrics.insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
 }
 
+/// Adds `value` to a metric already put: failures a later phase found.
+pub(crate) fn add(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str, value: f64) {
+    *metrics.entry(format!("{prefix}{name}")).or_insert(0.0) += value;
+}
+
 /// Whether `name` counts failures: merged by the worst round and gated at
 /// an absolute count, never by the median or the reference's count.
 pub(crate) fn counts_failures(name: &str) -> bool {
@@ -16,12 +21,14 @@ pub(crate) fn counts_failures(name: &str) -> bool {
 
 /// Each metric's median over `runs`, except failure counts, which take the
 /// worst round: a failure in one round of three is still a failure. `NaN`
-/// (no samples) sorts last, like the slowest round.
+/// (no samples) sorts last, like the slowest round. A metric missing from a
+/// round (a phase that never ran) is merged over the rounds that have it.
 pub(crate) fn merge(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
-    runs[0]
-        .keys()
+    let names: std::collections::BTreeSet<&String> = runs.iter().flat_map(|r| r.keys()).collect();
+    names
+        .into_iter()
         .map(|name| {
-            let mut values: Vec<f64> = runs.iter().map(|r| r[name]).collect();
+            let mut values: Vec<f64> = runs.iter().filter_map(|r| r.get(name).copied()).collect();
             values.sort_by(f64::total_cmp);
             let at = if counts_failures(name) {
                 values.len() - 1

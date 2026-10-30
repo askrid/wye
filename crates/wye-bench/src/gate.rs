@@ -6,6 +6,9 @@ use serde_json::Value;
 
 use crate::stats;
 
+/// The most a `*_release_max_us` metric may read, whatever the reference.
+const RELEASE_CEILING_US: f64 = 1_000_000.0;
+
 /// Gated metrics as (name, relative tolerance, absolute tolerance). Lower is
 /// better for all of them. Tolerances come from the spread of repeated runs of
 /// unchanged code on the development laptop; the SSE time-to-first-byte and
@@ -16,10 +19,9 @@ use crate::stats;
 /// between identical runs; in the paced scenario it is dominated by connection
 /// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
 /// the TLS + HTTP/2 path. Upload allocation counts for the agent-shaped body
-/// are reported but not gated: they swing about 20% with read timing.
-/// The most a `*_release_max_us` metric may read, whatever the reference.
-const RELEASE_CEILING_US: f64 = 1_000_000.0;
-
+/// are reported but not gated, since they swing about 20% with read timing,
+/// except on the `failover_` variant: there every kept chunk is an
+/// allocation, which makes the count steady (99.3 and 99.6 in two runs).
 const GATES: &[(&str, f64, f64)] = &[
     // Plain HTTP/1.1 upstream.
     ("unary_added_p50_us", 0.20, 40.0),

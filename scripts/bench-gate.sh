@@ -3,7 +3,8 @@
 # compares the medians. On a regression it reruns the benchmark once and
 # fails only when the same metric is past its limit again: load pushes some
 # metric past its limit now and then, a different one each time, while a real
-# regression repeats.
+# regression repeats. A failed request or stream is never noise: it fails the
+# gate at once, without a rerun to excuse it.
 #
 #   scripts/bench-gate.sh <ref> <out-dir> [wye-bench compare flags...]
 #
@@ -36,6 +37,10 @@ scripts/bench-against.sh "$ref" "$out"
 echo "==> compare with $ref"
 if compare "$out/failed-1.txt" "$@"; then
   exit 0
+fi
+if failures=$(grep -E '_failed_(requests|streams)$' "$out/failed-1.txt"); then
+  echo "requests or streams failed: $(tr '\n' ' ' <<<"$failures")" >&2
+  exit 1
 fi
 echo "==> regression reported; re-running the benchmark to rule out noise"
 scripts/bench-against.sh "$ref" "$out"

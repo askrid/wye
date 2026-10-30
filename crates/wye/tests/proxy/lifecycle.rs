@@ -298,15 +298,16 @@ fn review_commands_exit_3_on_what_they_report() {
         std::fs::write(&path, text).unwrap();
         path
     };
+    // Nothing listens on port 1: `doctor` stays on this machine.
     let loopback = write(
         "loopback.toml",
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+         [upstream]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n",
     );
     let keyed = write(
         "keyed.toml",
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"WYE_TEST_UNSET\"\n",
+         [upstream]\nbase_url = \"http://127.0.0.1:1\"\napi_key_env = \"WYE_TEST_UNSET\"\n",
     );
     let request = write("request.json", r#"{"messages":[]}"#);
     let status = |args: &[&std::ffi::OsStr]| {

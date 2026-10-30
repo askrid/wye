@@ -85,14 +85,25 @@ async fn delta(target: &Target, work: impl Future<Output = ()>) -> (f64, f64) {
 
 /// `UNARY_REQUESTS` requests; failures abort, so a broken setup cannot pass as cheap.
 async fn unary(t: &Target) {
-    let failed = scenarios::unary(t, CONCURRENCY, UNARY_REQUESTS)
-        .await
-        .iter()
-        .filter(|r| r.is_none())
-        .count();
+    no_failures(&scenarios::unary(t, CONCURRENCY, UNARY_REQUESTS).await);
+}
+
+/// A failed request allocates less than one that succeeds, so it would pass
+/// as cheaper: allocation counts are measured over successes only.
+fn no_failures(requests: &[Option<u64>]) {
+    let failed = requests.iter().filter(|r| r.is_none()).count();
     assert_eq!(
         failed, 0,
         "{failed} requests failed during allocation measurement"
+    );
+}
+
+/// [`no_failures`], for streams.
+fn no_failed_streams(streams: &[scenarios::Stream]) {
+    let failed = streams.iter().filter(|s| s.failed).count();
+    assert_eq!(
+        failed, 0,
+        "{failed} streams failed during allocation measurement"
     );
 }
 
@@ -123,13 +134,15 @@ async fn stalled_live_bytes(t: &Target, count: usize) -> f64 {
 }
 
 async fn agent_uploads(t: &Target) {
-    scenarios::upload(
-        t,
-        UPLOAD_CONCURRENCY,
-        UPLOAD_REQUESTS,
-        mock::agent_json(UPLOAD_BYTES),
-    )
-    .await;
+    no_failures(
+        &scenarios::upload(
+            t,
+            UPLOAD_CONCURRENCY,
+            UPLOAD_REQUESTS,
+            mock::agent_json(UPLOAD_BYTES),
+        )
+        .await,
+    );
 }
 
 /// Runs the allocation scenarios against `binary`: the full set in front of the
@@ -165,7 +178,7 @@ pub async fn measure(
     );
 
     let streams = |events| async move {
-        scenarios::sse(t, CONCURRENCY, SSE_STREAMS, events, 64, 0).await;
+        no_failed_streams(&scenarios::sse(t, CONCURRENCY, SSE_STREAMS, events, 64, 0).await);
     };
     let (short, _) = delta(t, streams(SSE_SHORT_EVENTS)).await;
     let (long, _) = delta(t, streams(SSE_LONG_EVENTS)).await;
@@ -179,7 +192,7 @@ pub async fn measure(
 
     let body = mock::message_json(UPLOAD_BYTES);
     let (allocations, bytes) = delta(t, async {
-        scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await;
+        no_failures(&scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await);
     })
     .await;
     put(

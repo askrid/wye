@@ -119,6 +119,10 @@ where
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
+                // Out of file descriptors, most likely: retrying at once would
+                // spin a core, which in the benchmark mock reads as gateway
+                // latency.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
             };
             let _ = stream.set_nodelay(true);
