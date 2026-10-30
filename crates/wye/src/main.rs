@@ -23,7 +23,7 @@ use wye::{
 };
 
 /// How long `serve` waits, after the server stopped, for blocking work such
-/// as a stderr write to finish before the process exits anyway.
+/// as a usage-log write to finish before the process exits anyway.
 const STOP_WAIT: Duration = Duration::from_secs(1);
 
 fn main() -> ExitCode {
@@ -387,11 +387,11 @@ fn serve(config: Config, path: &Path) -> Result<(), Box<dyn Error>> {
             listener.local_addr()?,
             path.display()
         );
-        let flushed = wye::serve(listener, gateway, shutdown_signal(), tokio::io::stderr()).await;
+        let flushed = wye::serve(listener, gateway, shutdown_signal(), tokio::io::stdout()).await;
         Ok::<_, Box<dyn Error>>(flushed)
     })?;
-    // A write to a stderr nobody reads blocks its thread, and the stderr lock,
-    // for good: dropping the runtime would wait on it, and so would a last line.
+    // A write to a stdout nobody reads blocks its thread for good: dropping the
+    // runtime would wait on it.
     runtime.shutdown_timeout(STOP_WAIT);
     if flushed {
         eprintln!("wye: stopped");

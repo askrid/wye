@@ -76,7 +76,7 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 
 **`wye policy-diff <old> <new>`** compares two configs offline and prints what the change widens, narrows, or only changes, then exits 3 when anything widens, so CI can ask for a second review. Identity providers' key sets are read relative to each config, so compare against a checkout of the base, not a copy of its `wye.toml` alone: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`. Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_credential_ttl_secs`, a newly trusted signer (a signing key, Wye's own credentials, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending the operator's key where callers brought their own. Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows. Upstreams added, removed, or moved within a route, and a changed key source, are listed as changes for review: where requests go is not who may send them. Aliases are not compared: permissions apply to the model an alias resolves to. Credentials are not read: a credential can only narrow what config allows.
 
-**`wye report [<log>]`** summarizes a usage log, the JSON lines `wye serve` writes to stderr, with no telemetry backend. It reads `~/.wye/usage.jsonl` unless given a file; `-` reads standard input.
+**`wye report [<log>]`** summarizes a usage log, the JSON lines `wye serve` writes to stdout, with no telemetry backend. It reads `~/.wye/usage.jsonl` unless given a file; `-` reads standard input.
 
 - Requests and outcomes, and the requests answered with an error status (a 429 refusal is an answer, so its outcome reads `completed`).
 - By request class: tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and, with `[pricing]`, cost (summed exactly from `cost_usd`, marked `+` when it includes partial or unknown costs, or records written without `[pricing]`).
@@ -86,7 +86,7 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 - Upgrade issues by target, rule, and client.
 - The ten sessions and prompts with the most tokens.
 
-Every line fits 80 columns: token counts are compact (`635M`), times read as `4h01m`, long names are cut, and a session's subject and compactions sit on the line under it. The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve 2>>~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
+Every line fits 80 columns: token counts are compact (`635M`), times read as `4h01m`, long names are cut, and a session's subject and compactions sit on the line under it. Other lines are skipped and counted. `wye serve >> ~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway, and asks its `/healthz` (the gateway's `/` serves nothing), so `wye probe http://127.0.0.1:8080` is the check `wye claude` and `wye service` make; a path is asked as given, such as `/readyz` for a load balancer's view in images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`).
 
@@ -101,7 +101,7 @@ To set up locally on macOS or Linux from source, install the binary with `cargo 
 ```bash
 wye init --subscription          # writes ~/.wye/wye.toml; plain `wye init` for an API key
 wye service install              # in the background, now and at every login
-                                 # (or in a terminal: wye serve 2>>~/.wye/usage.jsonl)
+                                 # (or in a terminal: wye serve >> ~/.wye/usage.jsonl)
 
 unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # subscription: keep Claude Code's own login
 wye claude                       # wye claude --resume <id>, etc.
@@ -109,7 +109,7 @@ wye claude                       # wye claude --resume <id>, etc.
 wye report                       # afterwards, or at any time
 ```
 
-The usage log goes to the gateway's stderr, so redirecting it keeps it; `wye report` skips the startup lines. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
+The usage log is the gateway's stdout, and its messages go to stderr, so redirecting stdout keeps the log and leaves errors on the screen. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
 **`wye codex`** takes the same options and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway token (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a token without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
@@ -212,6 +212,7 @@ outside your home directory changes.
   Write    ~/Library/LaunchAgents/dev.wye.gateway.plist
   Run      ~/.cargo/bin/wye serve --config ~/.wye/wye.toml
   Log      ~/.wye/usage.jsonl (appended)
+  Errors   ~/.wye/wye.log (appended)
   Then     launchctl bootstrap gui/501 ~/Library/LaunchAgents/dev.wye.gateway.plist
 
 Undo with `wye service uninstall`.
@@ -247,7 +248,8 @@ The files it writes, for reference or for a definition of your own. macOS, `~/Li
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardErrorPath</key><string>/Users/you/.wye/usage.jsonl</string>
+  <key>StandardOutPath</key><string>/Users/you/.wye/usage.jsonl</string>
+  <key>StandardErrorPath</key><string>/Users/you/.wye/wye.log</string>
   <key>ExitTimeOut</key><integer>35</integer>
 </dict>
 </plist>
@@ -262,7 +264,8 @@ Description=Wye gateway
 [Service]
 ExecStart=/home/you/.cargo/bin/wye serve --config /home/you/.wye/wye.toml
 Restart=on-failure
-StandardError=append:/home/you/.wye/usage.jsonl
+StandardOutput=append:/home/you/.wye/usage.jsonl
+StandardError=append:/home/you/.wye/wye.log
 TimeoutStopSec=35
 
 [Install]
@@ -315,9 +318,9 @@ Each Claude Code session stays on one account, chosen from its session id (SDK c
 
 ## Telemetry
 
-One usage record per proxied request, written as a JSON line to stderr and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Telemetry is not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
+One usage record per proxied request, written as a JSON line to stdout and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Telemetry is not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
-The usage record (`wye serve 2>>usage.jsonl` keeps the log; `wye report` reads it):
+The usage record:
 
 | Field | Values | Notes |
 |---|---|---|
@@ -364,7 +367,7 @@ OTLP metrics are cumulative since process start, exported every 10 s and at shut
 
 OTLP traces have one server span per request (`POST` and the route, such as `POST /v1/messages`) with the record's attributes, a `response headers` event, and `ERROR` status for failures and 5xx. Parent: a valid `traceparent` header; else, with a client session id (Claude Code's or Codex's), the session's trace (trace id = first 16 bytes of SHA-256 of the prefixed session id, the same on every replica, so a whole session is one timeline); else a new trace. Each reported tool call becomes a sibling span `tool <name>` (`gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
 
-Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to stderr at shutdown (`usage_log_dropped`, `otlp_dropped`). `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
+Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped`, `otlp_dropped`). `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
 
 ## Health and shutdown
 

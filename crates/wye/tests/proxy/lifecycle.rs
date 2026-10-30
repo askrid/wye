@@ -253,6 +253,74 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The binary's two streams: records are data, for a pipe or a file; messages
+/// are for whoever runs it, and stay out of the data.
+#[tokio::test]
+async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
+    use std::io::{BufRead, BufReader};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(ok(), hits, None, None).await;
+    let dir = std::env::temp_dir().join(format!("wye-streams-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = dir.join("wye.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "[server]\nlisten = \"127.0.0.1:0\"\n\
+             [upstream]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+        ),
+    )
+    .unwrap();
+    /// Stops the gateway however the test ends.
+    struct Running(std::process::Child);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut running = Running(
+        std::process::Command::new(env!("CARGO_BIN_EXE_wye"))
+            .args(["serve", "-c", config.to_str().unwrap()])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stderr = BufReader::new(running.0.stderr.take().unwrap());
+    let mut stdout = BufReader::new(running.0.stdout.take().unwrap());
+    let streams = tokio::task::spawn_blocking(move || {
+        let mut message = String::new();
+        stderr.read_line(&mut message).unwrap();
+        let addr: std::net::SocketAddr = message
+            .strip_prefix("wye: listening on http://")
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or_else(|| panic!("{message}"))
+            .parse()
+            .unwrap();
+        let mut request = std::net::TcpStream::connect(addr).unwrap();
+        std::io::Write::write_all(
+            &mut request,
+            b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\nx-api-key: k\r\n\
+              content-length: 2\r\nconnection: close\r\n\r\n{}",
+        )
+        .unwrap();
+        let mut record = String::new();
+        stdout.read_line(&mut record).unwrap();
+        record
+    });
+    let record = tokio::time::timeout(Duration::from_secs(30), streams)
+        .await
+        .expect("no record on stdout")
+        .unwrap();
+    let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(record["event"], "request");
+    assert_eq!(record["path"], "/v1/messages");
+    drop(running);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// The sample policy tests in examples/ pass against their config.
 #[test]
 fn example_policy_tests_pass() {

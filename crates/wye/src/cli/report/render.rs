@@ -24,8 +24,8 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     if s.total.requests == 0 {
         out.push_str(&wrap(
             &format!(
-                "No request records ({}). The gateway writes one per request to stderr; \
-                 `wye service install` keeps them in ~/.wye/usage.jsonl.",
+                "No request records ({}). The gateway writes one per request to stdout; \
+                 `wye service install` keeps them.",
                 skipped(s),
             ),
             0,

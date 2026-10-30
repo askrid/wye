@@ -155,7 +155,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Usage records as OTLP logs, metrics, and per-session traces (OTLP/HTTP,
 # JSON) to a collector or a backend that accepts OTLP directly, at
 # {otlp_endpoint}/v1/logs, /v1/metrics, and /v1/traces. Records also stay in
-# the stderr log.
+# the stdout log.
 # [telemetry]
 # otlp_endpoint = "http://localhost:4318"  # no credentials in the URL
 # otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2": the API key goes here

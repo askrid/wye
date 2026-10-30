@@ -159,6 +159,7 @@ pub fn install(
         program,
         config: config_path,
         log: context.wye_home.join("usage.jsonl"),
+        errors: context.wye_home.join("wye.log"),
         stop_secs: (config.server.drain_delay + config.server.shutdown_grace).as_secs() + 5,
     };
     let definition = service.definition(context.manager)?;
@@ -201,7 +202,7 @@ pub fn install(
     write_atomically(&file, &definition)?;
     println!("Wrote {}", show(&file));
     run_all(&commands, show)?;
-    wait_for(&url, &service.log, show)
+    wait_for(&url, &service.errors, show)
 }
 
 /// Asks before installing; `[s]how` prints the file and asks again.
@@ -273,8 +274,9 @@ pub fn status(context: &Context) -> Result<bool, String> {
         }
         Some((false, url)) => {
             println!(
-                "{:<9} not answering at {url}; the end of the log may say why",
-                "State"
+                "{:<9} not answering at {url}; the end of {} may say why",
+                "State",
+                show(&service.errors)
             );
             Ok(false)
         }
@@ -296,7 +298,7 @@ pub fn restart(context: &Context) -> Result<(), String> {
     let config = check(&service.config, show)
         .map_err(|e| format!("{e}\nThe service keeps running as it was."))?;
     run_all(&restart_commands(context.manager, &uid()?), show)?;
-    wait_for(&local_url(config.server.listen), &service.log, show)
+    wait_for(&local_url(config.server.listen), &service.errors, show)
 }
 
 /// `wye service uninstall`: stops the service and removes its definition.
@@ -361,7 +363,7 @@ fn run_all(commands: &Commands, show: &dyn Fn(&Path) -> String) -> Result<(), St
 }
 
 /// Waits for the gateway to answer, and says so.
-fn wait_for(url: &str, log: &Path, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
+fn wait_for(url: &str, errors: &Path, show: &dyn Fn(&Path) -> String) -> Result<(), String> {
     let deadline = std::time::Instant::now() + START_WAIT;
     while std::time::Instant::now() < deadline {
         if probe(url).is_ok() {
@@ -372,7 +374,7 @@ fn wait_for(url: &str, log: &Path, show: &dyn Fn(&Path) -> String) -> Result<(),
     }
     Err(format!(
         "nothing answers at {url} yet; the end of {} may say why",
-        show(log)
+        show(errors)
     ))
 }
 

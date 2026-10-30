@@ -161,7 +161,7 @@ default and limits, kept valid by a test.
 
 ## What it looks like
 
-Each request produces one JSON line on stderr (and, with `[telemetry]`, an
+Each request produces one JSON line on stdout (and, with `[telemetry]`, an
 OTLP log record, a span, and metrics). This record is from a local test run:
 
 ```json

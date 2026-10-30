@@ -21,7 +21,8 @@ pub const COMMANDS: &[Command] = &[
         arity: (0, 0),
         options: &[CONFIG],
         passthrough: false,
-        notes: "Usage records go to stderr, one JSON line per request.",
+        notes: "One JSON usage record per request on stdout; messages on stderr. Keep them \
+                with `wye serve >> ~/.wye/usage.jsonl`.",
     },
     Command {
         name: "service install",

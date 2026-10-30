@@ -1,5 +1,5 @@
 //! `wye report`: a summary of a usage log (the JSON lines `wye serve` writes
-//! to stderr), offline and with no telemetry backend.
+//! to stdout), offline and with no telemetry backend.
 //!
 //! It answers what the gateway cannot per request: totals per Claude Code
 //! session and prompt, spend by request class, and which cache misses are

@@ -541,7 +541,7 @@ async fn tool_calls_past_eight_names_go_under_other() {
     assert_eq!(calls["(other)"], 2, "{calls}");
 }
 
-/// The process reading stderr exits: records still reach OTLP, and the
+/// The process reading stdout exits: records still reach OTLP, and the
 /// lines the log could not take are counted as lost.
 #[tokio::test]
 async fn a_closed_log_leaves_otlp_export_running() {
