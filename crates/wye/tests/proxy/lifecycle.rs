@@ -128,7 +128,10 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
     // The open stream was cut, not left hanging, and so were the upstream
     // requests behind it: the provider stops generating.
     let ended = tokio::time::timeout(WAIT, stream.into_body().collect()).await;
-    assert!(ended.is_ok(), "stream still open after shutdown");
+    assert!(
+        matches!(ended, Ok(Err(_))),
+        "the stream must end cut, not complete or hanging"
+    );
     let senders: Vec<_> = open.lock().unwrap().drain(..).collect();
     assert_eq!(senders.len(), 2);
     for sender in senders {

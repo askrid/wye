@@ -49,9 +49,9 @@ for _ in $(seq 1 30); do
 done
 [ "$status" = healthy ] || { docker logs "$name"; echo "not healthy: $status"; exit 1; }
 
-code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/readyz")
+code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/readyz")
 [ "$code" = 200 ] || { echo "/readyz: $code"; exit 1; }
-code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/v1/messages" -d '{}')
+code=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:$port/v1/messages" -d '{}')
 [ "$code" = 401 ] || { echo "unauthenticated request: $code"; exit 1; }
 docker stop -t 10 "$name" >/dev/null
 echo "image smoke test passed"

@@ -34,7 +34,8 @@ const MAX_CONNECTION_BUFFER: usize = 32 * 1024;
 ///
 /// Left to autotuning, the kernel grows the send buffer of a connection whose
 /// client has stopped reading to as much as 4 MiB, kernel memory that Wye's own
-/// bounds do not see. Fixed, 256 stalled clients hold 32 MB of send buffers.
+/// bounds do not see. Fixed, 256 stalled clients hold 32 MB of send buffers
+/// (64 MB on Linux, which doubles the value it is given, for bookkeeping).
 /// It limits one response to 128 KiB per round trip: far above token pace, and
 /// clients usually sit behind a load balancer less than a millisecond away.
 const CLIENT_SEND_BUFFER: usize = 128 * 1024;

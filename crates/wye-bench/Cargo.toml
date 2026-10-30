@@ -20,7 +20,7 @@ hyper-util = { workspace = true, features = ["client-legacy", "http1", "http2", 
 ring = { workspace = true, features = ["alloc"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde_json = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["net", "process", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true

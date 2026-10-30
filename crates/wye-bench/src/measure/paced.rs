@@ -103,7 +103,7 @@ pub(super) async fn measure_paced(
         metrics,
         prefix,
         "paced_cpu_us_per_event",
-        (cpu_after - cpu_before) * 1e6 / paced.event_delay.len() as f64,
+        (cpu_after - cpu_before) * 1e6 / paced.event_delay.len().max(1) as f64,
     );
     put(
         metrics,

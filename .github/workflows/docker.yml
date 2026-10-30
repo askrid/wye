@@ -11,6 +11,8 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - Cargo.toml
+      - crates/**
       - rust-toolchain.toml
       - Cargo.lock
       - scripts/image-smoke.sh

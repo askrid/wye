@@ -35,7 +35,7 @@ webpki-roots.workspace = true
 [dev-dependencies]
 wye-testkit.workspace = true
 proptest.workspace = true
-tokio = { workspace = true, features = ["io-util", "sync", "test-util"] }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
