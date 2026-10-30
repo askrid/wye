@@ -295,7 +295,8 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         }
         "probe" => {
             let url = parsed.positional.first().copied().unwrap_or_default();
-            current_thread()?.block_on(wye::probe(url))?;
+            let checked = current_thread()?.block_on(wye::probe(url))?;
+            println!("{checked}: {}", Paint::stdout().green("ok"));
             Ok(0)
         }
         other => Err(format!("`{other}` is listed but not handled").into()),

@@ -122,18 +122,15 @@ fn secrets_from_the_environment_are_named() {
 }
 
 #[test]
-fn the_health_check_goes_to_this_machine() {
+fn the_gateway_is_asked_on_this_machine() {
     assert_eq!(
-        health_url("0.0.0.0:8080".parse().unwrap()),
-        "http://127.0.0.1:8080/healthz"
+        local_url("0.0.0.0:8080".parse().unwrap()),
+        "http://127.0.0.1:8080"
     );
+    assert_eq!(local_url("[::]:9000".parse().unwrap()), "http://[::1]:9000");
     assert_eq!(
-        health_url("[::]:9000".parse().unwrap()),
-        "http://[::1]:9000/healthz"
-    );
-    assert_eq!(
-        health_url("127.0.0.1:8080".parse().unwrap()),
-        "http://127.0.0.1:8080/healthz"
+        local_url("127.0.0.1:8080".parse().unwrap()),
+        "http://127.0.0.1:8080"
     );
 }
 

@@ -33,7 +33,7 @@ pub use explain::{Credential, Explanation, explain};
 pub use init::{InitOptions, Mode as InitMode, init};
 pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;
-pub use probe::probe;
+pub use probe::{health_url, probe};
 pub use report::report;
 pub use wrapper::{Agent, Launch, run as run_agent};
 

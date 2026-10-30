@@ -185,7 +185,7 @@ impl Gateway {
         match (method, path) {
             // Claude Code's best-effort connection warm-up probe; carries no data.
             (&Method::HEAD, "/api/hello") => empty(StatusCode::OK),
-            (&Method::GET, "/healthz") => empty(StatusCode::OK),
+            (&Method::GET, crate::HEALTH_PATH) => empty(StatusCode::OK),
             (&Method::GET, "/readyz") if self.draining.load(Ordering::Relaxed) => {
                 empty(StatusCode::SERVICE_UNAVAILABLE)
             }

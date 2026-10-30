@@ -182,7 +182,7 @@ fn toml_string(value: &str) -> String {
 /// Unix the process becomes the agent and this returns only if it cannot
 /// start; elsewhere it returns the agent's exit code.
 pub fn run(agent: Agent, launch: &Launch) -> Result<i32, String> {
-    let health = format!("{}/healthz", launch.gateway);
+    let health = super::health_url(&launch.gateway);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
