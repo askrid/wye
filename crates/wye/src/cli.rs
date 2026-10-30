@@ -13,11 +13,13 @@
 //! - `init`: a minimal working config
 //! - `token`: offline key generation and token issuance
 //! - `args`: every command's options, parsed and rendered as help
+//! - `files`: where a user's files live, and finding and reading a config
 //! - `paint`: color on a terminal, where it carries meaning
 
 pub mod args;
 mod doctor;
 mod explain;
+pub mod files;
 mod init;
 pub mod paint;
 mod policy_diff;
@@ -29,13 +31,29 @@ pub mod token;
 mod wrapper;
 
 pub use doctor::doctor;
-pub use explain::{Credential, Explanation, explain};
-pub use init::{InitOptions, Mode as InitMode, init};
+pub use explain::{Credential, Explanation, explain, run as run_explain};
+pub use init::run as run_init;
 pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;
-pub use probe::{health_url, probe};
-pub use report::report;
-pub use wrapper::{Agent, Launch, gateway_url, run as run_agent};
+pub(crate) use probe::health_url;
+pub use probe::{blocking as probe_blocking, probe};
+pub use report::{report, run as run_report};
+pub use wrapper::{Agent, gateway_url, run as run_agent};
+
+/// A runtime for a command that makes a request or two.
+pub fn current_thread() -> std::io::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+}
+
+/// The time offline checks verify credentials at.
+pub fn unix_secs() -> Result<u64, String> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .map_err(|e| e.to_string())
+}
 
 /// Writes to standard output. A reader that went away (`wye report | head`)
 /// is the normal end of a command, not a failure.

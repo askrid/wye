@@ -16,7 +16,10 @@ use std::{
 
 use gateway_core::config::{Config, UpstreamCredential};
 
-use super::say;
+use super::{
+    files::{self, ERRORS_FILE, USAGE_LOG_FILE},
+    probe_blocking as probe, say,
+};
 
 mod unit;
 
@@ -61,9 +64,7 @@ fn env_secrets(config: &Config) -> Vec<String> {
 /// Errors name the config, which may not be the one the user expected.
 fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> {
     let named = |e: String| format!("{}: {e}", show(path));
-    let source =
-        std::fs::read_to_string(path).map_err(|e| named(format!("cannot read it: {e}")))?;
-    let config = Config::from_toml_str(&source).map_err(|e| named(e.to_string()))?;
+    let config = files::load(path)?;
     let names = env_secrets(&config);
     if !names.is_empty() {
         let list = names
@@ -79,8 +80,8 @@ fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> 
              of your own (docs/operations.md#running-as-a-service). Another config: -c <path>"
         )));
     }
-    let dir = path.parent().unwrap_or(Path::new("."));
-    crate::startup::Resources::resolve(&config, dir).map_err(|e| named(e.to_string()))?;
+    crate::startup::Resources::resolve(&config, files::config_dir(path))
+        .map_err(|e| named(e.to_string()))?;
     Ok(config)
 }
 
@@ -114,6 +115,19 @@ pub struct Context {
 }
 
 impl Context {
+    /// The context of whoever runs this command.
+    pub fn new(env: impl Fn(&str) -> Option<String> + 'static) -> Result<Self, String> {
+        let user_home = env("HOME")
+            .filter(|home| !home.is_empty())
+            .ok_or("no home directory ($HOME)")?;
+        Ok(Self {
+            manager: Manager::here()?,
+            user_home: user_home.into(),
+            wye_home: files::home(&env).ok_or("no home directory ($HOME)")?,
+            show: Box::new(move |path: &Path| files::tilde(path, &env)),
+        })
+    }
+
     fn file(&self) -> PathBuf {
         self.manager.file(&self.user_home)
     }
@@ -160,8 +174,8 @@ pub fn install(
     let service = Service {
         program,
         config: config_path,
-        log: context.wye_home.join("usage.jsonl"),
-        errors: context.wye_home.join("wye.log"),
+        log: context.wye_home.join(USAGE_LOG_FILE),
+        errors: context.wye_home.join(ERRORS_FILE),
         stop_secs: (config.server.drain_delay + config.server.shutdown_grace).as_secs() + 5,
     };
     let definition = service.definition(context.manager)?;
@@ -381,14 +395,6 @@ fn wait_for(url: &str, errors: &Path, show: &dyn Fn(&Path) -> String) -> Result<
         "nothing answers at {url} yet; the end of {} may say why",
         show(errors)
     ))
-}
-
-fn probe(url: &str) -> Result<String, String> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?
-        .block_on(super::probe(url))
 }
 
 /// A file's size as people read it: `913 KB`, `4.2 MB`.

@@ -13,6 +13,13 @@ use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 /// The whole probe, including the connection, must finish within this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// [`probe`], for a command with no runtime of its own.
+pub fn blocking(url: &str) -> Result<String, String> {
+    super::current_thread()
+        .map_err(|e| e.to_string())?
+        .block_on(probe(url))
+}
+
 /// The health endpoint of the gateway at base URL `gateway`.
 pub fn health_url(gateway: &str) -> String {
     format!("{}{}", gateway.trim_end_matches('/'), crate::HEALTH_PATH)

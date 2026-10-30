@@ -8,11 +8,7 @@ use std::fmt::Write as _;
 use gateway_core::agent::CacheMiss;
 
 use super::{Group, Summary, TOP};
-use crate::cli::{
-    args::{WIDTH, wrap},
-    paint::Paint,
-    plural,
-};
+use crate::cli::{args::wrap, paint::Paint, plural};
 
 /// Width of a table's first column.
 const NAME: usize = 14;
@@ -29,7 +25,6 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
                 skipped(s),
             ),
             0,
-            WIDTH,
         ));
         return out;
     }
@@ -49,7 +44,6 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
             pairs(outcomes)
         ),
         0,
-        WIDTH,
     ));
     // A refusal (429, 529) or a client error is an answer like any other,
     // so its outcome reads completed.
@@ -119,7 +113,6 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
             count(CacheMiss::AfterCompaction.as_str()),
         ),
         2,
-        WIDTH,
     ));
 
     if !s.upgrades.is_empty() {
@@ -138,7 +131,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
                 cut(target, 24),
                 cut(rule, 20)
             );
-            out.push_str(&wrap(&format!("from {}", clients.join(", ")), 4, WIDTH));
+            out.push_str(&wrap(&format!("from {}", clients.join(", ")), 4));
         }
     }
 
@@ -197,7 +190,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
             details.push(plural(session.compactions, "compaction", "compactions"));
         }
         if !details.is_empty() {
-            out.push_str(&wrap(&details.join(", "), 4, WIDTH));
+            out.push_str(&wrap(&details.join(", "), 4));
         }
     }
 

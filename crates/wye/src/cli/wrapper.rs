@@ -10,6 +10,8 @@ use std::{ffi::OsString, process::Command};
 
 use gateway_core::config::is_loopback_host;
 
+use super::args::Parsed;
+
 /// Gateway URL when neither `--url` nor `WYE_URL` is set.
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
 /// The environment variable Codex reads its bearer token from (the Codex
@@ -75,12 +77,7 @@ impl Launch {
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
         let credential = match token_file {
-            Some(path) => Some(
-                std::fs::read_to_string(path)
-                    .map_err(|e| format!("cannot read {path}: {e}"))?
-                    .trim()
-                    .to_owned(),
-            ),
+            Some(path) => Some(super::files::read_token(path)?),
             None => env("WYE_TOKEN"),
         };
         let gateway = gateway_url(url, &env);
@@ -187,20 +184,24 @@ pub fn gateway_url(url: Option<&str>, env: &impl Fn(&str) -> Option<String>) -> 
 /// Runs the agent through the gateway, as the module docs describe. On
 /// Unix the process becomes the agent and this returns only if it cannot
 /// start; elsewhere it returns the agent's exit code.
-pub fn run(agent: Agent, launch: &Launch) -> Result<i32, String> {
-    let health = super::health_url(&launch.gateway);
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| e.to_string())?
-        .block_on(super::probe(&health))
-        .map_err(|e| {
-            format!(
-                "no gateway at {} ({e}); start one with `wye service install` or \
+pub fn run(
+    agent: Agent,
+    parsed: &Parsed<'_>,
+    env: impl Fn(&str) -> Option<String>,
+) -> Result<i32, String> {
+    let launch = Launch::resolve(
+        parsed.value("url"),
+        parsed.value("token-file"),
+        &parsed.positional,
+        env,
+    )?;
+    super::probe_blocking(&super::health_url(&launch.gateway)).map_err(|e| {
+        format!(
+            "no gateway at {} ({e}); start one with `wye service install` or \
                  `wye serve`, or name another with --url",
-                launch.gateway
-            )
-        })?;
+            launch.gateway
+        )
+    })?;
     let program = agent.program();
     let name = program.to_string_lossy().into_owned();
     let mut command = launch.command(agent, program);

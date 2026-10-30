@@ -282,7 +282,6 @@ pub(super) fn plan(
             manager.promise()
         ),
         0,
-        crate::cli::args::WIDTH,
     );
     let verb = if replacing { "Replace" } else { "Write" };
     out.push_str(&format!(
