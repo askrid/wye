@@ -2,7 +2,7 @@
 
 Wye is an efficient, easy-to-use gateway between AI agents or AI-native apps and the model providers, in Rust. Clients keep the provider's official SDK and native API; model choice, provider, credentials, limits, failover, upgrades, telemetry, and cost live in one Git-managed TOML file. One stateless binary, no database, no control plane. It reads the signals coding agents send (session, subagent, request class, compaction, tool time) to attribute and explain their work, and exports it through OpenTelemetry. Scope, strengths, and weaknesses: [product.md](product.md).
 
-Status: built for Claude Code and Anthropic SDK clients (Anthropic, Claude Platform on AWS, Bedrock) and for Codex and OpenAI SDK clients (OpenAI); Claude Code sessions run through it on a subscription since 2026-10-30, not yet with an API key. What is built and what comes next: [product.md](product.md#scope); stages: [roadmap.md](roadmap.md#status).
+Status: built for Claude Code and Anthropic SDK clients (Anthropic, Claude Platform on AWS, Bedrock) and for Codex and OpenAI SDK clients (OpenAI). What is built and what comes next: [product.md](product.md#scope); stages, and what has been checked against the real services: [roadmap.md](roadmap.md#status).
 
 ## Documents
 
@@ -31,7 +31,7 @@ Each document owns one concern. Other documents link to it instead of restating 
 | Failover | Resending a request to the route's next upstream after a refusal that proves it was not processed, before any output |
 | Alias | A model name clients send that config maps to a real model, per credential subject |
 | Gateway credential | What a caller presents to Wye (a JWT from Wye or an identity provider); Wye replaces it with the provider key |
-| Hold | Reading the start of a request body until its `model` is known, for permissions, aliases, and provider model ids |
+| Hold | Reading the start of a request body until its `model` is known, for permissions, output-token ceilings, aliases, and provider model ids |
 | Usage record | One JSON line per proxied request: tokens, cost, session, request class, outcome; also an OTLP log record and span |
 
 ## Conventions

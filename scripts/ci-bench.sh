@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Benchmarks this checkout against another commit on the same machine and
-# gates what does not depend on the machine: heap allocations and failed
-# requests. Latency and CPU are printed for review but never fail the check,
+# gates what does not depend on the machine: heap allocations, failed
+# requests, and failed streams. Latency and CPU are printed for review but never fail the check,
 # because shared CI runners are too noisy to gate them; the local pre-commit
 # gate (scripts/check.sh) does that on a quiet machine.
 #

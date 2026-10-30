@@ -1,7 +1,8 @@
 //! `wye policy-diff`: what a config change does to access, for review and
 //! CI. It compares two configs offline and lists what each change widens,
 //! narrows, or only changes; a change that widens access (a model newly
-//! allowed, a raised ceiling, a new trusted signer or key, authentication
+//! allowed, a raised ceiling, a longer credential lifetime, a new trusted
+//! signer or key, authentication
 //! removed, a listener beyond loopback or on every interface, a new API
 //! route, the operator's key where callers brought their own) makes the
 //! command exit non-zero, so it can require a second review.

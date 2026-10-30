@@ -29,8 +29,8 @@ field.
 Wye takes the opposite approach:
 
 - It does not translate. Anthropic Messages, OpenAI Responses, and Chat
-  Completions are forwarded as they are, so new provider features work through
-  Wye on the day they ship. The only body rewrite is the `model` field (an
+  Completions are forwarded as they are, so new provider features on the
+  endpoints Wye serves work through it on the day they ship. The only body rewrite is the `model` field (an
   alias, or Bedrock's `anthropic.` model ids), spliced in place.
 - It reads coding-agent traffic. Claude Code's session, subagent, request
   class, compaction, and tool timing headers become usage records, one trace
@@ -132,8 +132,9 @@ Each Claude Code session is pinned to one account by hashing its session id,
 so its prompt cache stays warm, and every replica picks the same account. If
 that account answers `429` or `529`, or the connection fails before the request
 body was delivered, Wye sends the same request to the next account in the same
-turn. It never does this after the first response byte, so a request is never
-billed twice.
+turn. It never does this after the first response byte, and it relies on
+`429` and `529` meaning the provider did not process the request (not yet
+confirmed for every provider).
 
 Secrets are read from environment variables or files and never appear in the
 config. Unknown fields are rejected at startup.
@@ -244,8 +245,8 @@ Tooling
   sample requests with expected decisions, so routing and permission changes
   can be tested in CI.
 - `wye policy-diff old.toml new.toml` exits non-zero when a config change
-  widens access: a model newly allowed, a ceiling raised, a new trusted key,
-  auth removed, a listener opened wider, a new API route, or the operator's
+  widens access: a model newly allowed, a ceiling raised, a longer credential
+  lifetime, a new trusted key, auth removed, a listener opened wider, a new API route, or the operator's
   key where callers brought their own.
 - `wye init`, `wye doctor`, `wye probe` (a health check for images without
   curl), and `wye token`.
@@ -254,7 +255,8 @@ Tooling
 
 Wye is meant to never be the slow part. Every commit is benchmarked against
 its parent, in alternating rounds on the same machine (`scripts/check.sh`),
-and a change that makes Wye slower or heavier is not committed. The numbers
+and a change that makes Wye slower or heavier beyond the gate's tolerances is
+not committed. The numbers
 below are lab numbers from one laptop (Intel i9-9880H, macOS) against a local
 mock provider, not production measurements.
 
@@ -327,8 +329,8 @@ scripts/check.sh                      # fmt, clippy, tests, release build, bench
 The check takes about eight minutes, most of it the benchmark. Tests run
 against local mock upstreams and never call a paid API. Pull requests also
 run CI on GitHub: lints and tests on Linux and macOS, `cargo deny`, and the
-benchmark against the base branch, gating allocations and failed requests
-(shared runners are too noisy to gate latency).
+benchmark against the base branch, gating allocations, failed requests, and
+failed streams (shared runners are too noisy to gate latency).
 [docs/development.md](docs/development.md) explains the benchmark gate, and
 how to compare two builds when a change is too small for the gate to see.
 

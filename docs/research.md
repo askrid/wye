@@ -89,7 +89,7 @@ Variants (plain path):
 | `failover_`: a route with failover | +7 allocations per request; +25% CPU per MB on Claude Code-shaped uploads (1.86 vs 1.49 ms/MB) and 99.5 vs 40.5 allocations, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](#performance-techniques)) |
 | `refused_`: one account refuses one request in four | refused requests resent: 149.5 µs CPU per request; no failed requests |
 
-**Stress** (TLS path, median of 3, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.7 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +2.7 ms p99, 0.49 MB RSS per stalled stream with the 256 KiB upstream window (2.0 MB with 1 MiB), no failures; RSS stays at its peak after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +2.9 ms p50 ([pre-warming](#performance-techniques)).
+**Stress** (TLS path, median of 7, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.9 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +2.7 ms p99, 0.49 MB RSS per stalled stream with the 256 KiB upstream window (2.0 MB with 1 MiB), no failures; RSS stays at its peak after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +2.9 ms p50 ([pre-warming](#performance-techniques)).
 
 **Soak** (`wye-bench load --scenario paced --seconds 150`, alloc-stats build): 34 batches of 2,000 paced streams, 6.8M events, zero failures, 34 µs CPU per event. Live heap rose ~600 KB over the first ~20 batches (lanes and buffers warming), then held at 49,363 KB; RSS levelled near 56 MB. No growth per stream served. A multi-hour soak is open: the overnight attempt (2026-10-18) was void because the laptop slept.
 
@@ -261,7 +261,7 @@ The new floors were not enough under everyday load. Gating this change itself, o
 
 ### OpenAI stream scanners (micro-benchmark)
 
-The gate's mock upstream speaks Anthropic only, so the Responses and Chat Completions usage scanners are measured with a release micro-benchmark: 200,000 token-sized events fed one per call, best of 7, on the development laptop (2026-10-26).
+The gate's mock upstream speaks Anthropic Messages and OpenAI Responses, not Chat Completions; the Responses and Chat Completions usage scanners were first measured with a release micro-benchmark: 200,000 token-sized events fed one per call, best of 7, on the development laptop (2026-10-26).
 
 | Scanner | Event | ns per event |
 |---|---|---|
@@ -273,7 +273,7 @@ The gate's mock upstream speaks Anthropic only, so the Responses and Chat Comple
 
 Lexing a 1.2 MiB Responses terminal event, or a non-streaming JSON body of that size, costs 0.56-0.61 ms per MiB, at 16 or 64 KiB chunks. Through the binary, the `openai_` benchmark variant gates the Responses path (CPU per event and per request). First runs (64-byte events, unpaced, plain path, two runs): 18.5-19.5 µs of CPU per event through Messages, 25.2-25.9 µs through Responses. Explained (2026-10-26, `wye-bench load --scenario events`, sampled with `sample`): the mock's Responses events are ~50 bytes larger than its minimal Messages events, and on the plain HTTP/1.1 path, where each event is its own write, CPU per event grows with bytes. With matched sizes (`WYE_BENCH_EVENT_BYTES=114` on Messages) the two runs read 17.1-17.3 µs for Messages against 17.6-17.9 µs for Responses: about 0.5 µs per event is the Responses scanner in a real relay, more than its 34 ns micro-benchmark (caches, split lines); the profiles are otherwise the same, `writev` first.
 
-**Coverage gap: unary JSON responses.** The mock's unary replies carry no `content-type`, so the gate never runs the non-streaming usage scanner that real `application/json` replies get. With the mock sending `application/json` (a full `wye-bench run` per binary, idle machine, 2026-10-26), Wye before JSON usage scanning (f1bf78e) against Wye with it, one allocation per response: `alloc_unary_per_request` 20.6 → 21.6, `alloc_unary_bytes_per_request` 21.8 → 24.4 KB (the boxed scanner with its inline 2 KiB usage buffer), `unary_cpu_us_per_request` 120 → 124.5 (within noise), unary latency unchanged within noise. The mock now sends `application/json` on unary replies, as Anthropic and OpenAI do, and those six allocation values moved in the baseline with it (approved 2026-10-26); no other baseline value changed.
+**Unary JSON responses (gap closed 2026-10-26).** The mock's unary replies carry no `content-type`, so the gate never runs the non-streaming usage scanner that real `application/json` replies get. With the mock sending `application/json` (a full `wye-bench run` per binary, idle machine, 2026-10-26), Wye before JSON usage scanning (f1bf78e) against Wye with it, one allocation per response: `alloc_unary_per_request` 20.6 → 21.6, `alloc_unary_bytes_per_request` 21.8 → 24.4 KB (the boxed scanner with its inline 2 KiB usage buffer), `unary_cpu_us_per_request` 120 → 124.5 (within noise), unary latency unchanged within noise. The mock now sends `application/json` on unary replies, as Anthropic and OpenAI do, and those six allocation values moved in the baseline with it (approved 2026-10-26); no other baseline value changed.
 
 ## Related work
 
