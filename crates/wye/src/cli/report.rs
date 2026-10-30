@@ -15,6 +15,8 @@ use gateway_core::{
 };
 use serde::Deserialize;
 
+use super::paint::Paint;
+
 /// Rows shown in the session and prompt rankings.
 const TOP: usize = 10;
 
@@ -290,7 +292,7 @@ struct Starts {
 
 /// Summarizes a usage log. Lines that are not request records (shutdown
 /// notices, other output) are skipped and counted.
-pub fn report(input: impl BufRead) -> std::io::Result<String> {
+pub fn report(input: impl BufRead, paint: Paint) -> std::io::Result<String> {
     let mut summary = Summary::default();
     for line in input.lines() {
         let line = line?;
@@ -300,7 +302,7 @@ pub fn report(input: impl BufRead) -> std::io::Result<String> {
             _ => summary.skipped += 1,
         }
     }
-    Ok(render(&summary))
+    Ok(render(&summary, paint))
 }
 
 mod render;

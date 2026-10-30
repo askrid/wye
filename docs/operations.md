@@ -39,6 +39,8 @@ wye probe <url>
 
 **Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
 
+**Output** fits 80 columns. On a terminal, color marks only what carries meaning: errors, `ok` and `FAIL`, what a config change widens or narrows, the decision `explain` reaches, and a report's section titles. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
+
 **`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
 
 - By default, for one developer with an Anthropic API key, read at startup from `anthropic.key` next to the config, where a background service finds it too.
@@ -84,7 +86,7 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 - Upgrade issues by target, rule, and client.
 - The ten sessions and prompts with the most tokens.
 
-The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve 2>>~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
+Every line fits 80 columns: token counts are compact (`635M`), times read as `4h01m`, long names are cut, and a session's subject and compactions sit on the line under it. The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve 2>>~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 

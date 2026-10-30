@@ -197,12 +197,13 @@ near money. A model with no price is recorded as `unknown`, never as $0.
 
 ```console
 $ wye report
-3 requests in 1 session (2 other lines skipped); outcomes: completed 3
+3 requests in 1 session (0 other lines skipped); outcomes: completed 3
 
 By request class
-  class                           reqs        input     output    cache read   cache write     hit        cost       time      tools
-  all                                3           36        114        144630          4590   96.9%     $0.0832       0.0s       0.0s
-  main                               3           36        114        144630          4590   96.9%     $0.0832       0.0s       0.0s
+                                      cache  cache
+  class           reqs  input output   read  write    hit      cost  time tools
+  all                3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
+  main               3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
 ...
 ```
 

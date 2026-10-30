@@ -13,11 +13,13 @@
 //! - `init`: a minimal working config
 //! - `token`: offline key generation and token issuance
 //! - `args`: every command's options, parsed and rendered as help
+//! - `paint`: color on a terminal, where it carries meaning
 
 pub mod args;
 mod doctor;
 mod explain;
 mod init;
+pub mod paint;
 mod policy_diff;
 mod policy_test;
 mod probe;
