@@ -82,6 +82,23 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 
 `--wye-refused` runs the `refused_` variant (uploads to an account that refuses one in four) and prints failed requests.
 
+## Scripts and benchmark variables
+
+| Variable | Used by | Meaning |
+|---|---|---|
+| `WYE_GATE_ACCEPT` | `scripts/check.sh` | Metrics an approved tradeoff may regress ([commit gate](#commit-gate)) |
+| `WYE_GATE_AGAINST` | `scripts/check.sh` | The commit to compare with, instead of the parent |
+| `WYE_BENCH_GATEWAY_LOG` | `wye-bench` | Keep each gateway's output next to its config |
+| `WYE_BENCH_GATEWAY_THREADS` | `wye-bench`, `capacity` | Tokio workers (default 1) |
+| `WYE_BENCH_EVENT_BYTES` | `wye-bench`, `events` | Event payload size |
+| `WYE_BENCH_UPSTREAM` | `wye-bench` | Extra `[upstream]` lines, for tuning experiments |
+| `WYE_BENCH_BIFROST_POOLS` | `wye-bench` | `default` keeps Bifrost's default pools |
+| `WYE_BENCH_PROVIDER_KEY`, `WYE_BENCH_HASH_KEY` | `wye-bench` | Set for the gateway it starts; not for you to set |
+| `WYE_IMAGE`, `WYE_SMOKE_PORT` | `scripts/image-smoke.sh` | The image tag and port |
+| `WYE_URL` | `scripts/upload-latency.sh` | Also time the same uploads through this gateway |
+
+The variables `wye` itself reads are in [operations.md](operations.md#environment-variables).
+
 ## Code changes
 
 - Correctness and protocol compatibility first; then no unnecessary allocation, buffering, locks, or blocking on the request path.

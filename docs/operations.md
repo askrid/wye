@@ -35,11 +35,60 @@ wye policy-diff <old> <new>
 wye probe [<url>]
 ```
 
-**Files.** A user's files live in `~/.wye`, or `$WYE_HOME`: the config `wye.toml`, the usage log `usage.jsonl`, the signing key `issuer.key`, and provider key files. A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it. The container image sets `WYE_CONFIG=/etc/wye/wye.toml`.
-
 **Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
 
-**Output** fits 80 columns. On a terminal, color marks only what carries meaning: errors, `ok` and `FAIL`, what a config change widens or narrows, the decision `explain` reaches, and a report's section titles. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
+**Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: errors, `ok` and `FAIL`, what a config change widens or narrows, the decision `explain` reaches, and a report's section titles. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
+
+### Files
+
+A user's files live in `~/.wye`, or `$WYE_HOME`:
+
+| File | What it is | Written by | Read by |
+|---|---|---|---|
+| `wye.toml` | The config | `wye init` | every command that takes `-c` |
+| `usage.jsonl` | Usage records | `wye service`, or your redirect | `wye report` |
+| `wye.log` | The background gateway's messages | `wye service` | you, when it does not answer |
+| `issuer.key` | The signing key, mode 600 | `wye init --team`, `wye token keygen` | `wye token issue`; never the gateway |
+| `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
+
+A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.
+
+### Environment variables
+
+Read by `wye`:
+
+| Variable | Meaning | Used by |
+|---|---|---|
+| `WYE_CONFIG` | The config, when `-c` is not given; the container image sets `/etc/wye/wye.toml` | every command that takes `-c` |
+| `WYE_HOME` | Your files (default `~/.wye`) | every command |
+| `WYE_URL` | The gateway (default `http://127.0.0.1:8080`) | `claude`, `codex`, `probe` |
+| `WYE_TOKEN` | The gateway token; removed from the agent's environment. Set but empty is an error, rather than falling back to the agent's own login | `claude`, `codex` |
+| `WYE_CLAUDE_BIN`, `WYE_CODEX_BIN` | Another path to the agent | `claude`, `codex` |
+| `NO_COLOR`, `TERM` | No color when `NO_COLOR` is set or `TERM=dumb` | every command |
+
+Set but empty counts as unset, except `WYE_TOKEN`.
+
+Named by the config, read once at startup; the names are yours to choose, and these are the usual ones:
+
+| Field | Usual variable | Holds |
+|---|---|---|
+| `api_key_env` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A provider key |
+| `cache_diagnostics.hash_key_env` | `WYE_CACHE_HASH_KEY` | The key for prompt-section hashes |
+| `telemetry.otlp_headers_env` | | Headers for OTLP export |
+
+Set for the agent by `wye claude` and `wye codex`:
+
+| Variable | Set to |
+|---|---|
+| `ANTHROPIC_BASE_URL` | The gateway |
+| `ANTHROPIC_AUTH_TOKEN` | The gateway token, if there is one; `ANTHROPIC_API_KEY` is then removed, since Claude Code would prefer it |
+| `CLAUDE_CODE_GATEWAY_HINT_HEADERS` | `1`, unless you set it |
+| `WYE_CODEX_TOKEN` | The token Codex sends |
+
+Clients read their own: the SDKs' `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_API_KEY` ([SDK integration](#sdk-integration)), and Claude Code's `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` and `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`. Variables for the benchmark and scripts are in [development.md](development.md#scripts-and-benchmark-variables).
+
+### Commands
+
 
 **`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
 
@@ -96,20 +145,7 @@ Every line fits 80 columns: token counts are compact (`635M`), times read as `4h
 
 **`wye claude [--url <url>] [--token-file <path>] [<claude args>...]`** checks that the gateway answers `/healthz`, sets `ANTHROPIC_BASE_URL` (`--url`, else `WYE_URL`, else `http://127.0.0.1:8080`) and, with a gateway token (`--token-file`, else `WYE_TOKEN`), `ANTHROPIC_AUTH_TOKEN` while removing `ANTHROPIC_API_KEY`, and then replaces itself with `claude` (Unix `exec`): signals, the terminal, and the exit code are Claude Code's own, and nothing is written, so nothing needs cleaning up. Without a token, Claude Code keeps its own login (subscription passthrough). It also sets `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` unless the variable is set, so Claude Code sends the request class, prompt id, and tool times that `wye report` and the usage records use; Claude Code sends them to a custom base URL only when asked. `claude` is found on `PATH` (a shell alias is not applied; `WYE_CLAUDE_BIN` names another program). Arguments after `--`, or from the first one wye does not know, go to Claude Code unchanged (`wye claude --resume <id>`; `wye claude -- --help` for Claude Code's own help). A gateway beyond this machine must be `https`: plain http would carry the token, or Claude Code's own login, in the clear. `WYE_TOKEN` is removed from the agent's environment, so the tools it runs do not inherit it. The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by Claude Code's daemon, which does not inherit the wrapper's environment. The token is never passed that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#credential-renewal).
 
-To set up locally on macOS or Linux from source, install the binary with `cargo install --path crates/wye --locked` (into `~/.cargo/bin`; after pulling changes, rerun it and `wye service restart`). Then:
-
-```bash
-wye init                         # writes ~/.wye/wye.toml
-wye service install              # in the background, now and at every login
-                                 # (or in a terminal: wye serve >> ~/.wye/usage.jsonl)
-
-unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN   # on a subscription: either one replaces your login
-wye claude                       # wye claude --resume <id>, etc.
-
-wye report                       # afterwards, or at any time
-```
-
-The usage log is the gateway's stdout, and its messages go to stderr, so redirecting stdout keeps the log and leaves errors on the screen. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
+The steps per setup are in the [README](../README.md#quick-start). `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
 **`wye codex`** takes the same options and environment as `wye claude`. It runs `codex` (or `WYE_CODEX_BIN`) with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it, and sets `WYE_CODEX_TOKEN` to the gateway token (a placeholder without one, which a gateway without `[auth]` replaces with its OpenAI key). `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a token without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#gateway-credentials)). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
@@ -380,7 +416,7 @@ Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at
 
 ## Health and shutdown
 
-`/healthz` and `/readyz` report whether Wye can serve under its configured policy, not whether a monitoring backend is reachable. A transient OTel outage does not block inference.
+`/healthz` says the process is up, and is what `wye probe`, `wye claude`, and `wye service` ask. `/readyz` also fails while draining, so it is the one for load balancers and container health checks. Neither depends on a monitoring backend: a transient OTel outage does not block inference.
 
 On SIGTERM, shutdown has two phases:
 
