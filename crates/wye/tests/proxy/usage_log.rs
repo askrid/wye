@@ -190,6 +190,43 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
     assert_eq!(record["path"], "/v1/messages");
 }
 
+/// A client body that breaks mid-upload (bad chunk framing here) is the
+/// client's error, `400`, never an upstream failure (`502`).
+#[tokio::test]
+async fn a_broken_client_body_is_the_clients_error() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    client
+        .write_all(
+            b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ntransfer-encoding: chunked\r\n\r\n\
+              2\r\n{}\r\nzz\r\n",
+        )
+        .await
+        .unwrap();
+    let mut answer = Vec::new();
+    tokio::time::timeout(WAIT, async {
+        let mut buf = [0; 1024];
+        while !String::from_utf8_lossy(&answer).contains("could not be read") {
+            match client.read(&mut buf).await.unwrap() {
+                0 => break,
+                n => answer.extend_from_slice(&buf[..n]),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let answer = String::from_utf8_lossy(&answer);
+    assert!(answer.starts_with("HTTP/1.1 400"), "{answer}");
+    assert!(
+        answer.contains("request body could not be read"),
+        "{answer}"
+    );
+    let record = h.usage_record().await;
+    assert_eq!(record["status"], 400);
+    assert_eq!(record["outcome"], "gateway_error");
+}
+
 #[tokio::test]
 async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;

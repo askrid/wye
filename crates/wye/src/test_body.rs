@@ -25,6 +25,24 @@ impl Client {
     }
 }
 
+/// A client that sends its chunks, then nothing more, without closing.
+pub(crate) struct Stalling(pub(crate) Client);
+
+impl Body for Stalling {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+        match Pin::new(&mut self.0).poll_frame(cx) {
+            Poll::Ready(None) => Poll::Pending,
+            sent => sent,
+        }
+    }
+}
+
 impl Body for Client {
     type Data = Bytes;
     type Error = Infallible;

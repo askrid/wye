@@ -139,22 +139,32 @@ async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
     let key = keypair();
     let (h, _bodies) = body_harness(&key, "").await;
     let t = token_with_models(&key, &["claude-haiku-*"]);
-    let with = |name: &'static str, value: &'static str| {
+    // Every line counts: a provider may honour the second.
+    let with_lines = |name: &'static str, values: &[&'static str]| {
         let mut req = messages().header("authorization", format!("Bearer {t}"));
-        req.headers_mut()
-            .unwrap()
-            .insert(name, http::HeaderValue::from_static(value));
+        let headers = req.headers_mut().unwrap();
+        headers.remove(name);
+        for value in values {
+            headers.append(name, http::HeaderValue::from_static(value));
+        }
         req
     };
-    for (name, value) in [
-        ("content-encoding", "br"),
-        ("content-type", "application/json; charset=utf-16"),
+    let with = |name: &'static str, value: &'static str| with_lines(name, &[value]);
+    for (name, values) in [
+        ("content-encoding", &["br"][..]),
+        ("content-encoding", &["identity", "br"]),
+        ("content-encoding", &["identity, br"]),
+        ("content-type", &["application/json; charset=utf-16"]),
+        (
+            "content-type",
+            &["application/json", "application/json; charset=utf-7"],
+        ),
     ] {
-        let res = h.send(with(name, value), HAIKU).await;
+        let res = h.send(with_lines(name, values), HAIKU).await;
         assert_eq!(
             res.status(),
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "{name}: {value}"
+            "{name}: {values:?}"
         );
     }
     let utf8 = with("content-type", "application/json; charset=UTF-8");

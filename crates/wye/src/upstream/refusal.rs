@@ -1,5 +1,7 @@
-//! Why Wye's own request body stopped an upstream request: a policy check
-//! on the streamed part of the body, or the size limit.
+//! Why the request body stopped an upstream request: a policy check on the
+//! streamed part of the body, the size limit, or the client's body failing
+//! (malformed framing, a connection cut mid-upload). Any of these is the
+//! client's request, not the upstream, failing.
 //!
 //! hyper's HTTP/1.1 client keeps a body's error as the source of the request
 //! error. Its HTTP/2 client only logs the error and resets the stream, so on
@@ -28,6 +30,25 @@ pub(crate) enum PolicyRefusal {
     TokenLimit(TokenLimitError),
     /// The body grew past `server.max_request_body_bytes`.
     TooLarge,
+    /// The client's body failed: bad framing, or cut off.
+    Broken,
+}
+
+/// A failed client body, marked so the request error that carries it is not
+/// taken for an upstream failure.
+#[derive(Debug)]
+struct BrokenBody(BoxError);
+
+impl std::fmt::Display for BrokenBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "request body failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for BrokenBody {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.0)
+    }
 }
 
 /// The refusal an attempt's request body raised.
@@ -46,12 +67,17 @@ pub(super) fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Optio
         if e.is::<LengthLimitError>() {
             return Some(PolicyRefusal::TooLarge);
         }
+        if e.is::<BrokenBody>() {
+            // Wraps only an error with none of the refusals above in it.
+            return Some(PolicyRefusal::Broken);
+        }
         cause = e.source();
     }
     None
 }
 
-/// `inner`, leaving the refusal its error carries in a slot when given.
+/// `inner`, leaving the refusal its error carries in a slot when given, and
+/// marking any other error of the client's body as [`PolicyRefusal::Broken`].
 pub(crate) struct Refusing<B> {
     inner: B,
     slot: Option<RefusalSlot>,
@@ -75,15 +101,21 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
         let this = self.get_mut();
-        let polled = Pin::new(&mut this.inner).poll_frame(cx);
-        if let (Poll::Ready(Some(Err(e))), Some(slot)) = (&polled, &this.slot)
-            && let Some(refusal) = policy_refusal(&**e)
-        {
-            // Set before hyper resets the stream, so the request error that
-            // follows finds it.
-            let _ = slot.set(refusal);
+        match Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(Some(Err(e))) => {
+                let (refusal, e) = match policy_refusal(&*e) {
+                    Some(refusal) => (refusal, e),
+                    None => (PolicyRefusal::Broken, Box::new(BrokenBody(e)) as BoxError),
+                };
+                if let Some(slot) = &this.slot {
+                    // Set before hyper resets the stream, so the request
+                    // error that follows finds it.
+                    let _ = slot.set(refusal);
+                }
+                Poll::Ready(Some(Err(e)))
+            }
+            polled => polled,
         }
-        polled
     }
 
     fn is_end_stream(&self) -> bool {

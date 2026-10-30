@@ -60,6 +60,10 @@ type UpstreamClient = Client<
 
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const WORKSPACE_ID: HeaderName = HeaderName::from_static("anthropic-workspace-id");
+/// Choose which organization or project an OpenAI key bills: the operator's
+/// key decides that, not the caller.
+const OPENAI_ORGANIZATION: HeaderName = HeaderName::from_static("openai-organization");
+const OPENAI_PROJECT: HeaderName = HeaderName::from_static("openai-project");
 /// Asked of the upstream instead of the caller's `accept-encoding`: Wye
 /// reads usage, models, and tool calls from the response bytes it relays,
 /// and Anthropic compresses responses (Brotli) when Claude Code asks for it.
@@ -227,14 +231,19 @@ impl Upstream {
         parts.headers.remove(HOST);
         parts.headers.insert(ACCEPT_ENCODING, IDENTITY);
         // The caller's headers carried the gateway credential, in either
-        // header: neither may reach the provider.
+        // header: neither may reach the provider. With the operator's key,
+        // the caller does not choose what it bills either.
         match &self.auth {
             UpstreamAuth::ApiKey(key) => {
                 parts.headers.remove(AUTHORIZATION);
+                parts.headers.remove(OPENAI_ORGANIZATION);
+                parts.headers.remove(OPENAI_PROJECT);
                 parts.headers.insert(X_API_KEY, key.clone());
             }
             UpstreamAuth::Bearer(value) => {
                 parts.headers.remove(X_API_KEY);
+                parts.headers.remove(OPENAI_ORGANIZATION);
+                parts.headers.remove(OPENAI_PROJECT);
                 parts.headers.insert(AUTHORIZATION, value.clone());
             }
             UpstreamAuth::ForwardCaller => {}

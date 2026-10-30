@@ -49,15 +49,21 @@ const BODY: &str = r#"{"model":"gpt-5.5-codex","stream":true,"input":[]}"#;
 #[tokio::test]
 async fn responses_reach_openai_with_the_provider_key() {
     let (h, mut seen) = harness("").await;
-    let res = h
-        .send(responses().header("x-api-key", "client-junk"), BODY)
-        .await;
+    // The operator's key decides what it bills: the caller's choice of
+    // organization or project does not reach OpenAI.
+    let req = responses()
+        .header("x-api-key", "client-junk")
+        .header("openai-organization", "org-other")
+        .header("openai-project", "proj_other");
+    let res = h.send(req, BODY).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(read_body(res).await, EVENTS);
     let got = seen.recv().await.unwrap();
     assert_eq!(got.uri.path(), "/v1/responses");
     assert_eq!(got.headers["authorization"], format!("Bearer {OPENAI_KEY}"));
     assert!(got.headers.get("x-api-key").is_none());
+    assert!(got.headers.get("openai-organization").is_none());
+    assert!(got.headers.get("openai-project").is_none());
     assert_eq!(got.headers["session-id"], "codex-session-1");
     assert_eq!(got.body, BODY);
     let record = h.usage_record().await;

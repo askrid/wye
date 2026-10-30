@@ -18,7 +18,7 @@ async fn holds_only_until_the_model_then_replays_everything() {
         .await
         .unwrap();
     assert_eq!(held.model(), Some("m"));
-    assert_eq!(budget.current(), parts[0].len());
+    assert_eq!(budget.current(), charge(parts[0].len()));
     let body = RequestBody::after_hold(held, client);
     assert_eq!(body.size_hint().lower(), parts[0].len() as u64);
     assert_eq!(collect(body).await.unwrap(), parts.concat());
@@ -153,6 +153,65 @@ async fn trailers_end_the_body_for_a_required_field() {
     );
 }
 
+/// A body sent in tiny chunks pins far more memory than its bytes: each
+/// chunk counts at least [`MIN_CHUNK_CHARGE`], so the budget runs out after a
+/// handful of chunks, not after millions.
+#[tokio::test]
+async fn tiny_chunks_count_at_least_the_minimum_charge() {
+    let budget = Gauge::default();
+    let bytes = r#"{"messages":[{"role":"user","content":"hi"}],"model":"m"}"#;
+    let parts: Vec<&str> = (0..bytes.len()).map(|i| &bytes[i..=i]).collect();
+    let mut client = Client::of(&parts);
+    let error = hold_until_model(
+        &mut client,
+        Api::Messages,
+        &budget,
+        8 * MIN_CHUNK_CHARGE,
+        None,
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(matches!(error, HoldError::Overloaded));
+    assert_eq!(budget.current(), 0);
+
+    // Ordinary chunks count their length: the same budget holds 8 KiB.
+    let big = format!(r#"{{"messages":[{{"content":"{}"}}],"#, "x".repeat(4000));
+    let mut client = Client(
+        [big.clone(), " ".into(), r#""model":"m"}"#.into()]
+            .into_iter()
+            .map(Bytes::from)
+            .collect(),
+    );
+    let held = hold_until_model(
+        &mut client,
+        Api::Messages,
+        &budget,
+        8 * MIN_CHUNK_CHARGE,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(held.model(), Some("m"));
+    assert_eq!(budget.current(), big.len() + 2 * MIN_CHUNK_CHARGE);
+}
+
+/// A client that stops sending before its model is read is refused, and
+/// what it sent is released, instead of holding its share for good.
+#[tokio::test(start_paused = true)]
+async fn a_stalled_hold_is_refused_and_released() {
+    let budget = Gauge::default();
+    let mut client = crate::test_body::Stalling(Client::of(&[r#"{"messages":["#]));
+    let started = tokio::time::Instant::now();
+    let error = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, None)
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(error, HoldError::Stalled));
+    assert_eq!(started.elapsed(), HOLD_IDLE_TIMEOUT);
+    assert_eq!(budget.current(), 0);
+}
+
 #[tokio::test]
 async fn refuses_beyond_the_budget_or_without_a_model() {
     let budget = Gauge::default();
@@ -170,7 +229,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     assert_eq!(budget.current(), 90);
 
     let mut client = Client::of(&[r#"{"messages":[]}"#]);
-    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, None)
+    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 1 << 20, None)
         .await
         .err()
         .unwrap();
@@ -180,7 +239,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
         Client::of(&[r#"{"messages":[1,2,3,4], "#, r#""model":"m"}"#]),
         10,
     );
-    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 100, None)
+    let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 1 << 20, None)
         .await
         .err()
         .unwrap();

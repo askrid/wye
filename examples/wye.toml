@@ -16,7 +16,9 @@ listen = "127.0.0.1:8080"              # beyond loopback only with [auth]
 # max_request_body_bytes = 33554432    # Anthropic's request size limit
 # Request bytes held while reading `model` (for permissions, aliases, and a
 # provider's model id), all requests together; beyond it, an overload error.
-# At least max_request_body_bytes, since one body may be held whole:
+# A chunk counts at least 1 KiB, for the memory it pins. A client that sends
+# nothing for 60 s while held gets 408. At least max_request_body_bytes,
+# since one body may be held whole:
 # max_held_request_bytes = 67108864
 # Requests in flight before new ones get an overload error (529 on the
 # Messages API, 503 on the OpenAI APIs):
@@ -63,7 +65,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # session's next upstream in the same turn; never after a response byte:
 # failover = ["429", "529", "connect"]
 # failover_max_body_bytes = 8388608    # larger bodies go without failover
-# failover_max_held_bytes = 268435456  # bodies kept for resending, across the process
+# failover_max_held_bytes = 268435456  # bodies kept for resending, across the process (a chunk counts at least 1 KiB)
 #
 # Up to 16 upstreams. Each takes every [upstream] field above except
 # forward_caller_credential.
