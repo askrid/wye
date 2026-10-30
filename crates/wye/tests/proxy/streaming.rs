@@ -8,12 +8,7 @@ async fn streams_events_before_upstream_completes() {
     let body = std::sync::Mutex::new(Some(chunks_rx));
     let handler: Handler = Arc::new(move |_| {
         let rx = body.lock().unwrap().take().unwrap();
-        Box::pin(async move {
-            let mut res = Response::new(Either::Right(ChannelBody(rx)));
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
+        Box::pin(async move { streaming(rx) })
     });
     let h = Harness::api_key(handler).await;
 
@@ -93,10 +88,7 @@ async fn stalled_event_stream_ends_with_an_error_event() {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 drop(tx);
             });
-            let mut res = Response::new(Either::Right(ChannelBody(rx)));
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
+            streaming(rx)
         })
     });
     let h = Harness::start(

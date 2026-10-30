@@ -126,6 +126,8 @@ pub enum Refusal {
     /// The output-token maximum is above the ceiling, or missing where the
     /// ceiling requires it.
     TokenLimit(TokenLimitError),
+    /// A known endpoint whose API no route serves.
+    NoRoute { api: Api, path: Box<str> },
 }
 
 impl Refusal {
@@ -134,6 +136,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => 400,
             Self::Model(_) | Self::TokenLimit(_) => 403,
+            Self::NoRoute { .. } => 404,
         }
     }
 
@@ -142,6 +145,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => "invalid_request_error",
             Self::Model(_) | Self::TokenLimit(_) => "permission_error",
+            Self::NoRoute { .. } => "not_found_error",
         }
     }
 }
@@ -152,6 +156,10 @@ impl fmt::Display for Refusal {
             Self::Invalid(e) => f.write_str(e.as_str()),
             Self::Model(model) => write!(f, "this credential may not use the model {model:?}"),
             Self::TokenLimit(e) => e.fmt(f),
+            // Names the sections that would serve it.
+            Self::NoRoute { api, path } => {
+                write!(f, "no route serves {path}: add {}", api.route_sections())
+            }
         }
     }
 }

@@ -26,12 +26,7 @@ async fn an_empty_response_is_completed() {
 #[tokio::test]
 async fn completed_stream_logs_usage_without_changing_bytes() {
     let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async {
-            let mut res = full(StatusCode::OK, USAGE_STREAM);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
+        Box::pin(async { sse(full(StatusCode::OK, USAGE_STREAM)) })
     }))
     .await;
     let res = h.send(messages(), "{}").await;
@@ -73,12 +68,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
         "data: {\"type\":\"message_stop\"}\n\n",
     );
     let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async {
-            let mut res = full(StatusCode::OK, MISS);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
+        Box::pin(async { sse(full(StatusCode::OK, MISS)) })
     }))
     .await;
     let req = messages()
@@ -136,12 +126,7 @@ async fn cancelled_stream_logs_partial_usage() {
     let body = std::sync::Mutex::new(Some(chunks_rx));
     let handler: Handler = Arc::new(move |_| {
         let rx = body.lock().unwrap().take().unwrap();
-        Box::pin(async move {
-            let mut res = Response::new(Either::Right(ChannelBody(rx)));
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
+        Box::pin(async move { streaming(rx) })
     });
     let h = Harness::api_key(handler).await;
     let start_event = &USAGE_STREAM[..USAGE_STREAM.find("event: content_block_delta").unwrap()];
@@ -195,7 +180,7 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
 #[tokio::test]
 async fn a_broken_client_body_is_the_clients_error() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
         .write_all(
@@ -229,8 +214,8 @@ async fn a_broken_client_body_is_the_clients_error() {
 
 #[tokio::test]
 async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
-    let big: &'static str = Box::leak("x".repeat(2048).into_boxed_str());
+    let h = Harness::api_key(ok()).await;
+    let big = "x".repeat(2048);
     assert_eq!(
         h.send(messages(), big).await.status(),
         StatusCode::PAYLOAD_TOO_LARGE
@@ -289,14 +274,7 @@ async fn a_body_delivered_to_its_length_is_completed_before_its_stream_ends() {
 #[tokio::test]
 async fn cache_diagnostics_log_keyed_prompt_hashes() {
     const BODY: &str = r#"{"model":"claude-test","system":"be brief","tools":[{"name":"Read"}],"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{"type":"ephemeral"}}]}]}"#;
-    let (tx, mut rx) = mpsc::channel::<Bytes>(2);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.body).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, mut rx) = recording(|seen| seen.body);
     let key = [7u8; 32];
     let h = Harness::with_cache_diagnostics(handler, &key, "").await;
 
@@ -328,7 +306,7 @@ async fn cache_diagnostics_log_keyed_prompt_hashes() {
 
 #[tokio::test]
 async fn usage_records_omit_prompt_without_diagnostics() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     let res = h.send(messages(), r#"{"messages":[]}"#).await;
     read_body(res).await;
     assert!(h.usage_record().await.get("prompt").is_none());
@@ -336,12 +314,7 @@ async fn usage_records_omit_prompt_without_diagnostics() {
 
 #[tokio::test]
 async fn cache_diagnostics_sample_whole_sessions() {
-    let h = Harness::with_cache_diagnostics(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
-        &[7; 32],
-        "sample_percent = 50",
-    )
-    .await;
+    let h = Harness::with_cache_diagnostics(ok(), &[7; 32], "sample_percent = 50").await;
     let sampled = |id: &String| gateway_core::prompt::session_sampled(Some(id.as_bytes()), 50);
     let ids: Vec<String> = (0..100).map(|i| format!("s-{i}")).collect();
     let (inside, outside) = (
@@ -364,48 +337,14 @@ async fn cache_diagnostics_sample_whole_sessions() {
 
 #[tokio::test]
 async fn usage_records_are_exported_as_otlp_logs() {
-    let (collected_tx, mut collected) = mpsc::channel::<Seen>(8);
-    let collector: Handler = Arc::new(move |seen: Seen| {
-        let tx = collected_tx.clone();
-        Box::pin(async move {
-            tx.send(seen).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
-    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(
-        Arc::new(|_| {
-            Box::pin(async {
-                let mut res = full(StatusCode::OK, USAGE_STREAM);
-                res.headers_mut()
-                    .insert("content-type", "text/event-stream".parse().unwrap());
-                res
-            })
-        }),
-        Arc::clone(&hits),
-        None,
-        None,
-    )
-    .await;
+    let (collector, mut collected) = recording(|seen| seen);
     let mut otlp_headers = HeaderMap::new();
     otlp_headers.insert("api-key", "telemetry-secret".parse().unwrap());
-    let resources = Resources {
-        upstreams: vec![UpstreamResources::new(
-            UpstreamAuth::api_key(API_KEY).unwrap(),
-        )],
-        verifier: None,
-        prompt_key: None,
+    let mut h = Harness::with_telemetry(
+        answering(|| sse(full(StatusCode::OK, USAGE_STREAM))),
+        collector,
+        "service_name = \"wye-test\"",
         otlp_headers,
-    };
-    let mut h = Harness::launch(
-        &format!("http://{upstream}"),
-        "",
-        &format!(
-            "api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\"\nservice_name = \"wye-test\""
-        ),
-        resources,
-        hits,
     )
     .await;
     const PARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
@@ -515,14 +454,8 @@ async fn usage_records_are_exported_as_otlp_logs() {
 
 #[tokio::test]
 async fn priced_records_carry_cost_status_and_version() {
-    let handler: Handler = Arc::new(|_| {
-        Box::pin(async {
-            let mut res = full(StatusCode::OK, USAGE_STREAM);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
-    });
+    let handler: Handler =
+        Arc::new(|_| Box::pin(async { sse(full(StatusCode::OK, USAGE_STREAM)) }));
     let pricing = "api_key_env = \"UNUSED\"\n\n[pricing]\nversion = \"test-1\"\n\
                    [[pricing.models]]\nmodels = [\"claude-test\"]\ninput = \"1.00\"\noutput = \"10.00\"\n\
                    cache_read = \"0.10\"\n";
@@ -550,7 +483,7 @@ async fn priced_records_carry_cost_status_and_version() {
 #[tokio::test]
 async fn checked_requests_record_what_each_target_would_reject() {
     let h = Harness::start(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
+        ok(),
         "api_key_env = \"UNUSED\"\n\n[upgrade_check]\ntargets = [\"claude-opus-5-5\", \"claude-opus-4-7\"]\n",
         UpstreamAuth::api_key(API_KEY).unwrap(),
     )
@@ -577,12 +510,7 @@ async fn checked_requests_record_what_each_target_would_reject() {
 async fn non_streaming_json_responses_report_usage() {
     const BODY: &str = r#"{"id":"msg_1","type":"message","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t","name":"Read","input":{}}],"usage":{"input_tokens":12,"output_tokens":34}}"#;
     let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async {
-            let mut res = full(StatusCode::OK, BODY);
-            res.headers_mut()
-                .insert("content-type", "application/json".parse().unwrap());
-            res
-        })
+        Box::pin(async { json(full(StatusCode::OK, BODY)) })
     }))
     .await;
     assert_eq!(read_body(h.send(messages(), "{}").await).await, BODY);
@@ -601,22 +529,12 @@ async fn tool_calls_past_eight_names_go_under_other() {
         .iter()
         .map(|n| format!(r#"{{"type":"tool_use","id":"t{n}","name":"{n}","input":{{}}}}"#))
         .collect();
-    let body: &'static str = Box::leak(
-        format!(
-            r#"{{"type":"message","model":"m","content":[{}],"usage":{{"input_tokens":1,"output_tokens":1}}}}"#,
-            blocks.join(",")
-        )
-        .into_boxed_str(),
+    let body = format!(
+        r#"{{"type":"message","model":"m","content":[{}],"usage":{{"input_tokens":1,"output_tokens":1}}}}"#,
+        blocks.join(",")
     );
-    let h = Harness::api_key(Arc::new(move |_| {
-        Box::pin(async move {
-            let mut res = full(StatusCode::OK, body);
-            res.headers_mut()
-                .insert("content-type", "application/json".parse().unwrap());
-            res
-        })
-    }))
-    .await;
+    let body = Bytes::from(body);
+    let h = Harness::api_key(answering(move || json(full(StatusCode::OK, body.clone())))).await;
     read_body(h.send(messages(), "{}").await).await;
     let calls = &h.usage_record().await["tool_calls"];
     assert_eq!(calls.as_object().unwrap().len(), 9, "{calls}");
@@ -627,34 +545,8 @@ async fn tool_calls_past_eight_names_go_under_other() {
 /// lines the log could not take are counted as lost.
 #[tokio::test]
 async fn a_closed_log_leaves_otlp_export_running() {
-    let (collected_tx, mut collected) = mpsc::channel::<Seen>(16);
-    let collector: Handler = Arc::new(move |seen: Seen| {
-        let tx = collected_tx.clone();
-        Box::pin(async move {
-            let _ = tx.send(seen).await;
-            full(StatusCode::OK, "{}")
-        })
-    });
-    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
-        Arc::clone(&hits),
-        None,
-        None,
-    )
-    .await;
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )]);
-    let h = Harness::launch(
-        &format!("http://{upstream}"),
-        "",
-        &format!("api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\""),
-        resources,
-        hits,
-    )
-    .await;
+    let (collector, mut collected) = recording(|seen| seen);
+    let h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
     h.close_usage_log().await;
     // Each record is exported once the log has failed its write.
     let mut exported = 0;
@@ -689,26 +581,7 @@ async fn spans_a_collector_refuses_are_counted_as_lost() {
             }
         })
     });
-    let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
-        Arc::clone(&hits),
-        None,
-        None,
-    )
-    .await;
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )]);
-    let mut h = Harness::launch(
-        &format!("http://{upstream}"),
-        "",
-        &format!("api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\""),
-        resources,
-        hits,
-    )
-    .await;
+    let mut h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
     read_body(h.send(messages(), "{}").await).await;
     h.usage_record().await;
     h.begin_shutdown();

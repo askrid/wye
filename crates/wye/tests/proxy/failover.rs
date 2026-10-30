@@ -286,14 +286,11 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
         UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
     ]);
     let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
-    let body: &'static str = Box::leak(
-        format!(
-            r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
-            "x".repeat(4 << 20)
-        )
-        .into_boxed_str(),
+    let body = format!(
+        r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
+        "x".repeat(4 << 20)
     );
-    let res = h.send(messages(), body).await;
+    let res = h.send(messages(), body.clone()).await;
     assert_eq!(res.status(), StatusCode::OK);
     read_body(res).await;
     assert_eq!(seen_b.recv().await.unwrap(), body, "the whole body, resent");
@@ -337,12 +334,9 @@ async fn early_refusals_over_http2_move_concurrent_uploads_on() {
     ]);
     let h =
         Arc::new(Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await);
-    let body: &'static str = Box::leak(
-        format!(
-            r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
-            "x".repeat(1 << 20)
-        )
-        .into_boxed_str(),
+    let body = format!(
+        r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
+        "x".repeat(1 << 20)
     );
     // The recording upstream holds 8 bodies: read them as they arrive.
     let received = tokio::spawn(async move {
@@ -355,8 +349,9 @@ async fn early_refusals_over_http2_move_concurrent_uploads_on() {
     let mut uploads = tokio::task::JoinSet::new();
     for _ in 0..32 {
         let h = Arc::clone(&h);
+        let body = body.clone();
         uploads.spawn(async move {
-            let res = h.send(messages(), body).await;
+            let res = h.send(messages(), body.clone()).await;
             let status = res.status();
             read_body(res).await;
             status

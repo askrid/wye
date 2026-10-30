@@ -91,14 +91,10 @@ pub fn explain(
         return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
     };
     let Some(route) = config.routes.get(endpoint.api) else {
-        return out.refuse(
-            404,
-            "not_found_error",
-            format!(
-                "no route serves {path}: add {}",
-                endpoint.api.route_sections()
-            ),
-        );
+        return out.refuse_policy(&Refusal::NoRoute {
+            api: endpoint.api,
+            path: path.into(),
+        });
     };
     let api = endpoint.api;
     out.step(format!("endpoint: POST {path}"));

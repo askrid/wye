@@ -7,7 +7,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{PERCENTILES, percentile, phase, put, sorted},
+    stats::{PERCENTILES, event_delays, percentile, phase, put, sorted},
 };
 
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
@@ -19,6 +19,23 @@ pub(crate) const PACED_EVENT_BYTES: usize = 100;
 /// the listen backlog at 128, and over HTTP/1.1 every stream needs its own
 /// upstream connection, so faster bursts would measure SYN retries.
 pub(crate) const PACED_RAMP: Duration = Duration::from_millis(2_000);
+
+/// `streams` token-paced streams, started over `ramp`.
+pub(crate) async fn token_streams(
+    target: &Target,
+    streams: usize,
+    ramp: Duration,
+) -> Vec<scenarios::Stream> {
+    scenarios::paced(
+        target,
+        streams,
+        ramp,
+        PACED_EVENTS,
+        PACED_EVENT_BYTES,
+        PACED_INTERVAL_US,
+    )
+    .await
+}
 
 /// The parameters, recorded in the report.
 pub(super) fn scenario_report() -> serde_json::Value {
@@ -37,17 +54,7 @@ impl Paced {
     pub(super) async fn measure(target: &Target, while_loaded: impl FnOnce()) -> Self {
         let streams = {
             let target = target.clone();
-            tokio::spawn(async move {
-                scenarios::paced(
-                    &target,
-                    PACED_STREAMS,
-                    PACED_RAMP,
-                    PACED_EVENTS,
-                    PACED_EVENT_BYTES,
-                    PACED_INTERVAL_US,
-                )
-                .await
-            })
+            tokio::spawn(async move { token_streams(&target, PACED_STREAMS, PACED_RAMP).await })
         };
         // Each stream lasts 2 s and starts within the 2 s ramp: just after the
         // ramp, every stream is open and streaming.
@@ -57,12 +64,7 @@ impl Paced {
         let failed_streams = streams.iter().filter(|s| s.failed).count();
         Self {
             ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
-            event_delay: sorted(
-                streams
-                    .into_iter()
-                    .flat_map(|s| s.event_delays_us)
-                    .collect(),
-            ),
+            event_delay: event_delays(streams),
             failed_streams,
         }
     }

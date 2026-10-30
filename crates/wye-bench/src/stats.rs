@@ -48,6 +48,16 @@ pub(crate) fn percentile(sorted: &[u64], p: f64) -> f64 {
     sorted[((p / 100.0) * (sorted.len() - 1) as f64).round() as usize] as f64
 }
 
+/// Every event delay of `streams`, sorted.
+pub(crate) fn event_delays(streams: Vec<crate::scenarios::Stream>) -> Vec<u64> {
+    sorted(
+        streams
+            .into_iter()
+            .flat_map(|s| s.event_delays_us)
+            .collect(),
+    )
+}
+
 pub(crate) fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v.sort_unstable();
     v

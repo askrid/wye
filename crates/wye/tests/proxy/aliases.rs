@@ -1,9 +1,5 @@
 //! Model aliases end to end: resolution, splicing, rollout, permissions.
 
-use gateway_core::credential::{self, NewCredential};
-use ring::signature::{Ed25519KeyPair, KeyPair};
-use wye_testkit::ed25519_keypair as keypair;
-
 use super::harness::*;
 
 const ALIASES: &str = "\n[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
@@ -38,33 +34,20 @@ async fn an_alias_is_replaced_in_place_and_recorded() {
 }
 
 fn token(key: &Ed25519KeyPair, sub: &str) -> String {
-    credential::issue(
-        key,
-        "k1",
-        &NewCredential {
-            iss: "wye",
-            sub,
-            aud: "wye-prod",
-            iat: now(),
-            exp: now() + 600,
-            models: None,
-            max_output_tokens: None,
-        },
-    )
+    issue(key, &claims(sub))
 }
 
 #[tokio::test]
 async fn rollout_follows_the_subject_and_permissions_apply_to_the_resolved_model() {
     let key = keypair();
     let auth = format!(
-        "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\nmodels = [\"claude-haiku-*\"]\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n{ALIASES}",
-        credential::encode_public_key(key.public_key().as_ref())
+        "{}\n{ALIASES}",
+        auth_section(&key, "models = [\"claude-haiku-*\"]")
     );
     let (h, mut seen) = harness(&auth).await;
     let send = |sub: &'static str, model: &'static str| {
         let req = messages().header("authorization", format!("Bearer {}", token(&key, sub)));
-        let body: &'static str = Box::leak(format!(r#"{{"model":"{model}"}}"#).into_boxed_str());
+        let body = format!(r#"{{"model":"{model}"}}"#);
         h.send(req, body)
     };
 
