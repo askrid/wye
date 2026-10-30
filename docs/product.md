@@ -84,7 +84,7 @@ A route counts as supported only once its request fields, tool-call identifiers 
 
 ## Use cases
 
-**Single developer.** `wye serve` locally and `wye claude`; `wye report` reads the usage log. On a claude.ai subscription, [caller-credential passthrough](policy.md#caller-credential-passthrough) keeps the developer's own login. The value here is modest, since Claude Code already exports its own usage; the point is that the developer later uses the same setup with a team.
+**Single developer.** `wye service install` and `wye claude`; `wye report` reads the usage log. [Caller-credential passthrough](policy.md#caller-credential-passthrough) keeps the developer's own login or API key, and the gateway holds no secret. The value here is modest, since Claude Code already exports its own usage; the point is that the developer later uses the same setup with a team.
 
 **Engineering team with coding agents.** Developers and CI reach a shared Wye behind HTTPS. Provider keys stay in the deployment, callers hold gateway or IdP credentials, policy is reviewed in Git, and usage arrives in the team's OTel backend attributed by subject, session, subagent, and work type. Attribution comes from verified credentials, so a client cannot switch it off.
 

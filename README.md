@@ -41,8 +41,7 @@ Wye takes the opposite approach:
 
 ## Quick start
 
-Build and install from source (the toolchain is pinned in
-`rust-toolchain.toml`):
+Build and install from source (needs Rust 1.98 or later):
 
 ```bash
 cargo install --git https://github.com/askrid/wye wye --locked

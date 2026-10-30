@@ -95,7 +95,7 @@ wye/
 │   │   ├── upstream/connect.rs  the connect timeout over TCP and the TLS handshake
 │   │   ├── usage_log.rs         per-request records, bounded writer
 │   │   ├── usage_log/           JSON line, OTLP logs, metrics, and traces
-│   │   ├── cli/                 args (the command table, parsing, help), service (launchd or systemd unit), paint (terminal color), explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
+│   │   ├── cli/                 args (the command table, parsing, help), files (the home directory, finding and reading a config), service (launchd or systemd unit), paint (terminal color), explain, policy-test, policy-diff, report, doctor, init, claude and codex, probe, token
 │   │   ├── gauge.rs             in-flight counters released on drop
 │   │   └── alloc_stats.rs       allocation counters (feature alloc-stats, benchmarks only)
 │   ├── wye-testkit/             test CA, mock upstream, test signing keys and IdP tokens
@@ -353,9 +353,9 @@ This pattern needs no MCP gateway. Provider-hosted tools pass through like any o
 
 ## Configuration
 
-One TOML file, loaded at startup, is the source of truth for routes and their providers, credential verification, limits, aliases, and prices. Secrets are referenced by environment variable, never stored in Git, images, or IaC state.
+One TOML file, loaded at startup, is the source of truth for routes and their providers, credential verification, limits, aliases, and prices. Secrets are referenced by environment variable or file, never stored in Git, images, or IaC state.
 
-The runtime resolves environment variables; the core validates configuration without resolving secrets. Reject unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
+The runtime resolves them; the core validates configuration without resolving secrets. Reject unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
 
 No hot reload; changes require a restart (or rolling deploy). A config snapshot stays consistent within a request. Planned: include the config version in logs and traces to diagnose rollout skew.
 
