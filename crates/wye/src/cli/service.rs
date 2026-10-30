@@ -250,7 +250,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
         }
     };
     let log_size = std::fs::metadata(&service.log)
-        .map(|m| format!(" ({})", super::size(m.len())))
+        .map(|m| format!(" ({})", file_size(m.len())))
         .unwrap_or_default();
     println!(
         "{:<9} {}\n{:<9} {} serve --config {}\n{:<9} {}{log_size}",
@@ -389,6 +389,16 @@ fn probe(url: &str) -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?
         .block_on(super::probe(url))
+}
+
+/// A file's size as people read it: `913 KB`, `4.2 MB`.
+fn file_size(bytes: u64) -> String {
+    match bytes {
+        b if b >= 1 << 30 => format!("{:.1} GB", b as f64 / f64::from(1u32 << 30)),
+        b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / f64::from(1u32 << 20)),
+        b if b >= 1 << 10 => format!("{} KB", b >> 10),
+        b => format!("{b} bytes"),
+    }
 }
 
 /// The user id, for launchd's `gui/<uid>` domain.
