@@ -6,6 +6,7 @@
 //! function of request, credential, and config, so the answer is what every
 //! replica would do.
 
+use super::{args::Parsed, files};
 use gateway_core::{
     admission::{BodyChecks, Refusal},
     api::{self, Api},
@@ -27,6 +28,56 @@ pub enum Credential<'a> {
     Token(&'a str, &'a Verifier),
     /// Claims taken as verified (policy tests; tokens in CI would expire).
     Trusted(Identity),
+}
+
+/// `wye explain`, from its options: the report, with the config it read, and
+/// whether the request would be forwarded.
+pub fn run(
+    parsed: &Parsed<'_>,
+    env: &impl Fn(&str) -> Option<String>,
+) -> Result<(String, bool), String> {
+    let path = files::config_path(parsed, env)?;
+    let config = files::load(&path)?;
+    let verifier = files::named(
+        &path,
+        crate::startup::verifier(&config, files::config_dir(&path)),
+    )?;
+    let token = parsed
+        .value("token-file")
+        .map(files::read_token)
+        .transpose()?;
+    let body = match parsed.positional.first() {
+        Some(&"-") => {
+            let mut body = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut body)
+                .map_err(|e| format!("cannot read standard input: {e}"))?;
+            body
+        }
+        Some(file) => std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?,
+        None => Vec::new(),
+    };
+    let credential = match (token.as_deref(), &verifier) {
+        (Some(token), Some(verifier)) => Credential::Token(token, verifier),
+        _ => Credential::None,
+    };
+    let explanation = explain(
+        &config,
+        parsed.value("path").unwrap_or("/v1/messages"),
+        credential,
+        parsed.value("session"),
+        &body,
+        super::unix_secs()?,
+        &parsed.values("target-model"),
+    );
+    let forwarded = explanation.refused.is_none();
+    Ok((
+        format!(
+            "config: {}\n{}",
+            files::tilde(&path, env),
+            explanation.report()
+        ),
+        forwarded,
+    ))
 }
 
 /// The decision and the steps that led to it.

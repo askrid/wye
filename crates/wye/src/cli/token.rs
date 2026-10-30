@@ -16,7 +16,11 @@ use ring::{
     signature::{Ed25519KeyPair, KeyPair},
 };
 
-use super::args::show_duration;
+use super::{
+    args::{self, Parsed, show_duration},
+    emit,
+    files::{self, SIGNING_KEY_FILE},
+};
 
 /// The signing key in `path`, made first if the file does not exist; `true`
 /// when it was made.
@@ -63,6 +67,51 @@ pub fn keygen(path: &Path) -> Result<String, String> {
         path.display(),
         public_key(&key),
     ))
+}
+
+/// `wye token keygen`, from its options.
+pub fn run_keygen(
+    parsed: &Parsed<'_>,
+    env: &impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    let out = match parsed.value("out") {
+        Some(out) => out.into(),
+        None => files::in_home(SIGNING_KEY_FILE, "pass --out", env)?,
+    };
+    keygen(&out)
+}
+
+/// `wye token issue`, from its options.
+pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<(), String> {
+    let key = match parsed.value("key") {
+        Some(key) => key.into(),
+        None => files::in_home(SIGNING_KEY_FILE, "pass --key", env)?,
+    };
+    let ttl_secs = parsed
+        .value("ttl")
+        .map(|ttl| {
+            args::duration_secs(ttl)
+                .ok_or_else(|| format!("--ttl {ttl}: write it as 30m, 8h, or 7d"))
+        })
+        .transpose()?;
+    let request = Issue {
+        subject: parsed.positional.first().copied().unwrap_or_default(),
+        ttl_secs,
+        models: parsed.value("models"),
+        max_output_tokens: parsed.value("max-output-tokens"),
+    };
+    let key = read_key(&key)?;
+    let path = files::config_path(parsed, env)?;
+    let config = files::load(&path)?;
+    let issued = files::named(&path, issue(&request, &key, &config, super::unix_secs()?))?;
+    match parsed.value("out") {
+        Some(out) => {
+            super::write_secret(Path::new(out), &issued)?;
+            eprintln!("wrote {out}, readable only by you");
+        }
+        None => emit(&format!("{issued}\n")),
+    }
+    Ok(())
 }
 
 /// What `wye token issue` was asked for.

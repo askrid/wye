@@ -11,7 +11,11 @@ use std::{
 
 use gateway_core::config::Config;
 
-use super::{args, token};
+use super::{
+    args::{self, Parsed},
+    files::{self, CONFIG_FILE, SIGNING_KEY_FILE},
+    token,
+};
 
 /// Who the gateway is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +95,7 @@ impl InitOptions {
     fn key_path(&self) -> Result<PathBuf, String> {
         self.home
             .as_ref()
-            .map(|home| home.join("issuer.key"))
+            .map(|home| home.join(SIGNING_KEY_FILE))
             .ok_or_else(|| "no home directory for the signing key: set WYE_HOME".to_owned())
     }
 
@@ -100,7 +104,7 @@ impl InitOptions {
         let found = self
             .home
             .as_ref()
-            .is_some_and(|h| h.join("wye.toml") == self.out);
+            .is_some_and(|h| h.join(CONFIG_FILE) == self.out);
         if found {
             String::new()
         } else {
@@ -185,7 +189,7 @@ impl InitOptions {
         for (i, (words, command)) in steps.iter().enumerate() {
             // Words wrap under themselves; a command stays on one line, so
             // it can be copied.
-            let wrapped = args::wrap(words, 5, args::WIDTH);
+            let wrapped = args::wrap(words, 5);
             out.push_str(&format!("  {}. {}", i + 1, wrapped.trim_start()));
             if !command.is_empty() {
                 out.push_str(&format!("     {command}\n"));
@@ -195,6 +199,35 @@ impl InitOptions {
     }
 }
 
+/// `wye init`: what the options ask for, written; returns what to print.
+pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<String, String> {
+    let mode = match (parsed.flag("api-key"), parsed.flag("team")) {
+        (true, true) => {
+            return Err("--api-key and --team do not mix: a team's gateway reads \
+                        its key from the deployment's environment"
+                .into());
+        }
+        (true, false) => Mode::ApiKey,
+        (false, true) => Mode::Team,
+        (false, false) => Mode::Forward,
+    };
+    // A team's config belongs in the repository it is reviewed in.
+    let out = match (parsed.value("out"), mode) {
+        (Some(out), _) => PathBuf::from(out),
+        (None, Mode::Team) => PathBuf::from(CONFIG_FILE),
+        (None, _) => files::in_home(CONFIG_FILE, "pass --out", env)?,
+    };
+    init(
+        &InitOptions {
+            mode,
+            openai: parsed.flag("openai"),
+            out,
+            home: files::home(env),
+        },
+        env,
+    )
+}
+
 /// Writes the starter config to `options.out`, never over an existing file
 /// (or through a symlink); with `--team`, also the signing key, unless one is
 /// there to reuse.
@@ -202,7 +235,7 @@ pub fn init(
     options: &InitOptions,
     env: &impl Fn(&str) -> Option<String>,
 ) -> Result<String, String> {
-    let show = |path: &Path| args::tilde(path, env);
+    let show = |path: &Path| files::tilde(path, env);
     let path = &options.out;
     // Checked first so a refused run creates no key; `create_new` below
     // still refuses a file that appears in between.

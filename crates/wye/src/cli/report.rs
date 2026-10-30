@@ -7,7 +7,7 @@
 //! (a conversation of its own) is expected; one request cannot know it is
 //! first, but the whole log can.
 
-use std::{collections::HashMap, io::BufRead};
+use std::{collections::HashMap, io::BufRead, path::Path};
 
 use gateway_core::{
     agent::CacheMiss,
@@ -15,7 +15,11 @@ use gateway_core::{
 };
 use serde::Deserialize;
 
-use super::paint::Paint;
+use super::{
+    args::Parsed,
+    files::{self, USAGE_LOG_FILE},
+    paint::Paint,
+};
 
 /// Rows shown in the session and prompt rankings.
 const TOP: usize = 10;
@@ -288,6 +292,35 @@ impl Summary {
 struct Starts {
     sessions: u64,
     subagents: u64,
+}
+
+/// `wye report`: the log it was given, or the one in the home directory.
+pub fn run(
+    parsed: &Parsed<'_>,
+    env: &impl Fn(&str) -> Option<String>,
+    paint: Paint,
+) -> Result<String, String> {
+    let open = |path: &Path| {
+        std::fs::File::open(path)
+            .map(std::io::BufReader::new)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))
+    };
+    let written = match parsed.positional.first() {
+        Some(&"-") => report(std::io::stdin().lock(), paint),
+        Some(path) => report(open(Path::new(path))?, paint),
+        None => {
+            let path = files::in_home(USAGE_LOG_FILE, "pass a log file", env)?;
+            if !path.exists() {
+                let log = files::tilde(&path, env);
+                return Err(format!(
+                    "no usage log at {log}. `wye service install` keeps one, as does \
+                     `wye serve >> {log}`; or pass a file, or - for standard input"
+                ));
+            }
+            report(open(&path)?, paint)
+        }
+    };
+    written.map_err(|e| e.to_string())
 }
 
 /// Summarizes a usage log. Lines that are not request records (shutdown

@@ -3,8 +3,6 @@
 //! options) and rendered as help from the same table, so help and parsing
 //! cannot disagree.
 
-use std::path::{Path, PathBuf};
-
 mod commands;
 
 pub use commands::COMMANDS;
@@ -244,7 +242,7 @@ impl Command {
         out.push_str(&row("  -h, --help", "Show this help"));
         if !self.notes.is_empty() {
             out.push('\n');
-            out.push_str(&wrap(self.notes, 0, WIDTH));
+            out.push_str(&wrap(self.notes, 0));
         }
         out
     }
@@ -259,17 +257,17 @@ fn row(left: &str, text: &str) -> String {
     } else {
         out.push_str(&" ".repeat(DESCRIPTION_COLUMN - left.len()));
     }
-    out.push_str(wrap(text, DESCRIPTION_COLUMN, WIDTH).trim_start());
+    out.push_str(wrap(text, DESCRIPTION_COLUMN).trim_start());
     out
 }
 
-/// `text` wrapped at word boundaries to `width`, every line indented by
+/// `text` wrapped at word boundaries to [`WIDTH`], every line indented by
 /// `indent`; ends with a newline.
-pub fn wrap(text: &str, indent: usize, width: usize) -> String {
+pub fn wrap(text: &str, indent: usize) -> String {
     let mut out = String::new();
     let mut line = 0;
     for word in text.split_whitespace() {
-        if line > indent && line + 1 + word.len() > width {
+        if line > indent && line + 1 + word.len() > WIDTH {
             out.push('\n');
             line = 0;
         }
@@ -309,7 +307,6 @@ pub fn overview() -> String {
          problem, a refused request, a failed policy test, widened access, or a service \
          that is not running.",
         0,
-        WIDTH,
     ));
     out
 }
@@ -375,56 +372,6 @@ fn distance(a: &str, b: &str) -> usize {
         }
     }
     row.last().copied().unwrap_or_default()
-}
-
-/// Where a user's files live: `$WYE_HOME`, else `~/.wye`.
-pub fn home(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let set = |name| env(name).filter(|v| !v.is_empty());
-    set("WYE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| set("HOME").map(|home| Path::new(&home).join(".wye")))
-}
-
-/// The config a command reads: `--config`, else `$WYE_CONFIG`, else
-/// `wye.toml` in the home directory.
-///
-/// Never one found in the working directory: a config decides where the
-/// caller's credentials go, so the one in a repository just cloned must not
-/// apply unless it is named.
-pub fn find_config(
-    flag: Option<&str>,
-    env: &impl Fn(&str) -> Option<String>,
-    exists: impl Fn(&Path) -> bool,
-) -> Result<PathBuf, String> {
-    if let Some(path) = flag
-        .map(str::to_owned)
-        .or_else(|| env("WYE_CONFIG").filter(|v| !v.is_empty()))
-    {
-        return Ok(path.into());
-    }
-    let home = home(env).map(|home| home.join("wye.toml"));
-    if let Some(path) = home.as_ref().filter(|path| exists(path)) {
-        return Ok(path.clone());
-    }
-    let shown = home.map_or_else(|| "~/.wye/wye.toml".to_owned(), |p| tilde(&p, env));
-    let here = Path::new("wye.toml");
-    Err(if exists(here) {
-        format!("no config at {shown}, and ./wye.toml is read only when named: -c wye.toml")
-    } else {
-        format!("no config at {shown}: write one with `wye init`, or pass -c <path>")
-    })
-}
-
-/// `path` with the home directory shown as `~`.
-pub fn tilde(path: &Path, env: &impl Fn(&str) -> Option<String>) -> String {
-    match env("HOME").filter(|h| !h.is_empty()) {
-        Some(home) => match path.strip_prefix(&home) {
-            Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        },
-        None => path.display().to_string(),
-    }
 }
 
 /// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.
