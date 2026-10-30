@@ -60,15 +60,15 @@ With cost ceilings, expectations will also bound a cost (`max_cost_usd <= "0.05"
 
 **`wye report [<usage.jsonl>]`** summarizes a usage log (the JSON lines `wye serve` writes to stderr; standard input by default) with no telemetry backend:
 
-- Requests and outcomes.
+- Requests and outcomes, and the requests answered with an error status (a 429 refusal is an answer, so its outcome reads `completed`).
 - By request class: tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and, with `[pricing]`, cost (summed exactly from `cost_usd`, marked `+` when it includes partial or unknown costs, or records written without `[pricing]`).
-- Cache misses: unexplained ones, session starts, compactions, and the first request after a compaction. A session's first cache write is an expected miss that one request cannot recognize but the whole log can; `count_tokens` and refused requests before it do not count.
+- Cache misses: unexplained ones, and the expected ones: session starts, subagent starts, compactions, and the first request after a compaction. The first cache write of a session, and of each subagent (a conversation with its own prompt), is an expected miss that one request cannot recognize but the whole log can; `count_tokens` and refused requests before it do not count.
 - By tool: calls the model requested, and calls and time Claude Code reported.
 - By upstream, when records name one ([routes](architecture.md#cache-affine-routing)): requests, tokens, and cost, and failovers by refusing upstream and reason.
 - Upgrade issues by target, rule, and client.
 - The ten sessions and prompts with the most tokens.
 
-Other lines are skipped and counted. `wye serve --config wye.toml 2>>usage.jsonl` keeps the log across restarts; `wye report usage.jsonl` reads it.
+The gateway's own notices (`wye: listening on ...`, which share stderr) and other lines are skipped and counted. `wye serve --config wye.toml 2>>usage.jsonl` keeps the log across restarts; `wye report usage.jsonl` reads it.
 
 **`wye probe <url>`** sends one `GET` over HTTP or HTTPS and exits 0 only for a 2xx answer within 5 s: a health check for images without `curl` (Docker `HEALTHCHECK CMD ["wye", "probe", "http://127.0.0.1:8080/readyz"]`), and the check `wye claude` runs against a local or remote gateway.
 
@@ -308,7 +308,7 @@ The usage record (`wye serve 2>>usage.jsonl` keeps the log; `wye report` reads i
 | `compaction`, `context_compacted` | `auto` \| `manual` \| `reactive` \| `other` | Hint headers |
 | `tool_durations` | `[{"name": "Bash", "ms": 742}]` | Tool calls since the agent's previous request; at most 32 |
 | `tool_calls` | `{"Bash": 2, "Read": 1}` | `tool_use` blocks the response started; at most 8 names, the rest under `(other)`; inputs never read |
-| `cache_miss` | `compaction` \| `after_compaction` \| `unexplained` | A cache write with no cache read; a session's first cache write also reads `unexplained` |
+| `cache_miss` | `compaction` \| `after_compaction` \| `unexplained` | A cache write with no cache read; the first cache write of a session or a subagent also reads `unexplained` |
 | `prompt` | keyed prompt hashes | With [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags |
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1-128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `ttft_ms`, `config_version`. No `provider`: the upstream's `id` names the account, and config maps it to its provider.

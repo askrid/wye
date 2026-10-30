@@ -11,9 +11,9 @@ pub(super) fn render(s: &Summary) -> String {
     if s.total.requests == 0 {
         let _ = writeln!(
             out,
-            "no request records ({} skipped); the gateway writes one per request to \
+            "no request records ({}); the gateway writes one per request to \
              stderr: `wye serve --config wye.toml 2>>usage.jsonl`",
-            plural(s.skipped, "other line", "other lines"),
+            skipped(s),
         );
         return out;
     }
@@ -25,16 +25,19 @@ pub(super) fn render(s: &Summary) -> String {
     outcomes.sort();
     let _ = writeln!(
         out,
-        "{} in {} ({} skipped); outcomes: {}",
+        "{} in {} ({}); outcomes: {}",
         plural(s.total.requests, "request", "requests"),
         plural(s.sessions.len() as u64, "session", "sessions"),
-        plural(s.skipped, "other line", "other lines"),
-        outcomes
-            .iter()
-            .map(|(k, v)| format!("{k} {v}"))
-            .collect::<Vec<_>>()
-            .join(", ")
+        skipped(s),
+        pairs(outcomes)
     );
+    // A refusal (429, 529) or a client error is an answer like any other,
+    // so its outcome reads completed.
+    if !s.errors.is_empty() {
+        let mut errors: Vec<_> = s.errors.iter().collect();
+        errors.sort();
+        let _ = writeln!(out, "error statuses: {}", pairs(errors));
+    }
 
     let _ = writeln!(out, "\nBy request class");
     columns.header(&mut out, "class");
@@ -76,14 +79,17 @@ pub(super) fn render(s: &Summary) -> String {
         }
     }
 
-    let starts = s.session_starts();
+    let starts = s.starts();
     let count = |k: &str| s.misses.get(k).copied().unwrap_or(0);
     let _ = writeln!(
         out,
-        "\nCache misses (cache written, nothing read): {} unexplained, {} session starts, \
-         {} compactions, {} after compaction",
-        count("unexplained").saturating_sub(starts),
-        starts,
+        "\nCache misses (cache written, nothing read): {} unexplained; expected: \
+         {} session starts, {} subagent starts, {} compactions, {} after compaction",
+        count("unexplained")
+            .saturating_sub(starts.sessions)
+            .saturating_sub(starts.subagents),
+        starts.sessions,
+        starts.subagents,
         count("compaction"),
         count("after_compaction"),
     );
@@ -222,6 +228,30 @@ impl Columns {
             seconds(g.tool_ms as f64)
         );
     }
+}
+
+/// What the report skipped: the gateway's own notices and anything else.
+fn skipped(s: &Summary) -> String {
+    let others = plural(s.skipped, "other line", "other lines");
+    match s.notices {
+        0 => format!("{others} skipped"),
+        n if s.skipped == 0 => {
+            format!("{} skipped", plural(n, "gateway notice", "gateway notices"))
+        }
+        n => format!(
+            "{} and {others} skipped",
+            plural(n, "gateway notice", "gateway notices")
+        ),
+    }
+}
+
+/// `name count` pairs, comma-separated.
+fn pairs(pairs: Vec<(impl std::fmt::Display, &u64)>) -> String {
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{k} {v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn seconds(ms: f64) -> String {

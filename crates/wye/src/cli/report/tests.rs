@@ -3,10 +3,11 @@
 use super::*;
 
 const LOG: &str = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":1500.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"main","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":100,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
-{"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}],"tool_calls":{"Bash":2,"Grep":1}}
+{"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","agent_id":"agent-1","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}],"tool_calls":{"Bash":2,"Grep":1}}
 {"event":"request","unix_ms":5000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":900.0,"session_id":"session-aaaa-1","request_class":"compaction","compaction":"auto","usage_status":"complete","input_tokens":20,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":6000}
 {"event":"request","unix_ms":2000,"path":"/v1/messages","status":529,"outcome":"gateway_error","duration_ms":0.1,"session_id":"session-bbbb-2","usage_status":"not_observed"}
 not json
+wye: listening on http://127.0.0.1:8080
 {"event":"usage_log_dropped","count":3}
 "#;
 
@@ -14,12 +15,19 @@ not json
 fn summarizes_sessions_classes_and_cache_misses() {
     let out = report(LOG.as_bytes()).unwrap();
     assert!(
-        out.starts_with("4 requests in 2 sessions (2 other lines skipped); outcomes: completed 3, gateway_error 1"),
+        out.starts_with(
+            "4 requests in 2 sessions (1 gateway notice and 2 other lines skipped); \
+             outcomes: completed 3, gateway_error 1\nerror statuses: 529 1\n"
+        ),
         "{out}"
     );
-    // The first request of session aaaa is an expected miss; the subagent's is not.
+    // The first cache writes of session aaaa and of its subagent are
+    // expected misses: each is a conversation of its own.
     assert!(
-        out.contains("1 unexplained, 1 session starts, 0 compactions, 0 after compaction"),
+        out.contains(
+            "0 unexplained; expected: 1 session starts, 1 subagent starts, 0 compactions, \
+             0 after compaction"
+        ),
         "{out}"
     );
     let row = |name: &str| {
@@ -63,7 +71,32 @@ fn a_session_starts_at_its_first_cache_write() {
 {"event":"request","unix_ms":1300,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"main","usage_status":"complete","input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":36820,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
 "#;
     let out = report(log.as_bytes()).unwrap();
-    assert!(out.contains("0 unexplained, 1 session starts"), "{out}");
+    assert!(
+        out.contains("0 unexplained; expected: 1 session starts, 0 subagent starts"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_subagent_misses_once_at_its_start() {
+    let line = |at: u64, agent: &str| {
+        format!(
+            r#"{{"event":"request","unix_ms":{at},"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s",{agent}"usage_status":"complete","input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":98000,"cache_read_input_tokens":0,"cache_miss":"unexplained"}}"#
+        )
+    };
+    let log = [
+        line(1000, ""),
+        line(2000, r#""agent_id":"a1","#),
+        line(3000, r#""agent_id":"a2","#),
+        // Its own prefix again: a miss nothing explains.
+        line(4000, r#""agent_id":"a1","#),
+    ]
+    .join("\n");
+    let out = report(log.as_bytes()).unwrap();
+    assert!(
+        out.contains("1 unexplained; expected: 1 session starts, 2 subagent starts"),
+        "{out}"
+    );
 }
 
 #[test]
