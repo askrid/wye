@@ -1,10 +1,6 @@
 //! The OpenAI route: `/v1/responses` and `/v1/chat/completions` passthrough
 //! for Codex and the OpenAI SDKs, with the provider key as a bearer token.
 
-use gateway_core::credential::{self, NewCredential};
-use ring::signature::{Ed25519KeyPair, KeyPair};
-use wye_testkit::ed25519_keypair as keypair;
-
 use super::harness::*;
 
 const OPENAI_KEY: &str = "sk-openai-test";
@@ -13,17 +9,7 @@ const EVENTS: &str = "event: response.created\ndata: {\"type\":\"response.create
 /// A gateway with only `[routes.openai]` (plus `extra` config), whose
 /// upstream reports what it received and answers with an SSE stream.
 async fn harness(extra: &str) -> (Harness, mpsc::Receiver<Seen>) {
-    let (tx, rx) = mpsc::channel(8);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen).await.unwrap();
-            let mut res = full(StatusCode::OK, EVENTS);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
-    });
+    let (handler, rx) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, EVENTS)));
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = format!(
@@ -94,17 +80,12 @@ async fn responses_reach_openai_with_the_provider_key() {
 }
 
 fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Option<u64>) -> String {
-    credential::issue(
+    issue(
         key,
-        "k1",
         &NewCredential {
-            iss: "wye",
-            sub: "dev",
-            aud: "wye-prod",
-            iat: now(),
-            exp: now() + 600,
             models,
             max_output_tokens,
+            ..claims("dev")
         },
     )
 }
@@ -112,11 +93,7 @@ fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Optio
 #[tokio::test]
 async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     let key = keypair();
-    let auth = format!(
-        "[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
-        credential::encode_public_key(key.public_key().as_ref())
-    );
+    let auth = auth_section(&key, "");
     let (h, mut seen) = harness(&auth).await;
 
     // Codex sends its env_key value as a bearer token: here, a gateway credential.
@@ -195,14 +172,8 @@ data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.5-codex\"
 
 #[tokio::test]
 async fn responses_usage_and_cost_are_recorded() {
-    let handler: Handler = Arc::new(|_seen: Seen| {
-        Box::pin(async {
-            let mut res = full(StatusCode::OK, COMPLETED);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
-    });
+    let handler: Handler =
+        Arc::new(|_seen: Seen| Box::pin(async { sse(full(StatusCode::OK, COMPLETED)) }));
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = format!(
@@ -236,17 +207,7 @@ async fn chat_completions_pass_through_with_usage() {
     const CHAT: &str = "data: {\"model\":\"gpt-5.5\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}],\"usage\":null}\n\n\
 data: {\"model\":\"gpt-5.5\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":10}}}\n\n\
 data: [DONE]\n\n";
-    let (tx, mut rx) = mpsc::channel(4);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen).await.unwrap();
-            let mut res = full(StatusCode::OK, CHAT);
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
-    });
+    let (handler, mut rx) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, CHAT)));
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = format!(
@@ -285,8 +246,7 @@ data: [DONE]\n\n";
 async fn a_body_past_the_limit_gets_openais_error_shape() {
     let (h, mut seen) = harness("").await;
     // The harness allows 1024 bytes.
-    let big: &'static str =
-        Box::leak(format!(r#"{{"input":"{}"}}"#, "x".repeat(2048)).into_boxed_str());
+    let big = format!(r#"{{"input":"{}"}}"#, "x".repeat(2048));
     let res = h.send(responses(), big).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let body: serde_json::Value = serde_json::from_slice(&read_body(res).await).unwrap();

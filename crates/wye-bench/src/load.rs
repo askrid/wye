@@ -13,8 +13,8 @@ use crate::{
     allocations,
     gateway_process::{Gateway, GatewayProcess},
     measure::{
-        PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US, PACED_RAMP, PACED_STREAMS,
-        UPLOAD_BYTES, UPLOAD_CONCURRENCY,
+        EVENT_CPU_CONCURRENCY, EVENT_CPU_EVENTS, EVENT_CPU_STREAMS, PACED_RAMP, PACED_STREAMS,
+        UPLOAD_BYTES, UPLOAD_CONCURRENCY, token_streams,
     },
     mock, scenarios,
 };
@@ -121,7 +121,16 @@ async fn soak_events(process: &GatewayProcess, seconds: u64) {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(64);
-    let run = || scenarios::sse(process.target(), 32, 64, 2_000, bytes, 0);
+    let run = || {
+        scenarios::sse(
+            process.target(),
+            EVENT_CPU_CONCURRENCY,
+            EVENT_CPU_STREAMS,
+            EVENT_CPU_EVENTS,
+            bytes,
+            0,
+        )
+    };
     run().await;
     eprintln!("gateway pid {} under events for {seconds}s", process.pid());
     let deadline = Instant::now() + Duration::from_secs(seconds);
@@ -145,16 +154,7 @@ async fn soak_events(process: &GatewayProcess, seconds: u64) {
 /// Batches of token-paced streams until `seconds` pass; prints CPU per event
 /// and the gateway's resident memory after each batch, so growth shows.
 async fn soak_paced(process: &GatewayProcess, seconds: u64) {
-    let run = || {
-        scenarios::paced(
-            process.target(),
-            PACED_STREAMS,
-            PACED_RAMP,
-            PACED_EVENTS,
-            PACED_EVENT_BYTES,
-            PACED_INTERVAL_US,
-        )
-    };
+    let run = || token_streams(process.target(), PACED_STREAMS, PACED_RAMP);
     run().await;
     eprintln!("gateway pid {} under paced for {seconds}s", process.pid());
     let started = Instant::now();

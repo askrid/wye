@@ -15,6 +15,7 @@ pub(crate) use std::{
 };
 
 pub(crate) use bytes::Bytes;
+pub(crate) use gateway_core::credential::{self, NewCredential};
 pub(crate) use gateway_core::{config::Config, prompt::HashKey};
 pub(crate) use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 pub(crate) use http_body_util::{BodyExt, Either, Full};
@@ -23,6 +24,7 @@ pub(crate) use hyper_util::{
     client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
+pub(crate) use ring::signature::{Ed25519KeyPair, KeyPair};
 pub(crate) use tokio::{
     io::{AsyncBufReadExt, BufReader, DuplexStream, Lines},
     net::TcpListener,
@@ -30,7 +32,7 @@ pub(crate) use tokio::{
     task::JoinHandle,
 };
 pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources};
-pub(crate) use wye_testkit::TestCa;
+pub(crate) use wye_testkit::{TestCa, ed25519_keypair as keypair};
 
 pub(crate) const API_KEY: &str = "sk-test-provider-key";
 pub(crate) const WAIT: Duration = Duration::from_secs(5);
@@ -215,6 +217,36 @@ impl Harness {
         }
     }
 
+    /// Gateway in front of `handler`, exporting OTLP to `collector` with
+    /// `otlp_headers` and `telemetry_extra` lines in `[telemetry]`.
+    pub(crate) async fn with_telemetry(
+        handler: Handler,
+        collector: Handler,
+        telemetry_extra: &str,
+        otlp_headers: HeaderMap,
+    ) -> Self {
+        let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
+        let hits = Arc::new(AtomicUsize::new(0));
+        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let resources = Resources {
+            otlp_headers,
+            ..with_upstreams(vec![UpstreamResources::new(
+                UpstreamAuth::api_key(API_KEY).unwrap(),
+            )])
+        };
+        let telemetry = format!(
+            "api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\"\n{telemetry_extra}"
+        );
+        Self::launch(
+            &format!("http://{upstream}"),
+            "",
+            &telemetry,
+            resources,
+            hits,
+        )
+        .await
+    }
+
     /// Closes the usage log's reading end, as when the process reading
     /// stderr exits.
     pub(crate) async fn close_usage_log(&self) {
@@ -239,12 +271,12 @@ impl Harness {
     pub(crate) async fn send(
         &self,
         req: http::request::Builder,
-        body: &'static str,
+        body: impl Into<Bytes>,
     ) -> Response<Incoming> {
         let path = req.uri_ref().unwrap().to_string();
         let req = req
             .uri(format!("http://{}{path}", self.gateway))
-            .body(Full::new(Bytes::from_static(body.as_bytes())))
+            .body(Full::new(body.into()))
             .unwrap();
         tokio::time::timeout(WAIT, self.client.request(req))
             .await
@@ -257,7 +289,7 @@ impl Harness {
     pub(crate) async fn send_chunked(
         &self,
         req: http::request::Builder,
-        chunks: &[&'static [u8]],
+        chunks: &[&[u8]],
     ) -> Response<Incoming> {
         let (tx, rx) = mpsc::channel::<Bytes>(2);
         let client: Client<HttpConnector, ChannelBody> =
@@ -270,7 +302,7 @@ impl Harness {
         let response = tokio::spawn(async move { client.request(req).await });
         for chunk in chunks {
             // A refusal may close the request before the last chunk.
-            if tx.send(Bytes::from_static(chunk)).await.is_err() {
+            if tx.send(Bytes::copy_from_slice(chunk)).await.is_err() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -333,10 +365,43 @@ pub(crate) async fn spawn_upstream(
     wye_testkit::spawn_upstream(serve, tls, max_streams).await
 }
 
-pub(crate) fn full(status: StatusCode, body: &'static str) -> Response<UpBody> {
-    let mut res = Response::new(Either::Left(Full::new(Bytes::from_static(body.as_bytes()))));
+pub(crate) fn full(status: StatusCode, body: impl Into<Bytes>) -> Response<UpBody> {
+    let mut res = Response::new(Either::Left(Full::new(body.into())));
     *res.status_mut() = status;
     res
+}
+
+/// `res` as an event stream.
+pub(crate) fn sse(mut res: Response<UpBody>) -> Response<UpBody> {
+    res.headers_mut()
+        .insert("content-type", "text/event-stream".parse().unwrap());
+    res
+}
+
+/// An event stream whose chunks the test sends on `rx`'s channel.
+pub(crate) fn streaming(rx: mpsc::Receiver<Bytes>) -> Response<UpBody> {
+    sse(Response::new(Either::Right(ChannelBody(rx))))
+}
+
+/// `res` as JSON.
+pub(crate) fn json(mut res: Response<UpBody>) -> Response<UpBody> {
+    res.headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
+    res
+}
+
+/// An upstream that answers every request with `reply()`.
+pub(crate) fn answering(reply: impl Fn() -> Response<UpBody> + Send + Sync + 'static) -> Handler {
+    let reply = Arc::new(reply);
+    Arc::new(move |_| {
+        let reply = Arc::clone(&reply);
+        Box::pin(async move { reply() })
+    })
+}
+
+/// An upstream that answers `200 {}`.
+pub(crate) fn ok() -> Handler {
+    answering(|| full(StatusCode::OK, "{}"))
 }
 
 /// An upstream that answers `200 {}` and passes `pick` of each request it
@@ -350,12 +415,23 @@ pub(crate) fn recording_with<T: Send + 'static>(
     status: StatusCode,
     pick: fn(Seen) -> T,
 ) -> (Handler, mpsc::Receiver<T>) {
+    recording_reply(pick, move || full(status, "{}"))
+}
+
+/// [`recording`], answering `reply()`. A receiver the test dropped is
+/// tolerated.
+pub(crate) fn recording_reply<T: Send + 'static>(
+    pick: fn(Seen) -> T,
+    reply: impl Fn() -> Response<UpBody> + Send + Sync + 'static,
+) -> (Handler, mpsc::Receiver<T>) {
     let (tx, rx) = mpsc::channel(8);
+    let reply = Arc::new(reply);
     let handler: Handler = Arc::new(move |seen: Seen| {
         let tx = tx.clone();
+        let reply = Arc::clone(&reply);
         Box::pin(async move {
-            tx.send(pick(seen)).await.unwrap();
-            full(status, "{}")
+            let _ = tx.send(pick(seen)).await;
+            reply()
         })
     });
     (handler, rx)
@@ -383,4 +459,32 @@ pub(crate) fn now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
+}
+
+/// Claims the tests' gateway credentials share: issuer `wye`, audience
+/// `wye-prod`, valid for ten minutes, no model list or ceiling.
+pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
+    NewCredential {
+        iss: "wye",
+        sub,
+        aud: "wye-prod",
+        iat: now(),
+        exp: now() + 600,
+        models: None,
+        max_output_tokens: None,
+    }
+}
+
+/// A gateway credential signed with `key` as key `k1`.
+pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewCredential<'_>) -> String {
+    credential::issue(key, "k1", claims)
+}
+
+/// An `[auth]` section trusting `key` as key `k1`, with `extra` lines.
+pub(crate) fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
+    format!(
+        "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
+         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
+        credential::encode_public_key(key.public_key().as_ref())
+    )
 }

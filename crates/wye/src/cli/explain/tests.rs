@@ -7,6 +7,11 @@ use super::*;
 
 const NOW: u64 = 1_800_000_000;
 
+/// `explain` for a `/v1/messages` request without a session, at `NOW`.
+fn explain_messages(config: &Config, credential: Credential<'_>, body: &[u8]) -> Explanation {
+    explain(config, "/v1/messages", credential, None, body, NOW, &[])
+}
+
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\nmax_request_body_bytes = 200\n\
@@ -67,15 +72,7 @@ fn explains_forwarding_and_each_refusal() {
 
     let sonnet = br#"{"model":"claude-sonnet-4-5"}"#;
     let refused = |e: Explanation| e.refused.map(|(status, kind, _)| (status, kind));
-    let forbidden = explain(
-        &config,
-        "/v1/messages",
-        Credential::Token(&t, &verifier(&config)),
-        None,
-        sonnet,
-        NOW,
-        &[],
-    );
+    let forbidden = explain_messages(&config, Credential::Token(&t, &verifier(&config)), sonnet);
     // The server's message: the model as the client sent it.
     assert_eq!(
         forbidden.refused.as_ref().map(|r| r.2.as_str()),
@@ -83,15 +80,7 @@ fn explains_forwarding_and_each_refusal() {
     );
     assert_eq!(refused(forbidden), Some((403, "permission_error")));
     assert_eq!(
-        refused(explain(
-            &config,
-            "/v1/messages",
-            Credential::None,
-            None,
-            haiku,
-            NOW,
-            &[]
-        )),
+        refused(explain_messages(&config, Credential::None, haiku)),
         Some((401, "authentication_error"))
     );
     assert_eq!(
@@ -107,26 +96,18 @@ fn explains_forwarding_and_each_refusal() {
         Some((401, "authentication_error"))
     );
     assert_eq!(
-        refused(explain(
+        refused(explain_messages(
             &config,
-            "/v1/messages",
             Credential::Token(&t, &verifier(&config)),
-            None,
-            &[b' '; 201],
-            NOW,
-            &[]
+            &[b' '; 201]
         )),
         Some((413, "request_too_large"))
     );
     assert_eq!(
-        refused(explain(
+        refused(explain_messages(
             &config,
-            "/v1/messages",
             Credential::Token(&t, &verifier(&config)),
-            None,
-            b"{}",
-            NOW,
-            &[]
+            b"{}"
         )),
         Some((400, "invalid_request_error"))
     );
@@ -146,25 +127,17 @@ fn explains_forwarding_and_each_refusal() {
     limited.auth.as_mut().unwrap().max_output_tokens = Some(100);
     let over = br#"{"model":"claude-haiku-4-5","max_tokens":101}"#;
     assert_eq!(
-        refused(explain(
+        refused(explain_messages(
             &limited,
-            "/v1/messages",
             Credential::Token(&t, &verifier(&config)),
-            None,
-            over,
-            NOW,
-            &[]
+            over
         )),
         Some((403, "permission_error"))
     );
-    let report = explain(
+    let report = explain_messages(
         &limited,
-        "/v1/messages",
         Credential::Token(&t, &verifier(&config)),
-        None,
         br#"{"model":"claude-haiku-4-5","max_tokens":100}"#,
-        NOW,
-        &[],
     )
     .report();
     assert!(report.contains("max_tokens: 100 (limit 100)"), "{report}");
@@ -175,14 +148,10 @@ fn explains_forwarding_and_each_refusal() {
     only_ceiling.auth.as_mut().unwrap().models = None;
     let t = token(&key, None);
     assert_eq!(
-        refused(explain(
+        refused(explain_messages(
             &only_ceiling,
-            "/v1/messages",
             Credential::Token(&t, &verifier(&only_ceiling)),
-            None,
-            br#"{"max_tokens":10}"#,
-            NOW,
-            &[]
+            br#"{"max_tokens":10}"#
         )),
         Some((400, "invalid_request_error"))
     );
@@ -196,16 +165,7 @@ fn explains_alias_resolution_before_permissions() {
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
-    let report = explain(
-        &config,
-        "/v1/messages",
-        Credential::None,
-        None,
-        br#"{"model":"coding"}"#,
-        NOW,
-        &[],
-    )
-    .report();
+    let report = explain_messages(&config, Credential::None, br#"{"model":"coding"}"#).report();
     assert!(
         report.contains("alias: coding resolves to claude-opus-5-5;"),
         "{report}"
@@ -223,15 +183,7 @@ fn explains_upgrade_issues_per_target_without_refusing() {
     )
     .unwrap();
     let body = br#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":9},"messages":[{"role":"system","content":"x"}]}"#;
-    let configured = explain(
-        &config,
-        "/v1/messages",
-        Credential::None,
-        None,
-        body,
-        NOW,
-        &[],
-    );
+    let configured = explain_messages(&config, Credential::None, body);
     assert!(configured.refused.is_none(), "report only");
     assert_eq!(
         configured.upgrade_issues,
@@ -314,16 +266,7 @@ fn shows_the_providers_own_model_id() {
         ),
         (&br#"{"model":"anthropic.claude-opus-5-5"}"#[..], None),
     ] {
-        let report = explain(
-            &config,
-            "/v1/messages",
-            Credential::None,
-            None,
-            body,
-            NOW,
-            &[],
-        )
-        .report();
+        let report = explain_messages(&config, Credential::None, body).report();
         assert!(
             report.contains(
                 "upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages"
@@ -408,18 +351,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
          cache_read = \"0.50\"\n",
     )
     .unwrap();
-    let report = |body: &[u8]| {
-        explain(
-            &config,
-            "/v1/messages",
-            Credential::None,
-            None,
-            body,
-            NOW,
-            &[],
-        )
-        .report()
-    };
+    let report = |body: &[u8]| explain_messages(&config, Credential::None, body).report();
     let priced = report(br#"{"model":"claude-opus-5-5"}"#);
     assert!(
         priced.contains(

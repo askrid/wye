@@ -9,9 +9,7 @@ mod stress;
 mod upload;
 
 // The gated scenarios' sizes, for the load and allocation runs to reproduce.
-pub(crate) use paced::{
-    PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US, PACED_RAMP, PACED_STREAMS,
-};
+pub(crate) use paced::{PACED_RAMP, PACED_STREAMS, token_streams};
 use upload::{
     AGENT_UPLOAD_REQUESTS, UPLOAD_REQUESTS, agent_body, measure_uploads, upload, upload_agent,
     upload_body,
@@ -25,7 +23,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios::{self, Stream},
-    stats::{PERCENTILES, add, percentile, phase, put, sorted},
+    stats::{PERCENTILES, add, event_delays, percentile, phase, put, sorted},
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -44,9 +42,9 @@ const CANCEL_ROUNDS: usize = 20;
 const CPU_PER_REQUEST_TOTAL: usize = 20_000;
 /// Token-sized events, unpaced, whose total gateway CPU gives the cost per
 /// event: what the usage scanner of each API adds to every streamed event.
-const EVENT_CPU_CONCURRENCY: usize = 32;
-const EVENT_CPU_STREAMS: usize = 64;
-const EVENT_CPU_EVENTS: u32 = 2_000;
+pub(crate) const EVENT_CPU_CONCURRENCY: usize = 32;
+pub(crate) const EVENT_CPU_STREAMS: usize = 64;
+pub(crate) const EVENT_CPU_EVENTS: u32 = 2_000;
 const EVENT_CPU_BYTES: usize = 64;
 
 /// Scenario parameters, recorded in the report so results stay interpretable.
@@ -346,12 +344,7 @@ impl Latency {
                     .collect(),
             ),
             sse_failed: streams.iter().filter(|s| s.failed).count(),
-            event_delay: sorted(
-                streams
-                    .into_iter()
-                    .flat_map(|s| s.event_delays_us)
-                    .collect(),
-            ),
+            event_delay: event_delays(streams),
         }
     }
 }

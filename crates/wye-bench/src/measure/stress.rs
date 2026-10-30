@@ -6,16 +6,12 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use super::{
-    paced::{PACED_EVENT_BYTES, PACED_EVENTS, PACED_INTERVAL_US},
-    successes,
-    upload::upload_body,
-};
+use super::{paced::token_streams, successes, upload::upload_body};
 use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{percentile, phase, put, sorted},
+    stats::{PERCENTILES, event_delays, percentile, phase, put},
 };
 
 /// Token-paced streams in the mixed and stalled scenarios.
@@ -66,17 +62,7 @@ impl Stress {
     pub(crate) async fn measure(target: &Target, rss: impl Fn() -> f64) -> Self {
         let streams = {
             let target = target.clone();
-            tokio::spawn(async move {
-                scenarios::paced(
-                    &target,
-                    STREAMS,
-                    RAMP,
-                    PACED_EVENTS,
-                    PACED_EVENT_BYTES,
-                    PACED_INTERVAL_US,
-                )
-                .await
-            })
+            tokio::spawn(async move { token_streams(&target, STREAMS, RAMP).await })
         };
         let body = upload_body();
         let mut uploads = Vec::new();
@@ -89,12 +75,7 @@ impl Stress {
         let streams = streams.await.unwrap();
         let (mixed_uploads, uploads_failed) = successes(uploads);
         let mixed_failed = uploads_failed + streams.iter().filter(|s| s.failed).count();
-        let mixed_events = sorted(
-            streams
-                .into_iter()
-                .flat_map(|s| s.event_delays_us)
-                .collect(),
-        );
+        let mixed_events = event_delays(streams);
 
         tokio::time::sleep(Duration::from_millis(500)).await;
         let rss_before = rss();
@@ -102,23 +83,10 @@ impl Stress {
         // Let every stalled stream fill its buffers and flow-control windows.
         tokio::time::sleep(Duration::from_millis(500)).await;
         let stalled_rss_kb = (rss() - rss_before) / STALLED as f64;
-        let streams = scenarios::paced(
-            target,
-            STREAMS,
-            RAMP,
-            PACED_EVENTS,
-            PACED_EVENT_BYTES,
-            PACED_INTERVAL_US,
-        )
-        .await;
+        let streams = token_streams(target, STREAMS, RAMP).await;
         let stalled_failed = STALLED - held.len() + streams.iter().filter(|s| s.failed).count();
         drop(held);
-        let stalled_events = sorted(
-            streams
-                .into_iter()
-                .flat_map(|s| s.event_delays_us)
-                .collect(),
-        );
+        let stalled_events = event_delays(streams);
 
         Self {
             mixed_events,
@@ -139,7 +107,7 @@ pub(super) async fn measure_cold(
     metrics: &mut BTreeMap<String, f64>,
 ) {
     let via = phase(format!("{prefix}cold"), Cold::measure(process.target())).await;
-    for (name, p) in [("p50", 50.0), ("p99", 99.0)] {
+    for (name, p) in PERCENTILES {
         put(
             metrics,
             prefix,
@@ -163,7 +131,7 @@ pub(super) async fn measure_stress(
     )
     .await;
     let added = |via: &[u64], direct: &[u64], p| percentile(via, p) - percentile(direct, p);
-    for (name, p) in [("p50", 50.0), ("p99", 99.0)] {
+    for (name, p) in PERCENTILES {
         put(
             metrics,
             prefix,

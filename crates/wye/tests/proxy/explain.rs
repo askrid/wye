@@ -1,25 +1,17 @@
 //! `wye explain` against the server: for the same config, credential, and
 //! body, both give the same answer, word for word.
 
-use gateway_core::credential::{self, NewCredential};
-use ring::signature::{Ed25519KeyPair, KeyPair};
 use wye::{Credential, explain};
-use wye_testkit::ed25519_keypair as keypair;
 
 use super::harness::*;
 
 fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Option<u64>) -> String {
-    credential::issue(
+    issue(
         key,
-        "k1",
         &NewCredential {
-            iss: "wye",
-            sub: "alice",
-            aud: "wye-prod",
-            iat: now(),
-            exp: now() + 600,
             models,
             max_output_tokens,
+            ..claims("alice")
         },
     )
 }
@@ -28,21 +20,15 @@ fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Optio
 async fn explain_and_the_server_answer_alike() {
     let key = keypair();
     let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
-        Arc::clone(&hits),
-        None,
-        None,
-    )
-    .await;
+    let upstream = spawn_upstream(ok(), Arc::clone(&hits), None, None).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [upstream]\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n\
-         [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n\
-         models = [\"claude-sonnet-*\", \"claude-haiku-*\"]\nmax_output_tokens = 1000\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n\
+         [upstream]\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n{}\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
-        credential::encode_public_key(key.public_key().as_ref())
+        auth_section(
+            &key,
+            "models = [\"claude-sonnet-*\", \"claude-haiku-*\"]\nmax_output_tokens = 1000"
+        )
     );
     let parsed = Config::from_toml_str(&config).unwrap();
     let verifier = wye::verifier(&parsed, Path::new("/")).unwrap().unwrap();
@@ -103,7 +89,7 @@ async fn explain_and_the_server_answer_alike() {
             now(),
             &[],
         );
-        let body: &'static str = Box::leak(body.to_owned().into_boxed_str());
+        let body = body.to_owned();
         let res = h
             .send(
                 messages().header("authorization", format!("Bearer {token}")),

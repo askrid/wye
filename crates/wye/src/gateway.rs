@@ -11,6 +11,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
+    admission::Refusal,
     alias::Aliases,
     api::{self, Api},
     config::{Config, DEFAULT_SAMPLE_PERCENT, UpgradeCheck},
@@ -238,7 +239,13 @@ impl Gateway {
             }
             (&Method::POST, path) => match api::endpoint(path) {
                 Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
-                Some(endpoint) => return no_route(endpoint.api, path),
+                Some(endpoint) => {
+                    let refusal = Refusal::NoRoute {
+                        api: endpoint.api,
+                        path: path.into(),
+                    };
+                    return responses::refuse(endpoint.api, &refusal);
+                }
                 None => return self.local(req.method(), path),
             },
             (method, path) => return self.local(method, path),
@@ -298,13 +305,6 @@ impl Gateway {
         );
         responses::json(body)
     }
-}
-
-/// A known endpoint whose API no route serves: the 404, in that API's shape,
-/// names the sections that would.
-fn no_route(api: Api, path: &str) -> Response<ResBody> {
-    let message = format!("no route serves {path}: add {}", api.route_sections());
-    error(api, StatusCode::NOT_FOUND, "not_found_error", &message)
 }
 
 /// Codex asks `GET {base_url}/models?client_version=...` for its own catalog

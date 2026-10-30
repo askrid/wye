@@ -5,16 +5,10 @@ use super::harness::*;
 #[tokio::test]
 async fn forwards_over_tls_with_http2_to_a_trusted_upstream() {
     let ca = TestCa::generate();
-    let (tx, mut rx) = mpsc::channel(1);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send((seen.version, seen.headers, seen.body))
-                .await
-                .unwrap();
-            full(StatusCode::OK, r#"{"id":"msg_tls"}"#)
-        })
-    });
+    let (handler, mut rx) = recording_reply(
+        |seen| (seen.version, seen.headers, seen.body),
+        || full(StatusCode::OK, r#"{"id":"msg_tls"}"#),
+    );
     let h = Harness::start_tls(handler, &ca, true).await;
     let res = h.send(messages(), r#"{"model":"claude-x"}"#).await;
     assert_eq!(res.status(), StatusCode::OK);
@@ -28,12 +22,7 @@ async fn forwards_over_tls_with_http2_to_a_trusted_upstream() {
 #[tokio::test]
 async fn untrusted_upstream_certificate_is_rejected() {
     let ca = TestCa::generate();
-    let h = Harness::start_tls(
-        Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") })),
-        &ca,
-        false,
-    )
-    .await;
+    let h = Harness::start_tls(ok(), &ca, false).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
@@ -93,14 +82,7 @@ async fn http_version_pins_the_upstream_protocol() {
         ("http_version = \"1.1\"", Version::HTTP_11),
     ] {
         let ca = TestCa::generate();
-        let (tx, mut rx) = mpsc::channel::<Version>(1);
-        let handler: Handler = Arc::new(move |seen: Seen| {
-            let tx = tx.clone();
-            Box::pin(async move {
-                tx.send(seen.version).await.unwrap();
-                full(StatusCode::OK, "{}")
-            })
-        });
+        let (handler, mut rx) = recording(|seen| seen.version);
         let h = Harness::start_tls_with(handler, &ca, true, None, extra).await;
         let res = h.send(messages(), "{}").await;
         assert_eq!(res.status(), StatusCode::OK);

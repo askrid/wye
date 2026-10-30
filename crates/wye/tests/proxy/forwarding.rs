@@ -4,11 +4,9 @@ use super::harness::*;
 
 #[tokio::test]
 async fn forwards_request_unchanged_and_replaces_credential() {
-    let (tx, mut rx) = mpsc::channel(1);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen).await.unwrap();
+    let (handler, mut rx) = recording_reply(
+        |seen| seen,
+        || {
             let mut res = full(StatusCode::OK, r#"{"id":"msg_1"}"#);
             res.headers_mut()
                 .insert("request-id", "req_1".parse().unwrap());
@@ -17,8 +15,8 @@ async fn forwards_request_unchanged_and_replaces_credential() {
                 "allowed".parse().unwrap(),
             );
             res
-        })
-    });
+        },
+    );
     let h = Harness::api_key(handler).await;
 
     let res = h
@@ -63,14 +61,7 @@ async fn forwards_request_unchanged_and_replaces_credential() {
 
 #[tokio::test]
 async fn forward_caller_credential_keeps_caller_headers() {
-    let (tx, mut rx) = mpsc::channel(1);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.headers).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, mut rx) = recording(|seen| seen.headers);
     let h = Harness::start(
         handler,
         "forward_caller_credential = true",
@@ -117,8 +108,8 @@ async fn preserves_upstream_errors() {
 
 #[tokio::test]
 async fn oversized_body_is_rejected_before_upstream() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
-    let big: &'static str = Box::leak("x".repeat(2048).into_boxed_str());
+    let h = Harness::api_key(ok()).await;
+    let big = "x".repeat(2048);
     let res = h.send(messages(), big).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(
@@ -134,9 +125,9 @@ async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
     let (handler, mut bodies) = recording(|seen| seen.body);
     let h = Harness::api_key(handler).await;
     // The harness allows 1024 bytes; the second chunk passes it mid-upload.
-    let rest: &'static [u8] = Box::leak(vec![b' '; 1100].into_boxed_slice());
+    let rest = vec![b' '; 1100];
     let res = h
-        .send_chunked(messages(), &[br#"{"messages":["#, rest])
+        .send_chunked(messages(), &[br#"{"messages":["#, &rest])
         .await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(
@@ -152,7 +143,7 @@ async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
 
 #[tokio::test]
 async fn local_endpoints_and_unknown_paths() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     assert_eq!(
         h.send(Request::head("/api/hello"), "").await.status(),
         StatusCode::OK
@@ -200,7 +191,7 @@ async fn count_tokens_is_forwarded() {
 
 #[tokio::test]
 async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     // An 8 KiB gateway credential plus other headers fits the connection buffer.
     let credential = "x".repeat(8 * 1024);
     let res = h
@@ -230,14 +221,7 @@ async fn api_key_file_is_read_relative_to_the_config_and_trimmed() {
     let dir = std::env::temp_dir().join(format!("wye-key-test-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("secrets")).unwrap();
     std::fs::write(dir.join("secrets/provider-key"), "sk-from-file\n").unwrap();
-    let (tx, mut rx) = mpsc::channel::<HeaderMap>(1);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.headers).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, mut rx) = recording(|seen| seen.headers);
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = Config::from_toml_str(&format!(

@@ -12,18 +12,19 @@
 //! largest step whose added p99 stays within [`MAX_ADDED_P99_US`], without
 //! failures or saturation, is the sustainable capacity.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use crate::{client::Target, gateway_process::GatewayProcess, scenarios, stats};
+use crate::{
+    client::Target,
+    gateway_process::GatewayProcess,
+    measure::{PACED_RAMP, token_streams},
+    stats,
+};
 
 /// Stream counts tried, in order.
 const STEPS: [usize; 10] = [
     500, 1_000, 1_500, 2_000, 3_000, 4_000, 6_000, 8_000, 12_000, 16_000,
 ];
-const EVENTS: u32 = 100;
-const SIZE: usize = 100;
-const INTERVAL_US: u64 = 20_000;
-const RAMP: Duration = Duration::from_millis(2_000);
 /// Added p99 event delay accepted at a sustainable load: well under a
 /// typical inter-token gap of 20 ms.
 pub const MAX_ADDED_P99_US: f64 = 10_000.0;
@@ -42,7 +43,7 @@ struct Step {
 
 async fn batch(target: &Target, streams: usize) -> (Vec<u64>, usize, usize, f64) {
     let start = Instant::now();
-    let results = scenarios::paced(target, streams, RAMP, EVENTS, SIZE, INTERVAL_US).await;
+    let results = token_streams(target, streams, PACED_RAMP).await;
     let wall = start.elapsed().as_secs_f64();
     let failed = results.iter().filter(|s| s.failed).count();
     let delays: Vec<u64> = results

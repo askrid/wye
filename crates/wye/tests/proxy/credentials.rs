@@ -1,34 +1,15 @@
 //! Gateway credentials end to end.
 
-use gateway_core::credential::{self, NewCredential};
-use ring::signature::{Ed25519KeyPair, KeyPair};
-
 use super::harness::*;
 
-use wye_testkit::ed25519_keypair as keypair;
-
 fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {
-    credential::issue(
+    issue(
         key,
-        "k1",
         &NewCredential {
-            iss: "wye",
-            sub: "alice",
-            aud: "wye-prod",
             iat,
             exp,
-            models: None,
-            max_output_tokens: None,
+            ..claims("alice")
         },
-    )
-}
-
-/// An `[auth]` section trusting `key`, with `extra` lines.
-fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
-    format!(
-        "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
-        credential::encode_public_key(key.public_key().as_ref())
     )
 }
 
@@ -103,17 +84,11 @@ async fn missing_expired_or_foreign_credentials_never_reach_upstream() {
 }
 
 fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
-    credential::issue(
+    issue(
         key,
-        "k1",
         &NewCredential {
-            iss: "wye",
-            sub: "alice",
-            aud: "wye-prod",
-            iat: now(),
-            exp: now() + 600,
             models: Some(models),
-            max_output_tokens: None,
+            ..claims("alice")
         },
     )
 }
@@ -244,17 +219,11 @@ async fn credentials_without_any_model_list_skip_the_check() {
 }
 
 fn token_with_output_limit(key: &Ed25519KeyPair, max_output_tokens: u64) -> String {
-    credential::issue(
+    issue(
         key,
-        "k1",
         &NewCredential {
-            iss: "wye",
-            sub: "alice",
-            aud: "wye-prod",
-            iat: now(),
-            exp: now() + 600,
-            models: None,
             max_output_tokens: Some(max_output_tokens),
+            ..claims("alice")
         },
     )
 }

@@ -68,14 +68,7 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
 
 #[tokio::test]
 async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
-    let (tx, mut rx) = mpsc::channel(2);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send(seen.headers).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, mut rx) = recording(|seen| seen.headers);
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = format!(
@@ -101,14 +94,7 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
 
 #[tokio::test]
 async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
-    let (tx, mut rx) = mpsc::channel(4);
-    let handler: Handler = Arc::new(move |seen: Seen| {
-        let tx = tx.clone();
-        Box::pin(async move {
-            tx.send((seen.headers, seen.body)).await.unwrap();
-            full(StatusCode::OK, "{}")
-        })
-    });
+    let (handler, mut rx) = recording(|seen| (seen.headers, seen.body));
     let hits = Arc::new(AtomicUsize::new(0));
     let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
     let config = format!(

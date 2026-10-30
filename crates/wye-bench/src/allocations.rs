@@ -18,6 +18,7 @@ use crate::{
     gateway_process::{Gateway, GatewayProcess},
     measure::{UPLOAD_BYTES, UPLOAD_CONCURRENCY},
     mock, scenarios,
+    stats::put,
 };
 
 const UNARY_REQUESTS: usize = 10_000;
@@ -156,10 +157,6 @@ pub async fn measure(
     dir: &Path,
     metrics: &mut BTreeMap<String, f64>,
 ) {
-    let mut put = |name: &str, value: f64| {
-        metrics.insert(name.to_owned(), (value * 100.0).round() / 100.0);
-    };
-
     let wye =
         GatewayProcess::start(Gateway::Wye(binary), upstream_base_url, None, dir, "alloc").await;
     let t = wye.target();
@@ -167,15 +164,7 @@ pub async fn measure(
     scenarios::unary(t, CONCURRENCY, 2_000).await;
     scenarios::sse(t, CONCURRENCY, 64, 5, 64, 0).await;
 
-    let (allocations, bytes) = delta(t, unary(t)).await;
-    put(
-        "alloc_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
-    );
-    put(
-        "alloc_unary_bytes_per_request",
-        bytes / UNARY_REQUESTS as f64,
-    );
+    per_request(t, metrics, "unary", UNARY_REQUESTS, true, unary(t)).await;
 
     let streams = |events| async move {
         no_failed_streams(&scenarios::sse(t, CONCURRENCY, SSE_STREAMS, events, 64, 0).await);
@@ -184,42 +173,40 @@ pub async fn measure(
     let (long, _) = delta(t, streams(SSE_LONG_EVENTS)).await;
     let per_event =
         (long - short) / (SSE_STREAMS as f64 * f64::from(SSE_LONG_EVENTS - SSE_SHORT_EVENTS));
-    put("alloc_sse_per_event", per_event);
+    put(metrics, "", "alloc_sse_per_event", per_event);
     put(
+        metrics,
+        "",
         "alloc_sse_per_stream",
         short / SSE_STREAMS as f64 - per_event * f64::from(SSE_SHORT_EVENTS),
     );
 
     let body = mock::message_json(UPLOAD_BYTES);
-    let (allocations, bytes) = delta(t, async {
+    let uploads = async {
         no_failures(&scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await);
-    })
-    .await;
-    put(
-        "alloc_upload_per_request",
-        allocations / UPLOAD_REQUESTS as f64,
-    );
-    put(
-        "alloc_upload_bytes_per_request",
-        bytes / UPLOAD_REQUESTS as f64,
-    );
+    };
+    per_request(t, metrics, "upload", UPLOAD_REQUESTS, true, uploads).await;
     // The same size shaped like Claude Code's, for comparison with the
     // cache-diagnostics variant below.
-    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
-    put(
-        "alloc_agent_upload_per_request",
-        allocations / UPLOAD_REQUESTS as f64,
-    );
-    put(
-        "alloc_agent_upload_bytes_per_request",
-        bytes / UPLOAD_REQUESTS as f64,
-    );
+    per_request(
+        t,
+        metrics,
+        "agent_upload",
+        UPLOAD_REQUESTS,
+        true,
+        agent_uploads(t),
+    )
+    .await;
 
     put(
+        metrics,
+        "",
         "alloc_idle_live_bytes_per_stream",
         idle_live_bytes(t, IDLE_STREAMS, None).await,
     );
     put(
+        metrics,
+        "",
         "alloc_idle_after_upload_live_bytes_per_stream",
         idle_live_bytes(
             t,
@@ -241,10 +228,14 @@ pub async fn measure(
     let t = tls.target();
     scenarios::unary(t, CONCURRENCY, 2_000).await;
     put(
+        metrics,
+        "",
         "alloc_tls_idle_live_bytes_per_stream",
         idle_live_bytes(t, IDLE_STREAMS, None).await,
     );
     put(
+        metrics,
+        "",
         "alloc_tls_idle_after_upload_live_bytes_per_stream",
         idle_live_bytes(
             t,
@@ -254,122 +245,65 @@ pub async fn measure(
         .await,
     );
     put(
+        metrics,
+        "",
         "alloc_tls_stalled_live_bytes_per_stream",
         stalled_live_bytes(t, STALLED_STREAMS).await,
     );
     drop(tls);
 
-    let auth = GatewayProcess::start(
-        Gateway::WyeAuth(binary),
-        upstream_base_url,
-        None,
-        dir,
-        "alloc",
-    )
-    .await;
-    let t = auth.target();
-    scenarios::unary(t, CONCURRENCY, 2_000).await;
-    let (allocations, _) = delta(t, unary(t)).await;
-    put(
-        "alloc_auth_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
-    );
-    drop(auth);
+    // The variants' per-request costs, each in its own process, in this order.
+    for (gateway, name, bytes, agent_upload) in [
+        (Gateway::WyeAuth(binary), "auth", false, false),
+        (Gateway::WyeModels(binary), "models", false, false),
+        (Gateway::WyeBedrock(binary), "bedrock", true, false),
+        (Gateway::WyeFailover(binary), "failover", true, true),
+        (Gateway::WyeDiag(binary), "diag", true, true),
+    ] {
+        let process = GatewayProcess::start(gateway, upstream_base_url, None, dir, "alloc").await;
+        let t = process.target();
+        scenarios::unary(t, CONCURRENCY, 2_000).await;
+        let unary_name = format!("{name}_unary");
+        per_request(t, metrics, &unary_name, UNARY_REQUESTS, bytes, unary(t)).await;
+        if agent_upload {
+            let upload_name = format!("{name}_agent_upload");
+            per_request(
+                t,
+                metrics,
+                &upload_name,
+                UPLOAD_REQUESTS,
+                true,
+                agent_uploads(t),
+            )
+            .await;
+        }
+    }
+}
 
-    let models = GatewayProcess::start(
-        Gateway::WyeModels(binary),
-        upstream_base_url,
-        None,
-        dir,
-        "alloc",
-    )
-    .await;
-    let t = models.target();
-    scenarios::unary(t, CONCURRENCY, 2_000).await;
-    let (allocations, _) = delta(t, unary(t)).await;
+/// Puts `alloc_{name}_per_request`, and with `bytes` also
+/// `alloc_{name}_bytes_per_request`, for the `requests` requests `work` makes.
+async fn per_request(
+    t: &Target,
+    metrics: &mut BTreeMap<String, f64>,
+    name: &str,
+    requests: usize,
+    bytes: bool,
+    work: impl Future<Output = ()>,
+) {
+    let (allocations, total) = delta(t, work).await;
+    let requests = requests as f64;
     put(
-        "alloc_models_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
+        metrics,
+        "alloc_",
+        &format!("{name}_per_request"),
+        allocations / requests,
     );
-    drop(models);
-
-    let bedrock = GatewayProcess::start(
-        Gateway::WyeBedrock(binary),
-        upstream_base_url,
-        None,
-        dir,
-        "alloc",
-    )
-    .await;
-    let t = bedrock.target();
-    scenarios::unary(t, CONCURRENCY, 2_000).await;
-    let (allocations, bytes) = delta(t, unary(t)).await;
-    put(
-        "alloc_bedrock_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
-    );
-    put(
-        "alloc_bedrock_unary_bytes_per_request",
-        bytes / UNARY_REQUESTS as f64,
-    );
-    drop(bedrock);
-
-    let failover = GatewayProcess::start(
-        Gateway::WyeFailover(binary),
-        upstream_base_url,
-        None,
-        dir,
-        "alloc",
-    )
-    .await;
-    let t = failover.target();
-    scenarios::unary(t, CONCURRENCY, 2_000).await;
-    let (allocations, bytes) = delta(t, unary(t)).await;
-    put(
-        "alloc_failover_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
-    );
-    put(
-        "alloc_failover_unary_bytes_per_request",
-        bytes / UNARY_REQUESTS as f64,
-    );
-    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
-    put(
-        "alloc_failover_agent_upload_per_request",
-        allocations / UPLOAD_REQUESTS as f64,
-    );
-    put(
-        "alloc_failover_agent_upload_bytes_per_request",
-        bytes / UPLOAD_REQUESTS as f64,
-    );
-    drop(failover);
-
-    let diag = GatewayProcess::start(
-        Gateway::WyeDiag(binary),
-        upstream_base_url,
-        None,
-        dir,
-        "alloc",
-    )
-    .await;
-    let t = diag.target();
-    scenarios::unary(t, CONCURRENCY, 2_000).await;
-    let (allocations, bytes) = delta(t, unary(t)).await;
-    put(
-        "alloc_diag_unary_per_request",
-        allocations / UNARY_REQUESTS as f64,
-    );
-    put(
-        "alloc_diag_unary_bytes_per_request",
-        bytes / UNARY_REQUESTS as f64,
-    );
-    let (allocations, bytes) = delta(t, agent_uploads(t)).await;
-    put(
-        "alloc_diag_agent_upload_per_request",
-        allocations / UPLOAD_REQUESTS as f64,
-    );
-    put(
-        "alloc_diag_agent_upload_bytes_per_request",
-        bytes / UPLOAD_REQUESTS as f64,
-    );
+    if bytes {
+        put(
+            metrics,
+            "alloc_",
+            &format!("{name}_bytes_per_request"),
+            total / requests,
+        );
+    }
 }

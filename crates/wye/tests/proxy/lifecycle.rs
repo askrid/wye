@@ -8,12 +8,7 @@ fn held_open(open: &Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>>) -> Handler 
     Arc::new(move |_| {
         let (tx, rx) = mpsc::channel(1);
         open.lock().unwrap().push(tx);
-        Box::pin(async move {
-            let mut res = Response::new(Either::Right(ChannelBody(rx)));
-            res.headers_mut()
-                .insert("content-type", "text/event-stream".parse().unwrap());
-            res
-        })
+        Box::pin(async move { streaming(rx) })
     })
 }
 
@@ -143,8 +138,7 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
 
 #[tokio::test]
 async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
-    let mut h =
-        Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let mut h = Harness::api_key(ok()).await;
     // Nothing reads the usage stream, so its 64 KiB buffer fills and the
     // writer waits on it.
     for _ in 0..400 {
@@ -160,7 +154,7 @@ async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
 
 #[tokio::test]
 async fn probe_succeeds_only_for_a_2xx_answer() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     wye::probe(&format!("http://{}/healthz", h.gateway))
         .await
         .unwrap();
@@ -182,7 +176,7 @@ async fn probe_succeeds_only_for_a_2xx_answer() {
 #[cfg(unix)]
 #[tokio::test]
 async fn wye_claude_runs_claude_against_the_gateway() {
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "{}") }))).await;
+    let h = Harness::api_key(ok()).await;
     let dir = std::env::temp_dir().join(format!("wye-claude-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     // A stand-in for claude that records what it was given and exits 3.
