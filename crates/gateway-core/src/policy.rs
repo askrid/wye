@@ -20,6 +20,17 @@ pub use scanner::PolicyScanner;
 
 /// Longest accepted model name.
 pub const MAX_MODEL_BYTES: usize = 256;
+
+/// A name a client can send and a permission can match exactly: what the
+/// policy scanner accepts as `model` (no escapes, so no `"` or `\`). Model
+/// names in config (aliases, discovery ids, upgrade targets) must be one.
+pub fn is_model_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_MODEL_BYTES
+        && !name.contains(['*', '"', '\\'])
+        && !name.chars().any(char::is_control)
+}
+
 /// Longest pattern accepted in config or a credential.
 const MAX_PATTERN_BYTES: usize = MAX_MODEL_BYTES;
 

@@ -9,6 +9,7 @@ use http::{
 use serde::Deserialize;
 
 use super::*;
+use crate::policy;
 
 mod auth;
 mod models;
@@ -129,27 +130,46 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
     })
 }
 
-pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
+/// An http or https URL without credentials or a query: its scheme, host,
+/// and path without a trailing slash. Secrets come from the environment,
+/// never from a URL in config. `field` names it in errors.
+pub(super) fn parse_url(
+    field: &'static str,
+    url: &str,
+) -> Result<(Scheme, Authority, String), ConfigError> {
     let invalid = |reason| ConfigError::InvalidUrl {
-        field: "telemetry.otlp_endpoint",
-        url: raw.otlp_endpoint.clone(),
+        field,
+        url: url.to_owned(),
         reason,
     };
-    let uri: Uri = raw
-        .otlp_endpoint
-        .parse()
-        .map_err(|_| invalid("not a valid URL"))?;
-    let parts = uri.into_parts();
+    let parts = url
+        .parse::<Uri>()
+        .map_err(|_| invalid("not a valid URL"))?
+        .into_parts();
     let scheme = parts.scheme.ok_or_else(|| invalid("missing scheme"))?;
     if scheme != Scheme::HTTP && scheme != Scheme::HTTPS {
         return Err(invalid("scheme must be http or https"));
     }
     let authority = parts.authority.ok_or_else(|| invalid("missing host"))?;
-    let base = match parts.path_and_query {
+    if authority.as_str().contains('@') {
+        return Err(invalid("credentials in the URL are not allowed"));
+    }
+    let path = match parts.path_and_query {
         Some(pq) if pq.query().is_some() => return Err(invalid("query strings are not allowed")),
         Some(pq) => pq.path().trim_end_matches('/').to_owned(),
         None => String::new(),
     };
+    Ok((scheme, authority, path))
+}
+
+pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
+    const FIELD: &str = "telemetry.otlp_endpoint";
+    let invalid = |reason| ConfigError::InvalidUrl {
+        field: FIELD,
+        url: raw.otlp_endpoint.clone(),
+        reason,
+    };
+    let (scheme, authority, base) = parse_url(FIELD, &raw.otlp_endpoint)?;
     let signal_uri = |signal: &str| {
         Uri::builder()
             .scheme(scheme.clone())
@@ -193,9 +213,9 @@ pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigE
     for model in raw.models {
         // A listed id is a name clients send, so it must be one a model
         // permission can match exactly.
-        if model.id.contains('*') || ModelPattern::parse(&model.id).is_none() {
+        if !policy::is_model_name(&model.id) {
             return Err(ConfigError::Invalid(
-                "discovery.models: id must be a model name of 1-256 bytes without *",
+                "discovery.models: id must be a model name of 1-256 bytes without * or escapes",
             ));
         }
         if models.iter().any(|m| m.id == model.id) {

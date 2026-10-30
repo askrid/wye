@@ -400,10 +400,6 @@ pub enum ConfigError {
     InvalidListen(String),
     NonLoopbackListen(SocketAddr),
     Auth(String),
-    InvalidBaseUrl {
-        url: String,
-        reason: &'static str,
-    },
     InvalidUrl {
         field: &'static str,
         url: String,
@@ -443,9 +439,6 @@ impl fmt::Display for ConfigError {
                 "server.listen: {addr} is not a loopback address; network exposure requires an [auth] section"
             ),
             Self::Auth(msg) => write!(f, "auth: {msg}"),
-            Self::InvalidBaseUrl { url, reason } => {
-                write!(f, "upstream.base_url {url:?}: {reason}")
-            }
             Self::InvalidUrl { field, url, reason } => write!(f, "{field} {url:?}: {reason}"),
             Self::Credential(msg) => write!(f, "upstream: {msg}"),
             Self::InvalidEnvName { field, name } => {

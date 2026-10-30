@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::policy::{MAX_MODEL_BYTES, ModelPattern};
+use crate::policy::{self, ModelPattern};
 
 /// Most aliases in one config: resolution scans them linearly.
 pub const MAX_ALIASES: usize = 256;
@@ -41,12 +41,12 @@ impl Alias {
         model: &str,
         when: impl IntoIterator<Item = (Vec<String>, String)>,
     ) -> Result<Self, AliasError> {
-        if !is_exact_name(name) {
+        if !policy::is_model_name(name) {
             return Err(AliasError(
                 "aliases: name must be 1-256 bytes without * or escapes",
             ));
         }
-        if !is_exact_name(model) {
+        if !policy::is_model_name(model) {
             return Err(AliasError(
                 "aliases: model must be a model name of 1-256 bytes without *",
             ));
@@ -56,7 +56,7 @@ impl Alias {
             if rules.len() == MAX_ALIAS_RULES {
                 return Err(AliasError("aliases.when: at most 32 rules"));
             }
-            if !is_exact_name(&model) {
+            if !policy::is_model_name(&model) {
                 return Err(AliasError(
                     "aliases.when: model must be a model name of 1-256 bytes without *",
                 ));
@@ -140,15 +140,6 @@ impl Aliases {
     pub fn iter(&self) -> impl Iterator<Item = &Alias> {
         self.0.iter()
     }
-}
-
-/// A name a client can send and a permission can match exactly: what the
-/// policy scanner accepts as `model` (no escapes, so no `"` or `\`).
-fn is_exact_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MAX_MODEL_BYTES
-        && !name.contains(['*', '"', '\\'])
-        && !name.chars().any(char::is_control)
 }
 
 #[cfg(test)]

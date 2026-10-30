@@ -158,8 +158,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 # {otlp_endpoint}/v1/logs, /v1/metrics, and /v1/traces. Records also stay in
 # the stderr log.
 # [telemetry]
-# otlp_endpoint = "http://localhost:4318"
-# otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2"
+# otlp_endpoint = "http://localhost:4318"  # no credentials in the URL
+# otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2": the API key goes here
 # service_name = "wye"
 
 # Model catalog for GET /v1/models (absent without this section): Claude
