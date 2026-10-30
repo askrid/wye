@@ -28,6 +28,8 @@ serde_json = { workspace = true, features = ["std"] }
 socket2.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml = { workspace = true, features = ["parse", "serde", "std"] }
+# The connector trait, to bound the TLS handshake (already in the graph via hyper-util).
+tower-service.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]

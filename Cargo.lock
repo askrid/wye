@@ -1122,6 +1122,7 @@ dependencies = [
  "socket2",
  "tokio",
  "toml",
+ "tower-service",
  "webpki-roots",
  "wye-testkit",
 ]
