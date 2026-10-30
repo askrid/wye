@@ -3,8 +3,9 @@
 //!
 //! It answers what the gateway cannot per request: totals per Claude Code
 //! session and prompt, spend by request class, and which cache misses are
-//! regressions. A miss on a session's first cache write is expected; one
-//! request cannot know it is first, but the whole log can.
+//! regressions. A miss on the first cache write of a session or a subagent
+//! (a conversation of its own) is expected; one request cannot know it is
+//! first, but the whole log can.
 
 use std::{collections::HashMap, io::BufRead};
 
@@ -22,10 +23,12 @@ struct Record {
     unix_ms: u64,
     #[serde(default)]
     duration_ms: f64,
+    status: Option<u16>,
     outcome: Option<String>,
     upstream: Option<String>,
     subject: Option<String>,
     session_id: Option<String>,
+    agent_id: Option<String>,
     request_class: Option<String>,
     prompt_id: Option<String>,
     compaction: Option<String>,
@@ -157,22 +160,32 @@ struct Session {
     group: Group,
     subject: Option<String>,
     compactions: u64,
-    /// Time and cache-miss label of the session's first cache write. Earlier
-    /// requests that use no cache (`count_tokens`, refusals) do not count.
-    first: Option<(u64, Option<String>)>,
 }
+
+/// One conversation with its own prompt cache: a session's main thread
+/// (no agent id) or one of its subagents.
+type Conversation = (String, Option<String>);
 
 #[derive(Default)]
 struct Summary {
     total: Group,
+    /// Lines `wye serve` prints about itself (`wye: listening on ...`), which
+    /// share stderr with the records.
+    notices: u64,
     skipped: u64,
     outcomes: HashMap<String, u64>,
+    /// Requests answered with a 4xx or 5xx status, by status.
+    errors: HashMap<u16, u64>,
     classes: HashMap<String, Group>,
     /// Route upstreams, when the log names them.
     upstreams: HashMap<String, Group>,
     /// Refusals that moved requests on, by (upstream, reason).
     failovers: HashMap<(String, String), u64>,
     sessions: HashMap<String, Session>,
+    /// Time and cache-miss label of each conversation's first cache write.
+    /// Earlier requests that use no cache (`count_tokens`, refusals) do not
+    /// count.
+    first_writes: HashMap<Conversation, (u64, Option<String>)>,
     prompts: HashMap<String, Group>,
     /// Per tool: calls with a reported duration, their total ms, and calls
     /// responses requested.
@@ -189,6 +202,9 @@ impl Summary {
             .outcomes
             .entry(r.outcome.clone().unwrap_or_default())
             .or_default() += 1;
+        if let Some(status) = r.status.filter(|s| *s >= 400) {
+            *self.errors.entry(status).or_default() += 1;
+        }
         let class = r.request_class.as_deref().unwrap_or("(no hint)");
         self.classes.entry(class.to_owned()).or_default().add(&r);
         if let Some(upstream) = &r.upstream {
@@ -235,20 +251,38 @@ impl Summary {
             if session.subject.is_none() {
                 session.subject.clone_from(&r.subject);
             }
-            let writes = r.cache_creation_input_tokens.is_some_and(|n| n > 0);
-            if writes && session.first.as_ref().is_none_or(|(at, _)| r.unix_ms < *at) {
-                session.first = Some((r.unix_ms, r.cache_miss.clone()));
+            if r.cache_creation_input_tokens.is_some_and(|n| n > 0) {
+                let first = self
+                    .first_writes
+                    .entry((id.clone(), r.agent_id.clone()))
+                    .or_insert_with(|| (r.unix_ms, r.cache_miss.clone()));
+                if r.unix_ms < first.0 {
+                    *first = (r.unix_ms, r.cache_miss.clone());
+                }
             }
         }
     }
 
-    /// Unexplained misses that were a session's first cache write: expected.
-    fn session_starts(&self) -> u64 {
-        self.sessions
-            .values()
-            .filter(|s| matches!(&s.first, Some((_, Some(m))) if m == "unexplained"))
-            .count() as u64
+    /// Unexplained misses that were the first cache write of a session's
+    /// main thread and of its subagents: expected.
+    fn starts(&self) -> Starts {
+        let mut starts = Starts::default();
+        for ((_, agent), (_, miss)) in &self.first_writes {
+            if miss.as_deref() == Some("unexplained") {
+                match agent {
+                    None => starts.sessions += 1,
+                    Some(_) => starts.subagents += 1,
+                }
+            }
+        }
+        starts
     }
+}
+
+#[derive(Default)]
+struct Starts {
+    sessions: u64,
+    subagents: u64,
 }
 
 /// Summarizes a usage log. Lines that are not request records (shutdown
@@ -256,8 +290,10 @@ impl Summary {
 pub fn report(input: impl BufRead) -> std::io::Result<String> {
     let mut summary = Summary::default();
     for line in input.lines() {
-        match serde_json::from_str::<Record>(&line?) {
+        let line = line?;
+        match serde_json::from_str::<Record>(&line) {
             Ok(r) if r.event == "request" => summary.add(r),
+            _ if line.starts_with("wye: ") => summary.notices += 1,
             _ => summary.skipped += 1,
         }
     }

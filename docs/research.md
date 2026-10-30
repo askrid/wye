@@ -345,7 +345,7 @@ What Claude Code tells a gateway without exposing prompts: session id on every r
 | Retry hygiene: Wye's 529s carry `retry-after: 1`, `x-should-retry: true` | A1 | Built |
 | Model picker from policy (`GET /v1/models`) | A1 | Built |
 | Spend by work type: agent headers in records and `wye.tokens` | A2 | Built; capture 0.04-0.32 µs per request, validation 0.11 µs in the writer task |
-| Expected versus unexpected cache misses | A2 | Built as `cache_miss`; a session's first cache write reads `unexplained`, and `wye report` counts it as a session start |
+| Expected versus unexpected cache misses | A2 | Built as `cache_miss`; the first cache write of a session or a subagent reads `unexplained`, and `wye report` counts it as a session or subagent start |
 | A session as one trace | A3 | Built flat: trace id from the session id, tool spans; no synthetic parent spans, since no request knows it is first. Checked in Jaeger across two replicas |
 | `wye report`; tool calls from responses | A4 | Built; `content_block_start` parsed borrowed, 0.22-0.33 µs per block, zero allocations |
 | Report-only secret detection | A5 | Open: needs a multi-pattern matcher and a sampled body scan. Report-only: blocking would brick a session, redaction would break caching |
