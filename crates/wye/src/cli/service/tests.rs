@@ -7,6 +7,7 @@ fn service(dir: &str) -> Service {
         program: format!("{dir}/.cargo/bin/wye").into(),
         config: format!("{dir}/.wye/wye.toml").into(),
         log: format!("{dir}/.wye/usage.jsonl").into(),
+        errors: format!("{dir}/.wye/wye.log").into(),
         stop_secs: 35,
     }
 }
@@ -36,7 +37,8 @@ fn a_definition_reads_back_as_written() {
         ),
         "{unit}"
     );
-    assert!(unit.contains("StandardError=append:/home/a%%b/.wye/usage.jsonl\n"));
+    assert!(unit.contains("StandardOutput=append:/home/a%%b/.wye/usage.jsonl\n"));
+    assert!(unit.contains("StandardError=append:/home/a%%b/.wye/wye.log\n"));
 }
 
 #[test]
@@ -84,6 +86,7 @@ fn the_plan_says_what_changes_and_how_to_undo_it() {
         "  Replace  ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
         "  Run      ~/.cargo/bin/wye serve --config ~/.wye/wye.toml\n",
         "  Log      ~/.wye/usage.jsonl (appended)\n",
+        "  Errors   ~/.wye/wye.log (appended)\n",
         "  Then     launchctl bootout gui/501/dev.wye.gateway\n",
         "           launchctl bootstrap gui/501 ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
         "Undo with `wye service uninstall`.",

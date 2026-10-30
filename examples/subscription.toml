@@ -2,7 +2,7 @@
 # machine only. Wye forwards your own Claude Code login to Anthropic instead of
 # an API key, so usage counts against your plan, not API billing.
 #
-#   wye serve -c examples/subscription.toml 2>>~/.wye/usage.jsonl
+#   wye serve -c examples/subscription.toml >> ~/.wye/usage.jsonl
 #   wye claude                  # in another terminal
 #   wye report
 #

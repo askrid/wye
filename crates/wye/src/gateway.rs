@@ -203,7 +203,7 @@ impl Gateway {
         }
     }
 
-    /// What the usage log writes besides stderr.
+    /// What the usage log writes besides stdout.
     pub(crate) fn sinks(&self) -> Sinks {
         Sinks {
             prompt_key: self.prompt_key.clone(),

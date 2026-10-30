@@ -126,7 +126,7 @@ Core, runtime, tests, and deployment artifacts change together and need coordina
 | Hashing | `xxhash-rust` xxh3 (prompt hashes), `ring` HMAC-SHA256 (their exported tags) and SHA-256 (session trace ids) |
 | Config / JSON | Serde, `toml`, `serde_json`; hand-written streaming scanners for request bodies and SSE (`memchr`) |
 | Buffers | `bytes` and streaming bodies |
-| Instrumentation | Usage records as a JSON-lines log on stderr and as OTLP logs, OTLP metrics, and OTLP spans (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack) |
+| Instrumentation | Usage records as a JSON-lines log on stdout and as OTLP logs, OTLP metrics, and OTLP spans (hand-written OTLP/HTTP JSON exporter on the existing hyper client, instead of the OpenTelemetry Rust SDK and its gRPC stack) |
 | Edge | Separate WASM adapter later |
 
 Direct Hyper gives explicit control over request and response bodies. Reconsider Axum if routing and middleware grow enough to justify it.
@@ -396,7 +396,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log.rs` | How often a partial batch and the cumulative metrics are exported |
 | `MAX_SERIES` | `wye/src/usage_log/metrics.rs` | Attribute sets per OTLP metric |
 | `LOG_FLUSH_TIMEOUT` | `wye/src/server.rs` | How long shutdown waits for the usage log |
-| `STOP_WAIT` | `wye/src/main.rs` | How long the process waits on blocking work, such as a write to a stderr nobody reads, before it exits anyway |
+| `STOP_WAIT` | `wye/src/main.rs` | How long the process waits on blocking work, such as a write to a stdout nobody reads, before it exits anyway |
 | `ACCEPT_ERROR_PAUSE` | `wye/src/server.rs` | The pause after an accept error such as file descriptor exhaustion, which would otherwise spin a core |
 | `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/credential.rs`, `credential/keys.rs` | A presented credential and an identity provider's key set |
 | `CLOCK_SKEW_SECS` | `gateway-core/src/credential.rs` | How far a credential's `iat` or `nbf` may lie ahead of this clock |

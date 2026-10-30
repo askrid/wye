@@ -123,7 +123,7 @@ pub(crate) struct Record {
     unix_ms: u128,
 }
 
-/// What the writer task writes besides the stderr log.
+/// What the writer task writes besides the stdout log.
 pub(crate) struct Sinks {
     /// Keys the prompt hashes of records that carry them.
     pub(crate) prompt_key: Option<Arc<HashKey>>,
