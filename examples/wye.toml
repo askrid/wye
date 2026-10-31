@@ -40,8 +40,9 @@ api_key_env = "ANTHROPIC_API_KEY"
 # Or read the key from a mounted secret file (Docker or Kubernetes secrets,
 # systemd credentials):
 # api_key_file = "/run/secrets/anthropic_api_key"
-# Or forward each caller's own credential, for a claude.ai subscription login
-# (loopback only, no [auth]; examples/subscription.toml is a complete config):
+# Or forward each caller's own credential: a claude.ai login, or an API key,
+# which bills the API (loopback only, no [auth]; `wye init` writes this, and
+# examples/subscription.toml is a complete config):
 # forward_caller_credential = true
 # connect_timeout_secs = 10           # TCP and the TLS handshake together
 # Non-streaming generations send no headers until they finish:

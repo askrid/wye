@@ -39,11 +39,11 @@ Detail and stages: [roadmap.md](roadmap.md#status).
 - Native passthrough of Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), OpenAI Responses, and OpenAI Chat Completions. It honors Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract) and serves the same calls from SDK clients, plus `GET /v1/models` answered from policy; batches, files, and other endpoints are not proxied. Streams are relayed as they arrive, with backpressure, cancellation, timeouts, a graceful two-phase shutdown, and bounds on concurrency and memory.
 - Several Claude accounts per route, each session kept on one, with failover before output, across Anthropic, Claude Platform on AWS, and Bedrock with API keys ([design](architecture.md#claude-across-providers-m4)).
 - Wye's own Ed25519 tokens (`wye token`), or identity-provider tokens verified directly (CI workload identity such as GitHub Actions, or the team's IdP through Claude Code's `apiKeyHelper`). Model permissions and output-token ceilings are checked before the provider is contacted.
-- Subscription passthrough for a single developer on a claude.ai plan, loopback only.
+- Caller-credential passthrough for a single developer, loopback only: a claude.ai login counts against the plan, and an API key bills the API.
 - Model aliases and upgrade checks. Clients ask for a stable name (`coding-default`) that config maps to a model per team or token, so upgrading or retiring a model is a reviewed config change instead of edits across repositories. Before an alias moves, Wye checks live requests against the new model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks)).
 - A price table in config ([format](policy.md#pricing-metadata)) turns usage into dollars in records, metrics, and `wye report`.
 - Agent-aware telemetry for Claude Code and Codex: usage records with subject, session, subagent, request class, prompt, compaction, and tool calls; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
-- Offline tools: `wye report` (a usage log summary without a backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye doctor`, `wye init`, and `wye probe`.
+- Offline tools: `wye report` (a usage log summary without a backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye doctor`, `wye init`, `wye service`, and `wye probe`.
 - Release archives for Linux and macOS built from a tag, and an OCI image built from the repository (not published).
 
 ### Next
@@ -59,17 +59,9 @@ In this order ([roadmap.md](roadmap.md)):
 
 Agent-aware model routing within a provider, a Helm chart, and other agents on their native APIs.
 
-### Phases
+### Support
 
-| Phase | Clients | Client-facing API | Upstream | Status |
-|---|---|---|---|---|
-| P0 | Claude Code, Anthropic SDK apps and agents | Anthropic Messages | Anthropic | Built |
-| P1 | Codex | OpenAI Responses | OpenAI | Started (M3): passthrough, usage and cost, `wye codex` |
-| P2 | OpenAI SDK apps and agents | OpenAI Chat Completions | OpenAI | Built (M3): passthrough, usage when the client asks for it |
-| P3 | Same as P0, across providers | Anthropic Messages | Anthropic, Claude Platform on AWS, Bedrock, Vertex | Started (M4): Anthropic, Claude Platform on AWS, Bedrock with API keys |
-| Later | Other agents (for example Gemini CLI) | Their native API | Their provider | Research |
-
-A route counts as supported only once its request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, and cancellation are tested. Where Wye cannot keep a request's semantics, it fails the request with an explicit error.
+Status per client and provider: [roadmap.md](roadmap.md#status). A route counts as supported only once its request fields, tool-call identifiers and argument fragments, event ordering, finish reasons, errors, usage, and cancellation are tested. Where Wye cannot keep a request's semantics, it fails the request with an explicit error.
 
 ### Non-goals
 
@@ -107,17 +99,17 @@ The landscape as of 2026-10. Competitor features change quickly; re-check them b
 
 Strengths:
 
-- Official SDKs and new provider features on the endpoints Wye serves work unchanged from day one, because native APIs pass through.
-- Agent-aware attribution: sessions, subagents, work types, tool time, and explained cache misses, request-local and consistent across replicas.
-- Trivial to operate: one stateless binary and one TOML file on any platform that runs N identical processes behind a load balancer ([operations.md](operations.md#without-kubernetes)).
+- Official SDKs and new provider features on the endpoints Wye serves work unchanged from day one.
+- Agent-aware attribution, request-local and consistent across replicas.
+- Trivial to operate on any platform that runs N identical processes behind a load balancer ([operations.md](operations.md#without-kubernetes)).
 - CI and IdP tokens are verified directly against keys pinned in config, with no token service.
-- Policy as code: `explain` and `policy-test` show and check every decision offline, `policy-diff` flags a config change that widens access, and tokens can only narrow config.
+- Policy as code, checked offline.
 - Measured, on a laptop against a mock upstream: about 0.2-0.3 ms added per request and no allocation per event, both checked on every commit, and about 1,500 token-paced streams on one core within 10 ms of added p99.
 
 Weaknesses:
 
-- Few providers so far: Anthropic, Claude Platform on AWS, and Bedrock (several accounts with failover between them; API keys only, Bedrock not yet checked live), plus OpenAI Responses and Chat Completions. No Vertex yet. Codex support is built from its source and tests, not yet checked in a real Codex session.
-- Not released. The release workflow builds Linux and macOS archives from a tag, but no version and no image is published yet. That hurts "easy to use" more than any missing feature.
+- Few providers so far, API keys only, with no Vertex yet, and Bedrock and Codex not yet checked live ([status](roadmap.md#status)).
+- Not released: no version and no image is published yet. That hurts "easy to use" more than any missing feature.
 - No cumulative limits, by design: budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - Little real-world validation ([status](roadmap.md#status)): one developer's Claude Code sessions on a subscription, no production deployment, and numbers from one laptop against a mock.
 - Ongoing upkeep: Claude Code's gateway contract changes per release, and upgrade checks need a table of each model's breaking changes.
