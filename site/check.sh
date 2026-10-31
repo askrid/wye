@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# The website's check: formatting, lints, tests, a build of site/out (which
+# fails on a missing source, a broken local link, or a resource from another
+# origin), and the page budget. The pre-commit hook runs it for a commit that
+# changes the site or a file the site reads. It never builds the gateway.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+if (( $# )); then echo "usage: site/check.sh (no arguments; see the header)" >&2; exit 2; fi
+
+cargo fmt --check
+cargo clippy --locked --all-targets --quiet -- -D warnings
+cargo test --locked --quiet
+cargo run --locked --quiet
+
+# What a first visit downloads, compressed as a server sends it: each page,
+# the stylesheet, and the icon gzipped, the fonts as they are
+# (site/DESIGN.md, "Never the slow part").
+budget=$((150 * 1024))
+gz() { gzip -9c "$1" | wc -c; }
+shared=$(( $(gz out/assets/site.css) + $(gz out/assets/icon.svg) + $(cat out/assets/fonts/*.woff2 | wc -c) ))
+for page in out/*.html; do
+  total=$(( $(gz "$page") + shared ))
+  echo "site: ${page#out/} weighs $(( total / 1024 )) KiB of its $(( budget / 1024 )) KiB budget"
+  if (( total > budget )); then
+    echo "site: ${page#out/} is over budget" >&2
+    exit 1
+  fi
+done

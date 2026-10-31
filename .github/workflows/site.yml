@@ -1,0 +1,80 @@
+# The website (site/): site/check.sh on pull requests that touch it or a file
+# it reads, and a deploy of site/out to GitHub Pages from main. Publishing
+# needs the repository's Pages source set to "GitHub Actions".
+
+name: site
+
+# The two path lists are the same: the site and every file it reads.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - README.md
+      - CHANGELOG.md
+      - bench/baseline.json
+      - Cargo.toml
+      - crates/wye/Cargo.toml
+      - deny.toml
+      - rust-toolchain.toml
+      - .github/workflows/site.yml
+  pull_request:
+    paths:
+      - "site/**"
+      - README.md
+      - CHANGELOG.md
+      - bench/baseline.json
+      - Cargo.toml
+      - crates/wye/Cargo.toml
+      - deny.toml
+      - rust-toolchain.toml
+      - .github/workflows/site.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # rustup installs the toolchain and components pinned in rust-toolchain.toml.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: site
+      - run: site/check.sh
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: site/Cargo.toml
+          command-arguments: --config deny.toml
+      - if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/out
+
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
