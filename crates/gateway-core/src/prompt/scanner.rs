@@ -2,7 +2,7 @@
 
 use xxhash_rust::xxh3::Xxh3Default;
 
-use crate::json::{Nesting, StringEnd, is_space, short_string_len};
+use crate::json::{Kept, Nesting, StringEnd, is_space, short_string_len};
 
 use super::{Breakpoint, MessagePrefix, PromptHashes, Section, SectionHash};
 
@@ -46,9 +46,7 @@ pub struct PromptScanner {
 
     // Key capture.
     capture: Capture,
-    key: [u8; KEY_CAP],
-    key_len: usize,
-    key_long: bool,
+    key: Kept<KEY_CAP>,
     key_escaped: bool,
 
     // Section state.
@@ -135,14 +133,14 @@ impl PromptScanner {
                         Some(len) => i += len + 1,
                         None => {
                             self.in_string = true;
-                            self.string.start();
                             return i + 1;
                         }
                     }
                 }
-                b'{' | b'[' => self.push(byte == b'['),
+                b'{' | b'[' => self.nest.open(byte == b'['),
                 b'}' | b']' => {
-                    if !self.pop(byte == b']') {
+                    if !self.nest.close(byte == b']') {
+                        self.failed = true;
                         return i + 1;
                     }
                     if self.nest.depth() == self.raw_floor {
@@ -160,20 +158,6 @@ impl PromptScanner {
             i += 1;
         }
         i
-    }
-
-    #[inline(always)]
-    fn push(&mut self, is_array: bool) {
-        self.nest.open(is_array);
-    }
-
-    /// Leaves the open container; `false` (and the scan fails) if `is_array`
-    /// does not match it.
-    #[inline(always)]
-    fn pop(&mut self, is_array: bool) -> bool {
-        let closed = self.nest.close(is_array);
-        self.failed |= !closed;
-        closed
     }
 
     /// Deepest level whose structure matters in the current position.
@@ -202,20 +186,17 @@ impl PromptScanner {
         *run = end;
     }
 
-    #[inline(always)]
-    fn is_array(&self, depth: u32) -> bool {
-        self.nest.is_array(depth)
-    }
-
     /// Whether the open object is a block that may hold `cache_control`: a tool
     /// definition, a system block, or a message content block. Blocks never
     /// nest, so one set of block flags suffices.
     #[inline(always)]
     fn in_block(&self) -> bool {
         match (self.section, self.nest.depth()) {
-            (Some(Section::Tools | Section::System), 3) => self.is_array(2) && !self.is_array(3),
+            (Some(Section::Tools | Section::System), 3) => {
+                self.nest.is_array(2) && !self.nest.is_array(3)
+            }
             (Some(Section::Messages), 5) => {
-                self.in_content && self.is_array(4) && !self.is_array(5)
+                self.in_content && self.nest.is_array(4) && !self.nest.is_array(5)
             }
             _ => false,
         }
@@ -226,7 +207,7 @@ impl PromptScanner {
         self.section == Some(Section::Messages)
             && self.nest.depth() == 4
             && self.in_content
-            && self.is_array(4)
+            && self.nest.is_array(4)
     }
 
     /// Keeps the key bytes `chunk[from..to]` when the name matters.
@@ -241,19 +222,14 @@ impl PromptScanner {
         if self.capture == Capture::Visible {
             return;
         }
-        let Some(slot) = self.key.get_mut(self.key_len..self.key_len + bytes.len()) else {
-            self.key_long = true;
-            if self.capture == Capture::Deferred {
-                // Too long for `cache_control`: hash what was held back and
-                // let the rest of the key flow through `run`.
-                self.release_key();
-                self.capture = Capture::Visible;
-                *run = from;
-            }
-            return;
-        };
-        slot.copy_from_slice(bytes);
-        self.key_len += bytes.len();
+        self.key.push(bytes);
+        if self.key.is_long() && self.capture == Capture::Deferred {
+            // Too long for `cache_control`: hash what was held back and
+            // let the rest of the key flow through `run`.
+            self.release_key();
+            self.capture = Capture::Visible;
+            *run = from;
+        }
     }
 
     fn release_comma(&mut self) {
@@ -267,8 +243,7 @@ impl PromptScanner {
         self.release_comma();
         self.member_hashed = true;
         self.hasher.update(b"\"");
-        self.hasher
-            .update(self.key.get(..self.key_len).unwrap_or_default());
+        self.hasher.update(self.key.bytes());
     }
 
     /// Handles a byte outside strings; returns the index after the bytes consumed.
@@ -325,7 +300,7 @@ impl PromptScanner {
             let role = if self.nest.depth() == 1
                 || (self.section == Some(Section::Messages)
                     && self.nest.depth() == 3
-                    && !self.is_array(3))
+                    && !self.nest.is_array(3))
             {
                 Capture::Plain
             } else if self.skip_depth == 0 && self.in_block() {
@@ -349,8 +324,7 @@ impl PromptScanner {
                 return after;
             }
             self.string_is_key = true;
-            self.key_len = 0;
-            self.key_long = false;
+            self.key.clear();
             self.key_escaped = false;
             self.capture = match role {
                 Capture::Deferred if may_be_marker(chunk.get(i..).unwrap_or_default()) => {
@@ -373,7 +347,6 @@ impl PromptScanner {
             }
         }
         self.in_string = true;
-        self.string.start();
         i + 1
     }
 
@@ -435,7 +408,7 @@ impl PromptScanner {
         }
         // A copy, so `classify` can borrow `self` mutably.
         let kept = self.key;
-        let key = (!self.key_long).then(|| kept.get(..self.key_len).unwrap_or_default());
+        let key = kept.whole();
         match capture {
             Capture::Deferred if key == Some(CACHE_CONTROL) => {
                 self.start_marker();
@@ -457,7 +430,7 @@ impl PromptScanner {
             self.value_start(chunk, i, run);
         }
         self.started = true;
-        self.push(is_array);
+        self.nest.open(is_array);
         if self.nest.depth() > self.tracked_depth() {
             self.raw_floor = self.nest.depth() - 1;
             return;
@@ -484,17 +457,7 @@ impl PromptScanner {
             self.skip_depth = 0;
             *run = i;
         }
-        if self.section.is_some() {
-            match self.nest.depth() {
-                // A bare scalar section value ends at the top-level `}`.
-                1 => {
-                    self.flush(chunk, run, i);
-                    self.finish_section();
-                }
-                2 if self.element_open => self.finish_element(chunk, run, i),
-                _ => {}
-            }
-        }
+        self.end_value(chunk, i, run);
         let marked = self.in_block() && std::mem::take(&mut self.marked);
         self.nest.close(is_array);
         self.expect_key = false;
@@ -513,17 +476,7 @@ impl PromptScanner {
 
     #[inline(always)]
     fn comma(&mut self, chunk: &[u8], i: usize, run: &mut usize) {
-        if self.section.is_some() {
-            match self.nest.depth() {
-                // A bare scalar section value ends at the next top-level member.
-                1 => {
-                    self.flush(chunk, run, i);
-                    self.finish_section();
-                }
-                2 if self.element_open => self.finish_element(chunk, run, i),
-                _ => {}
-            }
-        }
+        self.end_value(chunk, i, run);
         if self.skip_depth != 0 && self.skip_depth == self.nest.depth() {
             // The comma after a skipped `cache_control` member separates the
             // hashed members around it, if there are any.
@@ -543,6 +496,22 @@ impl PromptScanner {
             self.block = self.block.saturating_add(1);
         }
         self.expect_key = self.nest.in_object();
+    }
+
+    /// A `,` or closing bracket at `i` ends a bare scalar section value (at the
+    /// top level) or an open section element.
+    #[inline(always)]
+    fn end_value(&mut self, chunk: &[u8], i: usize, run: &mut usize) {
+        if self.section.is_some() {
+            match self.nest.depth() {
+                1 => {
+                    self.flush(chunk, run, i);
+                    self.finish_section();
+                }
+                2 if self.element_open => self.finish_element(chunk, run, i),
+                _ => {}
+            }
+        }
     }
 
     /// Ends the section element whose last byte precedes `end`.

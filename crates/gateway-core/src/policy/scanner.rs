@@ -2,7 +2,7 @@
 
 use super::{MAX_MODEL_BYTES, PolicyError};
 use crate::api::Api;
-use crate::json::{Nesting, StringEnd, is_space, short_string_len};
+use crate::json::{Kept, Nesting, StringEnd, is_space, short_string_len};
 
 /// What the bytes of the current top-level string are for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,18 +28,15 @@ pub struct PolicyScanner {
     string: StringEnd,
     expect_key: bool,
     capture: Capture,
-    key: [u8; KEY_CAP],
+    key: Kept<KEY_CAP>,
     /// The API's output-token fields.
     token_keys: &'static [&'static str],
-    key_len: usize,
-    key_long: bool,
     /// The string has an escape, or (a key) a non-ASCII byte: it may read
     /// as another key once decoded or case-folded.
     escaped: bool,
     /// The last top-level key was `model` and its value comes next.
     model_next: bool,
-    model: [u8; MAX_MODEL_BYTES],
-    model_len: usize,
+    model: Kept<MAX_MODEL_BYTES>,
     /// Offset of the model value's first byte in the body.
     model_start: u64,
     found: bool,
@@ -65,14 +62,11 @@ impl PolicyScanner {
             string: StringEnd::default(),
             expect_key: false,
             capture: Capture::None,
-            key: [0; KEY_CAP],
+            key: Kept::default(),
             token_keys: api.token_fields(),
-            key_len: 0,
-            key_long: false,
             escaped: false,
             model_next: false,
-            model: [0; MAX_MODEL_BYTES],
-            model_len: 0,
+            model: Kept::default(),
             model_start: 0,
             found: false,
             offset: 0,
@@ -98,7 +92,7 @@ impl PolicyScanner {
         }
         // Built only from complete string contents without escapes; a body
         // that is not UTF-8 there yields no model.
-        std::str::from_utf8(self.model.get(..self.model_len)?).ok()
+        std::str::from_utf8(self.model.bytes()).ok()
     }
 
     /// Where the model's value lies in the body, once read: its bytes
@@ -106,7 +100,7 @@ impl PolicyScanner {
     /// another name and keep every other byte.
     pub fn model_span(&self) -> Option<std::ops::Range<u64>> {
         self.model()?;
-        Some(self.model_start..self.model_start + self.model_len as u64)
+        Some(self.model_start..self.model_start + self.model.bytes().len() as u64)
     }
 
     /// The requested output-token maximum, once its value was read completely.
@@ -151,149 +145,135 @@ impl PolicyScanner {
             }
             let Some(&byte) = chunk.get(i) else { break };
             i += 1;
-            if is_space(byte) {
-                if self.tokens_reading {
-                    self.end_tokens();
-                }
-                continue;
-            }
-            if !self.started {
-                self.started = true;
-                if byte != b'{' {
-                    self.error = Some(PolicyError::Malformed);
-                    break;
-                }
-            }
-            match byte {
-                b'"' => {
-                    if self.tokens_next {
-                        self.error = Some(PolicyError::InvalidMaxTokens);
-                        break;
-                    }
-                    let top_key = self.nest.depth() == 1 && self.expect_key;
-                    let model_value = self.nest.depth() == 1 && self.model_next;
-                    self.expect_key = false;
-                    self.model_next = false;
-                    if !top_key && !model_value {
-                        // Most strings: nested or ordinary values, often short.
-                        let rest = chunk.get(i..).unwrap_or_default();
-                        if let Some(len) = short_string_len(rest) {
-                            i += len + 1;
-                            continue;
-                        }
-                    }
-                    self.capture = match (top_key, model_value) {
-                        (true, _) => Capture::Key,
-                        (_, true) => Capture::Model,
-                        _ => Capture::None,
-                    };
-                    self.key_len = 0;
-                    self.key_long = false;
-                    self.escaped = false;
-                    if model_value {
-                        self.model_len = 0;
-                        self.model_start = self.offset + i as u64;
-                    }
-                    self.in_string = true;
-                    self.string.start();
-                }
-                b'{' | b'[' => {
-                    if self.nest.depth() == 1 && self.model_next {
-                        self.error = Some(PolicyError::Invalid);
-                        break;
-                    }
-                    if self.tokens_next {
-                        self.error = Some(PolicyError::InvalidMaxTokens);
-                        break;
-                    }
-                    self.nest.open(byte == b'[');
-                    self.expect_key = byte == b'{';
-                }
-                b'}' | b']' => {
-                    self.end_tokens();
-                    if self.error.is_some() {
-                        break;
-                    }
-                    if !self.nest.closes(byte == b']') {
-                        self.error = Some(PolicyError::Malformed);
-                        break;
-                    }
-                    if self.nest.depth() == 1 && self.model_next {
-                        self.error = Some(PolicyError::Invalid);
-                        break;
-                    }
-                    self.nest.close(byte == b']');
-                    self.expect_key = false;
-                }
-                b',' => {
-                    self.end_tokens();
-                    if self.error.is_some() {
-                        break;
-                    }
-                    if self.nest.depth() == 1 && self.model_next {
-                        self.error = Some(PolicyError::Invalid);
-                        break;
-                    }
-                    self.expect_key = self.nest.in_object();
-                }
-                b':' => {}
-                // A number, `true`, `false`, or `null`. Any other byte is not
-                // JSON, and a provider that reads it anyway (a NUL in UTF-16
-                // text, an unquoted key, a comment) could see other keys than
-                // these.
-                b'0'..=b'9'
-                | b'-'
-                | b'+'
-                | b'.'
-                | b'E'
-                | b'a'
-                | b'e'
-                | b'f'
-                | b'l'
-                | b'n'
-                | b'r'
-                | b's'
-                | b't'
-                | b'u' => {
-                    if self.nest.depth() == 1 && self.model_next {
-                        self.error = Some(PolicyError::Invalid);
-                        break;
-                    }
-                    if self.tokens_next || self.tokens_reading {
-                        self.tokens_next = false;
-                        self.tokens_reading = true;
-                        let digit = byte.wrapping_sub(b'0');
-                        let next = (digit < 10)
-                            .then(|| self.tokens_value.checked_mul(10))
-                            .flatten()
-                            .and_then(|v| v.checked_add(u64::from(digit)));
-                        match next {
-                            Some(value) => self.tokens_value = value,
-                            None => {
-                                self.error = Some(PolicyError::InvalidMaxTokens);
-                                break;
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    self.error = Some(PolicyError::Malformed);
-                    break;
-                }
+            if let Err(error) = self.structural(chunk, byte, &mut i) {
+                self.error = Some(error);
             }
         }
         self.offset += chunk.len() as u64;
     }
 
+    /// Handles `byte`, outside strings, with `i` just after it.
+    #[inline(always)]
+    fn structural(&mut self, chunk: &[u8], byte: u8, i: &mut usize) -> Result<(), PolicyError> {
+        if is_space(byte) {
+            if self.tokens_reading {
+                self.end_tokens()?;
+            }
+            return Ok(());
+        }
+        if !self.started {
+            self.started = true;
+            if byte != b'{' {
+                return Err(PolicyError::Malformed);
+            }
+        }
+        match byte {
+            b'"' => {
+                if self.tokens_next {
+                    return Err(PolicyError::InvalidMaxTokens);
+                }
+                let top_key = self.nest.depth() == 1 && self.expect_key;
+                let model_value = self.nest.depth() == 1 && self.model_next;
+                self.expect_key = false;
+                self.model_next = false;
+                if !top_key && !model_value {
+                    // Most strings: nested or ordinary values, often short.
+                    let rest = chunk.get(*i..).unwrap_or_default();
+                    if let Some(len) = short_string_len(rest) {
+                        *i += len + 1;
+                        return Ok(());
+                    }
+                }
+                self.capture = match (top_key, model_value) {
+                    (true, _) => Capture::Key,
+                    (_, true) => Capture::Model,
+                    _ => Capture::None,
+                };
+                self.key.clear();
+                self.escaped = false;
+                if model_value {
+                    self.model.clear();
+                    self.model_start = self.offset + *i as u64;
+                }
+                self.in_string = true;
+            }
+            b'{' | b'[' => {
+                self.check_not_model_value()?;
+                if self.tokens_next {
+                    return Err(PolicyError::InvalidMaxTokens);
+                }
+                self.nest.open(byte == b'[');
+                self.expect_key = byte == b'{';
+            }
+            b'}' | b']' => {
+                self.end_tokens()?;
+                if !self.nest.closes(byte == b']') {
+                    return Err(PolicyError::Malformed);
+                }
+                self.check_not_model_value()?;
+                self.nest.close(byte == b']');
+                self.expect_key = false;
+            }
+            b',' => {
+                self.end_tokens()?;
+                self.check_not_model_value()?;
+                self.expect_key = self.nest.in_object();
+            }
+            b':' => {}
+            // A number, `true`, `false`, or `null`. Any other byte is not
+            // JSON, and a provider that reads it anyway (a NUL in UTF-16
+            // text, an unquoted key, a comment) could see other keys than
+            // these.
+            b'0'..=b'9'
+            | b'-'
+            | b'+'
+            | b'.'
+            | b'E'
+            | b'a'
+            | b'e'
+            | b'f'
+            | b'l'
+            | b'n'
+            | b'r'
+            | b's'
+            | b't'
+            | b'u' => {
+                self.check_not_model_value()?;
+                if self.tokens_next || self.tokens_reading {
+                    self.tokens_next = false;
+                    self.tokens_reading = true;
+                    let digit = byte.wrapping_sub(b'0');
+                    self.tokens_value = (digit < 10)
+                        .then(|| self.tokens_value.checked_mul(10))
+                        .flatten()
+                        .and_then(|v| v.checked_add(u64::from(digit)))
+                        .ok_or(PolicyError::InvalidMaxTokens)?;
+                }
+            }
+            _ => return Err(PolicyError::Malformed),
+        }
+        Ok(())
+    }
+
+    /// `model` takes a string; anything else where its value goes is invalid.
+    #[inline(always)]
+    fn check_not_model_value(&self) -> Result<(), PolicyError> {
+        if self.nest.depth() == 1 && self.model_next {
+            return Err(PolicyError::Invalid);
+        }
+        Ok(())
+    }
+
     /// Completes a token-field value at a terminator; a key whose value
     /// never started is an error.
-    fn end_tokens(&mut self) {
+    fn end_tokens(&mut self) -> Result<(), PolicyError> {
         if self.tokens_reading {
             self.tokens_reading = false;
             self.max_tokens = Some(self.tokens_value);
         } else if self.tokens_next {
-            self.error = Some(PolicyError::InvalidMaxTokens);
+            return Err(PolicyError::InvalidMaxTokens);
         }
+        Ok(())
     }
 
     fn keep(&mut self, content: &[u8]) {
@@ -304,17 +284,10 @@ impl PolicyScanner {
         if content.contains(&b'\\') || (self.capture == Capture::Key && !content.is_ascii()) {
             self.escaped = true;
         }
-        let (buf, len, long) = match self.capture {
-            Capture::Key => (&mut self.key[..], &mut self.key_len, &mut self.key_long),
-            Capture::Model => (&mut self.model[..], &mut self.model_len, &mut self.key_long),
-            Capture::None => return,
-        };
-        match buf.get_mut(*len..*len + content.len()) {
-            Some(slot) => {
-                slot.copy_from_slice(content);
-                *len += content.len();
-            }
-            None => *long = true,
+        match self.capture {
+            Capture::Key => self.key.push(content),
+            Capture::Model => self.model.push(content),
+            Capture::None => {}
         }
     }
 
@@ -324,20 +297,15 @@ impl PolicyScanner {
             // Keys compare ignoring ASCII case: some decoders (Go's) bind
             // `MODEL` to `model`.
             Capture::Key => {
+                let key = self.key.whole();
                 if self.escaped {
                     self.error = Some(PolicyError::EscapedKey);
-                } else if !self.key_long
-                    && self
-                        .key
-                        .get(..self.key_len)
-                        .is_some_and(|key| key.eq_ignore_ascii_case(b"model"))
-                {
+                } else if key.is_some_and(|key| key.eq_ignore_ascii_case(b"model")) {
                     if self.found {
                         self.error = Some(PolicyError::Repeated);
                     }
                     self.model_next = true;
-                } else if !self.key_long
-                    && let Some(key) = self.key.get(..self.key_len)
+                } else if let Some(key) = key
                     && self
                         .token_keys
                         .iter()
@@ -351,7 +319,7 @@ impl PolicyScanner {
                 }
             }
             Capture::Model => {
-                if self.escaped || self.key_long {
+                if self.escaped || self.model.is_long() {
                     self.error = Some(PolicyError::Invalid);
                 } else {
                     self.found = true;

@@ -39,7 +39,7 @@ impl JsonUsageScanner {
     /// The usage the body reported; `None` when absent, malformed, or cut
     /// off by a body that ended early.
     fn read(&self) -> Option<Usage> {
-        if self.fields.failed {
+        if self.fields.failed() {
             return None;
         }
         let bytes = self.fields.usage_bytes().ok()??;

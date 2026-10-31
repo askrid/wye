@@ -233,13 +233,61 @@ impl UsageScanner {
     }
 }
 
-/// Incremental usage scanner for one Anthropic Messages stream.
+/// Cuts a stream's chunks into lines, carrying a partial line to the next chunk.
 #[derive(Debug, Default)]
-pub struct SseUsageScanner {
+struct Lines {
     /// Partial line carried over from the previous chunk.
     line: Vec<u8>,
     /// The carried line was longer than the bytes kept.
-    line_truncated: bool,
+    truncated: bool,
+}
+
+impl Lines {
+    /// Calls `process` on each line that ends in `chunk`, with whether it was
+    /// truncated; a partial line keeps at most `limit` bytes. Takes the
+    /// scanner apart from its `Lines`, so `process` can borrow it mutably.
+    #[inline(always)]
+    fn feed<S>(
+        &mut self,
+        mut chunk: &[u8],
+        scanner: &mut S,
+        limit: impl Fn(&S) -> usize,
+        mut process: impl FnMut(&mut S, &[u8], bool),
+    ) {
+        // SIMD search: every streamed byte passes through here.
+        while let Some(newline) = memchr::memchr(b'\n', chunk) {
+            let (segment, rest) = chunk.split_at(newline);
+            chunk = rest.get(1..).unwrap_or_default();
+            if self.line.is_empty() && !self.truncated {
+                // Common case: the whole line is in this chunk; no copy.
+                process(scanner, segment, false);
+            } else {
+                self.carry(segment, limit(scanner));
+                process(scanner, &self.line, self.truncated);
+                // Keeps the allocation for the next carried line.
+                self.line.clear();
+                self.truncated = false;
+            }
+        }
+        if !chunk.is_empty() {
+            self.carry(chunk, limit(scanner));
+        }
+    }
+
+    fn carry(&mut self, bytes: &[u8], limit: usize) {
+        let room = limit.saturating_sub(self.line.len());
+        if bytes.len() > room {
+            self.truncated = true;
+        }
+        self.line
+            .extend_from_slice(bytes.get(..room.min(bytes.len())).unwrap_or_default());
+    }
+}
+
+/// Incremental usage scanner for one Anthropic Messages stream.
+#[derive(Debug, Default)]
+pub struct SseUsageScanner {
+    lines: Lines,
     event: Event,
     usage: Usage,
     model: Option<Box<str>>,
@@ -257,42 +305,19 @@ impl SseUsageScanner {
         Self::default()
     }
 
-    pub fn feed(&mut self, mut chunk: &[u8]) {
-        // SIMD search: every streamed byte passes through here.
-        while let Some(newline) = memchr::memchr(b'\n', chunk) {
-            let (segment, rest) = chunk.split_at(newline);
-            chunk = rest.get(1..).unwrap_or_default();
-            if self.line.is_empty() && !self.line_truncated {
-                // Common case: the whole line is in this chunk; no copy.
-                self.process_line(segment, false);
-            } else {
-                self.carry(segment);
-                let line = std::mem::take(&mut self.line);
-                let truncated = std::mem::replace(&mut self.line_truncated, false);
-                self.process_line(&line, truncated);
-                // Keep the allocation for the next carried line.
-                self.line = line;
-                self.line.clear();
-            }
-        }
-        if !chunk.is_empty() {
-            self.carry(chunk);
-        }
+    pub fn feed(&mut self, chunk: &[u8]) {
+        let mut lines = std::mem::take(&mut self.lines);
+        lines.feed(chunk, self, Self::line_limit, Self::process_line);
+        self.lines = lines;
     }
 
-    /// Appends part of a line, keeping only as much as the current event needs.
-    fn carry(&mut self, bytes: &[u8]) {
-        let limit = match self.event {
+    /// Bytes kept of a partial line: as much as the current event needs.
+    fn line_limit(&self) -> usize {
+        match self.event {
             Event::Other => CLASSIFY_PREFIX_BYTES,
             Event::MessageStart | Event::MessageDelta => MAX_USAGE_LINE_BYTES,
             Event::ContentBlockStart => MAX_BLOCK_START_LINE_BYTES,
-        };
-        let room = limit.saturating_sub(self.line.len());
-        if bytes.len() > room {
-            self.line_truncated = true;
         }
-        self.line
-            .extend_from_slice(bytes.get(..room.min(bytes.len())).unwrap_or_default());
     }
 
     fn process_line(&mut self, line: &[u8], truncated: bool) {

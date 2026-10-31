@@ -120,7 +120,7 @@ fn oversized_usage_event_is_unknown_and_bounded() {
     for _ in 0..32 {
         s.feed(&filler);
     }
-    assert!(s.line.len() <= MAX_USAGE_LINE_BYTES);
+    assert!(s.lines.line.len() <= MAX_USAGE_LINE_BYTES);
     s.feed(b"\"}}\n\n");
     assert_eq!(s.status(), UsageStatus::Unknown);
 }
@@ -130,7 +130,7 @@ fn long_lines_of_other_events_are_not_kept() {
     let mut s = SseUsageScanner::new();
     s.feed(b"event: content_block_delta\ndata: ");
     s.feed(&vec![b'x'; 100_000]);
-    assert!(s.line.len() <= CLASSIFY_PREFIX_BYTES);
+    assert!(s.lines.line.len() <= CLASSIFY_PREFIX_BYTES);
     s.feed(b"\n\n");
     s.feed(STREAM.as_bytes());
     assert_eq!(s.usage(), EXPECTED);
