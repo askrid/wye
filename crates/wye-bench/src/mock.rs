@@ -89,12 +89,10 @@ pub async fn spawn_refusing(every: u64) -> SocketAddr {
         let refuse = count.fetch_add(1, Ordering::Relaxed).is_multiple_of(every);
         async move {
             if refuse {
-                let mut res = Response::new(Either::Left(Full::new(Bytes::from_static(
+                let mut res = json_response(Bytes::from_static(
                     br#"{"type":"error","error":{"type":"rate_limit_error","message":"bench refusal"}}"#,
-                ))));
+                ));
                 *res.status_mut() = http::StatusCode::TOO_MANY_REQUESTS;
-                res.headers_mut()
-                    .insert("content-type", "application/json".parse().unwrap());
                 return res;
             }
             handle(req).await
@@ -108,27 +106,19 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     let responses = req.uri().path() == "/v1/responses";
     // Drain the request body like a real upstream would.
     let _ = req.into_body().collect().await;
-    if let (true, Some(size)) = (responses, header_u64(&headers, "x-bench-unary")) {
-        let body = padded_json(
-            r#"{"id":"resp_bench","object":"response","model":"openai/bench","output":[{"type":"message","content":[{"type":"output_text","text":""#,
-            r#""}]}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
-            size as usize,
-        );
-        let mut res = Response::new(Either::Left(Full::new(body)));
-        res.headers_mut()
-            .insert("content-type", "application/json".parse().unwrap());
-        return res;
-    }
     if let Some(size) = header_u64(&headers, "x-bench-unary") {
-        let body = padded_json(
-            r#"{"id":"msg_bench","type":"message","role":"assistant","content":[{"type":"text","text":""#,
-            r#""}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
-            size as usize,
-        );
-        let mut res = Response::new(Either::Left(Full::new(body)));
-        res.headers_mut()
-            .insert("content-type", "application/json".parse().unwrap());
-        return res;
+        let (head, tail) = if responses {
+            (
+                r#"{"id":"resp_bench","object":"response","model":"openai/bench","output":[{"type":"message","content":[{"type":"output_text","text":""#,
+                r#""}]}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+            )
+        } else {
+            (
+                r#"{"id":"msg_bench","type":"message","role":"assistant","content":[{"type":"text","text":""#,
+                r#""}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+            )
+        };
+        return json_response(padded_json(head, tail, size as usize));
     }
     let size = header_u64(&headers, "x-bench-size").unwrap_or(64) as usize;
     let mut res = Response::new(Either::Right(SseBody {
@@ -142,6 +132,13 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     }));
     res.headers_mut()
         .insert("content-type", "text/event-stream".parse().unwrap());
+    res
+}
+
+fn json_response(body: Bytes) -> Response<Either<Full<Bytes>, SseBody>> {
+    let mut res = Response::new(Either::Left(Full::new(body)));
+    res.headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
     res
 }
 

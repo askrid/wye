@@ -13,46 +13,52 @@ use launch::{Launch, Setup};
 /// Which gateway to start, with the path to its executable.
 #[derive(Clone, Copy)]
 pub enum Gateway<'a> {
-    Wye(&'a str),
-    /// Wye with `[auth]`: every request carries a gateway token to verify.
-    WyeAuth(&'a str),
-    /// Wye with `[cache_diagnostics]`: every request body is scanned and hashed.
-    WyeDiag(&'a str),
-    /// Wye with `[telemetry]`: every usage record is also exported as OTLP.
-    WyeOtlp(&'a str),
-    /// Wye with `[auth]` and model permissions in config and credential:
-    /// every request is held until its `model` is read, and its body checked.
-    WyeModels(&'a str),
-    /// Wye with `[routes.openai]`: OpenAI Responses requests, framed as
-    /// Responses streams by the mock, through the Responses usage scanner.
-    WyeOpenai(&'a str),
-    /// Wye with a Claude route to a Bedrock upstream: every request is held
-    /// until its `model` is read, and the model id rewritten for Bedrock.
-    WyeBedrock(&'a str),
-    /// Wye with a Claude route of two accounts and failover: every request
-    /// body is kept for resending until the response arrives.
-    WyeFailover(&'a str),
-    /// [`Self::WyeFailover`] whose first account (tried first) refuses every
-    /// fourth request with `429` before reading it: each refused request
-    /// moves to the second account.
-    WyeRefused(&'a str),
+    Wye(&'a str, Variant),
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
 }
 
+/// What a Wye under test does on top of forwarding.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Variant {
+    Plain,
+    /// `[auth]`: every request carries a gateway token to verify.
+    Auth,
+    /// `[cache_diagnostics]`: every request body is scanned and hashed.
+    Diag,
+    /// `[telemetry]`: every usage record is also exported as OTLP.
+    Otlp,
+    /// `[auth]` and model permissions in config and credential: every request
+    /// is held until its `model` is read, and its body checked.
+    Models,
+    /// `[routes.openai]`: OpenAI Responses requests, framed as Responses
+    /// streams by the mock, through the Responses usage scanner.
+    Openai,
+    /// A Claude route to a Bedrock upstream: every request is held until its
+    /// `model` is read, and the model id rewritten for Bedrock.
+    Bedrock,
+    /// A Claude route of two accounts and failover: every request body is
+    /// kept for resending until the response arrives.
+    Failover,
+    /// [`Self::Failover`] whose first account (tried first) refuses every
+    /// fourth request with `429` before reading it: each refused request
+    /// moves to the second account.
+    Refused,
+}
+
 impl Gateway<'_> {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Wye(_) => "wye",
-            Self::WyeAuth(_) => "wye-auth",
-            Self::WyeDiag(_) => "wye-diag",
-            Self::WyeOtlp(_) => "wye-otlp",
-            Self::WyeModels(_) => "wye-models",
-            Self::WyeOpenai(_) => "wye-openai",
-            Self::WyeBedrock(_) => "wye-bedrock",
-            Self::WyeFailover(_) => "wye-failover",
-            Self::WyeRefused(_) => "wye-refused",
+            Self::Wye(_, Variant::Plain) => "wye",
+            Self::Wye(_, Variant::Auth) => "wye-auth",
+            Self::Wye(_, Variant::Diag) => "wye-diag",
+            Self::Wye(_, Variant::Otlp) => "wye-otlp",
+            Self::Wye(_, Variant::Models) => "wye-models",
+            Self::Wye(_, Variant::Openai) => "wye-openai",
+            Self::Wye(_, Variant::Bedrock) => "wye-bedrock",
+            Self::Wye(_, Variant::Failover) => "wye-failover",
+            Self::Wye(_, Variant::Refused) => "wye-refused",
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
@@ -62,15 +68,15 @@ impl Gateway<'_> {
     /// Metric name prefix for this gateway.
     pub fn prefix(self) -> &'static str {
         match self {
-            Self::Wye(_) => "",
-            Self::WyeAuth(_) => "auth_",
-            Self::WyeDiag(_) => "diag_",
-            Self::WyeOtlp(_) => "otlp_",
-            Self::WyeModels(_) => "models_",
-            Self::WyeOpenai(_) => "openai_",
-            Self::WyeBedrock(_) => "bedrock_",
-            Self::WyeFailover(_) => "failover_",
-            Self::WyeRefused(_) => "refused_",
+            Self::Wye(_, Variant::Plain) => "",
+            Self::Wye(_, Variant::Auth) => "auth_",
+            Self::Wye(_, Variant::Diag) => "diag_",
+            Self::Wye(_, Variant::Otlp) => "otlp_",
+            Self::Wye(_, Variant::Models) => "models_",
+            Self::Wye(_, Variant::Openai) => "openai_",
+            Self::Wye(_, Variant::Bedrock) => "bedrock_",
+            Self::Wye(_, Variant::Failover) => "failover_",
+            Self::Wye(_, Variant::Refused) => "refused_",
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",

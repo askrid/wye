@@ -7,7 +7,7 @@
 
 use std::time::{Duration, Instant};
 
-use wye_testkit::TestCa;
+use wye_testkit::{TempDir, TestCa};
 
 use crate::{
     allocations,
@@ -33,8 +33,7 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     let ca = TestCa::generate();
     let upstream = mock::spawn(tls.then_some(&ca)).await;
     let base_url = format!("{}://{upstream}", if tls { "https" } else { "http" });
-    let dir = std::env::temp_dir().join(format!("wye-bench-load-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("bench-load");
     // Capacity is measured per worker thread: one by default, or
     // `WYE_BENCH_GATEWAY_THREADS` for a multi-core run.
     let threads = std::env::var("WYE_BENCH_GATEWAY_THREADS").unwrap_or_else(|_| "1".into());
@@ -53,37 +52,33 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
         env,
     )
     .await;
-    if scenario == "capacity" {
-        let direct = crate::client::Target::tls(upstream, ca.ca_cert());
-        let threads = threads
-            .parse()
-            .expect("WYE_BENCH_GATEWAY_THREADS must be a number");
-        crate::capacity::run(&direct, &process, threads).await;
-        drop(process);
-        let _ = std::fs::remove_dir_all(dir);
-        return;
+    match scenario {
+        "capacity" => {
+            let direct = crate::client::Target::tls(upstream, ca.ca_cert());
+            let threads = threads
+                .parse()
+                .expect("WYE_BENCH_GATEWAY_THREADS must be a number");
+            crate::capacity::run(&direct, &process, threads).await;
+        }
+        "events" => soak_events(&process, seconds).await,
+        "paced" => soak_paced(&process, seconds).await,
+        _ => soak_uploads(&process, scenario, seconds).await,
     }
-    if scenario == "events" {
-        soak_events(&process, seconds).await;
-        drop(process);
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
-    if scenario == "paced" {
-        soak_paced(&process, seconds).await;
-        drop(process);
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
+}
+
+/// Batches of agent-sized uploads until `seconds` pass; prints the gateway's CPU per MB.
+async fn soak_uploads(process: &GatewayProcess, scenario: &str, seconds: u64) {
     let body = mock::message_json(UPLOAD_BYTES);
+    let run = || {
+        scenarios::upload(
+            process.target(),
+            UPLOAD_CONCURRENCY,
+            UPLOAD_BATCH,
+            body.clone(),
+        )
+    };
     // Warm up connection pools before the measured window.
-    scenarios::upload(
-        process.target(),
-        UPLOAD_CONCURRENCY,
-        UPLOAD_BATCH,
-        body.clone(),
-    )
-    .await;
+    run().await;
     eprintln!(
         "gateway pid {} under {scenario} for {seconds}s",
         process.pid()
@@ -93,13 +88,7 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     let mut requests = 0;
     let mut failed = 0;
     while Instant::now() < deadline {
-        let results = scenarios::upload(
-            process.target(),
-            UPLOAD_CONCURRENCY,
-            UPLOAD_BATCH,
-            body.clone(),
-        )
-        .await;
+        let results = run().await;
         failed += results.iter().filter(|r| r.is_none()).count();
         requests += results.len();
     }
@@ -109,8 +98,6 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
         "{requests} requests ({failed} failed), {mb:.0} MB, gateway CPU {:.2} ms/MB",
         cpu * 1_000.0 / mb
     );
-    drop(process);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Batches of unpaced 64-byte events (64 streams of 2,000) until `seconds`
@@ -138,11 +125,8 @@ async fn soak_events(process: &GatewayProcess, seconds: u64) {
     let (mut events, mut failed) = (0usize, 0usize);
     while Instant::now() < deadline {
         let streams = run().await;
-        failed += streams.iter().filter(|s| s.failed).count();
-        events += streams
-            .iter()
-            .map(|s| s.event_delays_us.len())
-            .sum::<usize>();
+        failed += scenarios::count_failed(&streams);
+        events += scenarios::count_events(&streams);
     }
     let cpu = process.cpu_secs() - cpu_before;
     println!(
@@ -165,11 +149,8 @@ async fn soak_paced(process: &GatewayProcess, seconds: u64) {
     let mut live = Vec::new();
     while Instant::now() < deadline {
         let streams = run().await;
-        failed += streams.iter().filter(|s| s.failed).count();
-        events += streams
-            .iter()
-            .map(|s| s.event_delays_us.len())
-            .sum::<usize>();
+        failed += scenarios::count_failed(&streams);
+        events += scenarios::count_events(&streams);
         batches += 1;
         // Idle between batches: what the gateway keeps once streams end.
         tokio::time::sleep(Duration::from_millis(200)).await;

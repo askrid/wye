@@ -4,14 +4,14 @@
 //! against the mock and through the gateway under the same load, and the
 //! gateway's metrics are the difference.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use super::{paced::token_streams, successes, upload::upload_body};
 use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{PERCENTILES, event_delays, percentile, phase, put},
+    stats::{Out, PERCENTILES, event_delays, percentile, phase},
 };
 
 /// Token-paced streams in the mixed and stalled scenarios.
@@ -37,15 +37,15 @@ pub(super) fn scenario_report() -> serde_json::Value {
 pub(crate) struct Stress {
     mixed_events: Vec<u64>,
     mixed_uploads: Vec<u64>,
-    mixed_failed: usize,
+    pub(super) mixed_failed: usize,
     stalled_events: Vec<u64>,
-    stalled_failed: usize,
+    pub(super) stalled_failed: usize,
     /// Resident memory added per stalled stream, in KB.
     stalled_rss_kb: f64,
 }
 
 /// Latencies of the first requests on new connections, and failures.
-pub(crate) struct Cold(Vec<u64>, usize);
+pub(crate) struct Cold(Vec<u64>, pub(super) usize);
 
 impl Cold {
     /// Must be the first traffic a gateway sees, while its upstream
@@ -74,7 +74,7 @@ impl Stress {
         }
         let streams = streams.await.unwrap();
         let (mixed_uploads, uploads_failed) = successes(uploads);
-        let mixed_failed = uploads_failed + streams.iter().filter(|s| s.failed).count();
+        let mixed_failed = uploads_failed + scenarios::count_failed(&streams);
         let mixed_events = event_delays(streams);
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -84,7 +84,7 @@ impl Stress {
         tokio::time::sleep(Duration::from_millis(500)).await;
         let stalled_rss_kb = (rss() - rss_before) / STALLED as f64;
         let streams = token_streams(target, STREAMS, RAMP).await;
-        let stalled_failed = STALLED - held.len() + streams.iter().filter(|s| s.failed).count();
+        let stalled_failed = STALLED - held.len() + scenarios::count_failed(&streams);
         drop(held);
         let stalled_events = event_delays(streams);
 
@@ -100,66 +100,45 @@ impl Stress {
 }
 
 /// Cold-connection latency through a freshly started `process`, over `direct`.
-pub(super) async fn measure_cold(
-    direct: &Cold,
-    process: &GatewayProcess,
-    prefix: &str,
-    metrics: &mut BTreeMap<String, f64>,
-) {
-    let via = phase(format!("{prefix}cold"), Cold::measure(process.target())).await;
+pub(super) async fn measure_cold(direct: &Cold, process: &GatewayProcess, out: &mut Out<'_>) {
+    let via = phase(
+        format!("{}cold", out.prefix),
+        Cold::measure(process.target()),
+    )
+    .await;
     for (name, p) in PERCENTILES {
-        put(
-            metrics,
-            prefix,
+        out.put(
             &format!("cold_unary_added_{name}_us"),
             percentile(&via.0, p) - percentile(&direct.0, p),
         );
     }
-    put(metrics, prefix, "cold_failed_requests", via.1 as f64);
+    out.put("cold_failed_requests", via.1 as f64);
 }
 
 /// Runs the stress scenarios through `process` and adds what it costs over `direct`.
-pub(super) async fn measure_stress(
-    direct: &Stress,
-    process: &GatewayProcess,
-    prefix: &str,
-    metrics: &mut BTreeMap<String, f64>,
-) {
+pub(super) async fn measure_stress(direct: &Stress, process: &GatewayProcess, out: &mut Out<'_>) {
     let via = phase(
-        format!("{prefix}stress"),
+        format!("{}stress", out.prefix),
         Stress::measure(process.target(), || process.rss_kb()),
     )
     .await;
     let added = |via: &[u64], direct: &[u64], p| percentile(via, p) - percentile(direct, p);
     for (name, p) in PERCENTILES {
-        put(
-            metrics,
-            prefix,
+        out.put(
             &format!("mixed_event_added_{name}_us"),
             added(&via.mixed_events, &direct.mixed_events, p),
         );
     }
-    put(
-        metrics,
-        prefix,
+    out.put(
         "mixed_upload_added_p50_us",
         added(&via.mixed_uploads, &direct.mixed_uploads, 50.0),
     );
-    put(
-        metrics,
-        prefix,
+    out.put(
         "stalled_event_added_p99_us",
         added(&via.stalled_events, &direct.stalled_events, 99.0),
     );
-    put(
-        metrics,
-        prefix,
-        "stalled_rss_kb_per_stream",
-        via.stalled_rss_kb,
-    );
-    put(
-        metrics,
-        prefix,
+    out.put("stalled_rss_kb_per_stream", via.stalled_rss_kb);
+    out.put(
         "stress_failed_requests",
         (via.mixed_failed + via.stalled_failed) as f64,
     );

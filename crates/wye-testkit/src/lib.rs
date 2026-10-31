@@ -5,6 +5,7 @@
 //! - [`jwt`]: identity-provider signing keys, JWKS documents, and tokens.
 //! - [`spawn_upstream`]: a mock upstream over plain HTTP/1.1, or over TLS with
 //!   HTTP/2 or HTTP/1.1 negotiated by ALPN, like a real provider.
+//! - [`TempDir`]: a fresh directory, removed on drop.
 //!
 //! Not for production use: keys are generated per process (the RSA ones are
 //! fixed files) and never protected.
@@ -13,7 +14,18 @@
 
 pub mod jwt;
 
-use std::{convert::Infallible, error::Error, future::Future, net::SocketAddr, sync::Arc};
+use std::{
+    convert::Infallible,
+    error::Error,
+    future::Future,
+    net::SocketAddr,
+    ops::Deref,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use bytes::Bytes;
 use http::{Request, Response};
@@ -159,4 +171,33 @@ where
 pub fn ed25519_keypair() -> Ed25519KeyPair {
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).expect("key generation");
     Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).expect("generated key")
+}
+
+/// A fresh directory under the system's, removed on drop, so tests running in
+/// parallel never share one and a failing test leaves nothing behind.
+pub struct TempDir(PathBuf);
+
+impl TempDir {
+    /// `name` only helps to tell directories apart when debugging.
+    pub fn new(name: &str) -> Self {
+        static CREATED: AtomicUsize = AtomicUsize::new(0);
+        let n = CREATED.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("wye-{name}-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("temporary directory");
+        Self(path)
+    }
+}
+
+impl Deref for TempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }

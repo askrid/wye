@@ -3,8 +3,9 @@
 
 use super::harness::*;
 
-/// An upstream that records the bodies it receives and answers `status`.
-async fn upstream(
+/// An upstream that records the bodies it receives and answers `status`,
+/// counted in `hits`.
+async fn counted(
     status: StatusCode,
     hits: &Arc<AtomicUsize>,
 ) -> (SocketAddr, mpsc::Receiver<Bytes>) {
@@ -15,72 +16,94 @@ async fn upstream(
     )
 }
 
-async fn gateway(route: &str, a: &str, b: &str) -> Harness {
-    gateway_with(route, (a, "anthropic"), (b, "anthropic")).await
+/// [`counted`], for a test that does not count.
+async fn upstream(status: StatusCode) -> (SocketAddr, mpsc::Receiver<Bytes>) {
+    counted(status, &Arc::default()).await
 }
 
-/// Two upstreams, each a base URL and a provider, tried in order.
-async fn gateway_with(
-    route: &str,
-    (a, a_provider): (&str, &str),
-    (b, b_provider): (&str, &str),
-) -> Harness {
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+/// An upstream that refuses every request at once, without reading its body.
+async fn refusing(tls: Option<&TestCa>) -> SocketAddr {
+    let refuse = |_req: Request<Incoming>| async {
+        let mut res = Response::new(Full::new(Bytes::from_static(
+            br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
+        )));
+        *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+        res
+    };
+    wye_testkit::spawn_upstream(refuse, tls, None).await
+}
+
+fn base_url(addr: SocketAddr) -> String {
+    format!("base_url = \"http://{addr}\"")
+}
+
+/// The config of two upstreams tried in order, each given as its own lines.
+fn config(max_body: usize, route: &str, a: &str, b: &str) -> String {
+    format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = {max_body}\n\
          [routes.claude]\nselect = \"ordered\"\n{route}\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\nprovider = \"{a_provider}\"\n\
-         base_url = \"{a}\"\napi_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\nprovider = \"{b_provider}\"\n\
-         base_url = \"{b}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![
-        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
-        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-    ]);
-    Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await
+         [[routes.claude.upstreams]]\nid = \"a\"\n{a}\napi_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\n{b}\napi_key_env = \"UNUSED\"\n"
+    )
+}
+
+fn key(name: &str) -> UpstreamResources {
+    UpstreamResources::new(UpstreamAuth::api_key(name).unwrap())
+}
+
+async fn launch(config: &str, a: UpstreamResources) -> Harness {
+    let resources = with_upstreams(vec![a, key("key-b")]);
+    Harness::launch_config(config, resources, Arc::default()).await
+}
+
+/// Two plain upstreams.
+async fn gateway(route: &str, a: SocketAddr, b: SocketAddr) -> Harness {
+    let config = config(1024, route, &base_url(a), &base_url(b));
+    launch(&config, key("key-a")).await
+}
+
+/// Sends [`BODY`] and expects `200`, read to its end.
+async fn send_ok(h: &Harness) {
+    let res = h.send(messages(), BODY).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
 }
 
 const BODY: &str =
     r#"{"model":"claude-opus-5-5","max_tokens":1,"messages":[{"role":"user","content":"hello"}]}"#;
 
 #[tokio::test]
-async fn a_rate_limit_moves_the_request_to_the_next_upstream() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\", \"529\", \"connect\"]",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
-    let res = h.send(messages(), BODY).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    read_body(res).await;
-    assert_eq!(seen_a.recv().await.unwrap(), BODY);
-    assert_eq!(seen_b.recv().await.unwrap(), BODY, "the same bytes, resent");
-    let record = h.usage_record().await;
-    assert_eq!(record["upstream"], "b");
-    assert_eq!(
-        record["failovers"],
-        serde_json::json!([{"upstream": "a", "status": 429}])
-    );
+async fn a_rate_limit_or_an_overload_moves_the_request_to_the_next_upstream() {
+    for (status, route) in [
+        (429, "failover = [\"429\", \"529\", \"connect\"]"),
+        (529, "failover = [\"529\"]"),
+    ] {
+        let (a, mut seen_a) = upstream(StatusCode::from_u16(status).unwrap()).await;
+        let (b, mut seen_b) = upstream(StatusCode::OK).await;
+        let h = gateway(route, a, b).await;
+        send_ok(&h).await;
+        assert_eq!(seen_a.recv().await.unwrap(), BODY);
+        assert_eq!(seen_b.recv().await.unwrap(), BODY, "the same bytes, resent");
+        let record = h.usage_record().await;
+        assert_eq!(record["upstream"], "b");
+        assert_eq!(
+            record["failovers"],
+            serde_json::json!([{"upstream": "a", "status": status}])
+        );
+    }
 }
 
 #[tokio::test]
 async fn a_refused_connection_moves_the_request_on() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
     // Nothing listens on port 1.
     let h = gateway(
         "failover = [\"connect\"]",
-        "http://127.0.0.1:1",
-        &format!("http://{b}"),
+        "127.0.0.1:1".parse().unwrap(),
+        b,
     )
     .await;
-    let res = h.send(messages(), BODY).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    read_body(res).await;
+    send_ok(&h).await;
     assert_eq!(seen_b.recv().await.unwrap(), BODY);
     let record = h.usage_record().await;
     assert_eq!(
@@ -103,21 +126,14 @@ async fn a_stalled_tls_handshake_moves_the_request_on() {
             open.push(stream);
         }
     });
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.claude]\nselect = \"ordered\"\nfailover = [\"connect\"]\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://{a}\"\n\
-         api_key_env = \"UNUSED\"\nconnect_timeout_secs = 1\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\n\
-         api_key_env = \"UNUSED\"\n"
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let config = config(
+        1024,
+        "failover = [\"connect\"]",
+        &format!("base_url = \"https://{a}\"\nconnect_timeout_secs = 1"),
+        &base_url(b),
     );
-    let resources = with_upstreams(vec![
-        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
-        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-    ]);
-    let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
+    let h = launch(&config, key("key-a")).await;
     let res = tokio::time::timeout(WAIT, h.send(messages(), BODY))
         .await
         .expect("answered within the connect timeout, not the header timeout");
@@ -135,14 +151,9 @@ async fn a_stalled_tls_handshake_moves_the_request_on() {
 async fn other_failures_and_large_bodies_are_answered_as_they_are() {
     // A 500 may already have been processed: never resent.
     let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = upstream(StatusCode::INTERNAL_SERVER_ERROR, &hits).await;
-    let (b, _seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\", \"529\", \"connect\"]",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let (a, _seen_a) = counted(StatusCode::INTERNAL_SERVER_ERROR, &hits).await;
+    let (b, _seen_b) = counted(StatusCode::OK, &hits).await;
+    let h = gateway("failover = [\"429\", \"529\", \"connect\"]", a, b).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     read_body(res).await;
@@ -151,14 +162,9 @@ async fn other_failures_and_large_bodies_are_answered_as_they_are() {
 
     // A body over failover_max_body_bytes is not kept: the 429 stands.
     let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
-    let (b, _seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\"]\nfailover_max_body_bytes = 16",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let (a, _seen_a) = counted(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+    let (b, _seen_b) = counted(StatusCode::OK, &hits).await;
+    let h = gateway("failover = [\"429\"]\nfailover_max_body_bytes = 16", a, b).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     read_body(res).await;
@@ -174,15 +180,16 @@ async fn failover_sends_each_provider_its_own_model_id() {
         // Bedrock refuses: Anthropic gets the id the client sent.
         (("bedrock", "anthropic"), (bedrock_body.as_str(), BODY)),
     ] {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
-        let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-        let h = gateway_with(
+        let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS).await;
+        let (b, mut seen_b) = upstream(StatusCode::OK).await;
+        let lines = |provider: &str, addr| format!("provider = \"{provider}\"\n{}", base_url(addr));
+        let config = config(
+            1024,
             "failover = [\"429\"]",
-            (&format!("http://{a}"), providers.0),
-            (&format!("http://{b}"), providers.1),
-        )
-        .await;
+            &lines(providers.0, a),
+            &lines(providers.1, b),
+        );
+        let h = launch(&config, key("key-a")).await;
         let res = h.send(messages(), BODY).await;
         assert_eq!(res.status(), StatusCode::OK, "{providers:?}");
         read_body(res).await;
@@ -199,14 +206,9 @@ async fn a_chunked_body_too_large_to_keep_answers_the_refusal() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
-    let (b, _seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\"]\nfailover_max_body_bytes = 16",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let (a, _seen_a) = counted(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+    let (b, _seen_b) = counted(StatusCode::OK, &hits).await;
+    let h = gateway("failover = [\"429\"]\nfailover_max_body_bytes = 16", a, b).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
         .write_all(
@@ -230,27 +232,9 @@ async fn a_chunked_body_too_large_to_keep_answers_the_refusal() {
 async fn a_refusal_during_the_upload_resends_the_whole_body() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    // Refuses at once, without reading the body.
-    let refusing = wye_testkit::spawn_upstream(
-        |_req: Request<Incoming>| async {
-            let mut res = Response::new(Full::new(Bytes::from_static(
-                br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
-            )));
-            *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-            res
-        },
-        None,
-        None,
-    )
-    .await;
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\"]",
-        &format!("http://{refusing}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let a = refusing(None).await;
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let h = gateway("failover = [\"429\"]", a, b).await;
 
     // The refusal arrives while the client is still uploading: hyper drops
     // the attempt's body, which hands back the bytes sent and the unread
@@ -307,19 +291,14 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
             drop(socket);
         }
     });
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 8388608\n\
-         [routes.claude]\nselect = \"ordered\"\nfailover = [\"connect\"]\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"http://{cut_addr}\"\napi_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let config = config(
+        8 << 20,
+        "failover = [\"connect\"]",
+        &base_url(cut_addr),
+        &base_url(b),
     );
-    let resources = with_upstreams(vec![
-        UpstreamResources::new(UpstreamAuth::api_key("key-a").unwrap()),
-        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-    ]);
-    let h = Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await;
+    let h = launch(&config, key("key-a")).await;
     let body = format!(
         r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
         "x".repeat(4 << 20)
@@ -339,35 +318,19 @@ async fn early_refusals_over_http2_move_concurrent_uploads_on() {
     // The production shape: TLS and HTTP/2 to the provider, which refuses
     // each upload before reading it.
     let ca = TestCa::generate();
-    let refusing = wye_testkit::spawn_upstream(
-        |_req: Request<Incoming>| async {
-            let mut res = Response::new(Full::new(Bytes::from_static(
-                br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
-            )));
-            *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-            res
-        },
-        Some(&ca),
-        None,
-    )
-    .await;
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 4194304\n\
-         [routes.claude]\nselect = \"ordered\"\nfailover = [\"429\", \"connect\"]\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://{refusing}\"\napi_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\nbase_url = \"http://{b}\"\napi_key_env = \"UNUSED\"\n"
+    let a = refusing(Some(&ca)).await;
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let config = config(
+        4 << 20,
+        "failover = [\"429\", \"connect\"]",
+        &format!("base_url = \"https://{a}\""),
+        &base_url(b),
     );
-    let resources = with_upstreams(vec![
-        UpstreamResources {
-            auth: UpstreamAuth::api_key("key-a").unwrap(),
-            extra_roots: vec![ca.ca_cert()],
-        },
-        UpstreamResources::new(UpstreamAuth::api_key("key-b").unwrap()),
-    ]);
-    let h =
-        Arc::new(Harness::launch_config(&config, resources, Arc::new(AtomicUsize::new(0))).await);
+    let trusting = UpstreamResources {
+        auth: UpstreamAuth::api_key("key-a").unwrap(),
+        extra_roots: vec![ca.ca_cert()],
+    };
+    let h = Arc::new(launch(&config, trusting).await);
     let body = format!(
         r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
         "x".repeat(1 << 20)
@@ -420,14 +383,8 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
         }
         drop(socket);
     });
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"429\", \"529\", \"connect\"]",
-        &format!("http://{lost_addr}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let h = gateway("failover = [\"429\", \"529\", \"connect\"]", lost_addr, b).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
     read_body(res).await;
@@ -436,30 +393,8 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
 }
 
 #[tokio::test]
-async fn an_overloaded_upstream_moves_the_request_on() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = upstream(StatusCode::from_u16(529).unwrap(), &hits).await;
-    let (b, mut seen_b) = upstream(StatusCode::OK, &hits).await;
-    let h = gateway(
-        "failover = [\"529\"]",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
-    let res = h.send(messages(), BODY).await;
-    assert_eq!(res.status(), StatusCode::OK);
-    read_body(res).await;
-    assert_eq!(seen_b.recv().await.unwrap(), BODY);
-    assert_eq!(
-        h.usage_record().await["failovers"],
-        serde_json::json!([{"upstream": "a", "status": 529}])
-    );
-}
-
-#[tokio::test]
 async fn when_every_upstream_refuses_the_last_refusal_is_the_answer() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS).await;
     let last: Handler = Arc::new(|_| {
         Box::pin(async {
             let mut res = full(StatusCode::TOO_MANY_REQUESTS, r#"{"error":"from b"}"#);
@@ -468,13 +403,8 @@ async fn when_every_upstream_refuses_the_last_refusal_is_the_answer() {
             res
         })
     });
-    let b = spawn_upstream(last, Arc::clone(&hits), None, None).await;
-    let h = gateway(
-        "failover = [\"429\"]",
-        &format!("http://{a}"),
-        &format!("http://{b}"),
-    )
-    .await;
+    let (b, _) = spawn_counted(last).await;
+    let h = gateway("failover = [\"429\"]", a, b).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(res.headers()["retry-after"], "7");

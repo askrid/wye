@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::usage::tests::{arbitrary_chunks, feed_cut};
 
 /// A streamed chat completion with a tool call and, when asked for, usage.
 fn stream(with_usage: bool) -> String {
@@ -47,8 +48,15 @@ fn without_include_usage_the_usage_is_unknown() {
 
 #[test]
 fn a_cut_or_odd_usage_chunk_is_unknown() {
+    let full = stream(true);
+    let cut = &full[..full.find("\"total_tokens\"").unwrap()];
+    assert_eq!(scan(cut.as_bytes()).status(), UsageStatus::Unknown);
     let odd = stream(true).replace("\"prompt_tokens\":100", "\"prompt_tokens\":\"many\"");
     assert_eq!(scan(odd.as_bytes()).status(), UsageStatus::Unknown);
+}
+
+#[test]
+fn a_service_tier_other_than_default_is_unpriced() {
     let flex = stream(true).replace(
         "\"model\":\"gpt-5.5-2026-10-01\",",
         "\"model\":\"gpt-5.5\",\"service_tier\":\"flex\",",
@@ -60,20 +68,21 @@ proptest! {
     #[test]
     fn any_chunking_reads_the_same(cuts in proptest::collection::vec(0usize..1500, 0..12)) {
         let full = stream(true);
-        let bytes = full.as_bytes();
-        let whole = scan(bytes);
-        let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (bytes.len() + 1)).collect();
-        cuts.sort_unstable();
+        let whole = scan(full.as_bytes());
         let mut s = ChatUsageScanner::new();
-        let mut at = 0;
-        for cut in cuts {
-            s.feed(&bytes[at..cut]);
-            at = cut;
-        }
-        s.feed(&bytes[at..]);
+        feed_cut(full.as_bytes(), cuts, |piece| s.feed(piece));
         prop_assert_eq!(s.usage(), whole.usage());
         prop_assert_eq!(s.model(), whole.model());
         prop_assert_eq!(s.status(), UsageStatus::Complete);
         prop_assert_eq!(s.tools.as_deref(), whole.tools.as_deref());
+    }
+
+    #[test]
+    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks()) {
+        let mut s = ChatUsageScanner::new();
+        for chunk in &chunks {
+            s.feed(chunk);
+        }
+        let _ = (s.status(), s.usage(), s.model());
     }
 }

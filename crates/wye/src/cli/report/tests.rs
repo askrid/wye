@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 
 /// `out` with runs of whitespace as one space: lines wrap at 80 columns.

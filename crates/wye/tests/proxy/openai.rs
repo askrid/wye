@@ -6,12 +6,9 @@ use super::harness::*;
 const OPENAI_KEY: &str = "sk-openai-test";
 const EVENTS: &str = "event: response.created\ndata: {\"type\":\"response.created\"}\n\n";
 
-/// A gateway with only `[routes.openai]` (plus `extra` config), whose
-/// upstream reports what it received and answers with an SSE stream.
-async fn harness(extra: &str) -> (Harness, mpsc::Receiver<Seen>) {
-    let (handler, rx) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, EVENTS)));
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+/// A gateway with only `[routes.openai]` (plus `extra` config) in front of `handler`.
+async fn gateway(handler: Handler, extra: &str) -> Harness {
+    let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{extra}\n\
          [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
@@ -20,7 +17,13 @@ async fn harness(extra: &str) -> (Harness, mpsc::Receiver<Seen>) {
     let resources = with_upstreams(vec![UpstreamResources::new(
         UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
     )]);
-    (Harness::launch_config(&config, resources, hits).await, rx)
+    Harness::launch_config(&config, resources, hits).await
+}
+
+/// [`gateway`] whose upstream reports what it received and answers with an SSE stream.
+async fn harness(extra: &str) -> (Harness, mpsc::Receiver<Seen>) {
+    let (handler, rx) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, EVENTS)));
+    (gateway(handler, extra).await, rx)
 }
 
 fn responses() -> http::request::Builder {
@@ -28,6 +31,11 @@ fn responses() -> http::request::Builder {
         .header("content-type", "application/json")
         .header("session-id", "codex-session-1")
         .header("originator", "codex_cli_rs")
+}
+
+/// [`responses`], carrying `token` as a bearer token.
+fn responses_as(token: &str) -> http::request::Builder {
+    responses().header("authorization", format!("Bearer {token}"))
 }
 
 const BODY: &str = r#"{"model":"gpt-5.5-codex","stream":true,"input":[]}"#;
@@ -79,17 +87,6 @@ async fn responses_reach_openai_with_the_provider_key() {
     assert!(body.contains("add [upstream] or [routes.claude]"), "{body}");
 }
 
-fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Option<u64>) -> String {
-    issue(
-        key,
-        &NewCredential {
-            models,
-            max_output_tokens,
-            ..claims("dev")
-        },
-    )
-}
-
 #[tokio::test]
 async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     let key = keypair();
@@ -97,13 +94,8 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
     let (h, mut seen) = harness(&auth).await;
 
     // Codex sends its env_key value as a bearer token: here, a gateway token.
-    let t = token(&key, Some(&["gpt-5.5-*"]), None);
-    let res = h
-        .send(
-            responses().header("authorization", format!("Bearer {t}")),
-            BODY,
-        )
-        .await;
+    let t = token(&key, "dev", Some(&["gpt-5.5-*"]), None);
+    let res = h.send(responses_as(&t), BODY).await;
     assert_eq!(res.status(), StatusCode::OK);
     read_body(res).await;
     let got = seen.recv().await.unwrap();
@@ -126,33 +118,23 @@ async fn gateway_credentials_and_policy_apply_with_openai_errors() {
         "authentication_error"
     );
 
-    let other = token(&key, Some(&["claude-*"]), None);
-    let res = h
-        .send(
-            responses().header("authorization", format!("Bearer {other}")),
-            BODY,
-        )
-        .await;
+    let other = token(&key, "dev", Some(&["claude-*"]), None);
+    let res = h.send(responses_as(&other), BODY).await;
     assert_eq!(
         refused(res, StatusCode::FORBIDDEN).await,
         "permission_error"
     );
 
     // Under an output-token ceiling, Responses must say max_output_tokens.
-    let capped = token(&key, None, Some(1000));
-    let res = h
-        .send(
-            responses().header("authorization", format!("Bearer {capped}")),
-            BODY,
-        )
-        .await;
+    let capped = token(&key, "dev", None, Some(1000));
+    let res = h.send(responses_as(&capped), BODY).await;
     assert_eq!(
         refused(res, StatusCode::FORBIDDEN).await,
         "permission_error"
     );
     let res = h
         .send(
-            responses().header("authorization", format!("Bearer {capped}")),
+            responses_as(&capped),
             r#"{"model":"gpt-5.5-codex","max_output_tokens":800,"input":[]}"#,
         )
         .await;
@@ -172,21 +154,12 @@ data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.5-codex\"
 
 #[tokio::test]
 async fn responses_usage_and_cost_are_recorded() {
-    let handler: Handler =
-        Arc::new(|_seen: Seen| Box::pin(async { sse(full(StatusCode::OK, COMPLETED)) }));
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n\
-         [pricing]\nversion = \"openai-test\"\n[[pricing.models]]\nmodels = [\"gpt-5.5-*\"]\n\
-         input = \"1.25\"\noutput = \"10.00\"\ncache_read = \"0.125\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = gateway(
+        answering(|| sse(full(StatusCode::OK, COMPLETED))),
+        "[pricing]\nversion = \"openai-test\"\n[[pricing.models]]\nmodels = [\"gpt-5.5-*\"]\n\
+         input = \"1.25\"\noutput = \"10.00\"\ncache_read = \"0.125\"\n",
+    )
+    .await;
     let res = h.send(responses(), BODY).await;
     assert_eq!(read_body(res).await, COMPLETED);
     let record = h.usage_record().await;
@@ -208,17 +181,7 @@ async fn chat_completions_pass_through_with_usage() {
 data: {\"model\":\"gpt-5.5\",\"choices\":[],\"usage\":{\"prompt_tokens\":30,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":10}}}\n\n\
 data: [DONE]\n\n";
     let (handler, mut rx) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, CHAT)));
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = gateway(handler, "").await;
     let body = r#"{"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true},"messages":[]}"#;
     let req = Request::post("/v1/chat/completions").header("content-type", "application/json");
     let res = h.send(req, body).await;
@@ -258,27 +221,10 @@ async fn a_body_past_the_limit_gets_openais_error_shape() {
 async fn beyond_the_concurrency_limit_responses_get_a_retryable_503() {
     // An upstream that keeps its stream open, holding the one permit.
     let (_keep, rx) = mpsc::channel::<Bytes>(1);
-    let rx = std::sync::Mutex::new(Some(rx));
-    let handler: Handler = Arc::new(move |_| {
-        let rx = rx.lock().unwrap().take();
-        Box::pin(async move {
-            match rx {
-                Some(rx) => Response::new(Either::Right(ChannelBody(rx))),
-                None => full(StatusCode::OK, "{}"),
-            }
-        })
+    let handler = once(rx, |rx| async {
+        Response::new(Either::Right(ChannelBody(rx)))
     });
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_concurrent_requests = 1\n\
-         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = gateway(handler, "max_concurrent_requests = 1").await;
     let _held = h
         .send(responses(), r#"{"model":"gpt-5","input":"a"}"#)
         .await;

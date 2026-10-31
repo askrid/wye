@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use http_body_util::BodyExt;
 
 use super::*;

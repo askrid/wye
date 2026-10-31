@@ -35,6 +35,8 @@ mod stats;
 
 use std::process::ExitCode;
 
+use gateway_process::{Gateway, Variant};
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -50,9 +52,9 @@ fn main() -> ExitCode {
                         Ok(n) if n > 0 => repeat = n,
                         _ => return usage(),
                     },
-                    "--krakend" => others.push(gateway_process::Gateway::KrakenD(value)),
-                    "--litellm" => others.push(gateway_process::Gateway::LiteLlm(value)),
-                    "--bifrost" => others.push(gateway_process::Gateway::Bifrost(value)),
+                    "--krakend" => others.push(Gateway::KrakenD(value)),
+                    "--litellm" => others.push(Gateway::LiteLlm(value)),
+                    "--bifrost" => others.push(Gateway::Bifrost(value)),
                     "--wye-alloc" => wye_alloc = Some(*value),
                     _ => return usage(),
                 }
@@ -61,13 +63,7 @@ fn main() -> ExitCode {
             if !rest.is_empty() {
                 return usage();
             }
-            mock::init_clock();
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(run::run(binary, wye_alloc, &others, out, repeat));
-            ExitCode::SUCCESS
+            block_on(run::run(binary, wye_alloc, &others, out, repeat))
         }
         ["compare", reference, current, flags @ ..] => {
             let Some(scope) = compare_scope(flags) else {
@@ -90,22 +86,16 @@ fn main() -> ExitCode {
             seconds,
         ] => {
             let gateway = match *kind {
-                "--wye" => gateway_process::Gateway::Wye(binary),
-                "--wye-openai" => gateway_process::Gateway::WyeOpenai(binary),
-                "--wye-refused" => gateway_process::Gateway::WyeRefused(binary),
-                "--krakend" => gateway_process::Gateway::KrakenD(binary),
+                "--wye" => Gateway::Wye(binary, Variant::Plain),
+                "--wye-openai" => Gateway::Wye(binary, Variant::Openai),
+                "--wye-refused" => Gateway::Wye(binary, Variant::Refused),
+                "--krakend" => Gateway::KrakenD(binary),
                 _ => return usage(),
             };
             let Ok(seconds) = seconds.parse() else {
                 return usage();
             };
-            mock::init_clock();
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(load::load(gateway, scenario, seconds));
-            ExitCode::SUCCESS
+            block_on(load::load(gateway, scenario, seconds))
         }
         ["median", out, runs @ ..] if !runs.is_empty() => {
             gate::median(out, runs);
@@ -113,6 +103,17 @@ fn main() -> ExitCode {
         }
         _ => usage(),
     }
+}
+
+/// Runs `work` to its end, on the clock the mock and the client share.
+fn block_on(work: impl Future<Output = ()>) -> ExitCode {
+    mock::init_clock();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(work);
+    ExitCode::SUCCESS
 }
 
 /// `[--only <pattern,...>] [--accept <pattern,...>] [--allow-new]` for `compare`.

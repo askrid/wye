@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use gateway_core::api::Api;
 
 use super::*;
@@ -7,6 +5,17 @@ use crate::test_body::Client;
 
 async fn collect(body: RequestBody<Client>) -> Result<Bytes, BoxError> {
     body.collect().await.map(|c| c.to_bytes())
+}
+
+/// Holds `client` under an output-token ceiling of 4000, with budget to spare.
+async fn hold_under_ceiling<B>(client: &mut B, api: Api) -> Box<Hold>
+where
+    B: Body<Data = Bytes> + Unpin,
+    B::Error: Into<BoxError>,
+{
+    hold_until_model(client, api, &Gauge::default(), 1 << 20, Some(4000))
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -103,15 +112,7 @@ async fn a_repeated_model_later_fails_the_body() {
 #[tokio::test]
 async fn a_late_max_tokens_above_the_limit_fails_the_body() {
     let mut client = Client::of(&[r#"{"model":"m","messages":[],"#, r#""max_tokens":9000}"#]);
-    let held = hold_until_model(
-        &mut client,
-        Api::Messages,
-        &Gauge::default(),
-        1 << 20,
-        Some(4000),
-    )
-    .await
-    .unwrap();
+    let held = hold_under_ceiling(&mut client, Api::Messages).await;
     assert_eq!(
         held.max_output_tokens(),
         None,
@@ -128,15 +129,7 @@ async fn a_late_max_tokens_above_the_limit_fails_the_body() {
 async fn trailers_end_the_body_for_a_required_field() {
     let mut client = Client::of(&[r#"{"model":"m","#, r#""input":[]}"#])
         .with_trailers(std::future::ready(Some(Ok(http::HeaderMap::new()))));
-    let held = hold_until_model(
-        &mut client,
-        Api::Responses,
-        &Gauge::default(),
-        1 << 20,
-        Some(4000),
-    )
-    .await
-    .unwrap();
+    let held = hold_under_ceiling(&mut client, Api::Responses).await;
     let mut body = RequestBody::after_hold(held, client);
     // As hyper polls: nothing after the trailers.
     let refused = loop {
@@ -284,15 +277,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
 async fn responses_need_max_output_tokens_under_a_ceiling() {
     // Absent: refused when the body ends, so the request is never complete.
     let mut client = Client::of(&[r#"{"model":"m","input":[]"#, r#","stream":true}"#]);
-    let held = hold_until_model(
-        &mut client,
-        Api::Responses,
-        &Gauge::default(),
-        1 << 20,
-        Some(4000),
-    )
-    .await
-    .unwrap();
+    let held = hold_under_ceiling(&mut client, Api::Responses).await;
     let error = collect(RequestBody::after_hold(held, client))
         .await
         .unwrap_err();
@@ -309,15 +294,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
         r#""max_output_tokens":1000}"#,
     ];
     let mut client = Client::of(&body);
-    let held = hold_until_model(
-        &mut client,
-        Api::Responses,
-        &Gauge::default(),
-        1 << 20,
-        Some(4000),
-    )
-    .await
-    .unwrap();
+    let held = hold_under_ceiling(&mut client, Api::Responses).await;
     let forwarded = collect(RequestBody::after_hold(held, client))
         .await
         .unwrap();
@@ -325,15 +302,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
 
     // Anthropic's max_tokens is not the Responses field.
     let mut client = Client::of(&[r#"{"model":"m","#, r#""max_tokens":10}"#]);
-    let held = hold_until_model(
-        &mut client,
-        Api::Responses,
-        &Gauge::default(),
-        1 << 20,
-        Some(4000),
-    )
-    .await
-    .unwrap();
+    let held = hold_under_ceiling(&mut client, Api::Responses).await;
     assert!(
         collect(RequestBody::after_hold(held, client))
             .await

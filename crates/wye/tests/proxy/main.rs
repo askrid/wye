@@ -7,6 +7,7 @@
 )]
 
 mod aliases;
+mod cli;
 mod config_lookup;
 mod credentials;
 mod explain;

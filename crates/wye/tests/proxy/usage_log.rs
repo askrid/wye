@@ -16,7 +16,7 @@ const USAGE_STREAM: &str = concat!(
 #[tokio::test]
 async fn an_empty_response_is_completed() {
     // hyper sends an empty body with the headers and never polls it.
-    let h = Harness::api_key(Arc::new(|_| Box::pin(async { full(StatusCode::OK, "") }))).await;
+    let h = Harness::api_key(answering(|| full(StatusCode::OK, ""))).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(read_body(res).await.is_empty());
@@ -25,10 +25,7 @@ async fn an_empty_response_is_completed() {
 
 #[tokio::test]
 async fn completed_stream_logs_usage_without_changing_bytes() {
-    let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async { sse(full(StatusCode::OK, USAGE_STREAM)) })
-    }))
-    .await;
+    let h = Harness::api_key(answering(|| sse(full(StatusCode::OK, USAGE_STREAM)))).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(read_body(res).await, USAGE_STREAM);
 
@@ -67,10 +64,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
         "event: message_stop\n",
         "data: {\"type\":\"message_stop\"}\n\n",
     );
-    let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async { sse(full(StatusCode::OK, MISS)) })
-    }))
-    .await;
+    let h = Harness::api_key(answering(|| sse(full(StatusCode::OK, MISS)))).await;
     let req = messages()
         .header("x-claude-code-request-class", "subagent")
         .header("x-claude-code-agent-type", "Explore")
@@ -123,12 +117,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
 #[tokio::test]
 async fn cancelled_stream_logs_partial_usage() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
-    let body = std::sync::Mutex::new(Some(chunks_rx));
-    let handler: Handler = Arc::new(move |_| {
-        let rx = body.lock().unwrap().take().unwrap();
-        Box::pin(async move { streaming(rx) })
-    });
-    let h = Harness::api_key(handler).await;
+    let h = Harness::api_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
     let start_event = &USAGE_STREAM[..USAGE_STREAM.find("event: content_block_delta").unwrap()];
     chunks_tx
         .send(Bytes::from_static(start_event.as_bytes()))
@@ -136,11 +125,7 @@ async fn cancelled_stream_logs_partial_usage() {
         .unwrap();
     let res = h.send(messages(), "{}").await;
     let mut body = res.into_body();
-    tokio::time::timeout(WAIT, body.frame())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    next_frame(&mut body).await;
     drop(body);
 
     let record = h.usage_record().await;
@@ -361,11 +346,7 @@ async fn usage_records_are_exported_as_otlp_logs() {
             .unwrap();
         exports.insert(seen.uri.path().to_owned(), seen);
     }
-    h.begin_shutdown();
-    tokio::time::timeout(WAIT, &mut h.served)
-        .await
-        .unwrap()
-        .unwrap();
+    h.shut_down().await;
     while let Ok(seen) = collected.try_recv() {
         exports.insert(seen.uri.path().to_owned(), seen);
     }
@@ -454,12 +435,11 @@ async fn usage_records_are_exported_as_otlp_logs() {
 
 #[tokio::test]
 async fn priced_records_carry_cost_status_and_version() {
-    let handler: Handler =
-        Arc::new(|_| Box::pin(async { sse(full(StatusCode::OK, USAGE_STREAM)) }));
-    let pricing = "api_key_env = \"UNUSED\"\n\n[pricing]\nversion = \"test-1\"\n\
+    let handler = answering(|| sse(full(StatusCode::OK, USAGE_STREAM)));
+    let pricing = "\n[pricing]\nversion = \"test-1\"\n\
                    [[pricing.models]]\nmodels = [\"claude-test\"]\ninput = \"1.00\"\noutput = \"10.00\"\n\
                    cache_read = \"0.10\"\n";
-    let h = Harness::start(handler, pricing, UpstreamAuth::api_key(API_KEY).unwrap()).await;
+    let h = Harness::keyed(handler, pricing).await;
     read_body(h.send(messages(), "{}").await).await;
     let record = h.usage_record().await;
     // 10 input x $1 + 90 cache reads x $0.10 + 7 output x $10, per million.
@@ -468,7 +448,6 @@ async fn priced_records_carry_cost_status_and_version() {
     assert_eq!(record["pricing_version"], "test-1");
 
     // No usage observed (a refused request): unknown, never $0.
-    read_body(h.send(Request::get("/v1/nothing"), "").await).await;
     read_body(
         h.send(messages().header("content-length", "99999"), "{}")
             .await,
@@ -482,10 +461,9 @@ async fn priced_records_carry_cost_status_and_version() {
 
 #[tokio::test]
 async fn checked_requests_record_what_each_target_would_reject() {
-    let h = Harness::start(
+    let h = Harness::keyed(
         ok(),
-        "api_key_env = \"UNUSED\"\n\n[upgrade_check]\ntargets = [\"claude-opus-5-5\", \"claude-opus-4-7\"]\n",
-        UpstreamAuth::api_key(API_KEY).unwrap(),
+        "\n[upgrade_check]\ntargets = [\"claude-opus-5-5\", \"claude-opus-4-7\"]\n",
     )
     .await;
     let body = r#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":2048},"tool_choice":{"type":"any"},"messages":[{"role":"user","content":"x"}]}"#;
@@ -509,10 +487,7 @@ async fn checked_requests_record_what_each_target_would_reject() {
 #[tokio::test]
 async fn non_streaming_json_responses_report_usage() {
     const BODY: &str = r#"{"id":"msg_1","type":"message","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t","name":"Read","input":{}}],"usage":{"input_tokens":12,"output_tokens":34}}"#;
-    let h = Harness::api_key(Arc::new(|_| {
-        Box::pin(async { json(full(StatusCode::OK, BODY)) })
-    }))
-    .await;
+    let h = Harness::api_key(answering(|| json(full(StatusCode::OK, BODY)))).await;
     assert_eq!(read_body(h.send(messages(), "{}").await).await, BODY);
     let record = h.usage_record().await;
     assert_eq!(record["usage_status"], "complete");
@@ -541,12 +516,23 @@ async fn tool_calls_past_eight_names_go_under_other() {
     assert_eq!(calls["(other)"], 2, "{calls}");
 }
 
+/// Log records in an OTLP logs export; other exports hold none.
+fn exported_records(seen: &Seen) -> usize {
+    if seen.uri.path() != "/v1/logs" {
+        return 0;
+    }
+    let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
+    body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        .as_array()
+        .map_or(0, Vec::len)
+}
+
 /// The process reading stdout exits: records still reach OTLP, and the
 /// lines the log could not take are counted as lost.
 #[tokio::test]
 async fn a_closed_log_leaves_otlp_export_running() {
     let (collector, mut collected) = recording(|seen| seen);
-    let h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
+    let mut h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
     h.close_usage_log().await;
     // Each record is exported once the log has failed its write.
     let mut exported = 0;
@@ -558,16 +544,30 @@ async fn a_closed_log_leaves_otlp_export_running() {
                 .await
                 .expect("a log export after the log closed")
                 .unwrap();
-            if seen.uri.path() == "/v1/logs" {
-                let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
-                logs = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
-                    .as_array()
-                    .map_or(0, Vec::len);
-            }
+            logs = exported_records(&seen);
         }
         exported += logs;
     }
     assert_eq!(exported, 2);
+
+    // Shutdown exports the cumulative metrics once more.
+    h.shut_down().await;
+    let mut metrics = None;
+    while let Ok(seen) = collected.try_recv() {
+        if seen.uri.path() == "/v1/metrics" {
+            metrics = Some(seen);
+        }
+    }
+    let metrics: serde_json::Value =
+        serde_json::from_slice(&metrics.expect("metrics exported").body).unwrap();
+    let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap();
+    let lost = list
+        .iter()
+        .find(|m| m["name"] == "wye.telemetry.lost")
+        .unwrap();
+    assert_eq!(lost["sum"]["dataPoints"][0]["asInt"], "2", "{lost}");
 }
 
 /// A log nobody reads fills its pipe and its write waits: records still reach
@@ -586,12 +586,7 @@ async fn a_blocked_log_leaves_otlp_export_running() {
             .await
             .expect("every record exported while the log is blocked")
             .unwrap();
-        if seen.uri.path() == "/v1/logs" {
-            let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
-            exported += body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
-                .as_array()
-                .map_or(0, Vec::len);
-        }
+        exported += exported_records(&seen);
     }
     assert_eq!(exported, REQUESTS);
 }
@@ -610,11 +605,7 @@ async fn spans_a_collector_refuses_are_counted_as_lost() {
     let mut h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
     read_body(h.send(messages(), "{}").await).await;
     h.usage_record().await;
-    h.begin_shutdown();
-    tokio::time::timeout(WAIT, &mut h.served)
-        .await
-        .unwrap()
-        .unwrap();
+    h.shut_down().await;
     // The shutdown summary follows the request's record.
     let summary = h.usage_record().await;
     assert_eq!(summary["event"], "otlp_dropped", "{summary}");

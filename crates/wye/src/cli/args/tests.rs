@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 
 fn command(name: &str) -> &'static Command {

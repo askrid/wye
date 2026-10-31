@@ -5,12 +5,7 @@ use super::harness::*;
 #[tokio::test]
 async fn streams_events_before_upstream_completes() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(4);
-    let body = std::sync::Mutex::new(Some(chunks_rx));
-    let handler: Handler = Arc::new(move |_| {
-        let rx = body.lock().unwrap().take().unwrap();
-        Box::pin(async move { streaming(rx) })
-    });
-    let h = Harness::api_key(handler).await;
+    let h = Harness::api_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
 
     chunks_tx
         .send(Bytes::from_static(b"event: ping\ndata: {}\n\n"))
@@ -20,11 +15,7 @@ async fn streams_events_before_upstream_completes() {
     assert_eq!(res.headers()["content-type"], "text/event-stream");
     let mut body = res.into_body();
 
-    let first = tokio::time::timeout(WAIT, body.frame())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    let first = next_frame(&mut body).await;
     assert_eq!(first.into_data().unwrap(), "event: ping\ndata: {}\n\n");
 
     chunks_tx
@@ -43,10 +34,8 @@ async fn streams_events_before_upstream_completes() {
 #[tokio::test]
 async fn client_disconnect_releases_upstream_stream() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
-    let body = std::sync::Mutex::new(Some(chunks_rx));
-    let handler: Handler = Arc::new(move |_| {
-        let rx = body.lock().unwrap().take().unwrap();
-        Box::pin(async move { Response::new(Either::Right(ChannelBody(rx))) })
+    let handler = once(chunks_rx, |rx| async {
+        Response::new(Either::Right(ChannelBody(rx)))
     });
     let h = Harness::api_key(handler).await;
 
@@ -56,11 +45,7 @@ async fn client_disconnect_releases_upstream_stream() {
         .unwrap();
     let res = h.send(messages(), "{}").await;
     let mut body = res.into_body();
-    tokio::time::timeout(WAIT, body.frame())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    next_frame(&mut body).await;
     drop(body);
     drop(h.client);
 
@@ -91,12 +76,7 @@ async fn stalled_event_stream_ends_with_an_error_event() {
             streaming(rx)
         })
     });
-    let h = Harness::start(
-        handler,
-        "api_key_env = \"UNUSED\"\nstream_idle_timeout_secs = 1",
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )
-    .await;
+    let h = Harness::keyed(handler, "stream_idle_timeout_secs = 1").await;
     let res = h.send(messages(), "{}").await;
     let body = tokio::time::timeout(WAIT, res.into_body().collect())
         .await
@@ -121,11 +101,7 @@ async fn stalled_event_stream_ends_with_an_error_event() {
         )
         .await;
     let mut body = res.into_body();
-    tokio::time::timeout(WAIT, body.frame())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    next_frame(&mut body).await;
     let next = tokio::time::timeout(WAIT, body.frame()).await.unwrap();
     assert!(matches!(next, Some(Err(_))), "mid-event stall: {next:?}");
 }
@@ -144,19 +120,10 @@ async fn idle_upstream_stream_is_terminated() {
             Response::new(Either::Right(ChannelBody(rx)))
         })
     });
-    let h = Harness::start(
-        handler,
-        "api_key_env = \"UNUSED\"\nstream_idle_timeout_secs = 1",
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )
-    .await;
+    let h = Harness::keyed(handler, "stream_idle_timeout_secs = 1").await;
     let res = h.send(messages(), "{}").await;
     let mut body = res.into_body();
-    tokio::time::timeout(WAIT, body.frame())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    next_frame(&mut body).await;
     let next = tokio::time::timeout(WAIT, body.frame()).await.unwrap();
     assert!(
         matches!(next, Some(Err(_))),
@@ -172,12 +139,7 @@ async fn slow_upstream_headers_time_out() {
             full(StatusCode::OK, "{}")
         })
     });
-    let h = Harness::start(
-        handler,
-        "api_key_env = \"UNUSED\"\nresponse_header_timeout_secs = 1",
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )
-    .await;
+    let h = Harness::keyed(handler, "response_header_timeout_secs = 1").await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
     assert_eq!(res.headers()["content-type"], "application/json");
@@ -232,18 +194,14 @@ async fn slow_reader_backpressures_the_upstream() {
 #[tokio::test]
 async fn client_that_stops_reading_is_disconnected() {
     let (released_tx, released) = oneshot::channel();
-    let released_tx = std::sync::Mutex::new(Some(released_tx));
-    let handler: Handler = Arc::new(move |_| {
-        let released_tx = released_tx.lock().unwrap().take().unwrap();
-        Box::pin(async move {
-            let (tx, rx) = mpsc::channel(1);
-            tokio::spawn(async move {
-                let chunk = Bytes::from(vec![b'x'; 64 * 1024]);
-                while tx.send(chunk.clone()).await.is_ok() {}
-                let _ = released_tx.send(());
-            });
-            Response::new(Either::Right(ChannelBody(rx)))
-        })
+    let handler = once(released_tx, |released_tx: oneshot::Sender<()>| async {
+        let (tx, rx) = mpsc::channel(1);
+        tokio::spawn(async move {
+            let chunk = Bytes::from(vec![b'x'; 64 * 1024]);
+            while tx.send(chunk.clone()).await.is_ok() {}
+            let _ = released_tx.send(());
+        });
+        Response::new(Either::Right(ChannelBody(rx)))
     });
     let h = Harness::with_server_config(handler, "client_write_timeout_secs = 1").await;
 

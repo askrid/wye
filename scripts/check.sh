@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Correctness and performance gate. Run before every commit (the pre-commit hook does).
 #
-#   scripts/check.sh   fmt, clippy, tests, then the benchmark against HEAD
+#   scripts/check.sh   fmt, clippy, rustdoc, tests, then the benchmark against HEAD
 #
 # The benchmark runs this checkout and its parent commit in alternating rounds
 # and fails on a metric past its limit in a run and its rerun
@@ -39,6 +39,7 @@ step fmt cargo fmt --all --check
 step clippy cargo clippy --locked --all-targets --quiet -- -D warnings
 # The only unsafe code (alloc_stats.rs) builds only with this feature.
 step "clippy alloc-stats" cargo clippy --locked --quiet -p wye --features alloc-stats -- -D warnings
+step rustdoc env RUSTDOCFLAGS='-D warnings' cargo doc --locked --quiet --no-deps --workspace --document-private-items
 step test cargo test --locked --quiet
 step "build release" cargo build --locked --release --quiet -p wye -p wye-bench
 # Allocation-counting build, in its own target dir so it never replaces the measured binary.

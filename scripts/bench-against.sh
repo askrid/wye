@@ -3,10 +3,10 @@
 # machine, so clock speed, heat, and background load weigh on both alike: a
 # stored result from another day would carry that day's machine state.
 #
-#   scripts/bench-against.sh <ref> <out-dir> [rounds]
+#   scripts/bench-against.sh <ref> <out-dir>
 #
 # Writes <out-dir>/reference.json (the commit) and <out-dir>/current.json
-# (this checkout), each the median of `rounds` runs (default 3). Each side runs
+# (this checkout), each the median of three runs. Each side runs
 # its own wye-bench, so a commit that changes the benchmark still measures
 # the reference as that commit did. The reference is built in a worktree,
 # target/reference, kept between runs: a new reference rebuilds only what
@@ -14,10 +14,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage="usage: scripts/bench-against.sh <ref> <out-dir> [rounds]"
+usage="usage: scripts/bench-against.sh <ref> <out-dir>"
 ref=${1:?$usage}
 out=${2:?$usage}
-rounds=${3:-3}
+rounds=3
 tree=target/reference
 
 # A pre-commit hook gets GIT_INDEX_FILE pointing at the index being committed;

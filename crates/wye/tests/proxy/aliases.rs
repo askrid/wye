@@ -9,9 +9,7 @@ const ALIASES: &str = "\n[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5
 /// Gateway whose upstream reports each request's headers and body.
 async fn harness(upstream_extra: &str) -> (Harness, mpsc::Receiver<(HeaderMap, Bytes)>) {
     let (handler, rx) = recording(|seen| (seen.headers, seen.body));
-    let config = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
-    let h = Harness::start(handler, &config, UpstreamAuth::api_key(API_KEY).unwrap()).await;
-    (h, rx)
+    (Harness::keyed(handler, upstream_extra).await, rx)
 }
 
 #[tokio::test]
@@ -43,10 +41,6 @@ async fn an_alias_is_replaced_in_place_and_recorded() {
     assert!(h.usage_record().await.get("requested_model").is_none());
 }
 
-fn token(key: &Ed25519KeyPair, sub: &str) -> String {
-    issue(key, &claims(sub))
-}
-
 #[tokio::test]
 async fn rollout_follows_the_subject_and_permissions_apply_to_the_resolved_model() {
     let key = keypair();
@@ -56,7 +50,7 @@ async fn rollout_follows_the_subject_and_permissions_apply_to_the_resolved_model
     );
     let (h, mut seen) = harness(&auth).await;
     let send = |sub: &'static str, model: &'static str| {
-        let req = messages().header("authorization", format!("Bearer {}", token(&key, sub)));
+        let req = bearer(&token(&key, sub, None, None));
         let body = format!(r#"{{"model":"{model}"}}"#);
         h.send(req, body)
     };

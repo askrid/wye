@@ -1,13 +1,13 @@
 //! Token-paced streams at scale: thousands of concurrent streams at model
 //! output pace, where per-event cost and memory per stream dominate.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{PERCENTILES, event_delays, percentile, phase, put, sorted},
+    stats::{Out, PERCENTILES, event_delays, percentile, phase, sorted},
 };
 
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
@@ -46,7 +46,7 @@ pub(super) fn scenario_report() -> serde_json::Value {
 pub(crate) struct Paced {
     ttfb: Vec<u64>,
     event_delay: Vec<u64>,
-    failed_streams: usize,
+    pub(super) failed_streams: usize,
 }
 
 impl Paced {
@@ -61,7 +61,7 @@ impl Paced {
         tokio::time::sleep(PACED_RAMP + Duration::from_millis(100)).await;
         while_loaded();
         let streams = streams.await.unwrap();
-        let failed_streams = streams.iter().filter(|s| s.failed).count();
+        let failed_streams = scenarios::count_failed(&streams);
         Self {
             ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
             event_delay: event_delays(streams),
@@ -71,51 +71,30 @@ impl Paced {
 }
 
 /// Runs the paced scenario through `process` and adds what it costs over `direct`.
-pub(super) async fn measure_paced(
-    direct: &Paced,
-    process: &GatewayProcess,
-    prefix: &str,
-    metrics: &mut BTreeMap<String, f64>,
-) {
+pub(super) async fn measure_paced(direct: &Paced, process: &GatewayProcess, out: &mut Out<'_>) {
     let rss_before = process.rss_kb();
     let cpu_before = process.cpu_secs();
     let mut rss_loaded = 0.0;
     let paced = phase(
-        format!("{prefix}paced"),
+        format!("{}paced", out.prefix),
         Paced::measure(process.target(), || rss_loaded = process.rss_kb()),
     )
     .await;
     let cpu_after = process.cpu_secs();
     for (label, p) in PERCENTILES {
         let added = percentile(&paced.event_delay, p) - percentile(&direct.event_delay, p);
-        put(
-            metrics,
-            prefix,
-            &format!("paced_event_added_{label}_us"),
-            added,
-        );
+        out.put(&format!("paced_event_added_{label}_us"), added);
     }
-    put(
-        metrics,
-        prefix,
+    out.put(
         "paced_ttfb_added_p99_us",
         percentile(&paced.ttfb, 99.0) - percentile(&direct.ttfb, 99.0),
     );
-    put(
-        metrics,
-        prefix,
+    out.put(
         "paced_cpu_us_per_event",
         (cpu_after - cpu_before) * 1e6 / paced.event_delay.len().max(1) as f64,
     );
-    put(
-        metrics,
-        prefix,
-        "paced_failed_streams",
-        paced.failed_streams as f64,
-    );
-    put(
-        metrics,
-        prefix,
+    out.put("paced_failed_streams", paced.failed_streams as f64);
+    out.put(
         "paced_rss_kb_per_stream",
         (rss_loaded - rss_before) / PACED_STREAMS as f64,
     );

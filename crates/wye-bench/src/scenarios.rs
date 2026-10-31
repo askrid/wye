@@ -35,6 +35,41 @@ pub struct Stream {
     pub failed: bool,
 }
 
+impl Stream {
+    fn failed() -> Self {
+        Self {
+            ttfb_us: 0,
+            event_delays_us: Vec::new(),
+            bytes: 0,
+            failed: true,
+        }
+    }
+}
+
+/// How many of `streams` failed.
+pub fn count_failed(streams: &[Stream]) -> usize {
+    streams.iter().filter(|s| s.failed).count()
+}
+
+/// How many events `streams` delivered.
+pub fn count_events(streams: &[Stream]) -> usize {
+    streams.iter().map(|s| s.event_delays_us.len()).sum()
+}
+
+/// Runs `count` tasks at once and collects their results, in no particular order.
+async fn spawn_all<T, Fut>(count: usize, task: impl FnMut(usize) -> Fut) -> Vec<T>
+where
+    T: Send + 'static,
+    Fut: Future<Output = T> + Send + 'static,
+{
+    let mut set: JoinSet<T> = (0..count).map(task).collect();
+    let mut out = Vec::with_capacity(count);
+    while let Some(result) = set.join_next().await {
+        out.push(result.unwrap());
+    }
+    out
+}
+
 /// Runs `total` calls of `f` on `concurrency` workers.
 async fn run_workers<T, F, Fut>(concurrency: usize, total: usize, f: F) -> Vec<T>
 where
@@ -42,23 +77,19 @@ where
     F: Fn() -> Fut + Clone + Send + 'static,
     Fut: Future<Output = T> + Send,
 {
-    let mut set = JoinSet::new();
-    for worker in 0..concurrency {
+    let parts = spawn_all(concurrency, |worker| {
         let f = f.clone();
         let count = total / concurrency + usize::from(worker < total % concurrency);
-        set.spawn(async move {
+        async move {
             let mut out = Vec::with_capacity(count);
             for _ in 0..count {
                 out.push(f().await);
             }
             out
-        });
-    }
-    let mut all = Vec::with_capacity(total);
-    while let Some(part) = set.join_next().await {
-        all.extend(part.unwrap());
-    }
-    all
+        }
+    })
+    .await;
+    parts.into_iter().flatten().collect()
 }
 
 /// Latency in µs of small non-streaming requests; `None` for a failed request.
@@ -135,20 +166,15 @@ pub async fn paced(
     size: usize,
     interval_us: u64,
 ) -> Vec<Stream> {
-    let mut set = JoinSet::new();
-    for i in 0..streams {
+    spawn_all(streams, |i| {
         let target = target.clone();
         let delay = ramp.mul_f64(i as f64 / streams as f64);
-        set.spawn(async move {
+        async move {
             tokio::time::sleep(delay).await;
             read_stream(&target, events, size, interval_us).await
-        });
-    }
-    let mut out = Vec::with_capacity(streams);
-    while let Some(stream) = set.join_next().await {
-        out.push(stream.unwrap());
-    }
-    out
+        }
+    })
+    .await
 }
 
 /// Requests one SSE stream from the mock and records its timings; failed if
@@ -159,12 +185,7 @@ async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64
         stream_events(target, events, size, interval_us),
     )
     .await
-    .unwrap_or(Stream {
-        ttfb_us: 0,
-        event_delays_us: Vec::new(),
-        bytes: 0,
-        failed: true,
-    })
+    .unwrap_or_else(|_| Stream::failed())
 }
 
 async fn stream_events(target: &Target, events: u32, size: usize, interval_us: u64) -> Stream {
@@ -181,16 +202,10 @@ async fn stream_events(target: &Target, events: u32, size: usize, interval_us: u
     let mut failed = false;
     // A gateway that drops streams is a result to report, not a reason to abort the run.
     let mut body = match target.client().request(req).await {
-        Ok(res) if res.status().is_success() => Some(res.into_body()),
-        _ => None,
+        Ok(res) if res.status().is_success() => res.into_body(),
+        _ => return Stream::failed(),
     };
-    if body.is_none() {
-        failed = true;
-    }
-    while let Some(frame) = match body.as_mut() {
-        Some(body) => body.frame().await,
-        None => None,
-    } {
+    while let Some(frame) = body.frame().await {
         let Ok(frame) = frame else {
             failed = true;
             break;
@@ -238,23 +253,18 @@ fn event_timestamp(event: &[u8]) -> Option<u64> {
         .ok()
 }
 
-/// Opens `count` streams that stay open and silent; returns the held bodies.
-pub async fn open_idle_streams(target: &Target, count: usize) -> Vec<Incoming> {
-    open_idle_streams_with_body(target, count, None).await
-}
-
-/// Like `open_idle_streams`, each request carrying `body` (an agent's resent
-/// context) instead of a small one.
-pub async fn open_idle_streams_with_body(
+/// Opens `count` streams that stay open and silent, each request carrying
+/// `body` (an agent's resent context) if given, else a small one; returns the
+/// held bodies.
+pub async fn open_idle_streams(
     target: &Target,
     count: usize,
     body: Option<Bytes>,
 ) -> Vec<Incoming> {
-    let mut set = JoinSet::new();
-    for _ in 0..count {
+    spawn_all(count, |_| {
         let target = target.clone();
         let body = body.clone();
-        set.spawn(async move {
+        async move {
             let req = match body {
                 Some(body) => target.messages_with_body(&idle_stream_headers(), body),
                 None => target.messages(&idle_stream_headers()),
@@ -262,13 +272,9 @@ pub async fn open_idle_streams_with_body(
             let mut body = target.client().request(req).await.unwrap().into_body();
             body.frame().await.unwrap().unwrap();
             body
-        });
-    }
-    let mut bodies = Vec::with_capacity(count);
-    while let Some(body) = set.join_next().await {
-        bodies.push(body.unwrap());
-    }
-    bodies
+        }
+    })
+    .await
 }
 
 /// One event, then silence for 60 s, like a model thinking.
@@ -319,19 +325,14 @@ pub async fn cancel_latency(target: &Target, rounds: usize) -> Vec<u64> {
 /// requests after a start or a scale-out pay to open connections (on the TLS
 /// path, a handshake). `None` for a failed request.
 pub async fn cold_unary(target: &Target, count: usize) -> Vec<Option<u64>> {
-    let mut set = JoinSet::new();
-    for _ in 0..count {
+    spawn_all(count, |_| {
         let target = target.fresh();
-        set.spawn(async move {
+        async move {
             let req = target.messages(&[("x-bench-unary", "512".into())]);
             timed(&target, req).await
-        });
-    }
-    let mut out = Vec::with_capacity(count);
-    while let Some(sample) = set.join_next().await {
-        out.push(sample.unwrap());
-    }
-    out
+        }
+    })
+    .await
 }
 
 /// Opens `count` streams that send as fast as flow control allows, reads one
@@ -339,10 +340,9 @@ pub async fn cold_unary(target: &Target, count: usize) -> Vec<Option<u64>> {
 /// its own client with its own connection, as real clients are; the held
 /// bodies keep the streams open until dropped.
 pub async fn stalled_streams(target: &Target, count: usize) -> Vec<Incoming> {
-    let mut set = JoinSet::new();
-    for _ in 0..count {
+    let bodies = spawn_all(count, |_| {
         let target = target.fresh();
-        set.spawn(async move {
+        async move {
             let req = target.messages(&[
                 ("x-bench-events", "2000".into()),
                 ("x-bench-size", "4096".into()),
@@ -351,11 +351,8 @@ pub async fn stalled_streams(target: &Target, count: usize) -> Vec<Incoming> {
             let mut body = target.client().request(req).await.ok()?.into_body();
             body.frame().await?.ok()?;
             Some(body)
-        });
-    }
-    let mut bodies = Vec::with_capacity(count);
-    while let Some(body) = set.join_next().await {
-        bodies.extend(body.unwrap());
-    }
-    bodies
+        }
+    })
+    .await;
+    bodies.into_iter().flatten().collect()
 }

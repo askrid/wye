@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::usage::tests::{arbitrary_chunks, feed_cut};
 
 const MESSAGE: &str = r#"{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"a \"usage\":{\"input_tokens\":99} lookalike"},{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls","name":"not-a-tool","usage":{"input_tokens":7}}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":5,"output_tokens":20,"service_tier":"standard"}}"#;
 
@@ -75,20 +76,24 @@ proptest! {
     fn any_chunking_reads_the_same(cuts in proptest::collection::vec(0usize..700, 0..10), responses: bool) {
         let (api, body) = if responses { (Api::Responses, RESPONSE) } else { (Api::Messages, MESSAGE) };
         let whole = scan(api, body);
-        let bytes = body.as_bytes();
-        let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (bytes.len() + 1)).collect();
-        cuts.sort_unstable();
         let mut s = JsonUsageScanner::new(api);
-        let mut at = 0;
-        for cut in cuts {
-            s.feed(&bytes[at..cut]);
-            at = cut;
-        }
-        s.feed(&bytes[at..]);
+        feed_cut(body.as_bytes(), cuts, |piece| s.feed(piece));
         prop_assert_eq!(s.usage(), whole.usage());
         prop_assert_eq!(s.model(), whole.model());
         prop_assert_eq!(s.status(), UsageStatus::Complete);
         prop_assert_eq!(s.fields.tools.as_deref(), whole.fields.tools.as_deref());
+    }
+
+    #[test]
+    fn arbitrary_bytes_never_panic(
+        chunks in arbitrary_chunks(),
+        api in prop::sample::select(vec![Api::Messages, Api::Responses, Api::ChatCompletions]),
+    ) {
+        let mut s = JsonUsageScanner::new(api);
+        for chunk in &chunks {
+            s.feed(chunk);
+        }
+        let _ = (s.status(), s.usage(), s.model());
     }
 }
 

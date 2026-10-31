@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-
 use proptest::prelude::*;
 use xxhash_rust::xxh3::xxh3_64;
 
