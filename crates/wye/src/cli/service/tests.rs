@@ -43,10 +43,16 @@ fn a_definition_reads_back_as_written() {
 
 #[test]
 fn systemd_refuses_paths_it_would_split() {
-    let error = service("/home/a b")
-        .definition(Manager::Systemd)
-        .unwrap_err();
-    assert!(error.contains("spaces or quotes"), "{error}");
+    for odd in [
+        "/home/a b",
+        "/home/o'brien",
+        "/home/a$b",
+        "/home/a\"b",
+        "/home/a\\b",
+    ] {
+        let error = service(odd).definition(Manager::Systemd).unwrap_err();
+        assert!(error.contains("spaces, quotes, or $"), "{error}");
+    }
 }
 
 #[test]

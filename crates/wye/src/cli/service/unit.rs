@@ -112,9 +112,9 @@ impl Service {
             ),
             Manager::Systemd => {
                 for path in [&program, &config, &log, &errors] {
-                    if path.contains(|c: char| c.is_whitespace() || c == '"' || c == '\\') {
+                    if path.contains(|c: char| c.is_whitespace() || "\"'\\$".contains(c)) {
                         return Err(format!(
-                            "{path}: a path with spaces or quotes; systemd needs one without"
+                            "{path}: a path with spaces, quotes, or $; systemd needs one without"
                         ));
                     }
                 }
