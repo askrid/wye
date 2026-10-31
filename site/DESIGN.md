@@ -1,6 +1,10 @@
 # Site design
 
-The rules the Wye website is designed and reviewed against. Each one comes from one of Wye's own [principles](../docs/product.md#principles): the site should behave like the product it describes. Proposal: no page is built yet.
+The rules the Wye website is designed and reviewed against. Each one comes from Wye itself, from its [principles](../docs/product.md#principles), its name, or its behaviour: the site should behave like the product it describes. Proposal: no page is built yet.
+
+## Scope
+
+The landing page comes first. Type, colour, tables, and code blocks are chosen for long reading as well, because the next pages are the user docs rendered from the repository: [guide.md](../docs/guide.md) and the configuration reference, [examples/wye.toml](../examples/wye.toml). Until those pages exist, the landing page links to them on GitHub. The other docs serve contributors and stay on GitHub. A page is rendered from its source file, never copied into the site.
 
 ## Principles
 
@@ -40,9 +44,17 @@ Check: a Claude Code user can start Wye from the first screen without scrolling.
 
 Check: a diagram changes in the same commit as the behaviour it shows.
 
+### Motion shows what happens over time
+
+*From streaming and failover.* Wye's work happens in time: a request takes the junction, a refusal switches the points before the first byte, a stream comes back event by event. Motion is how the page shows that, replayed from a recorded run, never with invented timing. Each page gets one orchestrated sequence; apart from it, motion only answers the reader (opening, expanding, copying). No fade-and-rise entrances, no hover effects on every block, no parallax.
+
+CSS only, no animation library: transitions, keyframes, `@starting-style`, scroll-driven animations, and view transitions, each degrading to a still page where a browser lacks it. Animate `transform` and `opacity`, so motion stays off the main thread. Under `prefers-reduced-motion` the sequence becomes a still diagram that says the same thing.
+
+Check: with motion off, the page says everything it says with motion on.
+
 ### One bold thing
 
-*From one responsibility.* Each page has one job and one memorable element, and everything around it stays quiet. At most one motion moment, such as a request taking the junction, and none under `prefers-reduced-motion`. The quality floor is never announced: usable at 320 px wide, visible keyboard focus, text contrast that meets WCAG AA, light and dark.
+*From one responsibility.* Each page has one job and one memorable element, and everything around it stays quiet. The quality floor is never announced: usable at 320 px wide, visible keyboard focus, text contrast that meets WCAG AA, light and dark.
 
 Check: the review of each page names its job and its one bold element.
 
@@ -61,4 +73,5 @@ These appear on generated pages whatever the subject. None is used unless chosen
 
 - Plan before code with Anthropic's `frontend-design` skill: 4–6 named colours, type roles, ASCII wireframes. Review the plan against these principles and revise any part that would come out the same for any other gateway.
 - Run `npx impeccable detect` on the built page and check it against Vercel's web interface guidelines, locally; neither is a site dependency.
+- Review every animation with the `review-animations` skill, and its cost with `animation-performance`.
 - Look at screenshots at phone and desktop widths, light and dark, before each commit that changes the look.
