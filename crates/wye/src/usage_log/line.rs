@@ -3,11 +3,12 @@
 use std::time::Duration;
 
 use gateway_core::{
-    agent::CacheMiss,
+    agent::{self, CacheMiss},
     pricing::{CostStatus, Pico, Pricing, Usd},
     prompt::HashKey,
     usage::{ToolCalls, UsageStatus},
 };
+use http::HeaderValue;
 use serde::{Serialize, Serializer};
 
 use super::{Outcome, Record, RefusedAttempt, agent::ToolDurations};
@@ -105,12 +106,10 @@ pub(super) struct Line<'a> {
     pub(super) failovers: &'a [RefusedAttempt],
 }
 
-/// An outcome by its name.
 fn outcome<S: Serializer>(outcome: &Outcome, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(outcome.as_str())
 }
 
-/// A cache-miss reason by its name.
 fn cache_miss<S: Serializer>(miss: &Option<CacheMiss>, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(miss.map_or("", CacheMiss::as_str))
 }
@@ -143,10 +142,10 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             status: CostStatus::Unknown,
         },
     });
-    let agent = r.info.agent.fields();
+    let headers = &r.info.agent;
     Line {
         event: "request",
-        unix_ms: r.unix_ms as u64,
+        unix_ms: r.unix_ms,
         path: r.info.endpoint.path,
         system: r.info.endpoint.api.system(),
         status: r.status.as_u16(),
@@ -155,21 +154,19 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         headers_ms: r.headers_after.map(ms),
         upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
-        // Client-supplied, like the agent ids: kept only as a bounded token.
-        session_id: r
-            .info
-            .session_id
-            .as_ref()
-            .and_then(|v| gateway_core::agent::token(v.as_bytes())),
+        session_id: token(r.info.session_id.as_ref()),
         traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
-        request_class: agent.request_class,
-        agent_type: agent.agent_type,
-        agent_id: agent.agent_id,
-        parent_agent_id: agent.parent_agent_id,
-        prompt_id: agent.prompt_id,
-        compaction: agent.compaction.map(|c| c.as_str()),
-        context_compacted: agent.context_compacted.map(|c| c.as_str()),
-        tool_durations: agent.tool_durations,
+        request_class: headers.request_class.map(|c| c.as_str()),
+        agent_type: token(headers.agent_type.as_ref()),
+        agent_id: token(headers.agent_id.as_ref()),
+        parent_agent_id: token(headers.parent_agent_id.as_ref()),
+        prompt_id: token(headers.prompt_id.as_ref()),
+        compaction: headers.compaction.map(|c| c.as_str()),
+        context_compacted: headers.context_compacted.map(|c| c.as_str()),
+        tool_durations: headers
+            .prev_tool_durations
+            .as_ref()
+            .map(|v| ToolDurations(v.as_bytes())),
         requested_model: r.info.requested_model.as_deref(),
         model: r.model.as_deref(),
         usage_status: r
@@ -187,8 +184,8 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         cache_miss: CacheMiss::classify(
             usage.cache_read_input_tokens,
             usage.cache_creation_input_tokens,
-            agent.compaction,
-            agent.context_compacted,
+            headers.compaction,
+            headers.context_compacted,
         ),
         prompt: r
             .info
@@ -205,6 +202,11 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             .map(|(findings, targets)| UpgradeIssues { findings, targets }),
         failovers: &r.info.failovers,
     }
+}
+
+/// A client-supplied value, kept only as a bounded token.
+fn token(value: Option<&HeaderValue>) -> Option<&str> {
+    value.and_then(|v| agent::token(v.as_bytes()))
 }
 
 /// Name of the count of tool calls not recorded by name; parentheses are

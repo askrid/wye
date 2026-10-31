@@ -185,13 +185,16 @@ fn explains_upgrade_issues_per_target_without_refusing() {
     let body = br#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":9},"messages":[{"role":"system","content":"x"}]}"#;
     let configured = explain_messages(&config, Credential::None, body);
     assert!(configured.refused.is_none(), "report only");
-    assert_eq!(
-        configured.upgrade_issues,
-        [
-            ("claude-opus-4-7".to_owned(), "budget_tokens"),
-            ("claude-opus-4-7".to_owned(), "system_role")
-        ]
-    );
+    let report = configured.report();
+    for rule in ["budget_tokens", "system_role"] {
+        assert!(
+            report.contains(&format!(
+                "upgrade check: claude-opus-4-7 would reject it: {rule} ("
+            )),
+            "{report}"
+        );
+    }
+    assert_eq!(report.matches("would reject it").count(), 2, "{report}");
     let named = explain(
         &config,
         "/v1/messages",
@@ -201,7 +204,7 @@ fn explains_upgrade_issues_per_target_without_refusing() {
         NOW,
         &["claude-haiku-4-5"],
     );
-    assert!(named.upgrade_issues.is_empty());
+    assert!(!named.report().contains("would reject it"));
     assert!(
         named
             .report()

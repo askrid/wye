@@ -23,19 +23,13 @@ pub enum StartupError {
     EmptyEnv(String),
     InvalidApiKey,
     HashKeyTooShort(String),
-    KeyFile {
+    /// A file the configuration names, by the setting that names it.
+    File {
+        what: &'static str,
         path: PathBuf,
         reason: String,
     },
     InvalidOtlpHeaders(String),
-    CaFile {
-        path: PathBuf,
-        reason: String,
-    },
-    JwksFile {
-        path: PathBuf,
-        reason: String,
-    },
     KeySet(KeySetError),
     Tls(String),
     BodyLimitTooLarge,
@@ -64,14 +58,8 @@ impl fmt::Display for StartupError {
                 f,
                 "environment variable {name} must hold key=value pairs separated by commas"
             ),
-            Self::KeyFile { path, reason } => {
-                write!(f, "upstream.api_key_file {}: {reason}", path.display())
-            }
-            Self::CaFile { path, reason } => {
-                write!(f, "upstream.ca_file {}: {reason}", path.display())
-            }
-            Self::JwksFile { path, reason } => {
-                write!(f, "auth.issuers jwks_file {}: {reason}", path.display())
+            Self::File { what, path, reason } => {
+                write!(f, "{what} {}: {reason}", path.display())
             }
             Self::KeySet(e) => write!(f, "auth: {e}"),
             Self::Tls(msg) => write!(f, "TLS setup failed: {msg}"),
@@ -125,10 +113,7 @@ impl Resources {
         let mut upstreams = Vec::with_capacity(config.routes.upstreams().count());
         for upstream in config.routes.upstreams() {
             let auth = upstream_auth(upstream, config_dir)?;
-            let extra_roots = match &upstream.ca_file {
-                Some(path) => load_certificates(&config_dir.join(path))?,
-                None => Vec::new(),
-            };
+            let extra_roots = upstream_roots(upstream, config_dir)?;
             upstreams.push(UpstreamResources { auth, extra_roots });
         }
         let prompt_key = config
@@ -185,10 +170,7 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
 /// `config_dir`).
 pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<ProviderKeys, StartupError> {
     let path = config_dir.join(&issuer.jwks_file);
-    let error = |reason: String| StartupError::JwksFile {
-        path: path.clone(),
-        reason,
-    };
+    let error = file_error("auth.issuers jwks_file", &path);
     let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
     ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
@@ -237,11 +219,8 @@ fn env_secret(name: &str) -> Result<String, StartupError> {
 
 /// A secret file's contents without surrounding whitespace (mounted secrets
 /// often end in a newline).
-pub(crate) fn read_secret(path: &Path) -> Result<String, StartupError> {
-    let error = |reason: String| StartupError::KeyFile {
-        path: path.to_owned(),
-        reason,
-    };
+fn read_secret(path: &Path) -> Result<String, StartupError> {
+    let error = file_error("upstream.api_key_file", path);
     let contents = std::fs::read_to_string(path).map_err(|e| error(e.to_string()))?;
     let secret = contents.trim();
     if secret.is_empty() {
@@ -250,15 +229,23 @@ pub(crate) fn read_secret(path: &Path) -> Result<String, StartupError> {
     Ok(secret.to_owned())
 }
 
-pub(crate) fn env(name: &str) -> Result<String, StartupError> {
+fn env(name: &str) -> Result<String, StartupError> {
     std::env::var(name).map_err(|_| StartupError::MissingEnv(name.to_owned()))
 }
 
-pub(crate) fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {
-    let error = |reason: String| StartupError::CaFile {
-        path: path.to_owned(),
-        reason,
-    };
+/// The root certificates `upstream` trusts besides the built-in ones.
+pub(crate) fn upstream_roots(
+    upstream: &Upstream,
+    config_dir: &Path,
+) -> Result<Vec<CertificateDer<'static>>, StartupError> {
+    match &upstream.ca_file {
+        Some(path) => load_certificates(&config_dir.join(path)),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {
+    let error = file_error("upstream.ca_file", path);
     let certs = CertificateDer::pem_file_iter(path)
         .and_then(Iterator::collect::<Result<Vec<_>, _>>)
         .map_err(|e| error(e.to_string()))?;
@@ -266,6 +253,14 @@ pub(crate) fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'stati
         return Err(error("no PEM certificates found".into()));
     }
     Ok(certs)
+}
+
+fn file_error(what: &'static str, path: &Path) -> impl Fn(String) -> StartupError {
+    move |reason| StartupError::File {
+        what,
+        path: path.to_owned(),
+        reason,
+    }
 }
 
 /// Credential Wye presents upstream.
@@ -308,7 +303,7 @@ impl fmt::Debug for UpstreamAuth {
 
 /// Parses `key1=value1,key2=value2` (the `OTEL_EXPORTER_OTLP_HEADERS` format)
 /// into headers whose values are marked sensitive.
-pub(crate) fn parse_headers(spec: &str) -> Option<HeaderMap> {
+fn parse_headers(spec: &str) -> Option<HeaderMap> {
     let mut headers = HeaderMap::new();
     for pair in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
         let (name, value) = pair.split_once('=')?;

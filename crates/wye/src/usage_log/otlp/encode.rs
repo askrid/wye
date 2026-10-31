@@ -18,9 +18,25 @@ pub(in crate::usage_log) enum Value<'a> {
     Double(f64),
 }
 
+/// The attributes that are present, comma-separated.
+pub(in crate::usage_log) fn write_attributes(
+    buf: &mut Vec<u8>,
+    attributes: &[(&str, Option<Value<'_>>)],
+) {
+    let present = attributes
+        .iter()
+        .filter_map(|(key, value)| Some((key, (*value)?)));
+    for (i, (key, value)) in present.enumerate() {
+        if i > 0 {
+            buf.push(b',');
+        }
+        write_attribute(buf, key, value);
+    }
+}
+
 /// One OTLP `KeyValue`. Strings are escaped by serde_json; 64-bit integers
 /// are strings in the protobuf JSON mapping.
-pub(in crate::usage_log) fn write_attribute(buf: &mut Vec<u8>, key: &str, value: Value<'_>) {
+fn write_attribute(buf: &mut Vec<u8>, key: &str, value: Value<'_>) {
     buf.extend_from_slice(br#"{"key":"#);
     let _ = serde_json::to_writer(&mut *buf, key);
     buf.extend_from_slice(br#","value":{"#);
@@ -56,97 +72,73 @@ pub(super) fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>) {
 
 /// The attributes a usage record shares between its log record and span.
 fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
-    let mut first = true;
-    let mut attribute = |key: &str, value: Value<'_>| {
-        if !std::mem::take(&mut first) {
-            buf.push(b',');
-        }
-        write_attribute(buf, key, value);
-    };
-    attribute("gen_ai.system", Value::Str(line.system));
-    attribute(attr::ROUTE, Value::Str(line.path));
-    attribute(attr::STATUS, Value::Int(u64::from(line.status)));
-    attribute(attr::OUTCOME, Value::Str(line.outcome.as_str()));
-    attribute("wye.duration_ms", Value::Double(line.duration_ms));
-    if let Some(ms) = line.headers_ms {
-        attribute("wye.headers_ms", Value::Double(ms));
+    fn json(value: &impl serde::Serialize) -> String {
+        serde_json::to_string(value).unwrap_or_default()
     }
-    if let Some(upstream) = line.upstream {
-        attribute(attr::UPSTREAM, Value::Str(upstream));
-    }
-    if let Some(subject) = line.subject {
-        attribute(attr::SUBJECT, Value::Str(subject));
-    }
-    if let Some(session) = line.session_id {
-        attribute("session.id", Value::Str(session));
-    }
-    for (key, value) in [
-        (attr::REQUEST_CLASS, line.request_class),
-        ("gen_ai.agent.name", line.agent_type),
-        ("gen_ai.agent.id", line.agent_id),
-        ("wye.parent_agent_id", line.parent_agent_id),
-        ("wye.prompt_id", line.prompt_id),
-        ("wye.compaction", line.compaction),
-        ("wye.context_compacted", line.context_compacted),
-    ] {
-        if let Some(value) = value {
-            attribute(key, Value::Str(value));
-        }
-    }
-    if let Some(alias) = line.requested_model {
-        attribute("wye.requested_model", Value::Str(alias));
-    }
-    if let Some(model) = line.model {
-        attribute(attr::MODEL, Value::Str(model));
-    }
-    attribute("wye.usage_status", Value::Str(line.usage_status));
-    let tokens = [
-        ("gen_ai.usage.input_tokens", line.input_tokens),
-        ("gen_ai.usage.output_tokens", line.output_tokens),
-        (
-            "gen_ai.usage.cache_creation.input_tokens",
-            line.cache_creation_input_tokens,
-        ),
-        (
-            "gen_ai.usage.cache_read.input_tokens",
-            line.cache_read_input_tokens,
-        ),
-    ];
-    for (key, count) in tokens {
-        if let Some(count) = count {
-            attribute(key, Value::Int(count));
-        }
-    }
-    if let Some(cost) = line.cost {
-        // A string keeps the exact decimal.
-        attribute("wye.cost_usd", Value::Str(&Usd(cost).to_string()));
-    }
-    if let Some(status) = line.cost_status {
-        attribute("wye.cost_status", Value::Str(status));
-    }
-    if let Some(version) = line.pricing_version {
-        attribute("wye.pricing_version", Value::Str(version));
-    }
-    if let Some(tools) = &line.tool_calls {
-        let json = serde_json::to_string(tools).unwrap_or_default();
-        attribute("wye.tool_calls", Value::Str(&json));
-    }
-    if let Some(issues) = &line.upgrade_issues {
-        let json = serde_json::to_string(issues).unwrap_or_default();
-        attribute("wye.upgrade_issues", Value::Str(&json));
-    }
-    if !line.failovers.is_empty() {
-        let json = serde_json::to_string(line.failovers).unwrap_or_default();
-        attribute("wye.failovers", Value::Str(&json));
-    }
-    if let Some(miss) = line.cache_miss {
-        attribute(attr::CACHE_MISS, Value::Str(miss.as_str()));
-    }
-    if let Some(prompt) = &line.prompt {
-        // Nested and variable-length: one JSON string the backend can parse.
-        let json = serde_json::to_string(prompt).unwrap_or_default();
-        attribute("wye.prompt", Value::Str(&json));
-    }
+    // A string keeps the exact decimal.
+    let cost = line.cost.map(|cost| Usd(cost).to_string());
+    let tool_calls = line.tool_calls.as_ref().map(json);
+    let upgrade_issues = line.upgrade_issues.as_ref().map(json);
+    let failovers = (!line.failovers.is_empty()).then(|| json(&line.failovers));
+    // Nested and variable-length: one JSON string the backend can parse.
+    let prompt = line.prompt.as_ref().map(json);
+    write_attributes(
+        buf,
+        &[
+            ("gen_ai.system", Some(Value::Str(line.system))),
+            (attr::ROUTE, Some(Value::Str(line.path))),
+            (attr::STATUS, Some(Value::Int(u64::from(line.status)))),
+            (attr::OUTCOME, Some(Value::Str(line.outcome.as_str()))),
+            ("wye.duration_ms", Some(Value::Double(line.duration_ms))),
+            ("wye.headers_ms", line.headers_ms.map(Value::Double)),
+            (attr::UPSTREAM, line.upstream.map(Value::Str)),
+            (attr::SUBJECT, line.subject.map(Value::Str)),
+            ("session.id", line.session_id.map(Value::Str)),
+            (attr::REQUEST_CLASS, line.request_class.map(Value::Str)),
+            ("gen_ai.agent.name", line.agent_type.map(Value::Str)),
+            ("gen_ai.agent.id", line.agent_id.map(Value::Str)),
+            ("wye.parent_agent_id", line.parent_agent_id.map(Value::Str)),
+            ("wye.prompt_id", line.prompt_id.map(Value::Str)),
+            ("wye.compaction", line.compaction.map(Value::Str)),
+            (
+                "wye.context_compacted",
+                line.context_compacted.map(Value::Str),
+            ),
+            ("wye.requested_model", line.requested_model.map(Value::Str)),
+            (attr::MODEL, line.model.map(Value::Str)),
+            ("wye.usage_status", Some(Value::Str(line.usage_status))),
+            (
+                "gen_ai.usage.input_tokens",
+                line.input_tokens.map(Value::Int),
+            ),
+            (
+                "gen_ai.usage.output_tokens",
+                line.output_tokens.map(Value::Int),
+            ),
+            (
+                "gen_ai.usage.cache_creation.input_tokens",
+                line.cache_creation_input_tokens.map(Value::Int),
+            ),
+            (
+                "gen_ai.usage.cache_read.input_tokens",
+                line.cache_read_input_tokens.map(Value::Int),
+            ),
+            ("wye.cost_usd", cost.as_deref().map(Value::Str)),
+            ("wye.cost_status", line.cost_status.map(Value::Str)),
+            ("wye.pricing_version", line.pricing_version.map(Value::Str)),
+            ("wye.tool_calls", tool_calls.as_deref().map(Value::Str)),
+            (
+                "wye.upgrade_issues",
+                upgrade_issues.as_deref().map(Value::Str),
+            ),
+            ("wye.failovers", failovers.as_deref().map(Value::Str)),
+            (
+                attr::CACHE_MISS,
+                line.cache_miss.map(|m| Value::Str(m.as_str())),
+            ),
+            ("wye.prompt", prompt.as_deref().map(Value::Str)),
+        ],
+    );
 }
 
 /// One usage record as an OTLP server `Span`, followed by one internal span
@@ -180,12 +172,11 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         }
     };
     open_span(buf, &span_id);
-    let _ = write!(buf, r#""name":"POST "#);
-    let route = serde_json::to_string(line.path).unwrap_or_default();
-    buf.extend_from_slice(route.trim_matches('"').as_bytes());
+    // The path is one of the API's own, so it needs no escaping.
     let _ = write!(
         buf,
-        r#"","kind":2,"startTimeUnixNano":"{start_ns}","endTimeUnixNano":"{end_ns}","attributes":["#
+        r#""name":"POST {}","kind":2,"startTimeUnixNano":"{start_ns}","endTimeUnixNano":"{end_ns}","attributes":["#,
+        line.path
     );
     write_record_attributes(buf, line);
     buf.extend_from_slice(br#"],"events":["#);
@@ -217,19 +208,16 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
             buf,
             r#","kind":1,"startTimeUnixNano":"{tool_start}","endTimeUnixNano":"{start_ns}","attributes":["#
         );
-        write_attribute(buf, attr::TOOL, Value::Str(&name));
-        buf.push(b',');
-        write_attribute(buf, "wye.tool.duration_ms", Value::Int(ms));
-        for (key, value) in [
-            ("session.id", line.session_id),
-            ("gen_ai.agent.id", line.agent_id),
-            ("wye.prompt_id", line.prompt_id),
-        ] {
-            if let Some(value) = value {
-                buf.push(b',');
-                write_attribute(buf, key, Value::Str(value));
-            }
-        }
+        write_attributes(
+            buf,
+            &[
+                (attr::TOOL, Some(Value::Str(&name))),
+                ("wye.tool.duration_ms", Some(Value::Int(ms))),
+                ("session.id", line.session_id.map(Value::Str)),
+                ("gen_ai.agent.id", line.agent_id.map(Value::Str)),
+                ("wye.prompt_id", line.prompt_id.map(Value::Str)),
+            ],
+        );
         buf.extend_from_slice(br#"],"status":{"code":0}}"#);
     }
 }

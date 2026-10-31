@@ -3,7 +3,7 @@
 //! Every line fits 80 columns: counts of tokens are compact (`635M`), times
 //! read as `4h01m`, and long names are cut.
 
-use std::fmt::Write as _;
+use std::{cmp::Reverse, collections::HashMap, fmt::Write as _};
 
 use gateway_core::agent::CacheMiss;
 
@@ -33,36 +33,27 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         cost: s.total.cost.priced > 0,
         paint,
     };
-    let mut outcomes: Vec<_> = s.outcomes.iter().collect();
-    outcomes.sort();
     out.push_str(&wrap(
         &format!(
             "{} in {} ({}); outcomes: {}",
             plural(s.total.requests, "request", "requests"),
             plural(s.sessions.len() as u64, "session", "sessions"),
             skipped(s),
-            pairs(outcomes)
+            pairs(&s.outcomes)
         ),
         0,
     ));
     // A refusal (429, 529) or a client error is an answer like any other,
     // so its outcome reads completed.
     if !s.errors.is_empty() {
-        let mut errors: Vec<_> = s.errors.iter().collect();
-        errors.sort();
-        let _ = writeln!(out, "error statuses: {}", pairs(errors));
+        let _ = writeln!(out, "error statuses: {}", pairs(&s.errors));
     }
 
     columns.title(&mut out, "By request class");
     columns.header(&mut out, "class");
     columns.row(&mut out, "all", &s.total);
     let mut classes: Vec<_> = s.classes.iter().collect();
-    classes.sort_by(|a, b| {
-        b.1.tokens
-            .total()
-            .cmp(&a.1.tokens.total())
-            .then(a.0.cmp(b.0))
-    });
+    classes.sort_by_key(|&(n, g)| (Reverse(g.tokens.total()), n));
     for (name, group) in classes {
         columns.row(&mut out, name, group);
     }
@@ -71,16 +62,15 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         columns.title(&mut out, "By upstream");
         columns.header(&mut out, "upstream");
         let mut upstreams: Vec<_> = s.upstreams.iter().collect();
-        upstreams.sort_by(|a, b| a.0.cmp(b.0));
+        upstreams.sort_by_key(|&(n, _)| n);
         for (name, group) in upstreams {
             columns.row(&mut out, name, group);
         }
     }
     if !s.failovers.is_empty() {
-        let _ = writeln!(
-            out,
-            "\n{}",
-            paint.bold("Failovers: refusals that moved a request to the next upstream")
+        columns.title(
+            &mut out,
+            "Failovers: refusals that moved a request to the next upstream",
         );
         let _ = writeln!(
             out,
@@ -121,7 +111,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
             "Upgrade issues: requests a target model would reject",
         );
         let mut upgrades: Vec<_> = s.upgrades.iter().collect();
-        upgrades.sort_by(|a, b| (b.1).0.cmp(&(a.1).0).then(a.0.cmp(b.0)));
+        upgrades.sort_by_key(|&(k, v)| (Reverse(v.0), k));
         for ((target, rule), (requests, clients)) in upgrades {
             let mut clients = clients.clone();
             clients.sort();
@@ -141,11 +131,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
             "Tools: calls the model requested; calls Claude Code timed, and their time",
         );
         let mut tools: Vec<_> = s.tools.iter().collect();
-        tools.sort_by(|a, b| {
-            ((b.1).1, (b.1).2)
-                .cmp(&((a.1).1, (a.1).2))
-                .then(a.0.cmp(b.0))
-        });
+        tools.sort_by_key(|&(n, t)| (Reverse((t.1, t.2)), n));
         tools.truncate(TOP);
         // MCP tool names (`mcp__server__tool`) run long.
         let width = tools
@@ -171,13 +157,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     columns.title(&mut out, "Top sessions by tokens");
     columns.header(&mut out, "session");
     let mut sessions: Vec<_> = s.sessions.iter().collect();
-    sessions.sort_by(|a, b| {
-        b.1.group
-            .tokens
-            .total()
-            .cmp(&a.1.group.tokens.total())
-            .then(a.0.cmp(b.0))
-    });
+    sessions.sort_by_key(|&(n, g)| (Reverse(g.group.tokens.total()), n));
     // A session without tokens (a refused probe, a count) has no place in a
     // ranking by tokens.
     sessions.retain(|(_, session)| session.group.tokens.total() > 0);
@@ -198,12 +178,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         columns.title(&mut out, "Top prompts by tokens");
         columns.header(&mut out, "prompt");
         let mut prompts: Vec<_> = s.prompts.iter().collect();
-        prompts.sort_by(|a, b| {
-            b.1.tokens
-                .total()
-                .cmp(&a.1.tokens.total())
-                .then(a.0.cmp(b.0))
-        });
+        prompts.sort_by_key(|&(n, g)| (Reverse(g.tokens.total()), n));
         for (id, group) in prompts.iter().take(TOP) {
             columns.row(&mut out, short(id), group);
         }
@@ -282,8 +257,10 @@ fn skipped(s: &Summary) -> String {
     }
 }
 
-/// `name count` pairs, comma-separated.
-fn pairs(pairs: Vec<(impl std::fmt::Display, &u64)>) -> String {
+/// `name count` pairs, in name order, comma-separated.
+fn pairs(counts: &HashMap<impl std::fmt::Display + Ord, u64>) -> String {
+    let mut pairs: Vec<_> = counts.iter().collect();
+    pairs.sort();
     pairs
         .iter()
         .map(|(k, v)| format!("{k} {v}"))

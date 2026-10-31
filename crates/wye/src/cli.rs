@@ -1,20 +1,5 @@
 //! The commands besides `wye serve`. Each runs once and exits; none runs
 //! inside the server.
-//!
-//! - `explain`: the server's decisions for one request, offline
-//! - `policy_test`: sample requests checked against expected decisions
-//! - `policy_diff`: what a config change widens, narrows, or changes
-//! - `report`: a usage-log summary by request class, upstream, tool, session,
-//!   and prompt
-//! - `wrapper`: `wye claude` and `wye codex`, an agent pointed at a gateway
-//! - `probe`: a one-shot health check client
-//! - `doctor`: a config's secrets, files, and endpoints checked before serving
-//! - `service`: the gateway as a per-user launchd or systemd service
-//! - `init`: a minimal working config
-//! - `token`: offline key generation and token issuance
-//! - `args`: every command's options, parsed and rendered as help
-//! - `files`: where a user's files live, and finding and reading a config
-//! - `paint`: color on a terminal, where it carries meaning
 
 pub mod args;
 mod doctor;
@@ -37,7 +22,7 @@ pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;
 pub(crate) use probe::health_url;
 pub use probe::{blocking as probe_blocking, probe};
-pub use report::{report, run as run_report};
+pub use report::run as run_report;
 pub use wrapper::{Agent, gateway_url, run as run_agent};
 
 /// A runtime for a command that makes a request or two.
@@ -127,6 +112,15 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 /// `n` and the noun in the number it takes: "1 session", "2 sessions".
 fn plural(n: u64, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// Model patterns as a config lists them.
+fn model_list(patterns: &[gateway_core::policy::ModelPattern]) -> String {
+    patterns
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A configured size as people write it: "32 MiB", "64 KiB", or "1000 bytes".

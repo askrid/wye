@@ -178,8 +178,7 @@ type Conversation = (String, Option<String>);
 #[derive(Default)]
 struct Summary {
     total: Group,
-    /// Lines `wye serve` prints about itself (`wye: listening on ...`), which
-    /// share stderr with the records.
+    /// Lines `wye serve` prints about itself (`wye: listening on ...`).
     notices: u64,
     skipped: u64,
     outcomes: HashMap<String, u64>,
@@ -325,7 +324,7 @@ pub fn run(
 
 /// Summarizes a usage log. Lines that are not request records (shutdown
 /// notices, other output) are skipped and counted.
-pub fn report(input: impl BufRead, paint: Paint) -> std::io::Result<String> {
+fn report(input: impl BufRead, paint: Paint) -> std::io::Result<String> {
     let mut summary = Summary::default();
     for line in input.lines() {
         let line = line?;

@@ -1,10 +1,10 @@
 //! `wye explain`: what `wye serve` would decide for one request, offline.
 //!
 //! The checks call the same functions the server uses (credential
-//! verification, the policy scanner, body admission's [`BodyChecks`],
-//! session sampling) in the server's order, and make no network calls. Routing is a pure
-//! function of request, credential, and config, so the answer is what every
-//! replica would do.
+//! verification, the policy scanner, body admission's [`BodyChecks`], session
+//! sampling) in the server's order, and make no network calls. Routing is a
+//! pure function of request, credential, and config, so the answer is what
+//! every replica would do.
 
 use super::{args::Parsed, files};
 use gateway_core::{
@@ -19,7 +19,7 @@ use gateway_core::{
     upgrade::{self, UpgradeScanner},
 };
 
-use super::size;
+use super::{model_list, size};
 
 /// The gateway token a request carries.
 pub enum Credential<'a> {
@@ -89,8 +89,6 @@ pub struct Explanation {
     /// The model the request runs on, after alias resolution, when the body
     /// was read.
     pub model: Option<String>,
-    /// `(target model, rule)` for each upgrade-check issue.
-    pub upgrade_issues: Vec<(String, &'static str)>,
     /// The route upstream's id, with a route of named upstreams.
     pub upstream: Option<String>,
 }
@@ -133,7 +131,6 @@ pub fn explain(
         steps: Vec::new(),
         refused: None,
         model: None,
-        upgrade_issues: Vec::new(),
         upstream: None,
     };
     // The server matches the path; the query string is forwarded.
@@ -198,11 +195,7 @@ pub fn explain(
         None => "any".to_owned(),
         // An identity provider's token that matched no grant.
         Some([]) => "none".to_owned(),
-        Some(p) => p
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", "),
+        Some(p) => model_list(p),
     };
     let checks = BodyChecks::new(
         configured,
@@ -210,10 +203,7 @@ pub fn explain(
         config.aliases.as_ref(),
         identity.as_ref(),
         endpoint.generates,
-        config
-            .routes
-            .get(api)
-            .is_some_and(|r| r.prefixes_model_ids()),
+        route.prefixes_model_ids(),
     );
     if !checks.hold() {
         out.step(
@@ -355,49 +345,46 @@ pub fn explain(
         });
     }
     // Prompt hashes and upgrade checks read Anthropic request bodies.
-    if api != Api::Messages {
-        out.step("decision: forward".into());
-        return out;
-    }
-    if let Some(diagnostics) = &config.cache_diagnostics {
-        let sampled =
-            prompt::session_sampled(session.map(str::as_bytes), diagnostics.sample_percent);
-        out.step(format!(
-            "cache diagnostics: {} (sample_percent {})",
-            if sampled {
-                "this request is hashed"
-            } else {
-                "this session is not sampled"
-            },
-            diagnostics.sample_percent
-        ));
-    }
-    let configured_targets = config
-        .upgrade_check
-        .as_ref()
-        .map_or(&[][..], |c| &c.targets[..]);
-    let targets: Vec<&str> = if targets.is_empty() {
-        configured_targets.iter().map(|t| &**t).collect()
-    } else {
-        targets.to_vec()
-    };
-    if !targets.is_empty() {
-        let mut scanner = UpgradeScanner::new();
-        scanner.feed(body);
-        let findings = scanner.findings();
-        for target in targets {
-            let rules: Vec<upgrade::Rule> = upgrade::issues(&findings, target).collect();
-            if rules.is_empty() {
-                out.step(format!("upgrade check: {target} accepts this request"));
-            }
-            for rule in rules {
-                out.step(format!(
-                    "upgrade check: {target} would reject it: {} ({}; {})",
-                    rule.name(),
-                    rule.fix(),
-                    rule.source()
-                ));
-                out.upgrade_issues.push((target.to_owned(), rule.name()));
+    if api == Api::Messages {
+        if let Some(diagnostics) = &config.cache_diagnostics {
+            let sampled =
+                prompt::session_sampled(session.map(str::as_bytes), diagnostics.sample_percent);
+            out.step(format!(
+                "cache diagnostics: {} (sample_percent {})",
+                if sampled {
+                    "this request is hashed"
+                } else {
+                    "this session is not sampled"
+                },
+                diagnostics.sample_percent
+            ));
+        }
+        let configured_targets = config
+            .upgrade_check
+            .as_ref()
+            .map_or(&[][..], |c| &c.targets[..]);
+        let targets: Vec<&str> = if targets.is_empty() {
+            configured_targets.iter().map(|t| &**t).collect()
+        } else {
+            targets.to_vec()
+        };
+        if !targets.is_empty() {
+            let mut scanner = UpgradeScanner::new();
+            scanner.feed(body);
+            let findings = scanner.findings();
+            for target in targets {
+                let rules: Vec<upgrade::Rule> = upgrade::issues(&findings, target).collect();
+                if rules.is_empty() {
+                    out.step(format!("upgrade check: {target} accepts this request"));
+                }
+                for rule in rules {
+                    out.step(format!(
+                        "upgrade check: {target} would reject it: {} ({}; {})",
+                        rule.name(),
+                        rule.fix(),
+                        rule.source()
+                    ));
+                }
             }
         }
     }

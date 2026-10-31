@@ -11,7 +11,7 @@ use rustls::{ClientConfig, RootCertStore, pki_types::CertificateDer};
 use crate::StartupError;
 
 /// An HTTP/1.1 client connector for `http` and `https` URLs, trusting
-/// `extra_roots` besides the built-in roots: the OTLP exporter and `wye probe`.
+/// `extra_roots` besides the built-in roots.
 pub(crate) fn https_connector(
     extra_roots: &[CertificateDer<'static>],
 ) -> Result<HttpsConnector<HttpConnector>, StartupError> {

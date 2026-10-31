@@ -118,36 +118,29 @@ impl InitOptions {
         let dir = self.out.parent().unwrap_or(Path::new("."));
         let mut steps: Vec<(String, String)> = vec![];
         let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
-        let private = ", readable only by you (chmod 600).";
-        match (self.mode, self.openai) {
-            (Mode::ApiKey, false) => steps.push((
+        let mut keys = Vec::new();
+        if self.mode == Mode::ApiKey {
+            keys.push(key("Anthropic API key", "anthropic.key"));
+        }
+        if self.openai && self.mode != Mode::Team {
+            keys.push(key("OpenAI key", "openai.key"));
+        }
+        if !keys.is_empty() {
+            steps.push((
                 format!(
-                    "Put your {}{private}",
-                    key("Anthropic API key", "anthropic.key")
+                    "Put your {}, readable only by you (chmod 600).",
+                    keys.join(" and your ")
                 ),
                 String::new(),
-            )),
-            (Mode::ApiKey, true) => steps.push((
-                format!(
-                    "Put your {} and your {}{private}",
-                    key("Anthropic API key", "anthropic.key"),
-                    key("OpenAI key", "openai.key")
-                ),
-                String::new(),
-            )),
-            (Mode::Forward, true) => steps.push((
-                format!("Put your {}{private}", key("OpenAI key", "openai.key")),
-                String::new(),
-            )),
-            (Mode::Forward, false) => {}
-            (Mode::Team, openai) => {
-                let keys = if openai {
-                    "ANTHROPIC_API_KEY and OPENAI_API_KEY"
-                } else {
-                    "ANTHROPIC_API_KEY"
-                };
-                steps.push((format!("Set {keys} where the gateway runs."), String::new()));
-            }
+            ));
+        }
+        if self.mode == Mode::Team {
+            let keys = if self.openai {
+                "ANTHROPIC_API_KEY and OPENAI_API_KEY"
+            } else {
+                "ANTHROPIC_API_KEY"
+            };
+            steps.push((format!("Set {keys} where the gateway runs."), String::new()));
         }
         steps.push((
             "Check the keys, files, and endpoints:".to_owned(),

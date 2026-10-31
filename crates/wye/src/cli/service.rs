@@ -291,9 +291,8 @@ pub fn status(context: &Context) -> Result<bool, String> {
         "Log",
         show(&service.log),
     );
-    let answering = std::fs::read_to_string(&service.config)
+    let answering = files::load(&service.config)
         .ok()
-        .and_then(|source| Config::from_toml_str(&source).ok())
         .map(|config| local_url(config.server.listen))
         .map(|url| (probe(&url).is_ok(), url));
     match answering {

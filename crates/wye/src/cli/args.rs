@@ -158,14 +158,7 @@ impl Command {
                     (!rest.is_empty()).then_some(rest),
                 )
             } else {
-                if self.passthrough {
-                    parsed
-                        .positional
-                        .extend(args.get(i - 1..).unwrap_or_default());
-                    break;
-                }
-                parsed.positional.push(arg);
-                continue;
+                (None, None)
             };
             let Some(opt) = opt else {
                 if self.passthrough {
@@ -174,7 +167,11 @@ impl Command {
                         .extend(args.get(i - 1..).unwrap_or_default());
                     break;
                 }
-                return Err(ArgsError::Usage(format!("unknown option {arg}")));
+                if arg != "-" && arg.starts_with('-') {
+                    return Err(ArgsError::Usage(format!("unknown option {arg}")));
+                }
+                parsed.positional.push(arg);
+                continue;
             };
             let value = match (opt.value, inline) {
                 (None, None) => "",

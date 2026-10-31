@@ -19,12 +19,17 @@ const DURATION_BOUNDS_MS: [f64; 14] = [
     60_000.0, 300_000.0,
 ];
 
-struct RequestSeries {
+/// One attribute set and its total.
+struct Counted<K> {
+    key: K,
+    count: u64,
+}
+
+struct RequestKey {
     route: Box<str>,
     upstream: Option<Box<str>>,
     status: u16,
     outcome: Outcome,
-    count: u64,
 }
 
 struct DurationSeries {
@@ -35,53 +40,44 @@ struct DurationSeries {
     sum: f64,
 }
 
-struct TokenSeries {
-    kind: &'static str,
+/// What tokens and costs are counted by.
+struct ModelKey {
     model: Box<str>,
     upstream: Option<Box<str>>,
     /// The agent's request class: Claude Code's hint header, or Codex's
     /// subagent header.
     request_class: Option<&'static str>,
-    count: u64,
 }
 
-/// Priced cost, in pico-USD, exported as USD.
-struct CostSeries {
-    model: Box<str>,
-    upstream: Option<Box<str>>,
-    request_class: Option<&'static str>,
-    pico: u64,
-}
-
-/// Checked requests a target model would reject, by rule and subject.
-struct UpgradeSeries {
+struct UpgradeKey {
     target: Box<str>,
     rule: &'static str,
     subject: Option<Box<str>>,
-    count: u64,
 }
 
-/// Refusals that moved a request to the route's next upstream.
-struct FailoverSeries {
+struct FailoverKey {
     /// The upstream that refused.
     upstream: Option<Box<str>>,
     reason: FailoverReason,
-    count: u64,
 }
 
 /// Cumulative totals since `start_ns`.
 pub(super) struct Metrics {
     start_ns: u64,
-    requests: Vec<RequestSeries>,
+    requests: Vec<Counted<RequestKey>>,
     durations: Vec<DurationSeries>,
-    tokens: Vec<TokenSeries>,
-    costs: Vec<CostSeries>,
-    upgrades: Vec<UpgradeSeries>,
-    failovers: Vec<FailoverSeries>,
+    /// By token kind, then model.
+    tokens: Vec<Counted<(&'static str, ModelKey)>>,
+    /// Priced cost, in pico-USD, exported as USD.
+    costs: Vec<Counted<ModelKey>>,
+    /// Checked requests a target model would reject.
+    upgrades: Vec<Counted<UpgradeKey>>,
+    /// Refusals that moved a request to the route's next upstream.
+    failovers: Vec<Counted<FailoverKey>>,
     /// Tool calls responses requested, by tool name.
-    tool_calls: Vec<(Box<str>, u64)>,
-    /// Requests that wrote the prompt cache without reading it, by reason.
-    /// Per reason, in [`CacheMiss::ALL`] order.
+    tool_calls: Vec<Counted<Box<str>>>,
+    /// Requests that wrote the prompt cache without reading it, per reason in
+    /// [`CacheMiss::ALL`] order.
     cache_misses: [u64; CacheMiss::ALL.len()],
     overflow: u64,
 }
@@ -106,26 +102,23 @@ impl Metrics {
     /// models × token kinds), so a linear search beats hashing here.
     pub(super) fn record(&mut self, line: &Line<'_>) {
         let overflow = &mut self.overflow;
-        let request = series(
+        bump(
             &mut self.requests,
             overflow,
-            |s| {
-                &*s.route == line.path
-                    && s.upstream.as_deref() == line.upstream
-                    && s.status == line.status
-                    && s.outcome == line.outcome
+            1,
+            |k| {
+                &*k.route == line.path
+                    && k.upstream.as_deref() == line.upstream
+                    && k.status == line.status
+                    && k.outcome == line.outcome
             },
-            || RequestSeries {
+            || RequestKey {
                 route: line.path.into(),
                 upstream: line.upstream.map(Into::into),
                 status: line.status,
                 outcome: line.outcome,
-                count: 0,
             },
         );
-        if let Some(s) = request {
-            s.count += 1;
-        }
         let bucket = DURATION_BOUNDS_MS
             .iter()
             .position(|&bound| line.duration_ms <= bound)
@@ -157,67 +150,53 @@ impl Metrics {
             *count += 1;
         }
         for (name, count) in line.tool_calls.into_iter().flat_map(|t| t.iter()) {
-            let tool = series(
+            bump(
                 &mut self.tool_calls,
                 overflow,
-                |(n, _)| &**n == name,
-                || (name.into(), 0),
+                u64::from(count),
+                |n| &**n == name,
+                || name.into(),
             );
-            if let Some(s) = tool {
-                s.1 = s.1.saturating_add(u64::from(count));
-            }
         }
         for (target, rule) in line.upgrade_issues.iter().flat_map(|i| i.iter()) {
-            let upgrade = series(
+            bump(
                 &mut self.upgrades,
                 overflow,
-                |s| &*s.target == target && s.rule == rule && s.subject.as_deref() == line.subject,
-                || UpgradeSeries {
+                1,
+                |k| &*k.target == target && k.rule == rule && k.subject.as_deref() == line.subject,
+                || UpgradeKey {
                     target: target.into(),
                     rule,
                     subject: line.subject.map(Into::into),
-                    count: 0,
                 },
             );
-            if let Some(s) = upgrade {
-                s.count += 1;
-            }
         }
         for failover in line.failovers {
             let upstream = failover.upstream.as_deref();
-            let refused = series(
+            bump(
                 &mut self.failovers,
                 overflow,
-                |s| s.upstream.as_deref() == upstream && s.reason == failover.reason,
-                || FailoverSeries {
+                1,
+                |k| k.upstream.as_deref() == upstream && k.reason == failover.reason,
+                || FailoverKey {
                     upstream: upstream.map(Into::into),
                     reason: failover.reason,
-                    count: 0,
                 },
             );
-            if let Some(s) = refused {
-                s.count += 1;
-            }
         }
         let Some(model) = line.model else { return };
-        let of_model = |m: &str, class: Option<&str>, upstream: Option<&str>| {
-            m == model && class == line.request_class && upstream == line.upstream
+        let same = |k: &ModelKey| {
+            &*k.model == model
+                && k.request_class == line.request_class
+                && k.upstream.as_deref() == line.upstream
+        };
+        let key = || ModelKey {
+            model: model.into(),
+            upstream: line.upstream.map(Into::into),
+            request_class: line.request_class,
         };
         if let Some(pico) = line.cost.filter(|&c| c > 0) {
-            let cost = series(
-                &mut self.costs,
-                overflow,
-                |s| of_model(&s.model, s.request_class, s.upstream.as_deref()),
-                || CostSeries {
-                    model: model.into(),
-                    upstream: line.upstream.map(Into::into),
-                    request_class: line.request_class,
-                    pico: 0,
-                },
-            );
-            if let Some(s) = cost {
-                s.pico = s.pico.saturating_add(pico);
-            }
+            bump(&mut self.costs, overflow, pico, same, key);
         }
         for (kind, count) in [
             ("input", line.input_tokens),
@@ -228,22 +207,37 @@ impl Metrics {
             let Some(count) = count.filter(|&c| c > 0) else {
                 continue;
             };
-            let tokens = series(
+            bump(
                 &mut self.tokens,
                 overflow,
-                |s| s.kind == kind && of_model(&s.model, s.request_class, s.upstream.as_deref()),
-                || TokenSeries {
-                    kind,
-                    model: model.into(),
-                    upstream: line.upstream.map(Into::into),
-                    request_class: line.request_class,
-                    count: 0,
-                },
+                count,
+                |(k, model)| *k == kind && same(model),
+                || (kind, key()),
             );
-            if let Some(s) = tokens {
-                s.count = s.count.saturating_add(count);
-            }
         }
+    }
+}
+
+/// Adds `by` to the total of the key that `matches`, or of a new one from
+/// `new` (see [`series`]).
+fn bump<K>(
+    list: &mut Vec<Counted<K>>,
+    overflow: &mut u64,
+    by: u64,
+    matches: impl Fn(&K) -> bool,
+    new: impl FnOnce() -> K,
+) {
+    let counted = series(
+        list,
+        overflow,
+        |s| matches(&s.key),
+        || Counted {
+            key: new(),
+            count: 0,
+        },
+    );
+    if let Some(s) = counted {
+        s.count = s.count.saturating_add(by);
     }
 }
 

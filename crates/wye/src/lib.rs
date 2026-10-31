@@ -1,5 +1,5 @@
 //! Wye runtime: startup resolution, HTTP server, routing, and upstream
-//! forwarding. The module map is in `docs/architecture.md`.
+//! forwarding.
 
 #[cfg(feature = "alloc-stats")]
 pub mod alloc_stats;
@@ -21,7 +21,7 @@ mod upgrade_check;
 mod upstream;
 mod usage_log;
 
-pub use cli::{Credential, doctor, explain, policy_diff, policy_test, probe, report};
+pub use cli::{Credential, doctor, explain, policy_diff, policy_test, probe};
 pub use gateway::Gateway;
 pub use server::serve;
 pub(crate) use startup::StartupError;

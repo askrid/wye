@@ -192,13 +192,13 @@ impl Service {
     }
 }
 
-pub(super) fn xml(text: &str) -> String {
+fn xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
-pub(super) fn unxml(text: &str) -> String {
+fn unxml(text: &str) -> String {
     text.replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&amp;", "&")
@@ -207,7 +207,7 @@ pub(super) fn unxml(text: &str) -> String {
 /// The commands a step runs, each as program and arguments.
 pub(super) type Commands = Vec<Vec<String>>;
 
-pub(super) fn launchctl(args: &[&str]) -> Vec<String> {
+fn launchctl(args: &[&str]) -> Vec<String> {
     std::iter::once("launchctl")
         .chain(args.iter().copied())
         .map(str::to_owned)

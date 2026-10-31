@@ -27,30 +27,14 @@ const ORIGINATOR: HeaderName = HeaderName::from_static("originator");
 /// request's header bytes, and validated only when the record is written.
 #[derive(Default)]
 pub(crate) struct AgentHeaders {
-    request_class: Option<RequestClass>,
-    compaction: Option<Compaction>,
-    context_compacted: Option<Compaction>,
-    agent_id: Option<HeaderValue>,
-    parent_agent_id: Option<HeaderValue>,
-    agent_type: Option<HeaderValue>,
-    prompt_id: Option<HeaderValue>,
-    prev_tool_durations: Option<HeaderValue>,
-}
-
-/// The validated values a usage record carries.
-pub(super) struct AgentFields<'a> {
-    pub(super) request_class: Option<&'static str>,
-    pub(super) agent_type: Option<&'a str>,
-    pub(super) agent_id: Option<&'a str>,
-    pub(super) parent_agent_id: Option<&'a str>,
-    pub(super) prompt_id: Option<&'a str>,
+    pub(super) request_class: Option<RequestClass>,
     pub(super) compaction: Option<Compaction>,
     pub(super) context_compacted: Option<Compaction>,
-    pub(super) tool_durations: Option<ToolDurations<'a>>,
-}
-
-fn token(value: Option<&HeaderValue>) -> Option<&str> {
-    value.and_then(|v| agent::token(v.as_bytes()))
+    pub(super) agent_id: Option<HeaderValue>,
+    pub(super) parent_agent_id: Option<HeaderValue>,
+    pub(super) agent_type: Option<HeaderValue>,
+    pub(super) prompt_id: Option<HeaderValue>,
+    pub(super) prev_tool_durations: Option<HeaderValue>,
 }
 
 impl AgentHeaders {
@@ -84,22 +68,6 @@ impl AgentHeaders {
             parent_agent_id: headers.get(CODEX_PARENT_THREAD_ID).cloned(),
             agent_type: subagent.cloned(),
             ..Self::default()
-        }
-    }
-
-    pub(super) fn fields(&self) -> AgentFields<'_> {
-        AgentFields {
-            request_class: self.request_class.map(RequestClass::as_str),
-            agent_type: token(self.agent_type.as_ref()),
-            agent_id: token(self.agent_id.as_ref()),
-            parent_agent_id: token(self.parent_agent_id.as_ref()),
-            prompt_id: token(self.prompt_id.as_ref()),
-            compaction: self.compaction,
-            context_compacted: self.context_compacted,
-            tool_durations: self
-                .prev_tool_durations
-                .as_ref()
-                .map(|v| ToolDurations(v.as_bytes())),
         }
     }
 }

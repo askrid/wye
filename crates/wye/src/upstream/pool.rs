@@ -15,7 +15,7 @@
 use super::UpstreamClient;
 use crate::gauge::{Gauge, Held};
 
-/// Upper bound on upstream connections per process.
+/// Upper bound on connections per upstream.
 const LANES: usize = 64;
 
 pub(crate) struct ClientPool {

@@ -15,13 +15,9 @@ use tokio::time::{Instant, Sleep};
 
 use crate::{BoxError, gauge::Held};
 
-/// Response body from the upstream.
-///
-/// Holds the connection slot until the body is dropped, and fails the stream
-/// when the upstream sends nothing for `timeout`.
-///
-/// The timer runs only while this body waits on the upstream. Time spent
-/// while the downstream is not polling (backpressure) never counts.
+/// Fails the stream when the upstream sends nothing for `timeout`. The timer
+/// runs only while this body waits on the upstream: time the downstream is not
+/// polling (backpressure) never counts.
 pub(crate) struct UpstreamBody<B> {
     inner: B,
     timeout: Duration,

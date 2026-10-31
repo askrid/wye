@@ -156,12 +156,12 @@ impl Upstream {
         Ok(Self {
             id: config.id.as_deref().map(Arc::from),
             model_prefix: config.provider.model_prefix(),
-            workspace: match config.workspace_id.as_deref() {
-                Some(id) => {
-                    Some(HeaderValue::from_str(id).map_err(|_| StartupError::InvalidApiKey)?)
-                }
-                None => None,
-            },
+            workspace: config
+                .workspace_id
+                .as_deref()
+                .map(HeaderValue::from_str)
+                .transpose()
+                .map_err(|_| StartupError::InvalidApiKey)?,
             clients: ClientPool::new(|| {
                 Client::builder(TokioExecutor::new())
                     .http2_initial_stream_window_size(STREAM_WINDOW)
@@ -190,9 +190,8 @@ impl Upstream {
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
         let (mut parts, body) = req.into_parts();
         parts.uri = self.upstream_uri(parts.uri.path_and_query())?;
-        // The client negotiates HTTP/2 or HTTP/1.1 with the upstream through TLS ALPN
-        // (Anthropic: HTTP/2, so concurrent streams share one connection); this only
-        // resets the caller's version so it cannot select the upstream protocol.
+        // TLS ALPN picks the upstream's protocol; this only resets the caller's
+        // version so it cannot.
         parts.version = Version::HTTP_11;
         parts.extensions.clear();
         strip_hop_by_hop(&mut parts.headers);

@@ -82,7 +82,7 @@ fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
     };
     let in_clear = |endpoint: &str| {
         let config = config(endpoint);
-        super::headers_in_clear(config.telemetry.as_ref().unwrap()).map(|check| check.line)
+        super::headers_in_clear(config.telemetry.as_ref().unwrap()).map(|check| check.unwrap_err())
     };
     assert_eq!(
         in_clear("http://collector.example:4318").as_deref(),
