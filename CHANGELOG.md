@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0-rc.1
 
-First public release. Wye is a working prototype: tested and benchmarked on
-one machine, used with Claude Code through a claude.ai subscription. Expect
-the config format to change before 1.0.
+A prerelease, to prove the release pipeline. Wye is a working prototype: tested
+and benchmarked on one machine, used with Claude Code through a claude.ai
+subscription. Expect the config format to change before 1.0. `wye service` has
+not run under systemd on a real Linux machine.
 
 What is in it:
 
