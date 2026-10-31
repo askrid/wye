@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- License: MIT, instead of WTFPL.
+
 ## 0.1.0-rc.1
 
 A prerelease, to prove the release pipeline. Wye is a working prototype: tested

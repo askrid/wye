@@ -1,7 +1,7 @@
 # Wye
 
 [![CI](https://github.com/askrid/wye/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrid/wye/actions/workflows/ci.yml)
-[![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-orange)](rust-toolchain.toml)
 
 Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or
@@ -254,4 +254,4 @@ Tests use local mock upstreams and never call a paid API.
 
 ## License
 
-[WTFPL](LICENSE). Do what you want with it.
+[MIT](LICENSE).
