@@ -6,7 +6,7 @@
 # Inside a container Wye must listen on 0.0.0.0, which requires an [auth]
 # section (docs/policy.md). scripts/image-smoke.sh builds and checks the image.
 
-FROM rust:1.98.1-slim-bookworm AS build
+FROM rust:1.99.0-slim-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --release --locked -p wye \
