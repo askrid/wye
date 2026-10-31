@@ -196,6 +196,40 @@ async fn tiny_chunks_count_at_least_the_minimum_charge() {
     assert_eq!(budget.current(), big.len() + 2 * MIN_CHUNK_CHARGE);
 }
 
+/// A client that keeps sending a little, never reaching its model, is refused
+/// and released too: each byte resets the idle timeout, so only the total ends it.
+#[tokio::test(start_paused = true)]
+async fn a_dripping_hold_is_refused_at_its_deadline() {
+    struct Dripping(Pin<Box<tokio::time::Sleep>>, bool);
+    impl Body for Dripping {
+        type Data = Bytes;
+        type Error = std::convert::Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<Frame<Bytes>, Self::Error>>> {
+            std::task::ready!(self.0.as_mut().poll(cx));
+            let next = tokio::time::Instant::now() + HOLD_IDLE_TIMEOUT - Duration::from_secs(1);
+            self.0.as_mut().reset(next);
+            let started = std::mem::replace(&mut self.1, true);
+            let chunk: &[u8] = if started { b"1," } else { b"{\"messages\":[" };
+            std::task::Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(chunk)))))
+        }
+    }
+
+    let budget = Gauge::default();
+    let mut client = Dripping(Box::pin(tokio::time::sleep(Duration::ZERO)), false);
+    let started = tokio::time::Instant::now();
+    let error = hold_until_model(&mut client, Api::Messages, &budget, 1 << 20, None)
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(error, HoldError::Stalled));
+    assert_eq!(started.elapsed(), HOLD_TIMEOUT);
+    assert_eq!(budget.current(), 0);
+}
+
 /// A client that stops sending before its model is read is refused, and
 /// what it sent is released, instead of holding its share for good.
 #[tokio::test(start_paused = true)]

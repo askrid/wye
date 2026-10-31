@@ -31,6 +31,7 @@ use gateway_core::{
 };
 use http_body_util::{BodyExt, LengthLimitError, Limited};
 use hyper::body::{Body, Frame, Incoming, SizeHint};
+use tokio::time::Instant;
 
 use self::chunks::Chunks;
 pub(crate) use self::chunks::splice_chunks;
@@ -59,6 +60,10 @@ pub(crate) const MIN_CHUNK_CHARGE: usize = 1024;
 /// budget for good: nothing else reads a request body against a clock, and
 /// a connection to a peer that is gone stays open while Wye only reads.
 pub(crate) const HOLD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a body may take to reach its `model`, however it trickles: a drip
+/// would otherwise keep its charge against the hold budget for good. Allows
+/// the largest body at about 1 Mbit/s with `model` last.
+pub(crate) const HOLD_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// What a held chunk of `len` bytes counts against a budget.
 pub(crate) fn charge(len: usize) -> usize {
@@ -101,7 +106,8 @@ pub(crate) enum HoldError {
     Overloaded,
     /// The body exceeded the request size limit while being held.
     TooLarge,
-    /// The client sent nothing for [`HOLD_IDLE_TIMEOUT`].
+    /// The client sent nothing for [`HOLD_IDLE_TIMEOUT`], or had not reached
+    /// the model after [`HOLD_TIMEOUT`].
     Stalled,
     /// The client's body failed (for example, the connection dropped).
     Body,
@@ -213,8 +219,10 @@ where
         api,
         check_rest: true,
     });
+    let deadline = Instant::now() + HOLD_TIMEOUT;
     while hold.scanner.model().is_none() {
-        let frame = tokio::time::timeout(HOLD_IDLE_TIMEOUT, body.frame())
+        let wait = HOLD_IDLE_TIMEOUT.min(deadline.saturating_duration_since(Instant::now()));
+        let frame = tokio::time::timeout(wait, body.frame())
             .await
             .map_err(|_| HoldError::Stalled)?;
         let Some(frame) = frame else {
