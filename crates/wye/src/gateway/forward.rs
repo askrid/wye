@@ -30,7 +30,7 @@ use crate::{
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{BodyKind, Observed, RefusedAttempt, RequestInfo, Unanswered, UsageLog},
+    usage_log::{Observed, RefusedAttempt, RequestInfo, Unanswered, UsageLog},
 };
 
 /// How long a refused attempt may take to hand its body back: hyper drops a
@@ -46,15 +46,14 @@ impl Gateway {
     ) -> Response<ResBody> {
         let api = info.endpoint.api;
         let Some(permit) = self.in_flight.try_hold(self.max_concurrent_requests) else {
-            let res = overloaded(api, "gateway is at its concurrent request limit");
-            log.gateway_error(info, res.status());
-            return res;
+            return log.gateway_error(
+                info,
+                overloaded(api, "gateway is at its concurrent request limit"),
+            );
         };
         let declared_len = content_length(req.headers());
         if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
-            let res = too_large(api);
-            log.gateway_error(info, res.status());
-            return res;
+            return log.gateway_error(info, too_large(api));
         }
         // The awaits below read the body and wait for the upstream; if the
         // client leaves meanwhile, hyper drops this future and `pending`
@@ -66,10 +65,7 @@ impl Gateway {
             .await;
         let (body, model_span) = match admitted {
             Ok(admitted) => admitted,
-            Err(res) => {
-                log.gateway_error(pending.answered(), res.status());
-                return *res;
-            }
+            Err(res) => return log.gateway_error(pending.answered(), *res),
         };
         self.sample(pending.info());
         let Some(route) = self.route(api) else {
@@ -81,16 +77,13 @@ impl Gateway {
         let info = pending.answered();
         match result {
             Ok(res) => {
-                let status = res.status();
-                let kind = BodyKind::of(res.headers().get(CONTENT_TYPE).map(HeaderValue::as_bytes));
-                let log = log.clone();
-                res.map(|body| Either::Right(Observed::new(body, info, status, kind, log, permit)))
+                let (parts, body) = res.into_parts();
+                let content_type = parts.headers.get(CONTENT_TYPE);
+                let body =
+                    Observed::new(body, info, parts.status, content_type, log.clone(), permit);
+                Response::from_parts(parts, Either::Right(body))
             }
-            Err(e) => {
-                let res = forward_error(api, e);
-                log.gateway_error(info, res.status());
-                res
-            }
+            Err(e) => log.gateway_error(info, forward_error(api, e)),
         }
     }
 

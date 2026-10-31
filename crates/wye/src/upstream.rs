@@ -200,20 +200,16 @@ impl Upstream {
         // The caller's headers carried the gateway token, in either
         // header: neither may reach the provider. With the operator's key,
         // the caller does not choose what it bills either.
-        match &self.auth {
-            UpstreamAuth::ApiKey(key) => {
-                parts.headers.remove(AUTHORIZATION);
-                parts.headers.remove(OPENAI_ORGANIZATION);
-                parts.headers.remove(OPENAI_PROJECT);
-                parts.headers.insert(X_API_KEY, key.clone());
-            }
-            UpstreamAuth::Bearer(value) => {
-                parts.headers.remove(X_API_KEY);
-                parts.headers.remove(OPENAI_ORGANIZATION);
-                parts.headers.remove(OPENAI_PROJECT);
-                parts.headers.insert(AUTHORIZATION, value.clone());
-            }
-            UpstreamAuth::ForwardCaller => {}
+        let credential = match &self.auth {
+            UpstreamAuth::ApiKey(key) => Some((X_API_KEY, AUTHORIZATION, key)),
+            UpstreamAuth::Bearer(value) => Some((AUTHORIZATION, X_API_KEY, value)),
+            UpstreamAuth::ForwardCaller => None,
+        };
+        if let Some((name, other, value)) = credential {
+            parts.headers.remove(other);
+            parts.headers.remove(OPENAI_ORGANIZATION);
+            parts.headers.remove(OPENAI_PROJECT);
+            parts.headers.insert(name, value.clone());
         }
         if let Some(workspace) = &self.workspace {
             parts.headers.insert(WORKSPACE_ID, workspace.clone());

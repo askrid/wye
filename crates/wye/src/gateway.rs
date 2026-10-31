@@ -271,11 +271,7 @@ impl Gateway {
         if let Some(verifier) = &self.verifier {
             match authenticate(verifier, req.headers(), connection) {
                 Ok(identity) => info.identity = Some(identity),
-                Err(_) => {
-                    let res = unauthorized(api);
-                    log.gateway_error(info, res.status());
-                    return res;
-                }
+                Err(_) => return log.gateway_error(info, unauthorized(api)),
             }
         }
         self.forward(req, info, log).await

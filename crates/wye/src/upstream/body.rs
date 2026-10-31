@@ -1,8 +1,6 @@
 //! Upstream response body: holds the connection slot and fails when the upstream goes silent.
 
 use std::{
-    error::Error as StdError,
-    fmt,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -38,17 +36,6 @@ impl<B> UpstreamBody<B> {
     }
 }
 
-#[derive(Debug)]
-struct IdleTimeoutError;
-
-impl fmt::Display for IdleTimeoutError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("upstream stream idle timeout")
-    }
-}
-
-impl StdError for IdleTimeoutError {}
-
 impl<B> Body for UpstreamBody<B>
 where
     B: Body<Data = Bytes> + Unpin,
@@ -73,7 +60,9 @@ where
                     this.sleep.as_mut().reset(Instant::now() + this.timeout);
                 }
                 match this.sleep.as_mut().poll(cx) {
-                    Poll::Ready(()) => Poll::Ready(Some(Err(IdleTimeoutError.into()))),
+                    Poll::Ready(()) => {
+                        Poll::Ready(Some(Err("upstream stream idle timeout".into())))
+                    }
                     Poll::Pending => Poll::Pending,
                 }
             }
