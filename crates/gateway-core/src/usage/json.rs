@@ -32,7 +32,6 @@ impl JsonUsageScanner {
         }
     }
 
-    /// Feeds the next chunk of response bytes.
     pub fn feed(&mut self, chunk: &[u8]) {
         self.fields.feed(chunk);
     }
@@ -54,7 +53,6 @@ impl JsonUsageScanner {
                 .ok()?
                 .merge_into(&mut usage),
         }
-        // The tier that served an OpenAI request; others are priced differently.
         if self.api != Api::Messages {
             usage.unpriced |= super::unpriced_tier(self.fields.service_tier());
         }
@@ -79,7 +77,6 @@ impl JsonUsageScanner {
         }
     }
 
-    /// Moves the tool calls out, keeping their allocation.
     pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
         self.fields.tools.take()
     }

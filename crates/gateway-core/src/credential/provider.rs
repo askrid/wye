@@ -23,8 +23,6 @@ impl Audience {
 }
 
 impl Verifier {
-    /// Identity providers name claims freely, so the claims are read as a
-    /// JSON object and the configured subject and grant claims looked up.
     pub(super) fn provider_identity(
         &self,
         source: &Source,

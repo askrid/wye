@@ -13,7 +13,6 @@ pub const MAX_ALIASES: usize = 256;
 /// Most `when` rules per alias.
 pub const MAX_ALIAS_RULES: usize = 32;
 
-/// A model alias.
 #[derive(Debug, Clone)]
 pub struct Alias {
     name: Arc<str>,
@@ -106,7 +105,7 @@ impl Alias {
 }
 
 /// The configured aliases; names are unique.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Aliases(Box<[Alias]>);
 
 impl Aliases {

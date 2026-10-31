@@ -39,8 +39,9 @@ pub const MAX_BREAKPOINTS: usize = 4;
 pub const MESSAGE_PREFIXES: usize = 8;
 
 /// A top-level request field that takes part in the prompt cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
+    #[default]
     Tools,
     System,
     Messages,
@@ -52,14 +53,6 @@ impl Section {
             Self::Tools => "tools",
             Self::System => "system",
             Self::Messages => "messages",
-        }
-    }
-
-    fn index(self) -> usize {
-        match self {
-            Self::Tools => 0,
-            Self::System => 1,
-            Self::Messages => 2,
         }
     }
 }
@@ -74,7 +67,7 @@ pub struct SectionHash {
 
 /// A `cache_control` marker and the hash of its section up to the end of the
 /// marked block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Breakpoint {
     pub section: Section,
     /// Element of the section array (`tools[index]`, `messages[index]`).
@@ -85,22 +78,14 @@ pub struct Breakpoint {
 }
 
 /// Hash of `messages[0..=index]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MessagePrefix {
     pub index: u32,
     pub hash: u64,
 }
 
-const NO_BREAKPOINT: Breakpoint = Breakpoint {
-    section: Section::Tools,
-    index: 0,
-    block: None,
-    hash: 0,
-};
-const NO_PREFIX: MessagePrefix = MessagePrefix { index: 0, hash: 0 };
-
 /// Unkeyed hashes of one request body.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptHashes {
     pub tools: Option<SectionHash>,
     pub system: Option<SectionHash>,
@@ -127,20 +112,6 @@ impl PromptHashes {
     /// Hashes of the last [`MESSAGE_PREFIXES`] message prefixes, oldest first.
     pub fn message_prefixes(&self) -> &[MessagePrefix] {
         self.prefixes.get(..self.prefixes_len).unwrap_or_default()
-    }
-
-    const fn empty() -> Self {
-        Self {
-            tools: None,
-            system: None,
-            messages: None,
-            breakpoint_count: 0,
-            breakpoints: [NO_BREAKPOINT; MAX_BREAKPOINTS],
-            breakpoints_len: 0,
-            prefixes: [NO_PREFIX; MESSAGE_PREFIXES],
-            prefixes_len: 0,
-            prefixes_next: 0,
-        }
     }
 
     /// Puts the message prefixes in order once scanning is done.
@@ -199,9 +170,7 @@ impl HashKey {
     /// HMAC-SHA256 of `hash`, truncated to 64 bits.
     pub fn tag(&self, hash: u64) -> u64 {
         let tag = hmac::sign(&self.0, &hash.to_le_bytes());
-        let mut first = [0; 8];
-        first.copy_from_slice(tag.as_ref().get(..8).unwrap_or(&[0; 8]));
-        u64::from_le_bytes(first)
+        u64::from_le_bytes(tag.as_ref().first_chunk().copied().unwrap_or_default())
     }
 }
 

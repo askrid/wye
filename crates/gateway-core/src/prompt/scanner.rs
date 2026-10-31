@@ -12,9 +12,10 @@ const CACHE_CONTROL: &[u8] = b"cache_control";
 const QUOTED_CACHE_CONTROL: &[u8] = b"\"cache_control\"";
 
 /// How the key string being read is used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Capture {
     /// The key name does not matter.
+    #[default]
     None,
     /// Kept to classify; hashed with the surrounding bytes.
     Plain,
@@ -27,6 +28,7 @@ enum Capture {
 }
 
 /// Incremental hasher for one request body.
+#[derive(Default)]
 pub struct PromptScanner {
     hasher: Xxh3Default,
     out: PromptHashes,
@@ -77,48 +79,11 @@ pub struct PromptScanner {
     marked: bool,
 }
 
-impl Default for PromptScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PromptScanner {
     pub fn new() -> Self {
-        Self {
-            hasher: Xxh3Default::new(),
-            out: PromptHashes::empty(),
-            failed: false,
-            started: false,
-            ended: false,
-            nest: Nesting::default(),
-            in_string: false,
-            string_is_key: false,
-            string: StringEnd::default(),
-            expect_key: false,
-            capture: Capture::None,
-            key: [0; KEY_CAP],
-            key_len: 0,
-            key_long: false,
-            key_escaped: false,
-            member: None,
-            awaiting_value: false,
-            section: None,
-            section_is_array: false,
-            seen: [false; 3],
-            element_open: false,
-            elements: 0,
-            in_content: false,
-            block: 0,
-            skip_depth: 0,
-            raw_floor: 0,
-            member_hashed: false,
-            comma_held: false,
-            marked: false,
-        }
+        Self::default()
     }
 
-    /// Feeds the next chunk of request bytes.
     pub fn feed(&mut self, chunk: &[u8]) {
         // Start of the bytes not yet hashed or dropped.
         let mut run = 0;
@@ -291,7 +256,6 @@ impl PromptScanner {
         self.key_len += bytes.len();
     }
 
-    /// Hashes a held-back comma.
     fn release_comma(&mut self) {
         if std::mem::take(&mut self.comma_held) {
             self.hasher.update(b",");
@@ -439,7 +403,7 @@ impl PromptScanner {
                 Some(b"messages") => Some(Section::Messages),
                 _ => None,
             };
-            if let Some(seen) = self.member.and_then(|m| self.seen.get_mut(m.index())) {
+            if let Some(seen) = self.member.and_then(|m| self.seen.get_mut(m as usize)) {
                 if *seen {
                     self.failed = true;
                 }

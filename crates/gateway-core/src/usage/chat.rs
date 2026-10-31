@@ -13,7 +13,10 @@
 use memchr::memmem;
 use serde::Deserialize;
 
-use super::{ToolCalls, Usage, UsageStatus, fields::InputDetails};
+use super::{
+    ToolCalls, Usage, UsageStatus, count_tool,
+    fields::{InputDetails, merge_openai},
+};
 
 /// Longest data line kept when it continues into the next chunk; longer
 /// lines are content deltas, except a usage chunk, which then marks usage
@@ -62,7 +65,6 @@ impl ChatUsageScanner {
         }
     }
 
-    /// Feeds the next chunk of response bytes.
     pub fn feed(&mut self, mut chunk: &[u8]) {
         while let Some(newline) = memchr::memchr(b'\n', chunk) {
             let (segment, rest) = chunk.split_at(newline);
@@ -136,9 +138,7 @@ impl ChatUsageScanner {
                 .flat_map(|c| c.delta.tool_calls.iter().flatten())
                 .filter_map(|call| call.function.as_ref()?.name)
             {
-                self.tools
-                    .get_or_insert_with(|| Box::new(ToolCalls::new()))
-                    .count(name);
+                count_tool(&mut self.tools, name);
             }
         }
     }
@@ -151,7 +151,6 @@ impl ChatUsageScanner {
         self.model.as_deref()
     }
 
-    /// Moves the tool calls out, keeping their allocation.
     pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
         self.tools.take()
     }
@@ -176,17 +175,14 @@ pub(super) struct ChatUsage {
 }
 
 impl ChatUsage {
-    /// Into Wye's meaning: `prompt_tokens` include cached tokens, so the
-    /// cached share becomes `cache_read_input_tokens`; reasoning tokens are
-    /// part of `completion_tokens`, as billed.
+    /// Reasoning tokens are part of `completion_tokens`, as billed.
     pub(super) fn merge_into(self, usage: &mut Usage) {
-        let cached = self
-            .prompt_tokens_details
-            .and_then(|d| d.cached_tokens)
-            .unwrap_or(0);
-        usage.input_tokens = self.prompt_tokens.map(|p| p.saturating_sub(cached));
-        usage.cache_read_input_tokens = self.prompt_tokens.map(|_| cached);
-        usage.output_tokens = self.completion_tokens;
+        merge_openai(
+            usage,
+            self.prompt_tokens,
+            self.completion_tokens,
+            self.prompt_tokens_details,
+        );
     }
 }
 

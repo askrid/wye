@@ -160,11 +160,6 @@ impl ProviderKeys {
         Ok(Self { keys })
     }
 
-    /// Key ids in the set, in document order.
-    pub fn ids(&self) -> impl Iterator<Item = &str> {
-        self.keys.iter().map(|(kid, _)| &**kid)
-    }
-
     /// Ids of the keys this set trusts and `old` did not: new ids, and ids
     /// that now name another key.
     pub fn added_since<'a>(&'a self, old: &'a Self) -> impl Iterator<Item = &'a str> {

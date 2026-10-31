@@ -178,13 +178,10 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
             .build()
             .map_err(|_| invalid("not a valid URL"))
     };
-    let otlp_logs_uri = signal_uri("logs")?;
-    let otlp_metrics_uri = signal_uri("metrics")?;
-    let otlp_traces_uri = signal_uri("traces")?;
     Ok(Telemetry {
-        otlp_logs_uri,
-        otlp_metrics_uri,
-        otlp_traces_uri,
+        otlp_logs_uri: signal_uri("logs")?,
+        otlp_metrics_uri: signal_uri("metrics")?,
+        otlp_traces_uri: signal_uri("traces")?,
         otlp_headers_env: raw
             .otlp_headers_env
             .map(|name| env_name(name, "telemetry.otlp_headers_env"))
@@ -260,8 +257,13 @@ fn nonzero(value: u64, field: &'static str) -> Result<u64, ConfigError> {
     }
 }
 
-fn secs(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
-    nonzero(value, field).map(Duration::from_secs)
+/// A sampling share of 1-100, by default [`DEFAULT_SAMPLE_PERCENT`].
+pub(super) fn sample_percent(value: Option<u8>, field: &'static str) -> Result<u8, ConfigError> {
+    match value {
+        None => Ok(DEFAULT_SAMPLE_PERCENT),
+        Some(p @ 1..=100) => Ok(p),
+        Some(_) => Err(ConfigError::Percent(field)),
+    }
 }
 
 /// The longest timer, a day: longer ones are mistakes, and a timer adds its

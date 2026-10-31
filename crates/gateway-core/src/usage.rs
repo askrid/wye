@@ -80,8 +80,9 @@ impl UsageStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Event {
+    #[default]
     Other,
     MessageStart,
     MessageDelta,
@@ -123,7 +124,7 @@ impl ToolCalls {
             if let Some(dst) = entry.0.get_mut(..name.len()) {
                 dst.copy_from_slice(name.as_bytes());
             }
-            // The token check above bounds the length to 64.
+            // The length check above bounds it to 64.
             entry.1 = name.len() as u8;
             entry.2 = 1;
             self.len += 1;
@@ -148,6 +149,13 @@ impl ToolCalls {
     pub fn other(&self) -> u32 {
         self.other
     }
+}
+
+/// Counts a call of the tool `name`, boxing the table on the first.
+fn count_tool(tools: &mut Option<Box<ToolCalls>>, name: &str) {
+    tools
+        .get_or_insert_with(|| Box::new(ToolCalls::new()))
+        .count(name);
 }
 
 /// The usage scanner for one response body: an SSE stream of any of the APIs,
@@ -226,7 +234,7 @@ impl UsageScanner {
 }
 
 /// Incremental usage scanner for one Anthropic Messages stream.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SseUsageScanner {
     /// Partial line carried over from the previous chunk.
     line: Vec<u8>,
@@ -244,28 +252,11 @@ pub struct SseUsageScanner {
     corrupt: bool,
 }
 
-impl Default for SseUsageScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SseUsageScanner {
     pub fn new() -> Self {
-        Self {
-            line: Vec::new(),
-            line_truncated: false,
-            event: Event::Other,
-            usage: Usage::default(),
-            model: None,
-            tools: None,
-            saw_start: false,
-            saw_delta: false,
-            corrupt: false,
-        }
+        Self::default()
     }
 
-    /// Feeds the next chunk of response bytes.
     pub fn feed(&mut self, mut chunk: &[u8]) {
         // SIMD search: every streamed byte passes through here.
         while let Some(newline) = memchr::memchr(b'\n', chunk) {
@@ -355,22 +346,16 @@ impl SseUsageScanner {
                 if let Ok(start) = serde_json::from_slice::<BlockStartData<'_>>(data)
                     && start.content_block.kind == "tool_use"
                 {
-                    self.tools
-                        .get_or_insert_with(|| Box::new(ToolCalls::new()))
-                        .count(start.content_block.name.unwrap_or_default());
+                    count_tool(
+                        &mut self.tools,
+                        start.content_block.name.unwrap_or_default(),
+                    );
                 }
             }
             Event::Other => {}
         }
     }
 
-    /// `tool_use` blocks the response started, by tool name; `None` when
-    /// it requested no tool calls.
-    pub fn tool_calls(&self) -> Option<&ToolCalls> {
-        self.tools.as_deref()
-    }
-
-    /// Moves the tool calls out, keeping their allocation.
     pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
         self.tools.take()
     }

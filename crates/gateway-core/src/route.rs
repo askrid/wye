@@ -204,7 +204,7 @@ impl Route {
                 .iter_mut()
                 .zip(self.upstreams.iter().zip(&self.seeds))
             {
-                *score = self.score(upstream, *seed, key);
+                *score = f64::from(upstream.weight) / -unit(xxh3_64_with_seed(key, *seed)).ln();
             }
             let used = order.get_mut(..len).unwrap_or_default();
             // Highest score first; equal scores keep config order (stable).
@@ -215,10 +215,6 @@ impl Route {
             });
         }
         Ranking { order, len }
-    }
-
-    fn score(&self, upstream: &Upstream, seed: u64, key: &[u8]) -> f64 {
-        f64::from(upstream.weight) / -unit(xxh3_64_with_seed(key, seed)).ln()
     }
 
     /// The index of the upstream for a request with affinity `key` (the

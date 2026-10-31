@@ -31,9 +31,6 @@ pub fn is_model_name(name: &str) -> bool {
         && !name.chars().any(char::is_control)
 }
 
-/// Longest pattern accepted in config or a credential.
-const MAX_PATTERN_BYTES: usize = MAX_MODEL_BYTES;
-
 /// An allowed model: an exact name, or a prefix written with a trailing `*`
 /// (`claude-haiku-*` matches every dated Haiku model).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +44,7 @@ impl ModelPattern {
     /// `None` for an empty pattern, a `*` anywhere but at the end, or one
     /// longer than [`MAX_MODEL_BYTES`].
     pub fn parse(pattern: &str) -> Option<Self> {
-        if pattern.is_empty() || pattern.len() > MAX_PATTERN_BYTES {
+        if pattern.is_empty() || pattern.len() > MAX_MODEL_BYTES {
             return None;
         }
         let (text, prefix) = match pattern.strip_suffix('*') {
@@ -91,10 +88,7 @@ impl fmt::Display for ModelPattern {
 /// The output-token ceiling of a request: the stricter of the configured
 /// and the credential's limit, if either is set.
 pub fn token_limit(configured: Option<u64>, credential: Option<u64>) -> Option<u64> {
-    match (configured, credential) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
+    configured.into_iter().chain(credential).min()
 }
 
 /// Whether `model` is allowed by both lists; an absent list allows every
@@ -126,8 +120,7 @@ pub enum PolicyError {
     EscapedKey,
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
-    /// The output-token field (`max_tokens`, `max_output_tokens`,
-    /// `max_completion_tokens`) is not a non-negative integer.
+    /// The output-token field is not a non-negative integer.
     InvalidMaxTokens,
     /// A second top-level output-token field.
     RepeatedMaxTokens,

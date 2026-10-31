@@ -16,8 +16,9 @@
 use serde::Deserialize;
 
 use super::{
-    ToolCalls, Usage, UsageStatus,
+    ToolCalls, Usage, UsageStatus, count_tool,
     fields::{Items, ResponseFields, openai_tool},
+    raw::ContentBlock,
 };
 
 /// Longest event name kept; longer names are other events.
@@ -93,7 +94,6 @@ impl ResponsesUsageScanner {
         }
     }
 
-    /// Feeds the next chunk of response bytes.
     pub fn feed(&mut self, mut chunk: &[u8]) {
         while !chunk.is_empty() {
             let newline = memchr::memchr(b'\n', chunk);
@@ -238,8 +238,6 @@ impl ResponsesUsageScanner {
         if self.event != Event::Terminal {
             return;
         }
-        // The tier that served the request; a tier other than default is
-        // priced differently.
         if super::unpriced_tier(fields.service_tier()) {
             self.usage.unpriced = true;
         }
@@ -262,26 +260,17 @@ impl ResponsesUsageScanner {
             return;
         };
         self.usage.unpriced |= hosted;
-        self.tools
-            .get_or_insert_with(|| Box::new(ToolCalls::new()))
-            .count(name);
+        count_tool(&mut self.tools, name);
     }
 
     pub fn usage(&self) -> Usage {
         self.usage
     }
 
-    /// The model the provider reported.
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
     }
 
-    /// Tool calls the response started, by name; `None` without any.
-    pub fn tool_calls(&self) -> Option<&ToolCalls> {
-        self.tools.as_deref()
-    }
-
-    /// Moves the tool calls out, keeping their allocation.
     pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
         self.tools.take()
     }
@@ -300,15 +289,7 @@ impl ResponsesUsageScanner {
 #[derive(Deserialize)]
 struct ItemAdded<'a> {
     #[serde(borrow)]
-    item: Item<'a>,
-}
-
-#[derive(Deserialize)]
-struct Item<'a> {
-    #[serde(rename = "type", borrow)]
-    kind: &'a str,
-    #[serde(borrow)]
-    name: Option<&'a str>,
+    item: ContentBlock<'a>,
 }
 
 #[cfg(test)]

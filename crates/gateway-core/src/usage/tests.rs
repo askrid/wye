@@ -166,15 +166,12 @@ fn counts_tool_use_blocks_by_name_across_any_split() {
     for at in 0..=bytes.len() {
         let (a, b) = bytes.split_at(at);
         let s = scan(&[a, b]);
-        let tools: Vec<_> = s.tool_calls().unwrap().iter().collect();
+        let tools: Vec<_> = s.tools.as_deref().unwrap().iter().collect();
         assert_eq!(tools, [("Bash", 2), ("Read", 1)], "split at {at}");
         assert_eq!(s.status(), UsageStatus::Complete, "split at {at}");
         assert_eq!(s.usage(), EXPECTED, "split at {at}");
     }
-    assert!(
-        scan(&[STREAM.as_bytes()]).tool_calls().is_none(),
-        "text only"
-    );
+    assert!(scan(&[STREAM.as_bytes()]).tools.is_none(), "text only");
 }
 
 #[test]
@@ -186,7 +183,7 @@ fn tool_names_are_bounded() {
     stream.push_str(&tool_block(20, &long));
     stream.push_str(&tool_block(21, "has space"));
     let s = scan(&[stream.as_bytes()]);
-    let tools = s.tool_calls().unwrap();
+    let tools = s.tools.as_deref().unwrap();
     assert_eq!(tools.iter().count(), MAX_TOOL_NAMES);
     assert_eq!(
         tools.other(),

@@ -142,7 +142,6 @@ pub enum Refusal {
 }
 
 impl Refusal {
-    /// The HTTP status.
     pub fn status(&self) -> u16 {
         match self {
             Self::Invalid(_) => 400,
@@ -167,7 +166,6 @@ impl fmt::Display for Refusal {
             Self::Invalid(e) => f.write_str(e.as_str()),
             Self::Model(model) => write!(f, "this gateway token may not use the model {model:?}"),
             Self::TokenLimit(e) => e.fmt(f),
-            // Names the sections that would serve it.
             Self::NoRoute { api, path } => {
                 write!(f, "no route serves {path}: add {}", api.route_sections())
             }
@@ -179,8 +177,7 @@ impl fmt::Display for Refusal {
 /// the ceiling requires it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenLimitError {
-    /// The field's name: `max_tokens`, `max_output_tokens`, or
-    /// `max_completion_tokens`.
+    /// The output-token field's name.
     pub field: &'static str,
     /// `None`: the request did not set the field.
     pub requested: Option<u64>,

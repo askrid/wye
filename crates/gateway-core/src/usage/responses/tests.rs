@@ -42,7 +42,7 @@ fn reads_usage_model_and_tool_calls() {
     assert_eq!(usage.cache_creation_input_tokens, None);
     // The hosted web search is billed per call.
     assert!(usage.unpriced);
-    let tools: Vec<_> = s.tool_calls().unwrap().iter().collect();
+    let tools: Vec<_> = s.tools.as_deref().unwrap().iter().collect();
     assert_eq!(tools, [("shell", 1), ("web_search", 1)]);
 }
 
@@ -133,6 +133,6 @@ proptest! {
         prop_assert_eq!(scanner.usage(), whole.usage());
         prop_assert_eq!(scanner.model(), whole.model());
         prop_assert_eq!(scanner.status(), UsageStatus::Complete);
-        prop_assert_eq!(scanner.tool_calls(), whole.tool_calls());
+        prop_assert_eq!(scanner.tools, whole.tools);
     }
 }

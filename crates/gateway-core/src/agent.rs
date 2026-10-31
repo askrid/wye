@@ -116,11 +116,7 @@ pub fn token(value: &[u8]) -> Option<&str> {
         && value
             .iter()
             .all(|&b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
-    if valid {
-        std::str::from_utf8(value).ok()
-    } else {
-        None
-    }
+    valid.then(|| std::str::from_utf8(value).ok()).flatten()
 }
 
 /// Most tool entries read from `x-claude-code-prev-tool-durations`; Claude
