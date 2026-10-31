@@ -97,6 +97,13 @@ impl PolicyScanner {
         }
     }
 
+    /// Leaves the output-token field alone: without a ceiling, what it holds
+    /// is between the client and the provider.
+    pub fn without_token_field(mut self) -> Self {
+        self.token_keys = &[];
+        self
+    }
+
     /// The model, once its value has been read completely.
     pub fn model(&self) -> Option<&str> {
         if !self.found {

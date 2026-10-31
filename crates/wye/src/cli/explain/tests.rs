@@ -403,10 +403,18 @@ fn reads_the_body_in_the_servers_order() {
         status(br#"{"model":"claude-opus-5-5","max_tokens":4096.0}"#),
         Some(403)
     );
+    // No ceiling: the field is the provider's to judge.
     assert_eq!(
         status(br#"{"model":"claude-haiku-4-5","max_tokens":4096.0}"#),
-        Some(400)
+        None
     );
+    // Under a ceiling, a value it cannot read is refused.
+    let capped = self::config(&key, "max_output_tokens = 1000");
+    let verifier = self::verifier(&capped);
+    let credential = Credential::Token(&t, &verifier);
+    let body = br#"{"model":"claude-haiku-4-5","max_tokens":4096.0}"#;
+    let refused = explain(&capped, "/v1/messages", credential, None, body, NOW, &[]).refused;
+    assert_eq!(refused.map(|(status, ..)| status), Some(400));
 }
 
 #[test]
