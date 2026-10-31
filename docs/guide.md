@@ -4,7 +4,7 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 
 ## Choosing a setup
 
-Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.98 or later). Prebuilt archives come with the first release.
+Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.98 or later). Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases).
 
 `wye init` writes a config, never over an existing file, and prints the next steps. It has three modes:
 
