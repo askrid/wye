@@ -96,6 +96,8 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 
 From the CLI review (2026-10-30), not fixed:
 
+- `bench/baseline.json` lacks the ten `*_sse_failed_streams` metrics: it is a record, not a gate input, so it waits for the next refresh on an idle machine.
+
 - `wye doctor` does not warn about a provider key file others can read: mounted secrets are often 0444, so it would need to tell them apart.
 - `wye claude` starts the agent with an expired gateway token, which then gets 401s. The token's `exp` could be read locally first.
 - `policy-diff` takes no `-` for a config (`git show main:wye.toml | wye policy-diff - wye.toml`): key sets are read relative to each config, so a worktree remains the right way.
@@ -108,8 +110,8 @@ From the CLI review (2026-10-30), not fixed:
 
 What must be true to tag it:
 
-- [ ] The release workflow publishes a GitHub Release from a `v*` tag.
-- [ ] `gh attestation verify` passes on its archives.
+- [x] The release workflow publishes a GitHub Release from a `v*` tag ([`v0.1.0-rc.1`](https://github.com/askrid/wye/releases/tag/v0.1.0-rc.1)).
+- [x] `gh attestation verify` passes on its archives.
 - [ ] `wye service` has run on a real Linux machine, or the release notes say the systemd path is untested.
 - [ ] One full Claude Code session with an API key.
 - [ ] A container image on GHCR.
