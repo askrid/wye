@@ -1,6 +1,6 @@
 # Site design
 
-The rules the Wye website is designed and reviewed against. Each one comes from Wye itself, from its [principles](../docs/product.md#principles), its name, or its behaviour: the site should behave like the product it describes. Proposal: no page is built yet.
+The rules the Wye website is designed and reviewed against. Each one comes from Wye itself, from its [principles](../docs/product.md#principles), its name, or its behaviour: the site should behave like the product it describes. The landing page is built ([README.md](README.md)); the docs pages are planned.
 
 ## Scope
 

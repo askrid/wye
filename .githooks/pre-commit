@@ -1,12 +1,33 @@
 #!/usr/bin/env bash
 # Blocks commits that fail correctness or regress performance. See scripts/check.sh.
-# Commits that touch only docs or bench/baseline.json skip the run, except
-# docs/policy.md, which a test reads.
+# Commits that touch only docs, the website (site/), or bench/baseline.json
+# skip the run, except docs/policy.md, which a test reads. The website has its
+# own check, site/check.sh, run for a commit that changes the site or a file
+# the site reads.
 set -euo pipefail
 # A variable, not a pipe: with pipefail, grep -q leaving early could fail
 # the pipeline and skip the gate.
 staged=$(git diff --cached --name-only)
-if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md)$' <<<"$staged" \
+
+site_files=$(grep -E '^site/' <<<"$staged" | grep -vE '\.md$' || true)
+if [[ -n $site_files ]] || grep -qxE \
+  'README\.md|CHANGELOG\.md|bench/baseline\.json|Cargo\.toml|crates/wye/Cargo\.toml' <<<"$staged"; then
+  # site/check.sh builds the working tree too.
+  if ! git diff --quiet -- site; then
+    echo "pre-commit: unstaged changes in site/ would be checked but not committed;" \
+      "stage or stash them" >&2
+    exit 1
+  fi
+  untracked=$(git ls-files --others --exclude-standard -- site)
+  if [[ -n $untracked ]]; then
+    echo "pre-commit: untracked files in site/ would be built but not committed:" \
+      $untracked >&2
+    exit 1
+  fi
+  "$(git rev-parse --show-toplevel)/site/check.sh"
+fi
+
+if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md|site/.*)$' <<<"$staged" \
   || grep -qx 'docs/policy\.md' <<<"$staged"; }; then
   # check.sh builds the working tree: it must be what is committed.
   if ! git diff --quiet; then

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wye: a stateless gateway for coding agents</title>
+<meta name="description" content="Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Native APIs pass through; accounts, permissions, failover, and prices live in one TOML file in Git.">
+<link rel="preload" href="assets/fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/overpass-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="wrap bar">
+  <a class="mark" href="./">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path class="route-2" d="M14 16 L22 24 H28"/><path class="route-1" d="M4 16 H14 L22 8 H28"/></svg>
+    Wye
+  </a>
+  <nav aria-label="Documentation">
+    <a href="{{repo}}/blob/main/docs/guide.md">Guide</a>
+    <a href="{{repo}}/blob/main/examples/wye.toml">Configuration</a>
+    <a href="{{repo}}">GitHub</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero" aria-labelledby="top">
+    <div class="hero-copy">
+      <h1 id="top">Native APIs, passed through.</h1>
+      <p class="lede">Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Requests go out as clients sent them; the only change is the model name, when an alias or a provider's own ids call for it. Which account a request uses, who may use which model, failover, upgrades, and prices sit in one TOML file you keep in Git.</p>
+    </div>
+
+    <div class="hero-install">
+      {{fence README.md|cargo install}}
+      <p class="release">Release {{version}} is a prerelease. <a href="{{repo}}/blob/main/CHANGELOG.md">What it contains and what is not yet verified</a>.</p>
+    </div>
+
+    <figure class="junction">
+      <svg viewBox="0 0 640 230" role="img" aria-labelledby="junction-title">
+        <title id="junction-title">A request from Claude Code reaches the wye and takes its session's account, anthropic. anthropic answers 429 before any output, so the request goes to bedrock-us, whose stream comes back event by event.</title>
+        <path class="casing" d="M48 115 H300 L360 55 H584"/>
+        <path class="casing" d="M300 115 L360 175 H584"/>
+        <path class="track route-2" d="M300 115 L360 175 H584"/>
+        <path class="track route-1" d="M48 115 H300 L360 55 H584"/>
+        <circle class="station" cx="48" cy="115" r="9"/>
+        <circle class="station" cx="584" cy="55" r="9"/>
+        <circle class="station" cx="584" cy="175" r="9"/>
+        <text class="label" x="24" y="152">Claude Code</text>
+        <text class="label" x="300" y="152" text-anchor="middle">wye</text>
+        <text class="label" x="584" y="32" text-anchor="end">anthropic</text>
+        <text class="label" x="584" y="212" text-anchor="end">bedrock-us</text>
+        <g class="anim">
+          <path class="points points-up" d="M300 115 L318 97"/>
+          <path class="points points-down" d="M300 115 L318 133"/>
+          <g class="flag"><rect x="530" y="68" width="54" height="26" rx="3"/><text x="557" y="86" text-anchor="middle">429</text></g>
+          <circle class="request request-1" r="7"/>
+          <circle class="request request-2" r="7"/>
+          <circle class="event" r="4.5"/>
+          <circle class="event e2" r="4.5"/>
+          <circle class="event e3" r="4.5"/>
+          <circle class="event e4" r="4.5"/>
+        </g>
+        <g class="still">
+          <path class="points" d="M300 115 L318 133"/>
+          <g class="flag"><rect x="530" y="68" width="54" height="26" rx="3"/><text x="557" y="86" text-anchor="middle">429</text></g>
+          <circle class="event" cx="520" cy="175" r="4.5"/>
+          <circle class="event" cx="440" cy="175" r="4.5"/>
+          <circle class="event" cx="200" cy="115" r="4.5"/>
+        </g>
+      </svg>
+      <figcaption>Each session stays on one account. Here <code>anthropic</code> answers 429 before any output, so Wye sends the same request to <code>bedrock-us</code>, and the stream comes back event by event. After the first response byte, Wye never switches.</figcaption>
+    </figure>
+  </section>
+
+  <section class="part" aria-labelledby="records">
+    <h2 id="records">What it records</h2>
+    <p>Each request becomes one JSON line, and with telemetry turned on, an OTLP log record, a span, and metrics. <code>wye report</code> reads the log without a backend. Costs are exact decimal strings computed in integers; a model with no price is recorded as unknown, never as $0.</p>
+    {{fence README.md|$ wye report}}
+    {{fence README.md|{}}
+  </section>
+
+  <section class="part" aria-labelledby="config">
+    <h2 id="config">One file, kept in Git</h2>
+    <p>A route with two accounts, failover, and a price table. Each Claude Code session stays on one account, chosen by hashing its session id, so its prompt cache stays warm and every replica picks the same account. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+    {{fence README.md|[server]}}
+    <p><code>wye explain</code> shows what the server would do with a request, offline, by calling the same functions in the same order.</p>
+    <div class="long-lines">{{fence README.md|$ wye explain}}</div>
+    <p>Every option, with its default and limits: <a href="{{repo}}/blob/main/examples/wye.toml">examples/wye.toml</a>.</p>
+  </section>
+
+  <section class="part" aria-labelledby="costs">
+    <h2 id="costs">What it costs</h2>
+    <p>Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent on that machine, and a change that makes Wye slower or heavier past the gate's tolerances is not committed.</p>
+    <div class="table-scroll">
+      <table class="numbers">
+        <thead>
+          <tr><th scope="col">What Wye adds</th><th scope="col" class="n">Plain HTTP/1.1</th><th scope="col" class="n">TLS + HTTP/2</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Latency per request (p50)</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_added_p50_us/1000|2}} ms</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_added_p50_us/1000|2}} ms</td></tr>
+          <tr><th scope="row">CPU per request</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_cpu_us_per_request|0}} µs</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_cpu_us_per_request|0}} µs</td></tr>
+          <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n"></td></tr>
+          <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n"></td></tr>
+          <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
+          <tr><th scope="row">Memory per open stream at that load</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>KrakenD CE beats Wye on bulk transfer and TLS uploads, though it cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the full tables, the competitors, and where Wye loses</a>.</p>
+  </section>
+
+  <section class="part" aria-labelledby="status">
+    <h2 id="status">Status</h2>
+    <div class="prose">{{section README.md|Status}}</div>
+  </section>
+
+  <section class="part" aria-labelledby="limits">
+    <h2 id="limits">What Wye will not do</h2>
+    <div class="prose">{{section README.md|What Wye will not do}}</div>
+  </section>
+</main>
+
+<footer class="wrap foot">
+  <p>Wye {{version}}, under the {{license}} license. <a href="{{repo}}">Source, issues, and releases on GitHub</a>.</p>
+  <p>This page is built from the repository: the numbers come from <code>bench/baseline.json</code>, and the commands, output, and status from <code>README.md</code>.</p>
+</footer>
+</body>
+</html>

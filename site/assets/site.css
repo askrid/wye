@@ -1,0 +1,307 @@
+/* The Wye site. Tokens and rules: site/DESIGN.md (direction: route map). */
+
+@font-face {
+  font-family: "Overpass";
+  src: url("fonts/overpass-latin.woff2") format("woff2");
+  font-weight: 400 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Overpass Mono";
+  src: url("fonts/overpass-mono-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-display: swap;
+}
+/* Local faces scaled to Overpass's metrics (measured from the font files),
+   so text keeps its place when the web fonts arrive. */
+@font-face {
+  font-family: "Overpass fallback";
+  src: local("Arial");
+  size-adjust: 98.73%;
+  ascent-override: 89.44%;
+  descent-override: 38.79%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "Overpass Mono fallback";
+  src: local("Menlo");
+  size-adjust: 102.31%;
+  ascent-override: 86.31%;
+  descent-override: 37.44%;
+  line-gap-override: 0%;
+}
+
+:root {
+  color-scheme: light dark;
+  --paper: #ffffff;
+  --ink: #14212b;
+  --graphite: #5b6770;
+  --line: #0067b1;
+  --branch: #b97f00;
+  --signal: #c8102e;
+  --ground: color-mix(in oklab, var(--ink) 4%, var(--paper));
+  --rule: color-mix(in oklab, var(--ink) 14%, var(--paper));
+
+  --sans: "Overpass", "Overpass fallback", Arial, sans-serif;
+  --mono: "Overpass Mono", "Overpass Mono fallback", Menlo, Consolas, monospace;
+
+  /* Type scale: 14, 18, 21, 24, 36, up to 60 (Bringhurst's classic scale). */
+  --small: 0.875rem;
+  --body: 1.125rem;
+  --large: 1.3125rem;
+  --h3: 1.5rem;
+  --h2: clamp(1.75rem, 1.2rem + 1.8vw, 2.25rem);
+  --h1: clamp(2.25rem, 1.1rem + 4.4vw, 3.75rem);
+  /* About 72 characters: Overpass's 0, which ch measures, is wider than its
+     average letter. */
+  --measure: 54ch;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0e1a22;
+    --ink: #e8eef2;
+    --graphite: #9aa8b2;
+    --line: #5aa9e6;
+    --branch: #f2b630;
+    --signal: #ff6b7a;
+    --ground: color-mix(in oklab, var(--ink) 6%, var(--paper));
+  }
+}
+
+/* Base */
+* { box-sizing: border-box; }
+html {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body { margin: 0; font-size: var(--body); line-height: 1.55; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p, ul, ol { margin: 0; }
+p, li { text-wrap: pretty; }
+a {
+  color: var(--line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--line); outline-offset: 3px; border-radius: 2px; }
+code { font-family: var(--mono); font-size: 0.9em; }
+.wrap {
+  max-width: 74rem;
+  margin-inline: auto;
+  padding-inline: max(var(--gutter), env(safe-area-inset-left, 0px)) max(var(--gutter), env(safe-area-inset-right, 0px));
+}
+
+/* Header */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 2rem;
+  padding-block: 1.25rem;
+}
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  font-size: var(--h3);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.mark svg { width: 1.75rem; height: 1.75rem; }
+.mark .route-1, .mark .route-2 { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.mark .route-1 { stroke: var(--line); }
+.mark .route-2 { stroke: var(--branch); }
+.bar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-weight: 600; }
+.bar nav a { color: var(--ink); text-decoration: none; }
+.bar nav a:hover { text-decoration: underline; }
+
+/* First screen */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-areas: "copy figure" "install install";
+  align-items: center;
+  gap: 2.5rem clamp(2rem, 5vw, 4.5rem);
+  padding-block: clamp(1.5rem, 5vw, 4rem) clamp(2.5rem, 6vw, 4.5rem);
+}
+.hero-copy { grid-area: copy; display: grid; gap: 1.5rem; min-width: 0; }
+.hero .junction { grid-area: figure; }
+.hero-install { grid-area: install; display: grid; gap: 0.75rem; min-width: 0; }
+h1 { font-size: var(--h1); font-weight: 800; line-height: 1.02; letter-spacing: -0.025em; }
+.lede { font-size: var(--large); line-height: 1.5; max-width: 46ch; }
+.release { color: var(--graphite); font-size: 1rem; }
+/* On a phone the commands come before the diagram: they are what a reader
+   needs from the first screen (site/DESIGN.md, "Install first"). */
+@media (max-width: 56rem) {
+  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "figure"; }
+}
+@media (max-width: 40rem) {
+  .hero-install pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
+  .hero-install .code .c { display: none; }
+}
+
+/* Sections */
+.part { display: grid; gap: 1.5rem; padding-block: clamp(2rem, 5vw, 3.75rem); }
+.part h2 { font-size: var(--h2); font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; }
+.part > p, .prose { max-width: var(--measure); }
+.prose { display: grid; gap: 0.9rem; }
+.prose ul { padding-left: 1.25rem; display: grid; gap: 0.4rem; }
+
+/* Code and output, as the repository has them */
+pre.code {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  background: var(--ground);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  tab-size: 4;
+}
+pre.code code { font: inherit; }
+.code .prompt, .code .c { color: var(--graphite); }
+.code .t { color: var(--line); font-weight: 600; }
+.code .k { font-weight: 600; }
+/* Log-style output whose long lines carry content: wrap instead of hiding it. */
+.long-lines { min-width: 0; }
+.long-lines pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
+
+/* Numbers */
+.table-scroll { overflow-x: auto; }
+.numbers { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.numbers th, .numbers td {
+  padding: 0.65rem 0.75rem 0.65rem 0;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: baseline;
+}
+.numbers thead th { color: var(--graphite); font-size: 1rem; font-weight: 600; }
+.numbers .n { text-align: right; white-space: nowrap; padding-left: 1.5rem; padding-right: 0; }
+.numbers tbody th { font-weight: 400; }
+/* On a phone each row stacks: the measurement, then its values by path. */
+@media (max-width: 40rem) {
+  .numbers thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .numbers tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 1rem;
+    padding-block: 0.75rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .numbers tbody th { grid-column: 1 / -1; padding: 0; border: 0; }
+  .numbers td, .numbers .n { padding: 0; border: 0; text-align: left; font-weight: 600; }
+  .numbers td:empty { display: none; }
+  .numbers td::before {
+    content: attr(data-path);
+    display: block;
+    color: var(--graphite);
+    font-size: var(--small);
+    font-weight: 400;
+  }
+}
+
+/* Footer */
+.foot {
+  display: grid;
+  gap: 0.5rem;
+  padding-block: 3rem 4rem;
+  color: var(--graphite);
+  font-size: 1rem;
+}
+.foot p { max-width: var(--measure); }
+
+/* The junction: one client, two accounts, failover before the first byte. */
+.junction { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
+.junction svg { display: block; width: 100%; height: auto; }
+.junction figcaption { color: var(--graphite); font-size: 1rem; max-width: 52ch; }
+.junction .casing { fill: none; stroke: var(--paper); stroke-width: 18; stroke-linecap: round; stroke-linejoin: round; }
+.junction .track { fill: none; stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
+.junction .route-1 { stroke: var(--line); }
+.junction .route-2 { stroke: var(--branch); }
+.junction .station { fill: var(--paper); stroke: var(--ink); stroke-width: 3.5; }
+.junction .points { fill: none; stroke: var(--ink); stroke-width: 4; stroke-linecap: round; }
+.junction .request { fill: var(--ink); }
+.junction .event { fill: var(--paper); stroke: var(--ink); stroke-width: 2; }
+.junction .flag rect { fill: var(--signal); }
+.junction .flag text { fill: var(--paper); font: 800 14px var(--sans); }
+.junction .label { fill: var(--ink); font: 600 15px var(--sans); }
+@media (max-width: 40rem) {
+  .junction .label { font-size: 22px; }
+  .junction .flag text { font-size: 18px; }
+}
+
+/* Motion: one 7 s sequence, replaying the order of a real failover. Only
+   transform and opacity change. Keyframes along a track are placed in
+   proportion to its segments (252, 85, and 224 units), so speed is even. */
+.junction .anim > * { animation: 7s linear infinite both; }
+.junction .anim .points-up { animation-name: wye-points-up; }
+.junction .anim .points-down { animation-name: wye-points-down; }
+.junction .anim .flag { animation-name: wye-flag; }
+.junction .anim .request-1 { animation-name: wye-request-1; }
+.junction .anim .request-2 { animation-name: wye-request-2; }
+.junction .anim .event { animation-name: wye-event; }
+.junction .anim .e2 { animation-delay: 0.35s; }
+.junction .anim .e3 { animation-delay: 0.7s; }
+.junction .anim .e4 { animation-delay: 1.05s; }
+.junction .still { display: none; }
+
+@keyframes wye-points-up {
+  0%, 39.9% { opacity: 1; }
+  40%, 100% { opacity: 0; }
+}
+@keyframes wye-points-down {
+  0%, 39.9% { opacity: 0; }
+  40%, 100% { opacity: 1; }
+}
+@keyframes wye-flag {
+  0%, 31.9% { opacity: 0; }
+  32%, 94.9% { opacity: 1; }
+  95%, 100% { opacity: 0; }
+}
+@keyframes wye-request-1 {
+  0% { transform: translate(48px, 115px); }
+  13.48% { transform: translate(300px, 115px); }
+  18.02% { transform: translate(360px, 55px); }
+  30%, 100% { transform: translate(584px, 55px); }
+  0%, 37.9% { opacity: 1; }
+  38%, 100% { opacity: 0; }
+}
+@keyframes wye-request-2 {
+  0%, 40% { transform: translate(300px, 115px); }
+  44.95% { transform: translate(360px, 175px); }
+  58%, 100% { transform: translate(584px, 175px); }
+  0%, 39.9% { opacity: 0; }
+  40%, 59.9% { opacity: 1; }
+  60%, 100% { opacity: 0; }
+}
+@keyframes wye-event {
+  0%, 60% { transform: translate(584px, 175px); }
+  68.79% { transform: translate(360px, 175px); }
+  72.11% { transform: translate(300px, 115px); }
+  82%, 100% { transform: translate(48px, 115px); }
+  0%, 59.9% { opacity: 0; }
+  60%, 81.9% { opacity: 1; }
+  82%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .junction .anim { display: none; }
+  .junction .still { display: inline; }
+}

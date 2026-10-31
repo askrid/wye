@@ -2,14 +2,18 @@
 # lints, rustdoc, tests on Linux and macOS, release builds, and cargo-deny. bench.yml
 # compares allocations, failed requests, and failed streams with the base
 # branch; the latency and CPU gate runs locally before each commit
-# (scripts/check.sh).
+# (scripts/check.sh). The website (site/) has its own workflow, site.yml.
 
 name: ci
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "site/**"
   pull_request:
+    paths-ignore:
+      - "site/**"
 
 permissions:
   contents: read
