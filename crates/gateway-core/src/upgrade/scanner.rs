@@ -1,7 +1,7 @@
 //! The structure scanner behind [`UpgradeScanner`].
 
 use super::{Findings, Thinking};
-use crate::json::{Nesting, StringEnd, is_space, short_string_len};
+use crate::json::{Lexeme, Lexer, short_string_len};
 
 /// Member keys the rules name, tracked for the first three levels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -27,23 +27,9 @@ const CAPTURE: usize = 32;
 #[derive(Default)]
 pub struct UpgradeScanner {
     findings: Findings,
-    nest: Nesting,
-    started: bool,
-    /// The body is not a JSON object or its brackets do not match: stop.
-    failed: bool,
-    in_string: bool,
-    string: StringEnd,
-    /// Inside an object, the next string is a key.
-    expect_key: bool,
+    lex: Lexer<CAPTURE>,
     /// The key of the member being read, by depth.
     keys: [Key; KEY_DEPTHS],
-    /// The current string is kept: a tracked key or a watched value.
-    capturing: bool,
-    is_key: bool,
-    buf: [u8; CAPTURE],
-    len: usize,
-    long: bool,
-    escaped: bool,
 }
 
 impl UpgradeScanner {
@@ -58,89 +44,48 @@ impl UpgradeScanner {
 
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut i = 0;
-        while i < chunk.len() && !self.failed {
-            if self.in_string {
-                let rest = chunk.get(i..).unwrap_or_default();
-                let end = self.string.find(rest);
-                if self.capturing {
-                    self.keep(rest.get(..end.unwrap_or(rest.len())).unwrap_or_default());
-                }
-                match end {
-                    Some(quote) => {
-                        self.in_string = false;
-                        if self.capturing {
-                            self.end_string();
-                        }
-                        self.after_string();
-                        i += quote + 1;
-                    }
-                    None => i = chunk.len(),
-                }
-                continue;
-            }
-            let Some(&byte) = chunk.get(i) else { break };
-            i += 1;
-            if is_space(byte) {
-                continue;
-            }
-            if !self.started {
-                self.started = true;
-                if byte != b'{' {
-                    self.failed = true;
-                    break;
-                }
-            }
-            match byte {
-                b'"' => {
-                    self.is_key = self.expect_key;
-                    self.capturing = self.watched();
-                    if !self.capturing {
+        while let Some(lexeme) = self.lex.next(chunk, &mut i) {
+            match lexeme {
+                Lexeme::Kept => self.end_string(),
+                Lexeme::Byte(b'"') => {
+                    self.lex.is_key = self.lex.expect_key;
+                    let capturing = self.watched();
+                    if !capturing {
                         // Most strings: unwatched, often short.
                         let rest = chunk.get(i..).unwrap_or_default();
                         if let Some(len) = short_string_len(rest) {
                             i += len + 1;
-                            self.after_string();
+                            self.lex.expect_key = false;
                             continue;
                         }
                     }
-                    self.len = 0;
-                    self.long = false;
-                    self.escaped = false;
-                    self.in_string = true;
-                    self.string.start();
+                    self.lex.start_string(capturing);
                 }
-                b'{' | b'[' => {
-                    self.nest.open(byte == b'[');
-                    if let Some(key) = self.keys.get_mut(self.nest.depth() as usize) {
+                Lexeme::Byte(byte @ (b'{' | b'[')) => {
+                    self.lex.open(byte);
+                    if let Some(key) = self.keys.get_mut(self.lex.nest.depth() as usize) {
                         *key = Key::Other;
                     }
-                    self.expect_key = byte == b'{';
                 }
-                b'}' | b']' => {
-                    if !self.nest.close(byte == b']') {
-                        self.failed = true;
-                        break;
-                    }
-                    self.expect_key = false;
-                }
-                b',' => self.expect_key = self.nest.in_object(),
-                b':' => self.expect_key = false,
-                _ => {}
+                Lexeme::Byte(byte @ (b'}' | b']')) => self.lex.close(byte),
+                Lexeme::Byte(b',') => self.lex.expect_key = self.lex.nest.in_object(),
+                Lexeme::Byte(b':') => self.lex.expect_key = false,
+                Lexeme::Byte(_) => {}
             }
         }
     }
 
     /// Whether the string starting now is kept.
     fn watched(&self) -> bool {
-        let depth = self.nest.depth() as usize;
-        if self.is_key {
+        let depth = self.lex.nest.depth() as usize;
+        if self.lex.is_key {
             return (1..KEY_DEPTHS).contains(&depth);
         }
         let key = |d: usize| self.keys.get(d).copied().unwrap_or_default();
         match depth {
             2 => matches!(key(1), Key::Thinking | Key::ToolChoice) && key(2) == Key::Type,
             3 => {
-                self.nest.is_array(2)
+                self.lex.nest.is_array(2)
                     && matches!(
                         (key(1), key(3)),
                         (Key::Tools, Key::Type) | (Key::Messages, Key::Role)
@@ -150,33 +95,11 @@ impl UpgradeScanner {
         }
     }
 
-    fn keep(&mut self, content: &[u8]) {
-        if content.contains(&b'\\') {
-            self.escaped = true;
-        }
-        match self.buf.get_mut(self.len..self.len + content.len()) {
-            Some(slot) => {
-                slot.copy_from_slice(content);
-                self.len += content.len();
-            }
-            None => self.long = true,
-        }
-    }
-
-    /// After a key, its value comes; after a value, a separator.
-    fn after_string(&mut self) {
-        self.expect_key = false;
-    }
-
     fn end_string(&mut self) {
         // An escaped or long string matches nothing the rules name.
-        let text: &[u8] = if self.escaped || self.long {
-            b""
-        } else {
-            self.buf.get(..self.len).unwrap_or_default()
-        };
-        let depth = self.nest.depth() as usize;
-        if self.is_key {
+        let text = self.lex.text.whole().unwrap_or_default();
+        let depth = self.lex.nest.depth() as usize;
+        if self.lex.is_key {
             let key = match (depth, text) {
                 (1, b"thinking") => Key::Thinking,
                 (1, b"tool_choice") => Key::ToolChoice,

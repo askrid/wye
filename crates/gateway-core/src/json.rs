@@ -1,4 +1,4 @@
-//! Byte-level JSON lexing shared by the request scanners: strings, escapes,
+//! Byte-level JSON lexing shared by the scanners: strings, escapes,
 //! whitespace, and bracket nesting, with chunk boundaries allowed anywhere.
 
 /// Strings shorter than this are scanned with a plain loop: keys and short
@@ -13,12 +13,6 @@ pub(crate) struct StringEnd {
 }
 
 impl StringEnd {
-    /// A string starts after its opening quote.
-    #[inline(always)]
-    pub(crate) fn start(&mut self) {
-        self.backslash_odd = false;
-    }
-
     /// Index of the closing quote in `segment`, the string's next bytes, if
     /// it is there.
     #[inline(always)]
@@ -38,12 +32,7 @@ impl StringEnd {
     fn escaped_at(&self, segment: &[u8], at: usize) -> bool {
         let before = segment.get(..at).unwrap_or_default();
         let run = before.iter().rev().take_while(|&&b| b == b'\\').count();
-        let odd = run % 2 == 1;
-        if run == at {
-            odd != self.backslash_odd
-        } else {
-            odd
-        }
+        (run % 2 == 1) != (run == at && self.backslash_odd)
     }
 }
 
@@ -54,14 +43,11 @@ pub(crate) fn is_space(byte: u8) -> bool {
 /// Length of a string whose content starts `rest`, if it ends within
 /// [`SHORT_STRING`] bytes without an escape.
 pub(crate) fn short_string_len(rest: &[u8]) -> Option<usize> {
-    for (at, &byte) in rest.iter().take(SHORT_STRING).enumerate() {
-        match byte {
-            b'"' => return Some(at),
-            b'\\' => return None,
-            _ => {}
-        }
-    }
-    None
+    let at = rest
+        .iter()
+        .take(SHORT_STRING)
+        .position(|&b| matches!(b, b'"' | b'\\'))?;
+    (rest.get(at) == Some(&b'"')).then_some(at)
 }
 
 /// Open containers and whether each is an array, to match closing brackets.
@@ -124,6 +110,163 @@ impl Nesting {
             self.depth -= 1;
         }
         matches
+    }
+}
+
+/// String bytes kept in a fixed buffer; bytes that do not fit mark it long.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Kept<const N: usize> {
+    buf: [u8; N],
+    len: usize,
+    long: bool,
+}
+
+impl<const N: usize> Default for Kept<N> {
+    fn default() -> Self {
+        Self {
+            buf: [0; N],
+            len: 0,
+            long: false,
+        }
+    }
+}
+
+impl<const N: usize> Kept<N> {
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+        self.long = false;
+    }
+
+    /// Appends `bytes`, all or nothing.
+    pub(crate) fn push(&mut self, bytes: &[u8]) {
+        match self.buf.get_mut(self.len..self.len + bytes.len()) {
+            Some(slot) => {
+                slot.copy_from_slice(bytes);
+                self.len += bytes.len();
+            }
+            None => self.long = true,
+        }
+    }
+
+    /// Replaces the kept bytes; `bytes` too long leave them unchanged.
+    pub(crate) fn set(&mut self, bytes: &[u8]) {
+        if let Some(slot) = self.buf.get_mut(..bytes.len()) {
+            slot.copy_from_slice(bytes);
+            self.len = bytes.len();
+        }
+    }
+
+    pub(crate) fn is_long(&self) -> bool {
+        self.long
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        self.buf.get(..self.len).unwrap_or_default()
+    }
+
+    /// The bytes, unless some did not fit.
+    pub(crate) fn whole(&self) -> Option<&[u8]> {
+        (!self.long).then(|| self.bytes())
+    }
+
+    /// The bytes as text; `None` when empty or not UTF-8.
+    pub(crate) fn text(&self) -> Option<&str> {
+        std::str::from_utf8(self.bytes())
+            .ok()
+            .filter(|t| !t.is_empty())
+    }
+}
+
+/// What [`Lexer::next`] stopped at.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Lexeme {
+    /// The end of a string kept in [`Lexer::text`].
+    Kept,
+    /// A byte outside strings, not whitespace.
+    Byte(u8),
+}
+
+/// A pull lexer for one JSON object, keeping the strings the reader asks for.
+#[derive(Debug, Default)]
+pub(crate) struct Lexer<const N: usize> {
+    pub(crate) nest: Nesting,
+    started: bool,
+    /// Not a JSON object, or brackets that do not match.
+    pub(crate) failed: bool,
+    in_string: bool,
+    string: StringEnd,
+    /// Inside an object, the next string is a key.
+    pub(crate) expect_key: bool,
+    /// The current string is kept.
+    capturing: bool,
+    pub(crate) is_key: bool,
+    /// The kept string. An escaped one reads as long: it matches nothing a
+    /// reader looks for.
+    pub(crate) text: Kept<N>,
+}
+
+impl<const N: usize> Lexer<N> {
+    /// The next thing to act on at or after `*i`, which is left just past it;
+    /// `None` when the chunk ends or the lexer failed.
+    #[inline(always)]
+    pub(crate) fn next(&mut self, chunk: &[u8], i: &mut usize) -> Option<Lexeme> {
+        while *i < chunk.len() && !self.failed {
+            if self.in_string {
+                let rest = chunk.get(*i..).unwrap_or_default();
+                let end = self.string.find(rest);
+                if self.capturing {
+                    let content = rest.get(..end.unwrap_or(rest.len())).unwrap_or_default();
+                    if content.contains(&b'\\') {
+                        self.text.long = true;
+                    }
+                    self.text.push(content);
+                }
+                let Some(quote) = end else {
+                    *i = chunk.len();
+                    return None;
+                };
+                *i += quote + 1;
+                self.in_string = false;
+                self.expect_key = false;
+                if self.capturing {
+                    return Some(Lexeme::Kept);
+                }
+                continue;
+            }
+            let &byte = chunk.get(*i)?;
+            *i += 1;
+            if is_space(byte) {
+                continue;
+            }
+            if !self.started {
+                self.started = true;
+                if byte != b'{' {
+                    self.failed = true;
+                    return None;
+                }
+            }
+            return Some(Lexeme::Byte(byte));
+        }
+        None
+    }
+
+    /// A string starts, after its opening quote.
+    pub(crate) fn start_string(&mut self, capturing: bool) {
+        self.text.clear();
+        self.capturing = capturing;
+        self.in_string = true;
+    }
+
+    /// Opens the container of bracket `byte`.
+    pub(crate) fn open(&mut self, byte: u8) {
+        self.nest.open(byte == b'[');
+        self.expect_key = byte == b'{';
+    }
+
+    /// Closes the open container with bracket `byte`; a mismatch fails.
+    pub(crate) fn close(&mut self, byte: u8) {
+        self.failed = !self.nest.close(byte == b']');
+        self.expect_key = false;
     }
 }
 

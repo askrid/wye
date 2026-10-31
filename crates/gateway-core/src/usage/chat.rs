@@ -14,7 +14,7 @@ use memchr::memmem;
 use serde::Deserialize;
 
 use super::{
-    ToolCalls, Usage, UsageStatus, count_tool,
+    Lines, ToolCalls, Usage, UsageStatus, count_tool,
     fields::{InputDetails, merge_openai},
 };
 
@@ -30,9 +30,7 @@ pub struct ChatUsageScanner {
     usage_key: memmem::Finder<'static>,
     tool_calls_key: memmem::Finder<'static>,
     name_key: memmem::Finder<'static>,
-    /// Partial line carried over from the previous chunk.
-    line: Vec<u8>,
-    line_truncated: bool,
+    lines: Lines,
     usage: Usage,
     model: Option<Box<str>>,
     tools: Option<Box<ToolCalls>>,
@@ -54,8 +52,7 @@ impl ChatUsageScanner {
             usage_key: memmem::Finder::new(br#""usage":{"#),
             tool_calls_key: memmem::Finder::new(br#""tool_calls""#),
             name_key: memmem::Finder::new(br#""name":""#),
-            line: Vec::new(),
-            line_truncated: false,
+            lines: Lines::default(),
             usage: Usage::default(),
             model: None,
             tools: None,
@@ -65,34 +62,10 @@ impl ChatUsageScanner {
         }
     }
 
-    pub fn feed(&mut self, mut chunk: &[u8]) {
-        while let Some(newline) = memchr::memchr(b'\n', chunk) {
-            let (segment, rest) = chunk.split_at(newline);
-            chunk = rest.get(1..).unwrap_or_default();
-            if self.line.is_empty() && !self.line_truncated {
-                // Common case: the whole line is in this chunk; no copy.
-                self.process_line(segment, false);
-            } else {
-                self.carry(segment);
-                let line = std::mem::take(&mut self.line);
-                let truncated = std::mem::replace(&mut self.line_truncated, false);
-                self.process_line(&line, truncated);
-                self.line = line;
-                self.line.clear();
-            }
-        }
-        if !chunk.is_empty() {
-            self.carry(chunk);
-        }
-    }
-
-    fn carry(&mut self, bytes: &[u8]) {
-        let room = MAX_LINE_BYTES.saturating_sub(self.line.len());
-        if bytes.len() > room {
-            self.line_truncated = true;
-        }
-        self.line
-            .extend_from_slice(bytes.get(..room.min(bytes.len())).unwrap_or_default());
+    pub fn feed(&mut self, chunk: &[u8]) {
+        let mut lines = std::mem::take(&mut self.lines);
+        lines.feed(chunk, self, |_| MAX_LINE_BYTES, Self::process_line);
+        self.lines = lines;
     }
 
     fn process_line(&mut self, line: &[u8], truncated: bool) {

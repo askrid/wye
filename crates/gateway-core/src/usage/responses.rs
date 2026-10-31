@@ -15,6 +15,8 @@
 
 use serde::Deserialize;
 
+use crate::json::Kept;
+
 use super::{
     ToolCalls, Usage, UsageStatus, count_tool,
     fields::{Items, ResponseFields, openai_tool},
@@ -52,9 +54,7 @@ pub struct ResponsesUsageScanner {
     line: Line,
     prefix: [u8; 6],
     prefix_len: usize,
-    name: [u8; EVENT_NAME_BYTES],
-    name_len: usize,
-    name_long: bool,
+    name: Kept<EVENT_NAME_BYTES>,
     event: Event,
     /// The current `response.output_item.added` data line.
     item: Vec<u8>,
@@ -79,9 +79,7 @@ impl ResponsesUsageScanner {
             line: Line::Prefix,
             prefix: [0; 6],
             prefix_len: 0,
-            name: [0; EVENT_NAME_BYTES],
-            name_len: 0,
-            name_long: false,
+            name: Kept::default(),
             event: Event::Other,
             item: Vec::new(),
             item_long: false,
@@ -147,17 +145,7 @@ impl ResponsesUsageScanner {
             };
         }
         match self.line {
-            Line::EventName => {
-                let room = EVENT_NAME_BYTES - self.name_len;
-                if bytes.len() > room {
-                    self.name_long = true;
-                }
-                let take = room.min(bytes.len());
-                if let Some(dst) = self.name.get_mut(self.name_len..self.name_len + take) {
-                    dst.copy_from_slice(bytes.get(..take).unwrap_or_default());
-                }
-                self.name_len += take;
-            }
+            Line::EventName => self.name.push(bytes),
             Line::Data => self.data(bytes),
             Line::Prefix | Line::Skip => {}
         }
@@ -187,9 +175,7 @@ impl ResponsesUsageScanner {
         }
         match self.line {
             Line::EventName => {
-                let name = self.name.get(..self.name_len).unwrap_or_default();
-                self.event = match name.trim_ascii() {
-                    _ if self.name_long => Event::Other,
+                self.event = match self.name.whole().unwrap_or_default().trim_ascii() {
                     b"response.created" => Event::Created,
                     b"response.completed" | b"response.incomplete" | b"response.failed" => {
                         Event::Terminal
@@ -203,8 +189,7 @@ impl ResponsesUsageScanner {
         }
         self.line = Line::Prefix;
         self.prefix_len = 0;
-        self.name_len = 0;
-        self.name_long = false;
+        self.name.clear();
     }
 
     fn end_data(&mut self) {
@@ -228,7 +213,7 @@ impl ResponsesUsageScanner {
     }
 
     fn read_fields(&mut self, fields: &ResponseFields) {
-        if fields.failed {
+        if fields.failed() {
             self.corrupt = true;
             return;
         }

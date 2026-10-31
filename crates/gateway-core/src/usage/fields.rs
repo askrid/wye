@@ -8,7 +8,7 @@
 use serde::Deserialize;
 
 use super::{MAX_TOOL_NAME_BYTES, ToolCalls, Usage, count_tool};
-use crate::json::{Nesting, StringEnd, is_space};
+use crate::json::{Kept, Lexeme, Lexer};
 
 /// Longest `response.usage` object kept; larger marks usage unknown.
 const MAX_USAGE_BYTES: usize = 2 * 1024;
@@ -54,8 +54,9 @@ pub(super) fn merge_openai(
 }
 
 /// The response object's member keys that are read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Field {
+    #[default]
     Other,
     Model,
     ServiceTier,
@@ -64,8 +65,9 @@ enum Field {
 }
 
 /// The response's array scanned for tool calls, if any.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) enum Items {
+    #[default]
     None,
     /// Messages: `content`, blocks of type `tool_use`.
     Content,
@@ -74,19 +76,12 @@ pub(super) enum Items {
 }
 
 /// An item's keys that are read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum ItemKey {
+    #[default]
     Other,
     Type,
     Name,
-}
-
-/// The text kept in a fixed buffer; `None` when empty or not UTF-8.
-fn slot_str<const N: usize>((bytes, len): &([u8; N], usize)) -> Option<&str> {
-    bytes
-        .get(..*len)
-        .and_then(|b| std::str::from_utf8(b).ok())
-        .filter(|t| !t.is_empty())
 }
 
 /// Hosted tools OpenAI bills per call, outside token prices.
@@ -110,41 +105,27 @@ pub(super) fn openai_tool<'a>(kind: &'a str, name: Option<&'a str>) -> Option<(&
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) struct ResponseFields {
     /// The top-level key holding the response object; `None`: the document
     /// is the response object.
     root: Option<&'static [u8]>,
-    nest: Nesting,
-    started: bool,
-    /// Not a JSON object, or brackets that do not match.
-    pub(super) failed: bool,
-    in_string: bool,
-    string: StringEnd,
-    expect_key: bool,
+    lex: Lexer<MAX_FIELD_BYTES>,
     /// The depth-1 key being read is the root key.
     in_root: bool,
     /// The response object's key whose value comes next.
     field: Field,
-    /// The current string is kept: a key that can matter, or a field's value.
-    capturing: bool,
-    is_key: bool,
-    text: [u8; MAX_FIELD_BYTES],
-    text_len: usize,
-    text_long: bool,
-    model: ([u8; MAX_FIELD_BYTES], usize),
-    service_tier: ([u8; MAX_FIELD_BYTES], usize),
+    model: Kept<MAX_FIELD_BYTES>,
+    service_tier: Kept<MAX_FIELD_BYTES>,
     /// The usage object's bytes; empty when absent or `null`.
     /// Inline, so reading a response allocates nothing beyond the scanner.
-    usage: [u8; MAX_USAGE_BYTES],
-    usage_len: usize,
+    usage: Kept<MAX_USAGE_BYTES>,
     in_usage: bool,
-    usage_long: bool,
     items: Items,
     in_items: bool,
     item_key: ItemKey,
-    item_type: ([u8; MAX_TOOL_NAME_BYTES], usize),
-    item_name: ([u8; MAX_TOOL_NAME_BYTES], usize),
+    item_type: Kept<MAX_TOOL_NAME_BYTES>,
+    item_name: Kept<MAX_TOOL_NAME_BYTES>,
     /// Tool calls among the items; boxed on the first.
     pub(super) tools: Option<Box<ToolCalls>>,
     /// An item was a hosted tool billed per call.
@@ -155,33 +136,13 @@ impl ResponseFields {
     pub(super) fn new(root: Option<&'static [u8]>, items: Items) -> Self {
         Self {
             root,
-            nest: Nesting::default(),
-            started: false,
-            failed: false,
-            in_string: false,
-            string: StringEnd::default(),
-            expect_key: false,
-            in_root: false,
-            field: Field::Other,
-            capturing: false,
-            is_key: false,
-            text: [0; MAX_FIELD_BYTES],
-            text_len: 0,
-            text_long: false,
-            model: ([0; MAX_FIELD_BYTES], 0),
-            service_tier: ([0; MAX_FIELD_BYTES], 0),
-            usage: [0; MAX_USAGE_BYTES],
-            usage_len: 0,
-            in_usage: false,
-            usage_long: false,
             items,
-            in_items: false,
-            item_key: ItemKey::Other,
-            item_type: ([0; MAX_TOOL_NAME_BYTES], 0),
-            item_name: ([0; MAX_TOOL_NAME_BYTES], 0),
-            tools: None,
-            hosted_tool: false,
+            ..Self::default()
         }
+    }
+
+    pub(super) fn failed(&self) -> bool {
+        self.lex.failed
     }
 
     /// Depth of the response object's members: 2 under a root key, else 1.
@@ -198,44 +159,20 @@ impl ResponseFields {
         // Where the usage bytes of this chunk start, while inside usage.
         let mut usage_from = self.in_usage.then_some(0);
         let mut i = 0;
-        while i < chunk.len() && !self.failed {
-            if self.in_string {
-                let rest = chunk.get(i..).unwrap_or_default();
-                let end = self.string.find(rest);
-                if self.capturing {
-                    self.keep(rest.get(..end.unwrap_or(rest.len())).unwrap_or_default());
+        while let Some(lexeme) = self.lex.next(chunk, &mut i) {
+            let byte = match lexeme {
+                Lexeme::Kept => {
+                    self.end_string();
+                    continue;
                 }
-                match end {
-                    Some(quote) => {
-                        self.in_string = false;
-                        if self.capturing {
-                            self.end_string();
-                        }
-                        self.expect_key = false;
-                        i += quote + 1;
-                    }
-                    None => i = chunk.len(),
-                }
-                continue;
-            }
-            let Some(&byte) = chunk.get(i) else { break };
-            if is_space(byte) {
-                i += 1;
-                continue;
-            }
-            if !self.started {
-                self.started = true;
-                if byte != b'{' {
-                    self.failed = true;
-                    break;
-                }
-            }
+                Lexeme::Byte(byte) => byte,
+            };
             match byte {
                 b'"' => {
-                    self.is_key = self.expect_key;
-                    let depth = self.nest.depth();
+                    self.lex.is_key = self.lex.expect_key;
+                    let depth = self.lex.nest.depth();
                     let in_item = self.in_items && depth == fields + 2;
-                    self.capturing = if self.is_key {
+                    let capturing = if self.lex.is_key {
                         (depth == 1 && self.root.is_some())
                             || (depth == fields && self.in_object())
                             || in_item
@@ -243,38 +180,34 @@ impl ResponseFields {
                         (depth == fields && matches!(self.field, Field::Model | Field::ServiceTier))
                             || (in_item && self.item_key != ItemKey::Other)
                     };
-                    self.text_len = 0;
-                    self.text_long = false;
-                    self.in_string = true;
-                    self.string.start();
+                    self.lex.start_string(capturing);
                 }
                 b'{' | b'[' => {
-                    let depth = self.nest.depth();
+                    let depth = self.lex.nest.depth();
                     if depth == fields && self.field == Field::Usage && byte == b'{' {
                         self.in_usage = true;
-                        usage_from = Some(i);
+                        usage_from = Some(i - 1);
                     }
                     if depth == fields && self.field == Field::Items && byte == b'[' {
                         self.in_items = true;
                     }
                     if self.in_items && depth == fields + 1 && byte == b'{' {
                         self.item_key = ItemKey::Other;
-                        self.item_type.1 = 0;
-                        self.item_name.1 = 0;
+                        self.item_type.clear();
+                        self.item_name.clear();
                     }
-                    self.nest.open(byte == b'[');
-                    self.expect_key = byte == b'{';
+                    self.lex.open(byte);
                 }
                 b'}' | b']' => {
-                    if !self.nest.close(byte == b']') {
-                        self.failed = true;
+                    self.lex.close(byte);
+                    if self.lex.failed {
                         break;
                     }
-                    let depth = self.nest.depth();
+                    let depth = self.lex.nest.depth();
                     if self.in_usage && depth == fields {
                         self.in_usage = false;
                         if let Some(from) = usage_from.take() {
-                            self.keep_usage(chunk.get(from..=i).unwrap_or_default());
+                            self.usage.push(chunk.get(from..i).unwrap_or_default());
                         }
                     }
                     if self.in_items && depth == fields + 1 && byte == b'}' {
@@ -286,11 +219,10 @@ impl ResponseFields {
                     if depth < fields {
                         self.field = Field::Other;
                     }
-                    self.expect_key = false;
                 }
                 b',' => {
-                    let depth = self.nest.depth();
-                    self.expect_key = self.nest.in_object();
+                    let depth = self.lex.nest.depth();
+                    self.lex.expect_key = self.lex.nest.in_object();
                     if depth <= fields {
                         self.field = Field::Other;
                     }
@@ -301,56 +233,21 @@ impl ResponseFields {
                         self.in_root = false;
                     }
                 }
-                b':' => self.expect_key = false,
+                b':' => self.lex.expect_key = false,
                 _ => {}
             }
-            i += 1;
         }
         if self.in_usage
             && let Some(from) = usage_from
         {
-            self.keep_usage(chunk.get(from..).unwrap_or_default());
-        }
-    }
-
-    fn keep(&mut self, content: &[u8]) {
-        if content.contains(&b'\\') {
-            // An escaped key or value matches nothing read here.
-            self.text_long = true;
-        }
-        match self
-            .text
-            .get_mut(self.text_len..self.text_len + content.len())
-        {
-            Some(slot) => {
-                slot.copy_from_slice(content);
-                self.text_len += content.len();
-            }
-            None => self.text_long = true,
-        }
-    }
-
-    fn keep_usage(&mut self, bytes: &[u8]) {
-        match self
-            .usage
-            .get_mut(self.usage_len..self.usage_len + bytes.len())
-        {
-            Some(slot) => {
-                slot.copy_from_slice(bytes);
-                self.usage_len += bytes.len();
-            }
-            None => self.usage_long = true,
+            self.usage.push(chunk.get(from..).unwrap_or_default());
         }
     }
 
     fn end_string(&mut self) {
-        let text: &[u8] = if self.text_long {
-            b""
-        } else {
-            self.text.get(..self.text_len).unwrap_or_default()
-        };
-        let depth = self.nest.depth();
-        if self.is_key {
+        let text = self.lex.text.whole().unwrap_or_default();
+        let depth = self.lex.nest.depth();
+        if self.lex.is_key {
             let fields = self.field_depth();
             if let Some(root) = self.root.filter(|_| depth == 1) {
                 self.in_root = text == root;
@@ -377,31 +274,23 @@ impl ResponseFields {
             return;
         }
         if depth != self.field_depth() {
-            let slot = match self.item_key {
-                ItemKey::Type => &mut self.item_type,
-                ItemKey::Name => &mut self.item_name,
-                ItemKey::Other => return,
-            };
-            if let Some(dst) = slot.0.get_mut(..text.len()) {
-                dst.copy_from_slice(text);
-                slot.1 = text.len();
+            match self.item_key {
+                ItemKey::Type => self.item_type.set(text),
+                ItemKey::Name => self.item_name.set(text),
+                ItemKey::Other => {}
             }
             return;
         }
-        let slot = match self.field {
-            Field::Model => &mut self.model,
-            Field::ServiceTier => &mut self.service_tier,
-            Field::Other | Field::Usage | Field::Items => return,
-        };
-        if let Some(dst) = slot.0.get_mut(..text.len()) {
-            dst.copy_from_slice(text);
-            slot.1 = text.len();
+        match self.field {
+            Field::Model => self.model.set(text),
+            Field::ServiceTier => self.service_tier.set(text),
+            Field::Other | Field::Usage | Field::Items => {}
         }
     }
 
     /// An item ended: count it if it is a tool call.
     fn end_item(&mut self) {
-        let (Some(kind), name) = (slot_str(&self.item_type), slot_str(&self.item_name)) else {
+        let (Some(kind), name) = (self.item_type.text(), self.item_name.text()) else {
             return;
         };
         let call = match self.items {
@@ -416,20 +305,20 @@ impl ResponseFields {
     }
 
     pub(super) fn model(&self) -> Option<&str> {
-        slot_str(&self.model)
+        self.model.text()
     }
 
     pub(super) fn service_tier(&self) -> Option<&str> {
-        slot_str(&self.service_tier)
+        self.service_tier.text()
     }
 
     /// The raw usage object: `Ok(None)` when absent or `null`; `Err` when
     /// too large or cut off.
     pub(super) fn usage_bytes(&self) -> Result<Option<&[u8]>, ()> {
-        if self.usage_long || self.in_usage {
-            return Err(());
+        match self.usage.whole() {
+            Some(usage) if !self.in_usage => Ok(Some(usage).filter(|u| !u.is_empty())),
+            _ => Err(()),
         }
-        Ok(self.usage.get(..self.usage_len).filter(|u| !u.is_empty()))
     }
 
     /// The usage object in OpenAI's shape; `Err` when too large or malformed.
