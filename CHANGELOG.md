@@ -30,9 +30,10 @@ What is in it:
   `policy-test`, `policy-diff`, `report`, `probe`, `claude`, `codex`, and
   `token`, each with `--help`. A user's files live in `~/.wye`, and a
   command reads `~/.wye/wye.toml` unless told otherwise (`-c`,
-  `$WYE_CONFIG`), never a config it merely finds in the working directory. `wye claude` turns on Claude Code's gateway hints (request
-  class, prompt id, tool times), and `wye claude --bg` starts background
-  sessions that go through the gateway too.
+  `$WYE_CONFIG`), never a config it merely finds in the working directory.
+  `wye claude` turns on Claude Code's gateway hints (request class, prompt id,
+  tool times), and `wye claude --bg` starts background sessions that go through
+  the gateway too.
 - `wye service install`, `status`, `restart`, and `uninstall`: the gateway
   as a LaunchAgent (macOS) or systemd user unit (Linux), shown before it is
   written and checked before it starts.

@@ -155,13 +155,12 @@ cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 ```
 
-Each Claude Code session is pinned to one account by hashing its session id,
-so its prompt cache stays warm, and every replica picks the same account. If
+Each Claude Code session stays on one account, chosen by hashing its session
+id, so its prompt cache stays warm and every replica picks the same account. If
 that account answers `429` or `529`, or the connection fails before the request
-body was delivered, Wye sends the same request to the next account in the same
-turn. It never does this after the first response byte, and it relies on
-`429` and `529` meaning the provider did not process the request (not yet
-confirmed for every provider).
+body was delivered, Wye sends the request to the next account in the same turn,
+never after the first response byte. This relies on `429` and `529` meaning the
+provider did not process the request (not yet confirmed for every provider).
 
 Secrets are read from environment variables or files and never appear in the
 config. Unknown fields are rejected at startup.
@@ -198,9 +197,8 @@ OTLP log record, a span, and metrics). This record is from a local test run:
 }
 ```
 
-Costs are exact decimal strings. Prices are parsed into integer pico-dollars
-and summed with checked arithmetic, so there is no floating point anywhere
-near money. A model with no price is recorded as `unknown`, never as $0.
+Costs are exact decimal strings, computed in integers. A model with no price is
+recorded as `unknown`, never as $0.
 
 `wye report` summarizes a log without any backend:
 
@@ -237,50 +235,26 @@ decision: forward
 
 ## Features
 
-Providers and APIs
-- Anthropic Messages (`/v1/messages`, `count_tokens`) from Anthropic, Claude
-  Platform on AWS, and Amazon Bedrock, using API keys.
-- OpenAI Responses and Chat Completions.
-- `GET /v1/models` answered from config, filtered by what the caller may use.
-- Streams are relayed event by event, never buffered.
+- **APIs:** Anthropic Messages from Anthropic, Claude Platform on AWS, and
+  Amazon Bedrock, using API keys; OpenAI Responses and Chat Completions. Streams
+  are relayed event by event, never buffered.
+- **Routing:** several weighted accounts per route, each session on one; failover
+  before output.
+- **Access control:** Wye's own Ed25519 tokens, or your identity provider's, with
+  keys pinned in config. Model permissions and output-token ceilings. A token can
+  only narrow what config allows.
+- **Model changes:** aliases rolled out per team or token, and upgrade checks that
+  report which clients a model's breaking changes would fail. Requests are never
+  changed.
+- **Visibility:** usage records, OTLP logs, traces (one per Claude Code session),
+  and metrics; optional cache-miss diagnostics.
+- **Tooling:** `wye explain` and `wye policy-test` check decisions offline and in
+  CI, and `wye policy-diff` exits non-zero when a config change widens access.
+  Also `wye init`, `wye service`, `wye validate`, `wye doctor`, `wye token`, and
+  `wye probe`. Every command has `--help`, and reads `~/.wye/wye.toml` unless told
+  otherwise (`-c`, `$WYE_CONFIG`).
 
-Routing
-- Several accounts per route, weighted, with each session pinned to one.
-- `ordered` selection for a primary account with standbys.
-- Failover before output, with the request body kept within per-request and
-  process-wide memory limits.
-
-Access control
-- Wye's own Ed25519 tokens (compact JWTs with the algorithm pinned), or
-  tokens from your identity provider such as GitHub Actions OIDC or your SSO,
-  with keys pinned in config.
-- Model permissions and output-token ceilings. A token can only narrow
-  what config allows, never widen it.
-
-Model changes
-- Aliases (`coding-default` → a model), rolled out per team or token.
-- Upgrade checks: a sample of live requests is checked against the next
-  model's breaking changes, and Wye reports which clients would fail. It never
-  changes the requests.
-
-Visibility
-- Usage records with tokens, cost, cache hits and misses, upstream, failovers,
-  session, subagent, request class, and tool calls and time.
-- OTLP logs, traces (one per Claude Code session), and metrics.
-- Optional cache-miss diagnostics from keyed hashes of the prompt sections.
-
-Tooling
-- `wye explain` for one request, and `wye policy-test` for a directory of
-  sample requests with expected decisions, so routing and permission changes
-  can be tested in CI.
-- `wye policy-diff old.toml new.toml` exits non-zero when a config change
-  widens access: a model newly allowed, a ceiling raised, a longer token
-  lifetime, a new trusted key, auth removed, a listener opened wider, a new API route, or the operator's
-  key where callers brought their own.
-- `wye init` for one developer or a team, `wye validate` and `wye doctor`,
-  `wye token` to issue gateway tokens, and `wye probe` (a health check for
-  images without curl). Every command has `--help`, and reads
-  `~/.wye/wye.toml` unless told otherwise (`-c`, `$WYE_CONFIG`).
+Detail: [docs/product.md](docs/product.md#built).
 
 ## Performance
 
@@ -334,21 +308,6 @@ short-lived provider keys without a restart.
 - Grow a dashboard or an admin API. Config changes go through Git and a
   restart or rolling deploy.
 
-## Running it
-
-A Docker image builds from the repository:
-
-```bash
-docker build -t wye .
-docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
-```
-
-Inside a container Wye has to listen on `0.0.0.0`, and Wye refuses to listen
-beyond loopback without `[auth]`. Health checks are `/healthz` and `/readyz`.
-On shutdown, readiness fails first and in-flight streams get a grace period to
-finish. [docs/operations.md](docs/operations.md) covers deployment with and
-without Kubernetes, telemetry, and token renewal.
-
 ## Development
 
 ```bash
@@ -357,29 +316,13 @@ git config core.hooksPath .githooks   # run the full check before each commit
 scripts/check.sh                      # fmt, clippy, tests, release build, benchmark vs HEAD
 ```
 
-The check takes about eight minutes, most of it the benchmark. Tests run
-against local mock upstreams and never call a paid API. Pull requests also
-run CI on GitHub: lints and tests on Linux and macOS, `cargo deny`, and the
-benchmark against the base branch, gating allocations, failed requests, and
-failed streams (shared runners are too noisy to gate latency).
-[docs/development.md](docs/development.md) explains the benchmark gate, and
-how to compare two builds when a change is too small for the gate to see.
-
-The code is split into `crates/gateway-core` (config, policy, routing, usage
-parsing, pricing; no I/O) and `crates/wye` (the server and the CLI).
-`crates/wye-bench` is the benchmark and `crates/wye-testkit` holds the test
-helpers.
+Tests use local mock upstreams and never call a paid API.
+[docs/development.md](docs/development.md) explains the benchmark gate and CI.
 
 ## Documentation
 
-- [docs/README.md](docs/README.md): which document answers what, and the terms they use
-- [docs/product.md](docs/product.md): scope, who it is for, strengths and weaknesses
-- [examples/wye.toml](examples/wye.toml): every configuration option
-- [docs/architecture.md](docs/architecture.md): how it works
-- [docs/policy.md](docs/policy.md): tokens, permissions, pricing
-- [docs/operations.md](docs/operations.md): CLI, deployment, telemetry
-- [docs/roadmap.md](docs/roadmap.md): status and what is next
-- [docs/research.md](docs/research.md): benchmarks, experiments, open questions
+[docs/README.md](docs/README.md) says which document answers what.
+[examples/wye.toml](examples/wye.toml) lists every configuration option.
 
 ## License
 

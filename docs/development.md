@@ -6,12 +6,8 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 
 | Path | Contents |
 |---|---|
-| `crates/gateway-core` | Portable policy: config validation, token verification, model aliases, permissions and output-token ceilings, pricing, upgrade-check rules, request-body and SSE scanners, prompt hashes, agent headers. No I/O, no Tokio. |
-| `crates/wye` | The binary: `main.rs`, the offline commands (`cli/`), startup resolution, listener and shutdown (`server.rs`), routing (`gateway.rs`), tokens and permissions, forwarding (`upstream/`), usage log and OTLP export (`usage_log/`). Module map in [architecture.md](architecture.md#repository-and-workspace) |
-| `crates/wye-testkit` | Test support: throwaway CA, test signing keys, mock upstream (plain, or TLS with HTTP/2) |
-| `crates/wye-bench` | Benchmark and regression gate: mock Anthropic upstream, load client, soak and capacity runs, competitor runs |
+| `crates/`, `examples/` | [architecture.md](architecture.md#repository-and-workspace) |
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The gate does not read it |
-| `examples/` | The configuration reference (`wye.toml`), a subscription config, and policy-test cases |
 | `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
 | `scripts/ab.sh` | A/B comparison of two binaries |
 | `scripts/ci-bench.sh` | The pull-request benchmark: a commit against its base on one machine |
@@ -27,7 +23,7 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 git config core.hooksPath .githooks
 ```
 
-`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks, so it rebuilds only what the last commit changed) and runs both commits in alternating rounds, three each, each commit with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts); a comparison that fails without naming a metric fails the gate. A stored result would carry the machine's state on the day it was recorded ([why](research.md#gate-method-the-parent-in-alternating-rounds)). Rounds minutes apart see the same machine, so nothing has to be recorded first and the gate runs on any machine.
+`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts); a comparison that fails without naming a metric fails the gate. A stored result would carry the machine's state on the day it was recorded ([why](research.md#gate-method-the-parent-in-alternating-rounds)), so nothing is recorded first and the gate runs on any machine.
 
 - **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
@@ -36,7 +32,11 @@ git config core.hooksPath .githooks
 - Refresh `bench/baseline.json` by hand on an idle machine, together with the numbers in the docs: `target/release/wye-bench run --wye target/release/wye --out bench/baseline.json --wye-alloc target/alloc/release/wye --repeat 7`.
 - The proxy tests and the benchmark open thousands of sockets. `check.sh` and CI raise the open-file limit to 8192; on macOS, whose default is 256, run `ulimit -n 8192` before a bare `cargo test`. The stalled-client test keeps 256 loopback connections full, and their client ends autotune receive buffers larger than the 96 MB network pool of a 7 GB macOS CI runner, so CI caps that autotuning (`net.inet.tcp.autorcvbufmax`).
 
-A check takes about 8 minutes after an ordinary code change: tests about 15 s, incremental builds of both commits about a minute, and six benchmark runs of about 67 s each (Wye and eight variants on the plain path, then the TLS path; `wye-bench` prints the duration of each phase to stderr). The first check in a checkout builds the parent from scratch, about 90 s more on the laptop; a dependency change rebuilds both commits. A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: under load a different metric lands past its limit now and then, while a real regression repeats. A failed request or stream is never noise and fails the check at once. The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work; the noisiest latency tolerances come from A/A runs ([research.md](research.md#gate-method-the-parent-in-alternating-rounds)). Smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`, which runs two binaries in alternating rounds. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric. Results and rejected experiments are recorded in [research.md](research.md).
+A check takes about 8 minutes after an ordinary code change: tests about 15 s, incremental builds of both commits about a minute, and six benchmark runs of about 67 s each (`wye-bench` prints each phase's duration to stderr). The first check in a checkout takes about 90 s more; a dependency change rebuilds both commits.
+
+A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats. A failed request or stream is never noise and fails the check at once.
+
+The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](research.md#gate-method-the-parent-in-alternating-rounds)). Smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md).
 
 ## Continuous integration
 
@@ -49,7 +49,7 @@ GitHub Actions run on every pull request and push to `main` (`.github/workflows/
 | `docker.yml` | pushes to `main`, and pull requests that touch the image | `scripts/image-smoke.sh` |
 | `release.yml` | a `v*` tag | generated by dist ([operations.md](operations.md#distribution)); never edited by hand |
 
-Allocation counts vary under 1% between runs and do not depend on the machine, so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update a week; actions are pinned by commit and updated by hand (`release.yml`'s by upgrading dist and rerunning `dist init`). CI makes no provider calls and needs no secrets.
+Allocation counts vary under 1% between runs and do not depend on the machine, so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update and one for the Dockerfile's base images a week; actions are pinned by commit and updated by hand (`release.yml`'s by upgrading dist and rerunning `dist init`). CI makes no provider calls and needs no secrets.
 
 A release: bump `version` in `crates/wye/Cargo.toml`, commit through the gate, then `git tag v0.1.0 && git push origin v0.1.0`. `dist plan` previews what the tag will build.
 
@@ -105,7 +105,7 @@ The variables `wye` itself reads are in [operations.md](operations.md#environmen
 - Every change ends with a review pass over the files it touched: names, duplication, dead code, stale comments, module boundaries. Refactor instead of patching when logic repeats, a module does two jobs, or a name no longer fits.
 - A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
 - Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
-- `unwrap`, `expect`, panics, and indexing are denied outside tests; `unsafe` is forbidden in `gateway-core` and denied elsewhere.
+- `unwrap`, `expect`, panics, and indexing are denied outside tests (`wye-bench` and `wye-testkit` allow some); `unsafe` is forbidden in `gateway-core` and denied elsewhere.
 
 ## Design principles
 
