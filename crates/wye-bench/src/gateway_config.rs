@@ -193,6 +193,37 @@ pub(crate) fn litellm_config(upstream_base_url: &str) -> String {
     )
 }
 
+/// agentgateway's LLM listener at its best case for this traffic: one model,
+/// the one requests name, in `detect` passthrough (the request is relayed
+/// unchanged and its usage read, as Wye does), access logging off, and a
+/// request buffer as large as Wye's body limit. Its admin, stats, and
+/// readiness listeners take free ports, so runs do not collide.
+pub(crate) fn agentgateway_config(
+    port: u16,
+    upstream_base_url: &str,
+    ca_file: Option<&Path>,
+) -> String {
+    let free = || {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        probe.local_addr().unwrap()
+    };
+    let tls = ca_file
+        .map(|ca| format!("    tls:\n      root: {:?}\n", ca.display().to_string()))
+        .unwrap_or_default();
+    format!(
+        "config:\n  adminAddr: {}\n  statsAddr: {}\n  readinessAddr: {}\n\
+         \x20 logging:\n    level: error\n\
+         frontendPolicies:\n  accessLog:\n    filter: \"false\"\n\
+         \x20 http:\n    maxBufferSize: 33554432\n\
+         llm:\n  port: {port}\n  models:\n  - name: anthropic/bench\n    provider: anthropic\n\
+         \x20   passthrough: detect\n    params:\n      apiKey: sk-bench-upstream\n\
+         \x20     baseUrl: {upstream_base_url}\n{tls}",
+        free(),
+        free(),
+        free(),
+    )
+}
+
 /// Bifrost with one Anthropic key and no stores (no config or log database,
 /// no request logging), retries off, the pool and queue sizes of Bifrost's own
 /// published benchmark (t3.xlarge), and provider workers above this

@@ -202,10 +202,12 @@ mock provider, not production measurements.
 | 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
 | Memory per open stream at that load | | 9.3 KB |
 
-Compared at their best configurations on the same machine, Bifrost used about
-6.6× more CPU per request and 4.4× more per streamed event, and LiteLLM about
-120× and 9×. KrakenD CE cannot stream at all, though it beats Wye on bulk
-transfer and TLS uploads. [docs/benchmarks.md](docs/benchmarks.md) has
+Compared at their best configurations on the same machine, agentgateway (Rust,
+the closest in kind) used about 3× more CPU per request and 1.5× more per
+streamed event, though it beats Wye on paced-stream latency and on memory beside
+stalled clients; Bifrost used about 6.6× and 4.4×, and LiteLLM about 120× and
+9×. KrakenD CE cannot stream at all, though it beats Wye on bulk transfer and
+TLS uploads. [docs/benchmarks.md](docs/benchmarks.md) has
 the method, the full tables, the configurations used, and where Wye loses.
 
 ## Status

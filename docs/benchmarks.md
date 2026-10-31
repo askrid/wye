@@ -157,11 +157,41 @@ Where Bifrost leads, and why:
 
 Load generator, mock, and gateway share one laptop (8 physical cores); at 2,000 paced streams Wye alone uses ~3.7 cores and Bifrost all 16 threads, so paced latencies include machine contention. Bifrost's published "11 µs" counts only its internal stages ("excludes JSON marshalling and HTTP calls"); the numbers here are end to end, what a client sees.
 
-### Comparison runs
+## Against agentgateway
 
-Competitors run with `--bifrost`, `--litellm`, or `--krakend`. Gateways that parse requests and events need what real traffic always has, so comparison runs differ from gate runs in two ways, through every gateway alike:
+[agentgateway](https://github.com/agentgateway/agentgateway) 1.7.0 (Rust, Linux Foundation), the closest in kind: a proxy for AI agents and model providers. Built from source (`26f5aeb`) with its own release profile (fat LTO, one codegen unit) and default features (jemalloc), since there is no Intel macOS binary; native, not in a container. Its LLM listener at its best case for this traffic: one model in `detect` passthrough (the request relayed unchanged, its usage read, as Wye does), access log off, a 32 MiB request buffer. It offers HTTP/2 to TLS upstreams, as Wye does. Median of 3, 2026-11-01, zero failures on both.
+
+| Metric (TLS unless noted) | Wye | agentgateway |
+|---|---|---|
+| Added unary latency p50 / p99 | 0.26 / 0.36 ms | 1.8 / 2.7 ms |
+| Added unary latency p50, plain | 0.27 ms | 0.42 ms |
+| CPU per request | 171 µs | 536 µs |
+| Added time to first byte p50 | 0.24 ms | 0.63 ms |
+| Added delay per SSE event p50 / p99 | 233 / 244 µs | 408 / 635 µs |
+| 2,000 paced streams: event delay p50 / p99 | 1.2 / 3.1 ms | 1.0 / 3.6 ms |
+| 2,000 paced streams: time to first byte p99 | 5.1 ms | 4.4 ms |
+| 2,000 paced streams: CPU per event, memory per stream | 37 µs, 10 KB | 42 µs, 37 KB |
+| Paced streams during uploads: event p99; upload p50 | 1.8 ms; 2.6 ms | 1.0 ms; 11 ms |
+| Beside 200 stalled clients: event p99; memory per stalled stream | 2.9 ms; 472 KB | 2.2 ms; 145 KB |
+| 1 MiB upload: added p50, CPU per MB | 2.7 ms, 2.6 ms | 16 ms, 4.0 ms |
+| Claude Code-shaped upload, plain: CPU per MB | 1.56 ms | 24 ms |
+| Bulk relay: CPU per MB; throughput (direct 1.6 GB/s) | 4.8 ms; 0.98 GB/s | 13 ms; 0.31 GB/s |
+| 32 first requests on a new process: added p50 | 3.2 ms | 2.4 ms |
+| Memory per idle stream; process after load | 13 KB; 191 MB | 47 KB; 562 MB |
+
+Where agentgateway leads, and why:
+- Paced and mixed-load event latency (p50 1.0 vs 1.2 ms; event p99 during uploads 1.0 vs 1.8 ms); an earlier single run agreed. Its uploads take 4× longer there (11 vs 2.6 ms p50), so less upload traffic overlaps the streams.
+- Memory beside stalled clients: 145 vs 472 KB per stalled stream. Wye's bound is twice its 256 KiB HTTP/2 stream window ([why that size](research.md#performance-techniques)); a smaller window would cost bulk CPU. Worth an A/B before 1.0.
+- Cold connections (2.4 vs 3.2 ms p50), a metric that swings 3-9 ms with load.
+
+Unlike Wye, it does not relay a unary response's bytes: in passthrough it parses the JSON and writes it again, with its fields in another order, and answers `502 failed to process LLM response` to a reply without `model`.
+
+## Comparison runs
+
+Competitors run with `--agentgateway`, `--bifrost`, `--litellm`, or `--krakend`. Gateways that parse requests and events need what real traffic always has, so comparison runs differ from gate runs in three ways, through every gateway alike:
 - streams are complete Anthropic Messages streams (`message_start`, `text_delta` deltas carrying the send time in an extra field, `message_stop`); Bifrost drops events that are not Anthropic-shaped;
-- the Claude Code-shaped upload says `"stream":false`, since the upload scenarios get a unary reply.
+- the Claude Code-shaped upload says `"stream":false`, since the upload scenarios get a unary reply;
+- a unary Messages reply carries `model`, `stop_reason`, and `stop_sequence`, as Anthropic's do; agentgateway refuses one without.
 
 All runs send `"stream":true` on streaming requests and name the model `anthropic/bench`. Bifrost needs two more things: the mock's control headers go as `x-bf-eh-<name>`, the only extra headers it forwards, and requests leave `anthropic-version` to it, because its Anthropic route drops forwarded headers when the request carries one.
 

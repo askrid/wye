@@ -8,8 +8,8 @@ use crate::{
     client::Target,
     gateway_config::{
         BENCH_HASH_KEY_ENV, BENCH_PROVIDER_KEY_ENV, BIFROST_API_PREFIX, BIFROST_USER_AGENT,
-        BenchCredentials, LITELLM_API_PREFIX, LITELLM_MASTER_KEY, WyeOptions, bifrost_config,
-        krakend_config, litellm_config, wye_config,
+        BenchCredentials, LITELLM_API_PREFIX, LITELLM_MASTER_KEY, WyeOptions, agentgateway_config,
+        bifrost_config, krakend_config, litellm_config, wye_config,
     },
 };
 
@@ -59,6 +59,7 @@ impl Launch {
             Gateway::KrakenD(program) => Self::krakend(program, gateway, setup),
             Gateway::LiteLlm(program) => Self::litellm(program, gateway, setup),
             Gateway::Bifrost(program) => Self::bifrost(program, setup),
+            Gateway::Agentgateway(program) => Self::agentgateway(program, gateway, setup),
         }
     }
 
@@ -203,6 +204,18 @@ impl Launch {
             // those when the request carries `anthropic-version`, which
             // Bifrost adds upstream itself.
             .with_control_prefix("x-bf-eh-"),
+        }
+    }
+
+    fn agentgateway(program: &str, gateway: Gateway<'_>, setup: &Setup<'_>) -> Self {
+        let config = agentgateway_config(setup.port, setup.upstream, setup.ca_file.as_deref());
+        Self {
+            program: program.into(),
+            args: vec!["-f".into(), setup.config(gateway, "yaml", config)],
+            env: Vec::new(),
+            // The LLM listener's model list; readiness has a port of its own.
+            health: "/v1/models",
+            target: Target::plain(setup.addr),
         }
     }
 }
