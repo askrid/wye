@@ -38,15 +38,21 @@ echo "==> compare with $ref"
 if compare "$out/failed-1.txt" "$@"; then
   exit 0
 fi
-if failures=$(grep -E '_failed_(requests|streams)$' "$out/failed-1.txt"); then
-  echo "requests or streams failed: $(tr '\n' ' ' <<<"$failures")" >&2
-  exit 1
-fi
+# A failed request or stream is not noise, in either run.
+stop_on_failures() {
+  local failures
+  if failures=$(grep -E '_failed_(requests|streams)$' "$1"); then
+    echo "requests or streams failed: $(tr '\n' ' ' <<<"$failures")" >&2
+    exit 1
+  fi
+}
+stop_on_failures "$out/failed-1.txt"
 echo "==> regression reported; re-running the benchmark to rule out noise"
 scripts/bench-against.sh "$ref" "$out"
 if compare "$out/failed-2.txt" "$@"; then
   exit 0
 fi
+stop_on_failures "$out/failed-2.txt"
 both=$(comm -12 "$out/failed-1.txt" "$out/failed-2.txt" | tr '\n' ' ')
 if [[ -n $both ]]; then
   echo "past the limit in both runs: $both" >&2
