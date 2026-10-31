@@ -1,6 +1,6 @@
-//! Color on a terminal, only where it carries meaning: an error, a check's
-//! verdict, a report's section titles. Off when the output is not a
-//! terminal, `NO_COLOR` is set (no-color.org), or `TERM` is `dumb`.
+//! Color on a terminal, only where it carries meaning: an error, a verdict, a
+//! heading, a command to copy. Off when the output is not a terminal, `NO_COLOR`
+//! is set (no-color.org), or `TERM` is `dumb`.
 
 use std::io::IsTerminal;
 
@@ -47,16 +47,21 @@ impl Paint {
         self.paint("32", text)
     }
 
-    /// `text` with each line's verdict colored: `ok` and `FAIL` (doctor,
-    /// policy-test), `widens`/`narrows` and the result (policy-diff), and
-    /// the decision (explain).
-    pub fn verdicts(self, text: &str) -> String {
+    pub fn cyan(self, text: &str) -> String {
+        self.paint("36", text)
+    }
+
+    /// `text` as a terminal shows it. Headings are bold, and a command to copy
+    /// is cyan. A verdict is green or red: `ok` and `FAIL` (doctor,
+    /// policy-test), `widens` and `narrows` and the result (policy-diff), the
+    /// decision (explain).
+    pub fn style(self, text: &str) -> String {
         if !self.0 {
             return text.to_owned();
         }
         let mut out = String::with_capacity(text.len() + 64);
         for line in text.split_inclusive('\n') {
-            let colored = [
+            let verdict = [
                 ("ok ", Self::green as fn(Self, &str) -> String),
                 ("FAIL ", Self::red),
                 ("widens:", Self::red),
@@ -65,13 +70,23 @@ impl Paint {
                 ("result: no access widened", Self::green),
                 ("decision: forward", Self::green),
                 ("decision: refuse", Self::red),
+                ("Usage:", Self::bold),
             ]
             .into_iter()
-            .find_map(|(prefix, color)| {
-                let rest = line.strip_prefix(prefix)?;
-                Some(format!("{}{rest}", color(self, prefix)))
-            });
-            out.push_str(colored.as_deref().unwrap_or(line));
+            .find_map(|(prefix, color)| Some((prefix, line.strip_prefix(prefix)?, color)));
+            let body = line.trim_end_matches('\n');
+            if let Some((prefix, rest, color)) = verdict {
+                out.push_str(&color(self, prefix));
+                out.push_str(rest);
+            } else if !body.starts_with(' ') && body.ends_with(':') {
+                out.push_str(&self.bold(body));
+                out.push('\n');
+            } else if body.starts_with("     wye ") {
+                out.push_str(&self.cyan(body));
+                out.push('\n');
+            } else {
+                out.push_str(line);
+            }
         }
         out
     }
@@ -82,14 +97,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_verdicts_are_colored_and_off_means_plain() {
+    fn only_what_means_something_is_colored_and_off_means_plain() {
         let text = "ok    a\nFAIL  b: why\nother ok\ndecision: refuse 403\n";
-        assert_eq!(Paint::OFF.verdicts(text), text);
+        assert_eq!(Paint::OFF.style(text), text);
         assert_eq!(
-            Paint(true).verdicts(text),
+            Paint(true).style(text),
             "\x1b[32mok \x1b[0m   a\n\x1b[1;31mFAIL \x1b[0m b: why\nother ok\n\
              \x1b[1;31mdecision: refuse\x1b[0m 403\n"
         );
         assert_eq!(Paint::OFF.red("wye:"), "wye:");
+        assert_eq!(
+            Paint(true).style("Usage: wye\nOptions:\n  -c  x: y:\nNext:\n     wye doctor\n"),
+            "\x1b[1mUsage:\x1b[0m wye\n\x1b[1mOptions:\x1b[0m\n  -c  x: y:\n\
+             \x1b[1mNext:\x1b[0m\n\x1b[36m     wye doctor\x1b[0m\n"
+        );
     }
 }

@@ -275,6 +275,8 @@ fn help_answers_the_usual_ways_of_asking() {
         );
     }
     assert!(out(&setup.run(&["version"])).starts_with("wye "));
+    // Color is for terminals: a pipe, as here, stays plain.
+    assert!(!out(&setup.run(&["--help"])).contains('\x1b'));
     let leading = err(&setup.run(&["-c", "x", "doctor"]));
     assert!(
         leading.contains("options go after the command"),

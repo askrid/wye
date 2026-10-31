@@ -1,5 +1,9 @@
 # Wye
 
+[![CI](https://github.com/askrid/wye/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrid/wye/actions/workflows/ci.yml)
+[![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue)](LICENSE)
+[![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-orange)](rust-toolchain.toml)
+
 Wye is a small, stateless gateway that sits between coding agents (Claude Code,
 Codex) or your own apps and the model providers. It speaks each provider's
 native API and forwards requests byte for byte, so clients keep the official
