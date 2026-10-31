@@ -221,8 +221,8 @@ pub fn install(
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", show(dir)))?;
     }
-    std::fs::create_dir_all(&context.wye_home)
-        .map_err(|e| format!("cannot create {}: {e}", show(&context.wye_home)))?;
+    // It may later hold a signing key.
+    super::create_private_dir(&context.wye_home)?;
     write_atomically(&file, &definition)?;
     say!("Wrote {}", show(&file));
     if replacing {
