@@ -389,7 +389,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer, so a stalled client holds little kernel memory |
 | `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | How long a refused attempt may take to hand its body back for failover |
 | `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_held_request_bytes` and `failover_max_held_bytes` (1 KiB), so a body sent in tiny chunks cannot pin more memory than the budget says |
-| `HOLD_IDLE_TIMEOUT` | `wye/src/request_body.rs` | How long a held body may send nothing before its request gets `408` (60 s) |
+| `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | How long a held body may send nothing (60 s), or take in all to reach its `model` (5 minutes), before its request gets `408` |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer task; beyond it they are dropped and counted |
 | `WRITE_BATCH` | `wye/src/usage_log.rs` | Queued records formatted into one write: bounds the write buffer while records keep arriving |
 | `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting for export, one export attempt |

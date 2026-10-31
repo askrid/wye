@@ -17,7 +17,8 @@ listen = "127.0.0.1:8080"              # beyond loopback only with [auth]
 # Request bytes held while reading `model` (for permissions, aliases, and a
 # provider's model id), all requests together; beyond it, an overload error.
 # A chunk counts at least 1 KiB, for the memory it pins. A client that sends
-# nothing for 60 s while held gets 408. At least max_request_body_bytes,
+# nothing for 60 s while held, or has not reached its model after 5 minutes,
+# gets 408. At least max_request_body_bytes,
 # since one body may be held whole:
 # max_held_request_bytes = 67108864
 # Requests in flight before new ones get an overload error (529 on the
