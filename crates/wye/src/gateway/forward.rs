@@ -3,6 +3,7 @@
 //! error.
 
 use std::{ops::Range, time::Duration};
+use tokio::sync::oneshot::error::TryRecvError;
 
 use bytes::Bytes;
 use gateway_core::{
@@ -220,7 +221,10 @@ async fn handed_back(
 ) -> Option<Resend<RequestBody<ClientBody>>> {
     let resend = match handback.try_recv() {
         Ok(resend) => Some(resend),
-        Err(_) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
+        // The attempt stopped keeping the body: nothing will come, and a
+        // receiver that saw this must not be polled again.
+        Err(TryRecvError::Closed) => None,
+        Err(TryRecvError::Empty) => tokio::time::timeout(HANDBACK_WAIT, &mut *handback)
             .await
             .ok()
             .and_then(Result::ok),

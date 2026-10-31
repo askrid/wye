@@ -192,6 +192,40 @@ async fn failover_sends_each_provider_its_own_model_id() {
     }
 }
 
+/// Past its bound a body stops being kept, which only shows once it has
+/// started: a body without a declared length.
+#[tokio::test]
+async fn a_chunked_body_too_large_to_keep_answers_the_refusal() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS, &hits).await;
+    let (b, _seen_b) = upstream(StatusCode::OK, &hits).await;
+    let h = gateway(
+        "failover = [\"429\"]\nfailover_max_body_bytes = 16",
+        &format!("http://{a}"),
+        &format!("http://{b}"),
+    )
+    .await;
+    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    client
+        .write_all(
+            format!(
+                "POST /v1/messages HTTP/1.1\r\nhost: wye\r\ntransfer-encoding: chunked\r\n\
+                 connection: close\r\n\r\n{:x}\r\n{BODY}\r\n0\r\n\r\n",
+                BODY.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut answer = Vec::new();
+    client.read_to_end(&mut answer).await.unwrap();
+    let answer = String::from_utf8_lossy(&answer);
+    assert!(answer.starts_with("HTTP/1.1 429"), "{answer}");
+    assert_eq!(hits.load(Ordering::Relaxed), 1);
+}
+
 #[tokio::test]
 async fn a_refusal_during_the_upload_resends_the_whole_body() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
