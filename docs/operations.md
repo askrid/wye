@@ -67,19 +67,13 @@ Set for the agent by `wye claude` and `wye codex`:
 | `CLAUDE_CODE_GATEWAY_HINT_HEADERS` | `1`, unless you set it |
 | `WYE_CODEX_TOKEN` | The token Codex sends |
 
-Clients read their own: the SDKs' `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_API_KEY` ([SDK integration](#sdk-integration)), and Claude Code's `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` and `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`. Variables for the benchmark and scripts are in [development.md](development.md#scripts-and-benchmark-variables).
+Clients read their own: the SDKs' `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_API_KEY` ([using it from apps](guide.md#using-it-from-apps)), and Claude Code's `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` and `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`. Variables for the benchmark and scripts are in [development.md](development.md#scripts-and-benchmark-variables).
 
 ### Commands
 
 What `--help` does not say.
 
-**`wye init`** writes a minimal validated config, never over an existing file, and prints the next steps:
-
-- By default, for one developer on this machine: each caller's own credential goes through, whether Claude Code's claude.ai login or an API key, and the gateway holds no secret. Loopback only.
-- `--api-key`: for one developer whose gateway holds an Anthropic API key, read at startup from `anthropic.key` next to the config, where a background service finds it too.
-- `--team`: a shared gateway. It listens on every interface, takes gateway tokens (`[auth]`), reads the provider key from `ANTHROPIC_API_KEY` in the deployment, and creates the signing key `~/.wye/issuer.key` (mode 600, outside the config's directory and Git) unless one is there to reuse.
-
-`--openai` adds `[routes.openai]`, with the OpenAI key in `openai.key` next to the config (with `--team`, in `OPENAI_API_KEY`). The next steps carry `-c` when the lookup would not find the config.
+**`wye init`**: [choosing a setup](guide.md#choosing-a-setup).
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
 
@@ -103,13 +97,7 @@ A refusal prints the status and error the server would send. The body is read as
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the model an alias resolves to) and tokens (a token can only narrow what config allows).
 
-**`wye report [<log>]`** summarizes a usage log with no telemetry backend: outcomes and error statuses, tokens and time by request class and upstream, cache misses, failovers, tools, upgrade issues by target and client, and the ten sessions and prompts with the most tokens.
-
-- A 429 refusal is an answer, so its outcome reads `completed`.
-- The cache-hit rate is cache reads as a share of prompt tokens.
-- The cost column appears with `[pricing]`. It is summed exactly from `cost_usd`, and marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
-- The first cache write of a session, and of each subagent, is an expected miss that one request cannot recognize but the whole log can. `count_tokens` and refused requests before it do not count.
-- Other lines are skipped and counted. `wye serve >> ~/.wye/usage.jsonl` keeps the log across restarts, where `wye report` looks.
+**`wye report`**: [reading it](guide.md#reading-wye-report).
 
 **`wye probe [<url>]`** sends one `GET` and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway and asks its `/healthz` (the gateway's `/` serves nothing). A path is asked as given, such as `/readyz` for a load balancer's view.
 
@@ -126,19 +114,9 @@ A refusal prints the status and error the server would send. The body is read as
 - The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by its daemon, which does not inherit the wrapper's environment. The token never goes that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#token-renewal).
 - `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
-The steps per setup are in the [README](../README.md#quick-start).
+The steps per setup are in the [guide](guide.md#running-it).
 
 **`wye codex`** takes the same options and environment. It runs `codex` with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it. Without a gateway token, `WYE_CODEX_TOKEN` is a placeholder, which a gateway without `[auth]` replaces with its OpenAI key. `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a token without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#per-request-ceilings)). What Codex sends: [architecture.md](architecture.md#codex-integration).
-
-### SDK integration
-
-Apps and custom agents keep the provider's official SDK and change no code ([commands](../README.md#for-apps)). What they set as the key depends on the gateway:
-
-- With `[auth]`: a gateway token, which Wye reads from `x-api-key` or `Authorization: Bearer`.
-- The default `wye init`: the caller's own provider key, which goes through.
-- A gateway that holds a key (`wye init --api-key`): any non-empty placeholder, since the SDKs refuse to send a request without a key and Wye sends its own.
-
-The OpenAI SDK reaches `/v1/responses` and `/v1/chat/completions`. Streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add. Claude Code without the wrapper takes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, or `apiKeyHelper` for automatic renewal.
 
 ### Token renewal
 
@@ -260,7 +238,7 @@ From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude
 
 Wye does not lower a stream's tokens per second. It adds a roughly constant delay per event that does not accumulate: about 0.2 ms p50 at light load and 1.4 ms with 2,000 streams on the laptop, against the provider's 10-20 ms between tokens. Model permissions and cache diagnostics add cost per request and per uploaded MB, not per streamed event.
 
-One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms of added p99. Latency, not CPU, sets the limit, so size by streams per core ([measurements](research.md#current-harness-and-baseline)). Multi-core figures need a separate load machine.
+One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms of added p99. Latency, not CPU, sets the limit, so size by streams per core ([measurements](benchmarks.md#current-harness-and-baseline)). Multi-core figures need a separate load machine.
 
 ### Several Anthropic accounts
 

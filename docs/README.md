@@ -1,22 +1,36 @@
-# Wye design docs
+# Wye docs
 
-What Wye is and why: [product.md](product.md). What has been built and checked: [roadmap.md](roadmap.md#status).
+What Wye is and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
 
-## Documents
-
-Each document owns one concern. Other documents link to it instead of restating it.
+## Use it
 
 | Document | Answers |
 | --- | --- |
-| [product.md](product.md) | Why Wye exists, who uses it, scope (built, next, later), non-goals, positioning, strengths and weaknesses |
-| [architecture.md](architecture.md) | How a request flows: components, runtime, forwarding, providers, streaming, configuration, invariants, open design decisions |
-| [policy.md](policy.md) | What Wye authorizes and enforces, what it cannot enforce without shared state, security requirements |
-| [operations.md](operations.md) | Distribution, CLI, deployment topologies, telemetry, health, shutdown, failure behavior |
-| [roadmap.md](roadmap.md) | Status, open work, exit criteria, open findings, release checklist |
-| [research.md](research.md) | Open questions, measurement methodology, benchmark results, research directions |
-| [development.md](development.md) | Code layout, commit gate, CI, benchmark, releases, contribution rules |
+| [guide.md](guide.md) | Choosing a setup, running it, reading `wye report`, teams, apps, upgrades, troubleshooting, FAQ |
 | [examples/wye.toml](../examples/wye.toml) | Every configuration field: its default, limits, and meaning (parsed by a test with every section enabled) |
 | [CHANGELOG.md](../CHANGELOG.md) | What each release contains and what it leaves unverified |
+
+## Run it
+
+| Document | Answers |
+| --- | --- |
+| [operations.md](operations.md) | Distribution, CLI, deployment topologies, telemetry, health, shutdown, failure behavior |
+
+## Trust it
+
+| Document | Answers |
+| --- | --- |
+| [benchmarks.md](benchmarks.md) | What Wye costs, the method, competitors, the gate's evidence |
+| [policy.md](policy.md) | What Wye authorizes and enforces, what it cannot enforce without shared state, security requirements |
+| [architecture.md](architecture.md) | How a request flows: components, runtime, forwarding, providers, streaming, configuration, invariants, open design decisions |
+
+## Change it
+
+| Document | Answers |
+| --- | --- |
+| [development.md](development.md) | Commit gate, CI, benchmark scenarios, releases, design principles, review rounds |
+| [roadmap.md](roadmap.md) | Status, open work, exit criteria, open findings, release checklists |
+| [research.md](research.md) | Open questions, feature directions, related work, performance techniques |
 
 ## Terms
 
