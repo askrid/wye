@@ -58,6 +58,25 @@ Check: with motion off, the page says everything it says with motion on.
 
 Check: the review of each page names its job and its one bold element.
 
+## Direction: route map
+
+Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output). Wye's config already names routes and upstreams; the site draws them as a transit map draws lines: thick strokes, turns at 45° only, a station for each real upstream id. The junction on the first screen is the wye.
+
+| Token | Light | Dark | Use |
+| --- | --- | --- | --- |
+| `paper` | `#FFFFFF` | `#0E1A22` | Page ground |
+| `ink` | `#14212B` (16.4:1) | `#E8EEF2` (15.1:1) | Text, request marks |
+| `graphite` | `#5B6770` (5.8:1) | `#9AA8B2` (7.2:1) | Secondary text |
+| `line` | `#0067B1` (5.9:1) | `#5AA9E6` (6.9:1) | First route, links |
+| `branch` | `#B97F00` (3.4:1) | `#F2B630` (9.7:1) | Second route; lines only, never text |
+| `signal` | `#C8102E` (5.9:1) | `#FF6B7A` (6.4:1) | Refusals (429, 529), nothing else |
+
+Ratios are WCAG contrast against `paper`. Blue and ochre are the only route colours, chosen to stay apart under red-green colour blindness.
+
+Type: Overpass for all text and Overpass Mono for code and output, both variable, self-hosted as Latin subsets under the SIL Open Font License. Overpass is an open revival of Highway Gothic, the US road-sign face: wayfinding type for a product made of routes.
+
+Diagrams: strokes 10 units wide on a `paper` casing, round joins, stations as `paper` circles ringed in `ink`. Only real upstream ids are drawn.
+
 ## Defaults we do not use
 
 These appear on generated pages whatever the subject. None is used unless chosen on purpose, with the reason written down:
