@@ -18,6 +18,7 @@ use gateway_core::config::{Config, UpstreamCredential};
 
 use super::{
     files::{self, ERRORS_FILE, USAGE_LOG_FILE},
+    paint::Paint,
     probe_blocking as probe, say,
 };
 
@@ -297,13 +298,18 @@ pub fn status(context: &Context) -> Result<bool, String> {
         .map(|url| (probe(&url).is_ok(), url));
     match answering {
         Some((true, url)) => {
-            say!("{:<9} answering at {url}", "State");
+            say!(
+                "{:<9} {} at {url}",
+                "State",
+                Paint::stdout().green("answering")
+            );
             Ok(true)
         }
         Some((false, url)) => {
             say!(
-                "{:<9} not answering at {url}; the end of {} may say why",
+                "{:<9} {} at {url}; the end of {} may say why",
                 "State",
+                Paint::stdout().red("not answering"),
                 show(&service.errors)
             );
             Ok(false)

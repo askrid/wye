@@ -37,7 +37,7 @@ wye probe [<url>]
 
 **Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
 
-**Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: errors, `ok` and `FAIL`, what a config change widens or narrows, the decision `explain` reaches, and a report's section titles. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
+**Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
 
 ### Files
 

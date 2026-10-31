@@ -57,7 +57,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         _ => None,
     };
     if let Some(text) = help {
-        emit(&text);
+        emit(&Paint::stdout().style(&text));
         return Ok(0);
     }
     let Some((command, rest)) = Command::find(&args) else {
@@ -66,7 +66,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     let parsed = match command.parse(rest) {
         Ok(parsed) => parsed,
         Err(ArgsError::Help) => {
-            emit(&command.help());
+            emit(&Paint::stdout().style(&command.help()));
             return Ok(0);
         }
         Err(ArgsError::Usage(why)) => {
@@ -131,11 +131,11 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             Ok(0)
         }
         "init" => {
-            emit(&run_init(&parsed, &env)?);
+            emit(&Paint::stdout().style(&run_init(&parsed, &env)?));
             Ok(0)
         }
         "token keygen" => {
-            emit(&token::run_keygen(&parsed, &env)?);
+            emit(&Paint::stdout().style(&token::run_keygen(&parsed, &env)?));
             Ok(0)
         }
         "token issue" => {
@@ -184,7 +184,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
 
 /// Prints a check's report; the exit status of its result.
 fn verdicts(report: &str, ok: bool) -> u8 {
-    emit(&Paint::stdout().verdicts(report));
+    emit(&Paint::stdout().style(report));
     found(ok)
 }
 
