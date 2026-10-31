@@ -12,8 +12,19 @@ use crate::{
     alias::Aliases,
     api::Api,
     credential::Identity,
-    policy::{self, ModelPattern, PolicyError},
+    policy::{self, ModelPattern, PolicyError, PolicyScanner},
 };
+
+/// The scanner for a request body under `token_limit`: the field is read only
+/// when a ceiling applies, so a value only a ceiling would mind is not refused.
+pub fn scanner(api: Api, token_limit: Option<u64>) -> PolicyScanner {
+    let scanner = PolicyScanner::for_api(api);
+    if token_limit.is_some() {
+        scanner
+    } else {
+        scanner.without_token_field()
+    }
+}
 
 /// The checks that apply to one request's body.
 #[derive(Debug, Clone, Copy)]

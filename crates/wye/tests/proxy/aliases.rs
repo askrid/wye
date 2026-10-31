@@ -26,6 +26,16 @@ async fn an_alias_is_replaced_in_place_and_recorded() {
     assert_eq!(headers["content-length"], forwarded.len().to_string());
     assert_eq!(h.usage_record().await["requested_model"], "coding");
 
+    // No ceiling applies, so the output-token field is the provider's to judge.
+    for tokens in ["null", "4096.0"] {
+        let body = format!(r#"{{"model":"claude-sonnet-5-5","max_tokens":{tokens}}}"#);
+        let res = h.send(messages(), body.clone()).await;
+        assert_eq!(res.status(), StatusCode::OK, "{tokens}");
+        read_body(res).await;
+        assert_eq!(seen.recv().await.unwrap().1, body);
+        h.usage_record().await;
+    }
+
     // A name that is not an alias passes through byte for byte.
     let plain = r#"{"model":"claude-sonnet-5-5","max_tokens":1}"#;
     read_body(h.send(messages(), plain).await).await;

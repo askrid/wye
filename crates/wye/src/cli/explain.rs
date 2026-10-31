@@ -8,11 +8,11 @@
 
 use super::{args::Parsed, files};
 use gateway_core::{
-    admission::{BodyChecks, Refusal},
+    admission::{self, BodyChecks, Refusal},
     api::{self, Api},
     config::{Config, UpstreamCredential},
     credential::{Identity, Verifier},
-    policy::{self, PolicyScanner},
+    policy,
     pricing::{Pico, PricedModels, Usd},
     prompt,
     route::{self, FailoverReason, Select},
@@ -224,8 +224,8 @@ pub fn explain(
         // The server holds the body until its model is read, decides on what
         // it knows then, and checks the rest as it streams; explain reads the
         // file the same way, as if the hold ended right after the model.
-        let mut scanner = PolicyScanner::for_api(api);
-        let held = held_len(api, body);
+        let mut scanner = admission::scanner(api, checks.token_limit);
+        let held = held_len(api, checks.token_limit, body);
         let (start, rest) = body.split_at(held);
         scanner.feed(start);
         let sent = match scanner.finish() {
@@ -329,7 +329,7 @@ pub fn explain(
     // The gateway reads the model on a route that rewrites its id even when no
     // policy does; explain reads it for the price too.
     let model = out.model.clone().or_else(|| {
-        let mut scanner = PolicyScanner::for_api(api);
+        let mut scanner = admission::scanner(api, checks.token_limit);
         scanner.feed(body);
         scanner.finish().ok().map(str::to_owned)
     });
@@ -407,8 +407,8 @@ pub fn explain(
 
 /// Bytes of `body` through the end of its top-level `model` value, where
 /// the server's hold ends; the whole body when there is none to find.
-fn held_len(api: Api, body: &[u8]) -> usize {
-    let mut probe = PolicyScanner::for_api(api);
+fn held_len(api: Api, token_limit: Option<u64>, body: &[u8]) -> usize {
+    let mut probe = admission::scanner(api, token_limit);
     probe.feed(body);
     probe
         .model_span()

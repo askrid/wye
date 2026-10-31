@@ -25,6 +25,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
+    admission,
     admission::TokenLimitError,
     api::Api,
     policy::{PolicyError, PolicyScanner},
@@ -213,7 +214,7 @@ where
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
         budget: budget.hold_none(),
-        scanner: PolicyScanner::for_api(api),
+        scanner: admission::scanner(api, token_limit),
         ended: false,
         token_limit,
         api,
