@@ -570,6 +570,32 @@ async fn a_closed_log_leaves_otlp_export_running() {
     assert_eq!(exported, 2);
 }
 
+/// A log nobody reads fills its pipe and its write waits: records still reach
+/// OTLP. This harness's pipe holds 64 KiB, far less than these records.
+#[tokio::test]
+async fn a_blocked_log_leaves_otlp_export_running() {
+    const REQUESTS: usize = 800;
+    let (collector, mut collected) = recording(|seen| seen);
+    let h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
+    for _ in 0..REQUESTS {
+        read_body(h.send(messages(), "{}").await).await;
+    }
+    let mut exported = 0;
+    while exported < REQUESTS {
+        let seen = tokio::time::timeout(WAIT, collected.recv())
+            .await
+            .expect("every record exported while the log is blocked")
+            .unwrap();
+        if seen.uri.path() == "/v1/logs" {
+            let body: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
+            exported += body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+                .as_array()
+                .map_or(0, Vec::len);
+        }
+    }
+    assert_eq!(exported, REQUESTS);
+}
+
 #[tokio::test]
 async fn spans_a_collector_refuses_are_counted_as_lost() {
     // A collector without a traces pipeline: logs in, traces refused.

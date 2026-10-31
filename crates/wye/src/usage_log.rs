@@ -280,6 +280,15 @@ async fn write_records<W>(
             batch.flush();
         }
     };
+    let to_otlp = |otlp: &mut Option<(otlp::Batch, metrics::Metrics)>, line: &line::Line<'_>| {
+        if let Some((batch, metrics)) = otlp.as_mut() {
+            metrics.record(line);
+            batch.push(line);
+            if batch.is_full() {
+                batch.flush();
+            }
+        }
+    };
     let export = |otlp: &Option<(otlp::Batch, metrics::Metrics)>| {
         if let Some((batch, metrics)) = otlp.as_ref() {
             export_metrics(batch, metrics);
@@ -288,6 +297,10 @@ async fn write_records<W>(
     // A log that failed a write (its reader is gone) is not written again;
     // OTLP export goes on without it.
     let mut log_open = true;
+    // Records taken while the log's write waits: for the next write.
+    let mut spill = Vec::new();
+    let mut spilled: u64 = 0;
+    let mut queue_open = true;
     loop {
         // Cancel safety: `recv` and the ticks lose nothing when another branch wins.
         let record = tokio::select! {
@@ -306,36 +319,49 @@ async fn write_records<W>(
             let line = line(&r, &context);
             push_line(&mut buf, &line);
             lines += 1;
-            if let Some((batch, metrics)) = otlp.as_mut() {
-                metrics.record(&line);
-                batch.push(&line);
-                if batch.is_full() {
-                    batch.flush();
-                }
+            to_otlp(&mut otlp, &line);
+        }
+        while !buf.is_empty() {
+            if log_open {
+                // A log that blocks (a full pipe nobody reads) must not stop
+                // OTLP export: records and ticks are served while the write
+                // waits. Cancel safety: the write is never dropped before it
+                // completes, and `recv` loses nothing.
+                let write = async {
+                    out.write_all(&buf).await?;
+                    out.flush().await
+                };
+                tokio::pin!(write);
+                log_open = loop {
+                    tokio::select! {
+                        written = &mut write => break written.is_ok(),
+                        record = rx.recv(), if queue_open && otlp.is_some() => {
+                            let Some(r) = record else {
+                                queue_open = false;
+                                continue;
+                            };
+                            let line = line(&r, &context);
+                            to_otlp(&mut otlp, &line);
+                            if spilled < WRITE_BATCH as u64 {
+                                push_line(&mut spill, &line);
+                                spilled += 1;
+                            } else {
+                                dropped.fetch_add(1, Ordering::Relaxed);
+                            }
+                        }
+                        _ = logs_tick.tick(), if otlp.is_some() => flush(&mut otlp),
+                        _ = metrics_tick.tick(), if otlp.is_some() => export(&otlp),
+                    }
+                };
             }
+            if !log_open {
+                // Counted like a full queue's losses, so OTLP reports them.
+                dropped.fetch_add(lines, Ordering::Relaxed);
+            }
+            buf.clear();
+            std::mem::swap(&mut buf, &mut spill);
+            lines = std::mem::take(&mut spilled);
         }
-        if log_open {
-            // A log that blocks (a full pipe nobody reads) must not stop OTLP
-            // export: the ticks are served while the write waits. Cancel
-            // safety: the write is never dropped before it completes.
-            let write = async {
-                out.write_all(&buf).await?;
-                out.flush().await
-            };
-            tokio::pin!(write);
-            log_open = loop {
-                tokio::select! {
-                    written = &mut write => break written.is_ok(),
-                    _ = logs_tick.tick(), if otlp.is_some() => flush(&mut otlp),
-                    _ = metrics_tick.tick(), if otlp.is_some() => export(&otlp),
-                }
-            };
-        }
-        if !log_open {
-            // Counted like a full queue's losses, so OTLP reports them.
-            dropped.fetch_add(lines, Ordering::Relaxed);
-        }
-        buf.clear();
     }
     // The log's own losses, written before the exporter's last exports,
     // which a slow collector can hold past shutdown's flush.
