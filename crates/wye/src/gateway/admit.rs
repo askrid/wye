@@ -148,20 +148,20 @@ fn unreadable(headers: &HeaderMap) -> Option<&'static str> {
         // Which one a provider reads is not defined.
         return Some("the request body must be UTF-8 JSON");
     }
-    let charset = content_type.and_then(|v| v.to_str().ok()).and_then(|v| {
-        v.split(';').skip(1).find_map(|param| {
-            let (name, value) = param.split_once('=')?;
-            name.trim()
-                .eq_ignore_ascii_case("charset")
-                .then(|| value.trim().trim_matches('"'))
+    // Every parameter, and a value that cannot be read counts against it.
+    let other_charset = content_type.is_some_and(|v| {
+        v.to_str().map_or(true, |v| {
+            v.split(';').skip(1).any(|param| {
+                param.split_once('=').is_some_and(|(name, value)| {
+                    let value = value.trim().trim_matches('"');
+                    name.trim().eq_ignore_ascii_case("charset")
+                        && !value.eq_ignore_ascii_case("utf-8")
+                        && !value.eq_ignore_ascii_case("utf8")
+                })
+            })
         })
     });
-    match charset {
-        Some(c) if !c.eq_ignore_ascii_case("utf-8") && !c.eq_ignore_ascii_case("utf8") => {
-            Some("the request body must be UTF-8 JSON")
-        }
-        _ => None,
-    }
+    other_charset.then_some("the request body must be UTF-8 JSON")
 }
 
 /// Keeps a declared `content-length` true after the body changed by `delta`

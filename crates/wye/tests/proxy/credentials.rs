@@ -134,6 +134,10 @@ async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
             "content-type",
             &["application/json", "application/json; charset=utf-7"],
         ),
+        (
+            "content-type",
+            &["application/json; charset=utf-8; charset=utf-7"],
+        ),
     ] {
         let res = h.send(with_lines(name, values), HAIKU).await;
         assert_eq!(
@@ -142,6 +146,14 @@ async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
             "{name}: {values:?}"
         );
     }
+    // A value that cannot be read could hide a charset.
+    let mut opaque = with("content-type", "application/json");
+    opaque.headers_mut().unwrap().insert(
+        "content-type",
+        http::HeaderValue::from_bytes(b"application/json; charset=utf-7; x=\xff").unwrap(),
+    );
+    let res = h.send(opaque, HAIKU).await;
+    assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     let utf8 = with("content-type", "application/json; charset=UTF-8");
     assert_eq!(h.send(utf8, HAIKU).await.status(), StatusCode::OK);
     assert_eq!(h.upstream_hits.load(Ordering::SeqCst), 1);
