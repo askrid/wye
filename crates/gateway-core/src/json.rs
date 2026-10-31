@@ -90,9 +90,9 @@ impl Nesting {
         depth < Self::TRACKED && self.arrays & (1 << depth) != 0
     }
 
-    #[inline(always)]
     /// Whether the innermost open container is an object: after a `,`
     /// there, the next string is a key.
+    #[inline(always)]
     pub(crate) fn in_object(&self) -> bool {
         let depth = self.depth();
         depth > 0 && !self.is_array(depth)

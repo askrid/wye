@@ -15,11 +15,10 @@ mod validate;
 
 use crate::{alias::Aliases, api::Api, policy::ModelPattern, pricing::Pricing, route::Route};
 use validate::{
-    RawConfig, env_name, validate_aliases, validate_auth, validate_discovery, validate_pricing,
-    validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
+    RawConfig, env_name, sample_percent, validate_aliases, validate_auth, validate_discovery,
+    validate_pricing, validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
 };
 
-/// Default `max_held_request_bytes`.
 const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
@@ -35,8 +34,7 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 /// Local use needs no drain; behind a load balancer, set it above the
 /// health-check interval.
 const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
-/// Default `max_token_ttl_secs`: one week.
-const DEFAULT_MAX_CREDENTIAL_TTL_SECS: u64 = 7 * 24 * 3600;
+const DEFAULT_MAX_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
 /// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
 pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
 /// Default `failover_max_held_bytes`, across all requests of a process.
@@ -51,7 +49,7 @@ pub struct Config {
     pub server: Server,
     /// Where each API's requests go; at least one route.
     pub routes: Routes,
-    /// Gateway credentials callers must present. Without it, Wye listens on
+    /// Gateway tokens callers must present. Without it, Wye listens on
     /// loopback only.
     pub auth: Option<Auth>,
     /// Prompt hashes in the usage log, to explain prompt-cache misses.
@@ -110,8 +108,8 @@ pub const MAX_UPGRADE_TARGETS: usize = 16;
 pub struct UpgradeCheck {
     /// Models an alias or a client may move to; unique.
     pub targets: Box<[Box<str>]>,
-    /// Share of sessions checked (by session id, else credential subject),
-    /// every request of each.
+    /// Share of sessions checked (by session id, else token subject), every
+    /// request of each.
     pub sample_percent: u8,
 }
 
@@ -171,25 +169,23 @@ pub struct CacheDiagnostics {
 /// identity providers, or both.
 #[derive(Debug, Clone)]
 pub struct Auth {
-    /// Credentials issued with `wye token issue`; `None` when only identity
+    /// Tokens issued with `wye token issue`; `None` when only identity
     /// providers are trusted.
     pub own: Option<OwnIssuer>,
     /// Identity providers whose tokens are accepted directly.
     pub issuers: Vec<Issuer>,
     /// Longest accepted `exp - iat`: without a revocation list, offboarding
-    /// takes effect when the person's last credential expires.
+    /// takes effect when the person's last token expires.
     pub max_token_ttl: Duration,
-    /// Models any credential may use; `None` allows every model. A
-    /// credential's `models` claim, or an issuer's grants, narrow this, never
-    /// widen it.
+    /// Models any token may use; `None` allows every model. A token's
+    /// `models` claim, or an issuer's grants, narrow this, never widen it.
     pub models: Option<Vec<ModelPattern>>,
-    /// Largest output-token maximum any request may ask for (`max_tokens`,
-    /// `max_output_tokens`, `max_completion_tokens`); a credential's
+    /// Largest output-token maximum any request may ask for; a token's
     /// `max_output_tokens` claim can only lower it.
     pub max_output_tokens: Option<u64>,
 }
 
-/// Wye's own credentials: Ed25519, `alg` pinned to `EdDSA`.
+/// Wye's own tokens: Ed25519, `alg` pinned to `EdDSA`.
 #[derive(Debug, Clone)]
 pub struct OwnIssuer {
     /// Required `iss` claim.
@@ -218,7 +214,7 @@ pub struct Issuer {
     pub algorithm: Algorithm,
     /// The issuer's JSON Web Key Set, relative to the config file; read at startup.
     pub jwks_file: PathBuf,
-    /// The claim that names the credential's subject (default `sub`).
+    /// The claim that names the token's subject (default `sub`).
     pub subject_claim: String,
     /// Models granted by claim values. Empty: the `[auth] models` ceiling
     /// applies alone. Otherwise a token gets the union of its matching
@@ -492,16 +488,12 @@ impl Config {
         let cache_diagnostics = raw
             .cache_diagnostics
             .map(|raw| {
-                let sample_percent = match raw.sample_percent {
-                    None => DEFAULT_SAMPLE_PERCENT,
-                    Some(p @ 1..=100) => p,
-                    Some(_) => {
-                        return Err(ConfigError::Percent("cache_diagnostics.sample_percent"));
-                    }
-                };
                 Ok(CacheDiagnostics {
+                    sample_percent: sample_percent(
+                        raw.sample_percent,
+                        "cache_diagnostics.sample_percent",
+                    )?,
                     hash_key_env: env_name(raw.hash_key_env, "cache_diagnostics.hash_key_env")?,
-                    sample_percent,
                 })
             })
             .transpose()?;

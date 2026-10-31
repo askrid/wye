@@ -319,8 +319,9 @@ fn key_sets_keep_only_signing_keys_for_the_algorithm() {
     let ids = |alg| {
         ProviderKeys::parse(doc.as_bytes(), alg)
             .unwrap()
-            .ids()
-            .map(str::to_owned)
+            .keys
+            .iter()
+            .map(|(kid, _)| kid.to_string())
             .collect::<Vec<_>>()
     };
     assert_eq!(ids(Algorithm::Rs256), ["rsa-1"]);

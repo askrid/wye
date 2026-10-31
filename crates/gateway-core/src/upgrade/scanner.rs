@@ -24,6 +24,7 @@ const CAPTURE: usize = 32;
 
 /// Incremental reader of the request fields upgrade rules name, with constant
 /// memory and chunk boundaries anywhere.
+#[derive(Default)]
 pub struct UpgradeScanner {
     findings: Findings,
     nest: Nesting,
@@ -45,30 +46,9 @@ pub struct UpgradeScanner {
     escaped: bool,
 }
 
-impl Default for UpgradeScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl UpgradeScanner {
     pub fn new() -> Self {
-        Self {
-            findings: Findings::default(),
-            nest: Nesting::default(),
-            started: false,
-            failed: false,
-            in_string: false,
-            string: StringEnd::default(),
-            expect_key: false,
-            keys: [Key::Other; KEY_DEPTHS],
-            capturing: false,
-            is_key: false,
-            buf: [0; CAPTURE],
-            len: 0,
-            long: false,
-            escaped: false,
-        }
+        Self::default()
     }
 
     /// What the body uses so far; complete once the body has ended.
@@ -76,7 +56,6 @@ impl UpgradeScanner {
         self.findings
     }
 
-    /// Feeds the next chunk of request bytes.
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut i = 0;
         while i < chunk.len() && !self.failed {

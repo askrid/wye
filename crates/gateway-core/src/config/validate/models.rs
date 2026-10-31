@@ -82,11 +82,9 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
         ));
     }
     let price = |text: &str| {
-        parse_price(text).map_err(|_| {
-            ConfigError::Invalid(
-                "pricing: a price is USD per million tokens as a decimal string with at most six decimals, such as \"4.00\"",
-            )
-        })
+        parse_price(text).ok_or(ConfigError::Invalid(
+            "pricing: a price is USD per million tokens as a decimal string with at most six decimals, such as \"4.00\"",
+        ))
     };
     let optional = |text: Option<String>| text.as_deref().map(price).transpose();
     let mut entries = Vec::with_capacity(raw.models.len());
@@ -170,14 +168,9 @@ pub(crate) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeChec
         }
         targets.push(target.into());
     }
-    let sample_percent = match raw.sample_percent {
-        None => DEFAULT_SAMPLE_PERCENT,
-        Some(p @ 1..=100) => p,
-        Some(_) => return Err(ConfigError::Percent("upgrade_check.sample_percent")),
-    };
     Ok(UpgradeCheck {
         targets: targets.into(),
-        sample_percent,
+        sample_percent: sample_percent(raw.sample_percent, "upgrade_check.sample_percent")?,
     })
 }
 

@@ -93,11 +93,11 @@ pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
             .max_output_tokens
             .map(|n| nonzero(n, "auth.max_output_tokens"))
             .transpose()?,
-        max_token_ttl: secs(
-            raw.max_token_ttl_secs
-                .unwrap_or(DEFAULT_MAX_CREDENTIAL_TTL_SECS),
+        max_token_ttl: nonzero(
+            raw.max_token_ttl_secs.unwrap_or(DEFAULT_MAX_TOKEN_TTL_SECS),
             "auth.max_token_ttl_secs",
-        )?,
+        )
+        .map(Duration::from_secs)?,
     })
 }
 

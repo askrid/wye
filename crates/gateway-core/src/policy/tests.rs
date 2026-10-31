@@ -3,9 +3,10 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::api::Api;
 
 fn scan(body: &[u8]) -> Result<String, PolicyError> {
-    let mut scanner = PolicyScanner::new();
+    let mut scanner = PolicyScanner::for_api(Api::Messages);
     scanner.feed(body);
     scanner.finish().map(str::to_owned)
 }
@@ -18,7 +19,7 @@ type Chunked = (
 );
 
 fn scan_chunked(body: &[u8], sizes: &[usize]) -> Chunked {
-    let mut scanner = PolicyScanner::new();
+    let mut scanner = PolicyScanner::for_api(Api::Messages);
     let mut fed = 0;
     let mut known_after = None;
     let mut rest = body;
@@ -149,7 +150,7 @@ fn reads_only_what_a_strict_json_parser_reads() {
     }
     let literals = br#"{"model":"m","temperature":-1.5e+2,"stream":false,"stop":null,"x":true}"#;
     assert_eq!(scan(literals).unwrap(), "m");
-    let mut scanner = PolicyScanner::new();
+    let mut scanner = PolicyScanner::for_api(Api::Messages);
     scanner.feed(br#"{"model":"a","MAX_TOKENS":7}"#);
     assert_eq!(scanner.max_output_tokens(), Some(7));
 }
@@ -158,7 +159,7 @@ fn reads_only_what_a_strict_json_parser_reads() {
 fn model_is_known_right_after_its_value() {
     let body = br#"{"model":"claude-x","messages":[]}"#;
     let end = body.iter().position(|&b| b == b',').unwrap();
-    let mut scanner = PolicyScanner::new();
+    let mut scanner = PolicyScanner::for_api(Api::Messages);
     scanner.feed(&body[..end]);
     assert_eq!(scanner.model(), Some("claude-x"));
 }
@@ -251,7 +252,7 @@ proptest! {
 #[test]
 fn reads_max_tokens_and_rejects_bad_values() {
     let tokens = |body: &[u8]| {
-        let mut scanner = PolicyScanner::new();
+        let mut scanner = PolicyScanner::for_api(Api::Messages);
         scanner.feed(body);
         scanner.error().map_or(Ok(scanner.max_output_tokens()), Err)
     };
@@ -308,7 +309,7 @@ fn chat_completions_take_either_token_field_but_not_both() {
         Some(PolicyError::RepeatedMaxTokens)
     );
     // Messages reads only its own field.
-    let mut s = PolicyScanner::new();
+    let mut s = PolicyScanner::for_api(Api::Messages);
     s.feed(br#"{"model":"m","max_completion_tokens":50}"#);
     assert_eq!(s.max_output_tokens(), None);
 }

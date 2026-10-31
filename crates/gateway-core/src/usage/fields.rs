@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 
-use super::{MAX_TOOL_NAME_BYTES, ToolCalls, Usage};
+use super::{MAX_TOOL_NAME_BYTES, ToolCalls, Usage, count_tool};
 use crate::json::{Nesting, StringEnd, is_space};
 
 /// Longest `response.usage` object kept; larger marks usage unknown.
@@ -29,17 +29,28 @@ pub(super) struct InputDetails {
 }
 
 impl OpenAiUsage {
-    /// Into Wye's meaning: OpenAI's `input_tokens` include cached tokens,
-    /// ours do not, so the cached share becomes `cache_read_input_tokens`.
     pub(super) fn merge_into(self, usage: &mut Usage) {
-        let cached = self
-            .input_tokens_details
-            .and_then(|d| d.cached_tokens)
-            .unwrap_or(0);
-        usage.input_tokens = self.input_tokens.map(|i| i.saturating_sub(cached));
-        usage.cache_read_input_tokens = self.input_tokens.map(|_| cached);
-        usage.output_tokens = self.output_tokens;
+        merge_openai(
+            usage,
+            self.input_tokens,
+            self.output_tokens,
+            self.input_tokens_details,
+        );
     }
+}
+
+/// Into Wye's meaning: OpenAI's input count includes cached tokens, ours
+/// does not, so the cached share becomes `cache_read_input_tokens`.
+pub(super) fn merge_openai(
+    usage: &mut Usage,
+    input: Option<u64>,
+    output: Option<u64>,
+    details: Option<InputDetails>,
+) {
+    let cached = details.and_then(|d| d.cached_tokens).unwrap_or(0);
+    usage.input_tokens = input.map(|i| i.saturating_sub(cached));
+    usage.cache_read_input_tokens = input.map(|_| cached);
+    usage.output_tokens = output;
 }
 
 /// The response object's member keys that are read.
@@ -99,8 +110,6 @@ pub(super) fn openai_tool<'a>(kind: &'a str, name: Option<&'a str>) -> Option<(&
     }
 }
 
-/// A constant-memory lexer for one JSON document, keeping the response
-/// object's `model`, `service_tier`, and raw `usage`.
 #[derive(Debug)]
 pub(super) struct ResponseFields {
     /// The top-level key holding the response object; `None`: the document
@@ -129,11 +138,9 @@ pub(super) struct ResponseFields {
     /// Inline, so reading a response allocates nothing beyond the scanner.
     usage: [u8; MAX_USAGE_BYTES],
     usage_len: usize,
-    /// Inside the usage object.
     in_usage: bool,
     usage_long: bool,
     items: Items,
-    /// Inside the items array.
     in_items: bool,
     item_key: ItemKey,
     item_type: ([u8; MAX_TOOL_NAME_BYTES], usize),
@@ -182,7 +189,6 @@ impl ResponseFields {
         if self.root.is_some() { 2 } else { 1 }
     }
 
-    /// Inside the response object.
     fn in_object(&self) -> bool {
         self.root.is_none() || self.in_root
     }
@@ -405,9 +411,7 @@ impl ResponseFields {
         };
         if let Some((tool, hosted)) = call {
             self.hosted_tool |= hosted;
-            self.tools
-                .get_or_insert_with(|| Box::new(ToolCalls::new()))
-                .count(tool);
+            count_tool(&mut self.tools, tool);
         }
     }
 

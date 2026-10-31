@@ -164,7 +164,7 @@ A body wrapper emits one record when the body is dropped, so every outcome is re
 
 **Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured provider key, except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough); with the provider key, also drop the caller's `OpenAI-Organization` and `OpenAI-Project`, which would choose what the operator's key bills. Forward only appropriate end-to-end headers.
 
-Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response costs only bytes, decompressing a copy costs CPU per event ([research.md](research.md#current-harness-and-baseline)).
+Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response costs only bytes, decompressing a copy costs CPU per event ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
 
 The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
 

@@ -37,17 +37,14 @@ fn usage(input: u64, output: u64) -> Usage {
 
 #[test]
 fn parses_prices_per_million_into_exact_pico_per_token() {
-    assert_eq!(parse_price("4.00"), Ok(4_000_000));
-    assert_eq!(parse_price("0.10"), Ok(100_000));
-    assert_eq!(parse_price("0.000001"), Ok(1));
-    assert_eq!(parse_price("15"), Ok(15_000_000));
+    assert_eq!(parse_price("4.00"), Some(4_000_000));
+    assert_eq!(parse_price("0.10"), Some(100_000));
+    assert_eq!(parse_price("0.000001"), Some(1));
+    assert_eq!(parse_price("15"), Some(15_000_000));
     for bad in ["", ".5", "1.", "-1", "1.0000001", "1e3", "1,5", " 1"] {
-        assert_eq!(parse_price(bad), Err(PriceError::Format), "{bad:?}");
+        assert_eq!(parse_price(bad), None, "{bad:?}");
     }
-    assert_eq!(
-        parse_price("99999999999999999999"),
-        Err(PriceError::Overflow)
-    );
+    assert_eq!(parse_price("99999999999999999999"), None);
 }
 
 #[test]

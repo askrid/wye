@@ -72,17 +72,6 @@ impl<'de> Deserialize<'de> for AnyCount {
     }
 }
 
-/// A count, or zero for anything that is not a non-negative integer.
-struct Count(u64);
-
-impl<'de> Deserialize<'de> for Count {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer
-            .deserialize_any(AnyCountVisitor)
-            .map(|any| Count(u64::from(any.0)))
-    }
-}
-
 struct AnyCountVisitor;
 
 impl<'de> Visitor<'de> for AnyCountVisitor {
@@ -123,8 +112,8 @@ impl<'de> Visitor<'de> for AnyCountVisitor {
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<AnyCount, A::Error> {
         let mut any = false;
-        while let Some((_, Count(n))) = map.next_entry::<IgnoredAny, Count>()? {
-            any |= n > 0;
+        while let Some((_, AnyCount(n))) = map.next_entry::<IgnoredAny, AnyCount>()? {
+            any |= n;
         }
         Ok(AnyCount(any))
     }
@@ -133,11 +122,7 @@ impl<'de> Visitor<'de> for AnyCountVisitor {
 impl RawUsage<'_> {
     /// Later events replace earlier counts; `message_delta` output tokens are cumulative.
     pub(super) fn merge_into(self, usage: &mut Usage) {
-        let take = |field: &mut Option<u64>, value: Option<u64>| {
-            if value.is_some() {
-                *field = value;
-            }
-        };
+        let take = |field: &mut Option<u64>, value: Option<u64>| *field = value.or(*field);
         take(&mut usage.input_tokens, self.input_tokens);
         take(&mut usage.output_tokens, self.output_tokens);
         take(

@@ -80,7 +80,6 @@ impl CostStatus {
     }
 }
 
-/// A request's cost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cost {
     /// `None` when unknown.
@@ -195,39 +194,30 @@ impl PricedModels {
     }
 }
 
-/// Why a price string was rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PriceError {
-    /// Not a non-negative decimal with at most six decimals.
-    Format,
-    /// Too large to represent.
-    Overflow,
-}
-
 /// Pico-USD in one USD: costs are integers in this unit.
 pub const PICO_PER_USD: u64 = 1_000_000_000_000;
 
 /// Parses USD per million tokens (`"4.00"`) into pico-USD per token: the
 /// value times 10^6, exact for at most six decimals.
-pub(crate) fn parse_price(text: &str) -> Result<Pico, PriceError> {
+pub(crate) fn parse_price(text: &str) -> Option<Pico> {
     parse_fixed(text, 6)
 }
 
 /// Parses a cost written by [`Usd`] (a decimal with at most 12 decimals)
 /// back into pico-USD; `None` for anything else or an overflow.
 pub fn parse_usd(text: &str) -> Option<Pico> {
-    parse_fixed(text, 12).ok()
+    parse_fixed(text, 12)
 }
 
 /// A non-negative decimal with at most `decimals` decimals, times
-/// 10^`decimals`, exact.
-fn parse_fixed(text: &str, decimals: usize) -> Result<u64, PriceError> {
+/// 10^`decimals`, exact; `None` for anything else or an overflow.
+fn parse_fixed(text: &str, decimals: usize) -> Option<u64> {
     let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     if !digits(whole) || (text.contains('.') && !digits(fraction)) || fraction.len() > decimals {
-        return Err(PriceError::Format);
+        return None;
     }
-    let whole: u64 = whole.parse().map_err(|_| PriceError::Overflow)?;
+    let whole: u64 = whole.parse().ok()?;
     // At most `decimals` digits, padded to that many: no overflow for 12.
     let mut scale = 1u64;
     let scaled = fraction
@@ -238,10 +228,7 @@ fn parse_fixed(text: &str, decimals: usize) -> Result<u64, PriceError> {
             scale *= 10;
             acc * 10 + u64::from(b - b'0')
         });
-    whole
-        .checked_mul(scale)
-        .and_then(|w| w.checked_add(scaled))
-        .ok_or(PriceError::Overflow)
+    whole.checked_mul(scale)?.checked_add(scaled)
 }
 
 /// A cost in USD as a decimal string, exact: pico-USD with trailing zeros

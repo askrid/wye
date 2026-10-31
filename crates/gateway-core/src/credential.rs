@@ -46,8 +46,7 @@ pub struct Identity {
     /// provider's matching grants); `None` leaves the configured list in
     /// charge. An empty list allows no model.
     pub models: Option<Box<[ModelPattern]>>,
-    /// Largest output-token maximum (`max_tokens`, `max_output_tokens`,
-    /// `max_completion_tokens`) this credential may request (the
+    /// Largest output-token maximum this credential may request (the
     /// `max_output_tokens` claim).
     pub max_output_tokens: Option<u64>,
 }

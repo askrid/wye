@@ -29,8 +29,7 @@ pub struct PolicyScanner {
     expect_key: bool,
     capture: Capture,
     key: [u8; KEY_CAP],
-    /// The API's output-token fields (`max_tokens`, `max_output_tokens`,
-    /// `max_completion_tokens`).
+    /// The API's output-token fields.
     token_keys: &'static [&'static str],
     key_len: usize,
     key_long: bool,
@@ -56,19 +55,7 @@ pub struct PolicyScanner {
     max_tokens: Option<u64>,
 }
 
-impl Default for PolicyScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PolicyScanner {
-    /// A scanner for Anthropic Messages bodies.
-    pub fn new() -> Self {
-        Self::for_api(Api::Messages)
-    }
-
-    /// A scanner for `api`'s request bodies.
     pub fn for_api(api: Api) -> Self {
         Self {
             error: None,
@@ -122,9 +109,7 @@ impl PolicyScanner {
         Some(self.model_start..self.model_start + self.model_len as u64)
     }
 
-    /// The requested output-token maximum (`max_tokens` on Messages,
-    /// `max_output_tokens` on Responses, either field on Chat Completions),
-    /// once its value was read completely.
+    /// The requested output-token maximum, once its value was read completely.
     pub fn max_output_tokens(&self) -> Option<u64> {
         self.max_tokens
     }
@@ -146,7 +131,6 @@ impl PolicyScanner {
         })
     }
 
-    /// Feeds the next chunk of request bytes.
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut i = 0;
         while i < chunk.len() && self.error.is_none() {
@@ -312,7 +296,6 @@ impl PolicyScanner {
         }
     }
 
-    /// Keeps string content that matters.
     fn keep(&mut self, content: &[u8]) {
         if self.capture == Capture::None {
             return;
