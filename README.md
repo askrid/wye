@@ -4,22 +4,43 @@
 [![License: WTFPL](https://img.shields.io/badge/license-WTFPL-blue)](LICENSE)
 [![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-orange)](rust-toolchain.toml)
 
-Wye is a small, stateless gateway that sits between coding agents (Claude Code,
-Codex) or your own apps and the model providers. It speaks each provider's
-native API and forwards requests byte for byte, so clients keep the official
-SDK and nothing gets translated. What changes is where the decisions live:
-which provider and account a request goes to, who may use which model,
-output-token ceilings, failover, model upgrades, and prices all sit in one TOML
-file you keep in Git.
-
-It is one Rust binary with no database and no admin API. Every replica makes
-the same decision for the same request, so you can run as many as you like
-behind a load balancer.
+Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or
+your own apps and the model providers. It speaks each provider's native API and
+forwards requests byte for byte, so clients keep the official SDK and nothing
+gets translated. Which provider and account a request goes to, who may use which
+model, output-token ceilings, failover, model upgrades, and prices all sit in one
+TOML file you keep in Git. It is one Rust binary with no database and no admin
+API, and every replica makes the same decision for the same request.
 
 > **Status:** working prototype, `0.x`. It is tested and benchmarked on one
 > machine and has been used with Claude Code through a claude.ai subscription.
 > See [Status](#status) for what is and is not checked against the real
 > providers.
+
+```console
+$ wye report
+3 requests in 1 session (0 other lines skipped); outcomes: completed 3
+
+By request class
+                                      cache  cache
+  class           reqs  input output   read  write    hit      cost  time tools
+  all                3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
+  main               3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
+...
+```
+
+```bash
+cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.98+
+
+wye init              # writes ~/.wye/wye.toml; needs no key
+wye service install   # shows what it sets up and asks; runs the gateway in the background
+wye claude            # Claude Code through the gateway, signed in as usual
+wye report            # what it recorded
+```
+
+Your claude.ai login or API key goes through, on this machine only, and the
+gateway holds no secret. [docs/guide.md](docs/guide.md) covers the other setups: a
+team behind HTTPS, apps on the official SDKs, upgrades, and troubleshooting.
 
 ## Why
 
@@ -42,85 +63,6 @@ Wye takes the opposite approach:
   subagent headers map onto the same fields.
 - It keeps no state between requests. Limits are per request; rate limits and
   budgets stay with the provider, which already keeps that ledger.
-
-## Quick start
-
-Build and install from source (needs Rust 1.98 or later):
-
-```bash
-cargo install --git https://github.com/askrid/wye wye --locked
-```
-
-Prebuilt Linux and macOS archives come with the first release, which is not
-published yet.
-
-### For yourself
-
-```bash
-wye init              # writes ~/.wye/wye.toml; needs no key
-wye service install   # shows what it sets up and asks; runs the gateway in the background
-wye claude            # Claude Code through the gateway, signed in as usual
-wye report            # what it recorded
-```
-
-Your claude.ai login (Pro or Max) or API key goes through the gateway, on this
-machine only, and the gateway holds no secret. As without Wye, an exported
-`ANTHROPIC_API_KEY` takes over from your login and bills the API. `wye init
---api-key` has the gateway hold a key instead, and `wye serve >>
-~/.wye/usage.jsonl` runs it in a terminal instead of as a service.
-
-`wye claude` starts Claude Code with its base URL set to the gateway and its
-gateway hints on (request class, prompt id, and tool times, for the usage
-log), and `wye claude --bg "task"` starts a background session that goes
-through it too. It does not touch your Claude Code settings.
-`wye service install` shows the file it writes (a LaunchAgent on macOS, a
-systemd user unit on Linux) and asks before changing anything;
-`wye service uninstall` removes it
-([docs/operations.md](docs/operations.md#running-as-a-service)).
-
-### For a team
-
-One gateway for every developer and app, configured from a repository. No image
-is published yet, so build one from a clone of this repository:
-
-```bash
-docker build -t wye .                               # in a clone of Wye
-
-wye init --team                                     # in your config repository: ./wye.toml,
-                                                    # and a signing key in ~/.wye/issuer.key
-wye token issue alice -c wye.toml --out alice.token # a token, valid for a week
-docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
-```
-
-Put it behind HTTPS ([docs/operations.md](docs/operations.md#deployment-modes)).
-Each developer then points their agent at it:
-
-```bash
-export WYE_URL=https://wye.example.com WYE_TOKEN=<their token>
-wye claude
-```
-
-Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and
-`ANTHROPIC_AUTH_TOKEN`, or an `apiKeyHelper` that fetches short-lived tokens
-from your identity provider
-([docs/operations.md](docs/operations.md#token-renewal)). `wye codex` needs
-`[routes.openai]` in the config (`wye init --team --openai`, and
-`-e OPENAI_API_KEY` for the container).
-
-### For apps
-
-The official SDKs read their base URL and key from the environment, so an app
-changes no code. Against a team's gateway, the key is a gateway token:
-
-```bash
-ANTHROPIC_BASE_URL=https://wye.example.com ANTHROPIC_API_KEY=<gateway token> python app.py
-OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<gateway token> node app.js
-```
-
-Against the gateway on your own machine, only the URL changes
-(`ANTHROPIC_BASE_URL=http://127.0.0.1:8080`): the app's own key goes through.
-With `wye init --api-key` the gateway holds the key, and the app's can be any
-placeholder.
 
 ## Configuration
 
@@ -200,20 +142,6 @@ OTLP log record, a span, and metrics). This record is from a local test run:
 Costs are exact decimal strings, computed in integers. A model with no price is
 recorded as `unknown`, never as $0.
 
-`wye report` summarizes a log without any backend:
-
-```console
-$ wye report
-3 requests in 1 session (0 other lines skipped); outcomes: completed 3
-
-By request class
-                                      cache  cache
-  class           reqs  input output   read  write    hit      cost  time tools
-  all                3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
-  main               3     36    114   145K   4.6K  96.9%   $0.0832   14s  1.8s
-...
-```
-
 `wye explain` shows what the server would do with a request, offline, by
 calling the same functions in the same order:
 
@@ -277,7 +205,7 @@ mock provider, not production measurements.
 Compared at their best configurations on the same machine, Bifrost used about
 6.6× more CPU per request and 4.4× more per streamed event, and LiteLLM about
 120× and 9×. KrakenD CE cannot stream at all, though it beats Wye on bulk
-transfer and TLS uploads. [docs/research.md](docs/research.md#benchmarks) has
+transfer and TLS uploads. [docs/benchmarks.md](docs/benchmarks.md) has
 the method, the full tables, the configurations used, and where Wye loses.
 
 ## Status

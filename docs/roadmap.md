@@ -14,7 +14,7 @@ Each milestone leaves a runnable system with focused tests. Order of the next wo
 | M2b: model aliases and upgrade checks | Done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit check, a real alias move |
 | M3: Codex | Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, stored responses reaching their account by affinity ([as built](architecture.md#upstream-held-state)). Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision |
 | M4: Claude across providers and accounts | Built: routes with several accounts, `cache_affine` or `ordered`, failover before output, Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-m4)). Open: one live Bedrock request, SigV4, Vertex; these need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
-| M5: benchmarks and optimization | Started early: the commit gate since M0, with provider, failover, and refusal variants; KrakenD, LiteLLM, and Bifrost comparisons ([research.md](research.md#benchmarks)). Open: agent trace replay, a floor baseline, a separate Linux load machine, the remaining competitors |
+| M5: benchmarks and optimization | Started early: the commit gate since M0, with provider, failover, and refusal variants; KrakenD, LiteLLM, and Bifrost comparisons ([benchmarks.md](benchmarks.md)). Open: agent trace replay, a floor baseline, a separate Linux load machine, the remaining competitors |
 | M6: optional extensions | `wye policy-diff` done (the CI half of [queryable policy](research.md#5-queryable-and-provable-policy)); the rest not started |
 
 ## Open work and exits
@@ -66,7 +66,7 @@ Exit: a team serves Claude Code from at least two providers, keeps prompt-cache 
 
 ### M5: benchmarks and optimization
 
-Adds a floor baseline (nginx or Envoy as a plain streaming proxy), the [remaining competitors](research.md#benchmark-suite-kept-cut-missing), 10k streams, Linux and a separate load machine, replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)), and targeted optimization of memory, TTFT, backpressure, and CPU.
+Adds a floor baseline (nginx or Envoy as a plain streaming proxy), the [remaining competitors](benchmarks.md#benchmark-suite-kept-cut-missing), 10k streams, Linux and a separate load machine, replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)), and targeted optimization of memory, TTFT, backpressure, and CPU.
 
 Exit: comparative results document actual performance, workload assumptions, and tradeoffs, with no speedup goal that a measurement does not back.
 
@@ -104,7 +104,19 @@ From the CLI review (2026-10-30), not fixed:
 - A `gateway_error` record does not say why: `wye report` shows `502 6` on a real log, and neither the record nor the report tells a refused connection from a broken stream. Six in a burst of auxiliary requests (2026-10-30) stay unexplained for that reason.
 - The report has no cost column until the config has `[pricing]`, and `wye init` writes none, since a table in the binary would need upkeep ([visibility ideas](research.md#visibility-for-one-developer)).
 
-## Release acceptance checklist
+## First release (0.1)
+
+What must be true to tag it:
+
+- [ ] The release workflow publishes a GitHub Release from a `v*` tag.
+- [ ] `gh attestation verify` passes on its archives.
+- [ ] `wye service` has run on a real Linux machine, or the release notes say the systemd path is untested.
+- [ ] One full Claude Code session with an API key.
+- [ ] A container image on GHCR.
+
+Postponed while solo-maintained: CONTRIBUTING, issue forms, Discussions, SECURITY.md, code of conduct.
+
+## Before 1.0
 
 ### Functional / API
 
