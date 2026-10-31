@@ -72,6 +72,6 @@ These appear on generated pages whatever the subject. None is used unless chosen
 ## Review
 
 - Plan before code with Anthropic's `frontend-design` skill: 4–6 named colours, type roles, ASCII wireframes. Review the plan against these principles and revise any part that would come out the same for any other gateway.
-- Run `npx impeccable detect` on the built page and check it against Vercel's web interface guidelines, locally; neither is a site dependency.
+- Run `npx impeccable detect` on the built page and check it against Vercel's web interface guidelines, locally; neither is a site dependency. Run Impeccable from `site/`, never from the repository root: it treats this file as its design file and keeps its own files (`PRODUCT.md`, `.impeccable/`) beside it.
 - Review every animation with the `review-animations` skill, and its cost with `animation-performance`.
 - Look at screenshots at phone and desktop widths, light and dark, before each commit that changes the look.
