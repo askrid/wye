@@ -2,37 +2,24 @@
 
 use super::harness::*;
 
-fn token(key: &Ed25519KeyPair, iat: u64, exp: u64) -> String {
-    issue(
-        key,
-        &NewCredential {
-            iat,
-            exp,
-            ..claims("alice")
-        },
-    )
+/// A token for `alice` with no model list or ceiling of its own.
+fn alice(key: &Ed25519KeyPair) -> String {
+    token(key, "alice", None, None)
 }
 
 /// Gateway with `[auth]` trusting `key`, recording what the upstream receives.
 async fn harness(key: &Ed25519KeyPair) -> (Harness, mpsc::Receiver<HeaderMap>) {
     let (handler, rx) = recording(|seen| seen.headers);
-    let auth = format!("api_key_env = \"UNUSED\"\n{}", auth_section(key, ""));
-    let h = Harness::start(handler, &auth, UpstreamAuth::api_key(API_KEY).unwrap()).await;
-    (h, rx)
+    (Harness::keyed(handler, &auth_section(key, "")).await, rx)
 }
 
 #[tokio::test]
 async fn valid_credential_is_replaced_by_the_provider_key() {
     let key = keypair();
     let (h, mut seen) = harness(&key).await;
-    let t = token(&key, now(), now() + 600);
+    let t = alice(&key);
 
-    let res = h
-        .send(
-            messages().header("authorization", format!("Bearer {t}")),
-            "{}",
-        )
-        .await;
+    let res = h.send(bearer(&t), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     let headers = seen.recv().await.unwrap();
     assert_eq!(headers["x-api-key"], API_KEY);
@@ -50,14 +37,21 @@ async fn valid_credential_is_replaced_by_the_provider_key() {
 async fn missing_expired_or_foreign_credentials_never_reach_upstream() {
     let key = keypair();
     let (h, _seen) = harness(&key).await;
-    let expired = token(&key, now() - 600, now() - 1);
-    let foreign = token(&keypair(), now(), now() + 600);
+    let expired = issue(
+        &key,
+        &NewCredential {
+            iat: now() - 600,
+            exp: now() - 1,
+            ..claims("alice")
+        },
+    );
+    let foreign = alice(&keypair());
     for header in [
         None,
         Some(format!("Bearer {expired}")),
         Some(format!("Bearer {foreign}")),
         Some("Bearer not-a-token".to_owned()),
-        Some(format!("Basic {}", token(&key, now(), now() + 600))),
+        Some(format!("Basic {}", alice(&key))),
     ] {
         let req = match &header {
             Some(value) => messages().header("authorization", value),
@@ -84,24 +78,14 @@ async fn missing_expired_or_foreign_credentials_never_reach_upstream() {
 }
 
 fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
-    issue(
-        key,
-        &NewCredential {
-            models: Some(models),
-            ..claims("alice")
-        },
-    )
+    token(key, "alice", Some(models), None)
 }
 
 /// Gateway with `[auth]` trusting `key` and `auth_extra` lines, recording
 /// the request bodies the upstream receives.
 async fn body_harness(key: &Ed25519KeyPair, auth_extra: &str) -> (Harness, mpsc::Receiver<Bytes>) {
     let (handler, rx) = recording(|seen| seen.body);
-    let auth = format!(
-        "api_key_env = \"UNUSED\"\n{}",
-        auth_section(key, auth_extra)
-    );
-    let h = Harness::start(handler, &auth, UpstreamAuth::api_key(API_KEY).unwrap()).await;
+    let h = Harness::keyed(handler, &auth_section(key, auth_extra)).await;
     (h, rx)
 }
 
@@ -116,7 +100,7 @@ async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
     let t = token_with_models(&key, &["claude-haiku-*"]);
     // Every line counts: a provider may honour the second.
     let with_lines = |name: &'static str, values: &[&'static str]| {
-        let mut req = messages().header("authorization", format!("Bearer {t}"));
+        let mut req = bearer(&t);
         let headers = req.headers_mut().unwrap();
         headers.remove(name);
         for value in values {
@@ -164,14 +148,14 @@ async fn credential_models_allow_or_refuse_before_upstream() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;
     let t = token_with_models(&key, &["claude-haiku-*"]);
-    let bearer = || messages().header("authorization", format!("Bearer {t}"));
+    let req = || bearer(&t);
 
-    let res = h.send(bearer(), HAIKU).await;
+    let res = h.send(req(), HAIKU).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(bodies.recv().await.unwrap(), HAIKU, "forwarded unchanged");
     h.usage_record().await;
 
-    let res = h.send(bearer(), SONNET).await;
+    let res = h.send(req(), SONNET).await;
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let refusal = read_body(res).await;
     assert!(refusal.starts_with(br#"{"type":"error","error":{"type":"permission_error""#));
@@ -189,7 +173,7 @@ async fn credential_models_allow_or_refuse_before_upstream() {
         ),
         ("not json", StatusCode::BAD_REQUEST),
     ] {
-        let res = h.send(bearer(), body).await;
+        let res = h.send(req(), body).await;
         assert_eq!(res.status(), status, "{body}");
         h.usage_record().await;
     }
@@ -200,17 +184,11 @@ async fn credential_models_allow_or_refuse_before_upstream() {
 async fn configured_models_are_a_ceiling_credentials_cannot_widen() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "models = [\"claude-haiku-*\"]").await;
-    for t in [
-        token(&key, now(), now() + 600),
-        token_with_models(&key, &["*"]),
-    ] {
-        let bearer = || messages().header("authorization", format!("Bearer {t}"));
-        assert_eq!(h.send(bearer(), HAIKU).await.status(), StatusCode::OK);
+    for t in [alice(&key), token_with_models(&key, &["*"])] {
+        let req = || bearer(&t);
+        assert_eq!(h.send(req(), HAIKU).await.status(), StatusCode::OK);
         assert_eq!(bodies.recv().await.unwrap(), HAIKU);
-        assert_eq!(
-            h.send(bearer(), SONNET).await.status(),
-            StatusCode::FORBIDDEN
-        );
+        assert_eq!(h.send(req(), SONNET).await.status(), StatusCode::FORBIDDEN);
     }
 }
 
@@ -218,43 +196,28 @@ async fn configured_models_are_a_ceiling_credentials_cannot_widen() {
 async fn credentials_without_any_model_list_skip_the_check() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;
-    let t = token(&key, now(), now() + 600);
+    let t = alice(&key);
     // Not even JSON: without a restriction, Wye does not read the body.
-    let res = h
-        .send(
-            messages().header("authorization", format!("Bearer {t}")),
-            "not json",
-        )
-        .await;
+    let res = h.send(bearer(&t), "not json").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(bodies.recv().await.unwrap(), "not json");
-}
-
-fn token_with_output_limit(key: &Ed25519KeyPair, max_output_tokens: u64) -> String {
-    issue(
-        key,
-        &NewCredential {
-            max_output_tokens: Some(max_output_tokens),
-            ..claims("alice")
-        },
-    )
 }
 
 #[tokio::test]
 async fn max_tokens_above_the_stricter_limit_is_refused() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "max_output_tokens = 8000").await;
-    let t = token_with_output_limit(&key, 4000);
-    let bearer = || messages().header("authorization", format!("Bearer {t}"));
+    let t = token(&key, "alice", None, Some(4000));
+    let req = || bearer(&t);
     let within = r#"{"model":"claude-haiku-4-5","max_tokens":4000,"messages":[]}"#;
-    assert_eq!(h.send(bearer(), within).await.status(), StatusCode::OK);
+    assert_eq!(h.send(req(), within).await.status(), StatusCode::OK);
     assert_eq!(bodies.recv().await.unwrap(), within);
     h.usage_record().await;
 
     // The credential's 4000 is stricter than the configured 8000.
     let res = h
         .send(
-            bearer(),
+            req(),
             r#"{"model":"claude-haiku-4-5","max_tokens":6000,"messages":[]}"#,
         )
         .await;
@@ -304,7 +267,7 @@ async fn a_late_second_model_aborts_the_upstream_request() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;
     let t = token_with_models(&key, &["claude-haiku-*"]);
-    let req = messages().header("authorization", format!("Bearer {t}"));
+    let req = bearer(&t);
     let chunks: [&[u8]; 2] = [
         br#"{"model":"claude-haiku-4-5","messages":[],"#,
         br#""model":"claude-opus-5-5"}"#,
@@ -329,8 +292,8 @@ async fn late_max_tokens_is_refused(
     key: &Ed25519KeyPair,
     bodies: &mut mpsc::Receiver<Bytes>,
 ) {
-    let t = token(key, now(), now() + 600);
-    let req = messages().header("authorization", format!("Bearer {t}"));
+    let t = alice(key);
+    let req = bearer(&t);
     let chunks: [&[u8]; 2] = [
         br#"{"model":"claude-haiku-4-5","messages":[],"#,
         br#""max_tokens":9000}"#,
@@ -375,7 +338,7 @@ async fn model_discovery_lists_only_permitted_models() {
             .collect()
     };
 
-    let res = list(Some(token(&key, now(), now() + 600))).await;
+    let res = list(Some(alice(&key))).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["content-type"], "application/json");
     assert_eq!(
@@ -395,6 +358,6 @@ async fn model_discovery_lists_only_permitted_models() {
 async fn model_discovery_is_absent_without_a_catalog() {
     let key = keypair();
     let (h, _bodies) = body_harness(&key, "").await;
-    let req = Request::get("/v1/models").header("x-api-key", token(&key, now(), now() + 600));
+    let req = Request::get("/v1/models").header("x-api-key", alice(&key));
     assert_eq!(h.send(req, "").await.status(), StatusCode::NOT_FOUND);
 }

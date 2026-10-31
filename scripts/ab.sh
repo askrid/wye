@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 a=$1; b=$2; rounds=${3:-3}
 out=target/bench/ab; rm -rf "$out"; mkdir -p "$out"
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
-cargo build --release --quiet -p wye-bench
+cargo build --locked --release --quiet -p wye-bench
 for i in $(seq 1 "$rounds"); do
   order="a b"; (( i % 2 == 0 )) && order="b a"
   for side in $order; do

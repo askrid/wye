@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::Gateway;
+use super::{Gateway, Variant};
 use crate::{
     client::Target,
     gateway_config::{
@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-/// [`Gateway::WyeRefused`]'s first account refuses one request in this many.
+/// [`Variant::Refused`]'s first account refuses one request in this many.
 const REFUSE_EVERY: u64 = 4;
 
 /// How to launch one gateway in front of an upstream.
@@ -55,32 +55,24 @@ impl Setup<'_> {
 impl Launch {
     pub(super) async fn new(gateway: Gateway<'_>, setup: &Setup<'_>) -> Self {
         match gateway {
-            Gateway::Wye(program)
-            | Gateway::WyeAuth(program)
-            | Gateway::WyeModels(program)
-            | Gateway::WyeDiag(program)
-            | Gateway::WyeOtlp(program)
-            | Gateway::WyeOpenai(program)
-            | Gateway::WyeBedrock(program)
-            | Gateway::WyeFailover(program)
-            | Gateway::WyeRefused(program) => Self::wye(program, gateway, setup).await,
+            Gateway::Wye(program, variant) => Self::wye(program, variant, setup).await,
             Gateway::KrakenD(program) => Self::krakend(program, gateway, setup),
             Gateway::LiteLlm(program) => Self::litellm(program, gateway, setup),
             Gateway::Bifrost(program) => Self::bifrost(program, setup),
         }
     }
 
-    async fn wye(program: &str, gateway: Gateway<'_>, setup: &Setup<'_>) -> Self {
+    async fn wye(program: &str, variant: Variant, setup: &Setup<'_>) -> Self {
         // The refusing first account, spawned for this process only.
-        let refusing = match gateway {
-            Gateway::WyeRefused(_) => Some(format!(
+        let refusing = match variant {
+            Variant::Refused => Some(format!(
                 "http://{}",
                 crate::mock::spawn_refusing(REFUSE_EVERY).await
             )),
             _ => None,
         };
-        let authenticated = matches!(gateway, Gateway::WyeAuth(_) | Gateway::WyeModels(_));
-        let models = matches!(gateway, Gateway::WyeModels(_));
+        let authenticated = matches!(variant, Variant::Auth | Variant::Models);
+        let models = variant == Variant::Models;
         // Requests name model "anthropic/bench" (Bifrost relays bytes unchanged
         // only for a provider-qualified model): allowed by both lists.
         let credentials = authenticated
@@ -88,12 +80,12 @@ impl Launch {
         let options = WyeOptions {
             auth_public_key: credentials.as_ref().map(|c| c.public_key.as_str()),
             auth_models: models.then_some(r#"["anthropic/bench*", "claude-*"]"#),
-            cache_diagnostics: matches!(gateway, Gateway::WyeDiag(_)),
+            cache_diagnostics: variant == Variant::Diag,
             // The mock answers the export POSTs like any request.
-            otlp_endpoint: matches!(gateway, Gateway::WyeOtlp(_)).then_some(setup.upstream),
-            openai: matches!(gateway, Gateway::WyeOpenai(_)),
-            bedrock: matches!(gateway, Gateway::WyeBedrock(_)),
-            failover: matches!(gateway, Gateway::WyeFailover(_) | Gateway::WyeRefused(_)),
+            otlp_endpoint: (variant == Variant::Otlp).then_some(setup.upstream),
+            openai: variant == Variant::Openai,
+            bedrock: variant == Variant::Bedrock,
+            failover: matches!(variant, Variant::Failover | Variant::Refused),
             refusing_upstream: refusing.as_deref(),
         };
         let mut env = Vec::new();
@@ -115,7 +107,7 @@ impl Launch {
             args: vec![
                 "serve".into(),
                 "--config".into(),
-                setup.config(gateway, "toml", config),
+                setup.config(Gateway::Wye(program, variant), "toml", config),
             ],
             env,
             health: "/healthz",

@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use gateway_core::credential::{self, NewCredential};
 use ring::signature::KeyPair;
 

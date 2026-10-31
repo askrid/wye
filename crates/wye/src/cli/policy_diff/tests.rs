@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use gateway_core::credential;
 
 use super::*;
@@ -251,7 +249,7 @@ fn a_key_set_compares_by_its_keys() {
     use wye_testkit::jwt::{IdpKey, jwks};
 
     let (a, b, c) = (IdpKey::ed25519(), IdpKey::ed25519(), IdpKey::ed25519());
-    let dir = std::env::temp_dir().join(format!("wye-policy-diff-{}", std::process::id()));
+    let dir = wye_testkit::TempDir::new("policy-diff");
     let side = |name: &str, keys: &[(&IdpKey, &str)]| {
         let at = dir.join(name);
         std::fs::create_dir_all(&at).unwrap();
@@ -284,5 +282,4 @@ fn a_key_set_compares_by_its_keys() {
     let mut diff = policy_diff(&config, &config);
     diff.key_sets(&config, &old, &config, &old).unwrap();
     assert!(!diff.widens());
-    std::fs::remove_dir_all(&dir).unwrap();
 }

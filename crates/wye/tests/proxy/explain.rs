@@ -5,22 +5,10 @@ use wye::{Credential, explain};
 
 use super::harness::*;
 
-fn token(key: &Ed25519KeyPair, models: Option<&[&str]>, max_output_tokens: Option<u64>) -> String {
-    issue(
-        key,
-        &NewCredential {
-            models,
-            max_output_tokens,
-            ..claims("alice")
-        },
-    )
-}
-
 #[tokio::test]
 async fn explain_and_the_server_answer_alike() {
     let key = keypair();
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(ok(), Arc::clone(&hits), None, None).await;
+    let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
          [upstream]\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n{}\n\
@@ -32,14 +20,11 @@ async fn explain_and_the_server_answer_alike() {
     );
     let parsed = Config::from_toml_str(&config).unwrap();
     let verifier = wye::verifier(&parsed, Path::new("/")).unwrap().unwrap();
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::api_key(API_KEY).unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
 
-    let open = token(&key, None, None);
-    let haiku_only = token(&key, Some(&["claude-haiku-*"]), None);
-    let capped = token(&key, None, Some(10));
+    let open = token(&key, "alice", None, None);
+    let haiku_only = token(&key, "alice", Some(&["claude-haiku-*"]), None);
+    let capped = token(&key, "alice", None, Some(10));
     let cases: [(&str, &str, &str); 9] = [
         (
             "allowed",
@@ -90,12 +75,7 @@ async fn explain_and_the_server_answer_alike() {
             &[],
         );
         let body = body.to_owned();
-        let res = h
-            .send(
-                messages().header("authorization", format!("Bearer {token}")),
-                body,
-            )
-            .await;
+        let res = h.send(bearer(token), body).await;
         let status = res.status().as_u16();
         let answer = read_body(res).await;
         let served = (status != 200).then(|| {

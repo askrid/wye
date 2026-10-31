@@ -13,7 +13,7 @@ const RELEASE_CEILING_US: f64 = 1_000_000.0;
 /// better for all of them. Tolerances come from the spread of repeated runs of
 /// unchanged code on the development laptop; the SSE time-to-first-byte and
 /// per-event p50s, cold connections, and the stalled-client p99 from eight A/A
-/// comparisons of the alternating-rounds gate (`docs/research.md`).
+/// comparisons of the alternating-rounds gate (`docs/benchmarks.md`).
 ///
 /// Reported but not gated: p99 time to first byte (swung from -521 to 1694 µs
 /// between identical runs; in the paced scenario it is dominated by connection
@@ -296,7 +296,20 @@ fn load(path: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use serde_json::json;
+    use wye_testkit::TempDir;
+
     use super::*;
+
+    /// Writes a report of `metrics` as `dir/name`; returns its path.
+    fn report(dir: &Path, name: &str, metrics: Value) -> String {
+        let path = dir.join(name);
+        let report = json!({"machine": {}, "metrics": metrics});
+        std::fs::write(&path, report.to_string()).unwrap();
+        path.display().to_string()
+    }
 
     #[test]
     fn a_scope_enforces_matching_metrics_only() {
@@ -326,24 +339,16 @@ mod tests {
 
     #[test]
     fn report_only_and_new_metrics_do_not_fail_a_scoped_comparison() {
-        let dir = std::env::temp_dir().join(format!("wye-bench-gate-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let write = |name: &str, metrics: serde_json::Value| {
-            let path = dir.join(name);
-            std::fs::write(
-                &path,
-                serde_json::json!({"machine": {}, "metrics": metrics}).to_string(),
-            )
-            .unwrap();
-            path.display().to_string()
-        };
-        let base = write(
+        let dir = TempDir::new("bench-gate");
+        let base = report(
+            &dir,
             "base.json",
-            serde_json::json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 20.0}),
+            json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 20.0}),
         );
-        let slower = write(
+        let slower = report(
+            &dir,
             "slower.json",
-            serde_json::json!({
+            json!({
                 "unary_added_p50_us": 900.0,
                 "alloc_unary_per_request": 20.0,
                 "bedrock_unary_failed_requests": 0.0,
@@ -369,68 +374,47 @@ mod tests {
             ..scope(&latency, false)
         };
         assert!(compare(&base, &slower, &accepted));
-        let heavier = write(
+        let heavier = report(
+            &dir,
             "heavier.json",
-            serde_json::json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 22.0}),
+            json!({"unary_added_p50_us": 100.0, "alloc_unary_per_request": 22.0}),
         );
         assert!(!compare(
             &base,
             &heavier,
             &scope(&["alloc_unary_per_request"], true)
         ));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn failures_and_release_times_have_absolute_limits() {
-        let dir = std::env::temp_dir().join(format!("wye-bench-abs-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let write = |name: &str, metrics: serde_json::Value| {
-            let path = dir.join(name);
-            std::fs::write(
-                &path,
-                serde_json::json!({"machine": {}, "metrics": metrics}).to_string(),
-            )
-            .unwrap();
-            path.display().to_string()
-        };
+        let dir = TempDir::new("bench-abs");
         let only = |name: &str| Scope {
             only: vec![name.into()],
             ..Scope::default()
         };
         // The reference failing 5 requests allows the current commit none.
-        let failing = write(
-            "failing.json",
-            serde_json::json!({"unary_failed_requests": 5.0}),
-        );
-        let fewer = write(
-            "fewer.json",
-            serde_json::json!({"unary_failed_requests": 3.0}),
-        );
+        let failing = report(&dir, "failing.json", json!({"unary_failed_requests": 5.0}));
+        let fewer = report(&dir, "fewer.json", json!({"unary_failed_requests": 3.0}));
         assert!(!compare(&failing, &fewer, &only("unary_failed_requests")));
-        let none = write(
-            "none.json",
-            serde_json::json!({"unary_failed_requests": 0.0}),
-        );
+        let none = report(&dir, "none.json", json!({"unary_failed_requests": 0.0}));
         assert!(compare(&failing, &none, &only("unary_failed_requests")));
         // A reference stuck at the 5 s timeout allows no more than a second.
         let metric = "cancel_upstream_release_max_us";
-        let stuck = write("stuck.json", serde_json::json!({metric: 5_000_000.0}));
-        let slow = write("slow.json", serde_json::json!({metric: 2_000_000.0}));
+        let stuck = report(&dir, "stuck.json", json!({metric: 5_000_000.0}));
+        let slow = report(&dir, "slow.json", json!({metric: 2_000_000.0}));
         assert!(!compare(&stuck, &slow, &only(metric)));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn median_merges_rounds_into_one_report() {
-        let dir = std::env::temp_dir().join(format!("wye-bench-median-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = TempDir::new("bench-median");
         let rounds: Vec<String> = [(3.0, Some(0.0)), (1.0, None), (2.0, Some(2.0))]
             .iter()
             .enumerate()
             .map(|(i, (latency, failed))| {
                 let path = dir.join(format!("round-{i}.json")).display().to_string();
-                let report = serde_json::json!({
+                let report = json!({
                     "machine": {"os": "test"},
                     "repeat": 1,
                     "metrics": {"unary_added_p50_us": latency, "unary_failed_requests": failed},
@@ -448,6 +432,5 @@ mod tests {
         // Failure counts take the worst round, and a round without samples
         // is worse than any: one round of three failing still fails.
         assert!(merged["metrics"]["unary_failed_requests"].is_null());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

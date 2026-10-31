@@ -4,9 +4,22 @@ fn claude(config: &Config) -> &Route {
     config.routes.claude.as_ref().unwrap()
 }
 
+/// An upstream that needs no key of its own.
+const FORWARDING: &str =
+    "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
+/// A valid 32-byte key, base64url without padding.
+const PUBLIC_KEY: &str = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
+
 fn parse(upstream: &str) -> Result<Config, ConfigError> {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\n[upstream]\n{upstream}"
+    ))
+}
+
+/// A forwarding gateway with extra `[server]` lines.
+fn server(lines: &str) -> Result<Config, ConfigError> {
+    Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n{lines}\n[upstream]\n{FORWARDING}"
     ))
 }
 
@@ -42,24 +55,22 @@ fn base_path_keeps_prefix_without_trailing_slash() {
 
 #[test]
 fn rejects_non_loopback_listen() {
-    let err = Config::from_toml_str(
-        "[server]\nlisten = \"0.0.0.0:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true",
-    )
+    let err = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"0.0.0.0:8080\"\n[upstream]\n{FORWARDING}"
+    ))
     .unwrap_err();
     assert!(matches!(err, ConfigError::NonLoopbackListen(_)));
 }
 
 #[test]
 fn auth_allows_network_listen_and_validates_keys() {
-    // A valid 32-byte key, base64url without padding.
-    let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
     let with_auth = |listen: &str, upstream: &str, auth: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"{listen}\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
              {upstream}\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth}"
         ))
     };
-    let keys = format!("[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\"");
+    let keys = format!("[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
     let config = with_auth("0.0.0.0:8080", "api_key_env = \"K\"", &keys).unwrap();
     let auth = config.auth.unwrap();
     assert_eq!(auth.own.unwrap().keys.len(), 1);
@@ -87,12 +98,11 @@ fn auth_allows_network_listen_and_validates_keys() {
 
 #[test]
 fn auth_models_are_validated_patterns() {
-    let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
     let with_models = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
              api_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n\
-             [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\""
+             [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
         ))
     };
     assert!(with_models("").unwrap().auth.unwrap().models.is_none());
@@ -121,11 +131,6 @@ fn auth_models_are_validated_patterns() {
         with_models("max_output_tokens = 0").unwrap_err(),
         ConfigError::Zero("auth.max_output_tokens")
     );
-    let held = parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
-        .unwrap()
-        .server
-        .max_held_request_bytes;
-    assert_eq!(held, DEFAULT_MAX_HELD_REQUEST_BYTES);
 }
 
 #[test]
@@ -176,39 +181,39 @@ fn base_url_rules() {
 
 #[test]
 fn ca_file_is_kept_as_written() {
-    let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
-    let config = parse(&format!("{ok}ca_file = \"certs/ca.pem\"")).unwrap();
+    let config = parse(&format!("{FORWARDING}ca_file = \"certs/ca.pem\"")).unwrap();
     assert_eq!(
         claude(&config).upstreams()[0].ca_file,
         Some(PathBuf::from("certs/ca.pem"))
     );
-    assert_eq!(claude(&parse(ok).unwrap()).upstreams()[0].ca_file, None);
     assert_eq!(
-        parse(&format!("{ok}ca_file = \"\"")).unwrap_err(),
+        claude(&parse(FORWARDING).unwrap()).upstreams()[0].ca_file,
+        None
+    );
+    assert_eq!(
+        parse(&format!("{FORWARDING}ca_file = \"\"")).unwrap_err(),
         ConfigError::EmptyPath("upstream.ca_file")
     );
 }
 
 #[test]
 fn lifecycle_defaults_and_zero_limits_rejected() {
-    let config =
-        parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true")
-            .unwrap();
+    let config = parse(FORWARDING).unwrap();
     assert_eq!(config.server.max_concurrent_requests, 10_000);
     assert_eq!(config.server.drain_delay, Duration::ZERO);
-    let err = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\nmax_concurrent_requests = 0\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true",
-    )
-    .unwrap_err();
-    assert_eq!(err, ConfigError::Zero("server.max_concurrent_requests"));
+    assert_eq!(
+        config.server.max_held_request_bytes,
+        DEFAULT_MAX_HELD_REQUEST_BYTES
+    );
     assert_eq!(config.server.client_write_timeout, Duration::from_secs(60));
-    let err = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\nclient_write_timeout_secs = 0\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true",
-    )
-    .unwrap_err();
-    assert_eq!(err, ConfigError::Zero("server.client_write_timeout_secs"));
+    assert_eq!(
+        server("max_concurrent_requests = 0").unwrap_err(),
+        ConfigError::Zero("server.max_concurrent_requests")
+    );
+    assert_eq!(
+        server("client_write_timeout_secs = 0").unwrap_err(),
+        ConfigError::Zero("server.client_write_timeout_secs")
+    );
 }
 
 #[test]
@@ -266,26 +271,18 @@ fn cache_diagnostics_require_a_key_variable() {
 #[test]
 fn rejects_zero_timeouts_and_timers_past_a_day() {
     assert_eq!(
-        parse("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\nstream_idle_timeout_secs = 0")
-            .unwrap_err(),
+        parse(&format!("{FORWARDING}stream_idle_timeout_secs = 0")).unwrap_err(),
         ConfigError::Zero("upstream.stream_idle_timeout_secs")
     );
     // The largest TOML integer would overflow `Instant + timeout`.
     let huge = "9223372036854775807";
     assert_eq!(
-        parse(&format!("base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\nstream_idle_timeout_secs = {huge}"))
-            .unwrap_err(),
+        parse(&format!("{FORWARDING}stream_idle_timeout_secs = {huge}")).unwrap_err(),
         ConfigError::TooLong {
             field: "upstream.stream_idle_timeout_secs",
             max: 86_400
         }
     );
-    let server = |line: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n{line}\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true"
-        ))
-    };
     assert!(matches!(
         server(&format!("client_write_timeout_secs = {huge}")),
         Err(ConfigError::TooLong { .. })
@@ -295,12 +292,6 @@ fn rejects_zero_timeouts_and_timers_past_a_day() {
 
 #[test]
 fn the_hold_budget_fits_one_whole_body() {
-    let server = |line: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n{line}\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true"
-        ))
-    };
     assert!(matches!(
         server("max_held_request_bytes = 1048576"),
         Err(ConfigError::Invalid(_))
@@ -376,17 +367,17 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
 
 #[test]
 fn http_version_is_auto_unless_pinned_to_1_1() {
-    let ok = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
     assert_eq!(
-        claude(&parse(ok).unwrap()).upstreams()[0].http_version,
+        claude(&parse(FORWARDING).unwrap()).upstreams()[0].http_version,
         UpstreamHttpVersion::Auto
     );
     assert_eq!(
-        claude(&parse(&format!("{ok}http_version = \"1.1\"")).unwrap()).upstreams()[0].http_version,
+        claude(&parse(&format!("{FORWARDING}http_version = \"1.1\"")).unwrap()).upstreams()[0]
+            .http_version,
         UpstreamHttpVersion::Http1
     );
     assert!(matches!(
-        parse(&format!("{ok}http_version = \"2\"")),
+        parse(&format!("{FORWARDING}http_version = \"2\"")),
         Err(ConfigError::Invalid(_))
     ));
 }
@@ -453,9 +444,8 @@ fn identity_provider_issuers_are_validated() {
         "claude-haiku-*"
     );
 
-    let key = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
     let own = format!(
-        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{key}\"\n"
+        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"\n"
     );
     let auth = parse_auth(&format!("{own}{idp}")).unwrap().auth.unwrap();
     assert!(auth.own.is_some() && auth.issuers.len() == 1);
@@ -483,10 +473,9 @@ fn identity_provider_issuers_are_validated() {
 
 #[test]
 fn aliases_parse_and_reject_duplicates() {
-    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
-    assert!(parse(base).unwrap().aliases.is_none());
+    assert!(parse(FORWARDING).unwrap().aliases.is_none());
     let config = parse(&format!(
-        "{base}[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
+        "{FORWARDING}[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
          when = [{{ subjects = [\"canary-*\"], model = \"claude-sonnet-5-5\" }}]\n"
     ))
     .unwrap();
@@ -497,12 +486,12 @@ fn aliases_parse_and_reject_duplicates() {
 
     let twice = "[[aliases]]\nname = \"a\"\nmodel = \"m\"\n";
     assert_eq!(
-        parse(&format!("{base}{twice}{twice}")).unwrap_err(),
+        parse(&format!("{FORWARDING}{twice}{twice}")).unwrap_err(),
         ConfigError::Invalid("aliases: duplicate name")
     );
     assert!(
         parse(&format!(
-            "{base}[[aliases]]\nname = \"a\"\nmodel = \"m*\"\n"
+            "{FORWARDING}[[aliases]]\nname = \"a\"\nmodel = \"m*\"\n"
         ))
         .is_err()
     );
@@ -515,8 +504,10 @@ fn documented_pricing_example_parses() {
     let doc = include_str!("../../../../docs/policy.md");
     let start = doc.find("```toml\n[pricing]").unwrap() + "```toml\n".len();
     let example = &doc[start..start + doc[start..].find("```").unwrap()];
-    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
-    let pricing = parse(&format!("{base}{example}")).unwrap().pricing.unwrap();
+    let pricing = parse(&format!("{FORWARDING}{example}"))
+        .unwrap()
+        .pricing
+        .unwrap();
     assert_eq!(&*pricing.version, "anthropic-2026-10-06");
     assert_eq!(pricing.entries.len(), 3);
     assert_eq!(pricing.entries[0].prices.input, 4_000_000);
@@ -525,7 +516,7 @@ fn documented_pricing_example_parses() {
 
     let one = |extra: &str| {
         parse(&format!(
-            "{base}[pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
+            "{FORWARDING}[pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
         ))
     };
     assert!(one("").is_ok());
@@ -540,8 +531,7 @@ fn documented_pricing_example_parses() {
 
 #[test]
 fn upgrade_check_targets_are_unique_model_names() {
-    let base = "base_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n";
-    let check = |body: &str| parse(&format!("{base}[upgrade_check]\n{body}"));
+    let check = |body: &str| parse(&format!("{FORWARDING}[upgrade_check]\n{body}"));
     let ok = check("targets = [\"claude-opus-5-5\"]\nsample_percent = 10").unwrap();
     let ok = ok.upgrade_check.unwrap();
     assert_eq!(&*ok.targets[0], "claude-opus-5-5");

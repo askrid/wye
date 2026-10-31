@@ -18,7 +18,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     measure::{PACED_RAMP, token_streams},
-    stats,
+    scenarios, stats,
 };
 
 /// Stream counts tried, in order.
@@ -45,7 +45,7 @@ async fn batch(target: &Target, streams: usize) -> (Vec<u64>, usize, usize, f64)
     let start = Instant::now();
     let results = token_streams(target, streams, PACED_RAMP).await;
     let wall = start.elapsed().as_secs_f64();
-    let failed = results.iter().filter(|s| s.failed).count();
+    let failed = scenarios::count_failed(&results);
     let delays: Vec<u64> = results
         .into_iter()
         .flat_map(|s| s.event_delays_us)

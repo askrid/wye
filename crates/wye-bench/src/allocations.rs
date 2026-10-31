@@ -9,16 +9,16 @@
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
-use bytes::Bytes;
 use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use serde_json::Value;
 
 use crate::{
     client::Target,
-    gateway_process::{Gateway, GatewayProcess},
+    gateway_process::{Gateway, GatewayProcess, Variant},
     measure::{UPLOAD_BYTES, UPLOAD_CONCURRENCY},
     mock, scenarios,
-    stats::put,
+    stats::Out,
 };
 
 const UNARY_REQUESTS: usize = 10_000;
@@ -101,18 +101,24 @@ fn no_failures(requests: &[Option<u64>]) {
 
 /// [`no_failures`], for streams.
 fn no_failed_streams(streams: &[scenarios::Stream]) {
-    let failed = streams.iter().filter(|s| s.failed).count();
+    let failed = scenarios::count_failed(streams);
     assert_eq!(
         failed, 0,
         "{failed} streams failed during allocation measurement"
     );
 }
 
-/// Live heap per stream while `count` streams stay open and silent.
-async fn idle_live_bytes(t: &Target, count: usize, body: Option<Bytes>) -> f64 {
+/// Live heap per stream, `settle` after the `count` streams of `open` opened.
+async fn held_live_bytes(
+    t: &Target,
+    count: usize,
+    settle: Duration,
+    open: impl Future<Output = Vec<Incoming>>,
+) -> f64 {
     let live_before = counters(t).await.live_bytes;
-    let held = scenarios::open_idle_streams_with_body(t, count, body).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let held = open.await;
+    assert_eq!(held.len(), count, "streams failed to open");
+    tokio::time::sleep(settle).await;
     let live_open = counters(t).await.live_bytes;
     drop(held);
     // Let the gateway release the closed streams before the next measurement.
@@ -120,18 +126,22 @@ async fn idle_live_bytes(t: &Target, count: usize, body: Option<Bytes>) -> f64 {
     (live_open - live_before) / count as f64
 }
 
-/// Live heap per stream while `count` clients have stopped reading a stream
-/// the upstream sends as fast as flow control allows.
-async fn stalled_live_bytes(t: &Target, count: usize) -> f64 {
-    let live_before = counters(t).await.live_bytes;
-    let held = scenarios::stalled_streams(t, count).await;
-    assert_eq!(held.len(), count, "stalled streams failed to open");
-    // Let every stalled stream fill its buffers and flow-control windows.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let live_open = counters(t).await.live_bytes;
-    drop(held);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    (live_open - live_before) / count as f64
+/// `{prefix}idle_live_bytes_per_stream` while streams stay open and silent,
+/// and `{prefix}idle_after_upload_live_bytes_per_stream` for streams whose
+/// request carried an agent-sized context.
+async fn put_idle(t: &Target, out: &mut Out<'_>) {
+    let settle = Duration::from_millis(300);
+    let open = scenarios::open_idle_streams(t, IDLE_STREAMS, None);
+    out.put(
+        "idle_live_bytes_per_stream",
+        held_live_bytes(t, IDLE_STREAMS, settle, open).await,
+    );
+    let body = Some(mock::message_json(IDLE_UPLOAD_BYTES));
+    let open = scenarios::open_idle_streams(t, IDLE_AFTER_UPLOAD_STREAMS, body);
+    out.put(
+        "idle_after_upload_live_bytes_per_stream",
+        held_live_bytes(t, IDLE_AFTER_UPLOAD_STREAMS, settle, open).await,
+    );
 }
 
 async fn agent_uploads(t: &Target) {
@@ -157,14 +167,18 @@ pub async fn measure(
     dir: &Path,
     metrics: &mut BTreeMap<String, f64>,
 ) {
-    let wye =
-        GatewayProcess::start(Gateway::Wye(binary), upstream_base_url, None, dir, "alloc").await;
+    let plain = Gateway::Wye(binary, Variant::Plain);
+    let mut out = Out {
+        metrics: &mut *metrics,
+        prefix: "alloc_",
+    };
+    let wye = GatewayProcess::start(plain, upstream_base_url, None, dir, "alloc").await;
     let t = wye.target();
     // Warm up pools, buffers, and lazily initialized state, so steady state is measured.
     scenarios::unary(t, CONCURRENCY, 2_000).await;
     scenarios::sse(t, CONCURRENCY, 64, 5, 64, 0).await;
 
-    per_request(t, metrics, "unary", UNARY_REQUESTS, true, unary(t)).await;
+    per_request(t, &mut out, "unary", UNARY_REQUESTS, true, unary(t)).await;
 
     let streams = |events| async move {
         no_failed_streams(&scenarios::sse(t, CONCURRENCY, SSE_STREAMS, events, 64, 0).await);
@@ -173,11 +187,9 @@ pub async fn measure(
     let (long, _) = delta(t, streams(SSE_LONG_EVENTS)).await;
     let per_event =
         (long - short) / (SSE_STREAMS as f64 * f64::from(SSE_LONG_EVENTS - SSE_SHORT_EVENTS));
-    put(metrics, "", "alloc_sse_per_event", per_event);
-    put(
-        metrics,
-        "",
-        "alloc_sse_per_stream",
+    out.put("sse_per_event", per_event);
+    out.put(
+        "sse_per_stream",
         short / SSE_STREAMS as f64 - per_event * f64::from(SSE_SHORT_EVENTS),
     );
 
@@ -185,12 +197,12 @@ pub async fn measure(
     let uploads = async {
         no_failures(&scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await);
     };
-    per_request(t, metrics, "upload", UPLOAD_REQUESTS, true, uploads).await;
+    per_request(t, &mut out, "upload", UPLOAD_REQUESTS, true, uploads).await;
     // The same size shaped like Claude Code's, for comparison with the
     // cache-diagnostics variant below.
     per_request(
         t,
-        metrics,
+        &mut out,
         "agent_upload",
         UPLOAD_REQUESTS,
         true,
@@ -198,78 +210,54 @@ pub async fn measure(
     )
     .await;
 
-    put(
-        metrics,
-        "",
-        "alloc_idle_live_bytes_per_stream",
-        idle_live_bytes(t, IDLE_STREAMS, None).await,
-    );
-    put(
-        metrics,
-        "",
-        "alloc_idle_after_upload_live_bytes_per_stream",
-        idle_live_bytes(
-            t,
-            IDLE_AFTER_UPLOAD_STREAMS,
-            Some(mock::message_json(IDLE_UPLOAD_BYTES)),
-        )
-        .await,
-    );
+    put_idle(t, &mut out).await;
     drop(wye);
 
-    let tls = GatewayProcess::start(
-        Gateway::Wye(binary),
-        tls_base_url,
-        Some(tls_ca_pem),
-        dir,
-        "alloc-tls",
-    )
-    .await;
+    let tls = GatewayProcess::start(plain, tls_base_url, Some(tls_ca_pem), dir, "alloc-tls").await;
     let t = tls.target();
     scenarios::unary(t, CONCURRENCY, 2_000).await;
-    put(
-        metrics,
-        "",
-        "alloc_tls_idle_live_bytes_per_stream",
-        idle_live_bytes(t, IDLE_STREAMS, None).await,
-    );
-    put(
-        metrics,
-        "",
-        "alloc_tls_idle_after_upload_live_bytes_per_stream",
-        idle_live_bytes(
+    let mut tls_out = Out {
+        metrics: &mut *metrics,
+        prefix: "alloc_tls_",
+    };
+    put_idle(t, &mut tls_out).await;
+    // A client that stops reading a stream the upstream sends as fast as flow
+    // control allows; let every one fill its buffers and flow-control windows.
+    tls_out.put(
+        "stalled_live_bytes_per_stream",
+        held_live_bytes(
             t,
-            IDLE_AFTER_UPLOAD_STREAMS,
-            Some(mock::message_json(IDLE_UPLOAD_BYTES)),
+            STALLED_STREAMS,
+            Duration::from_millis(500),
+            scenarios::stalled_streams(t, STALLED_STREAMS),
         )
         .await,
-    );
-    put(
-        metrics,
-        "",
-        "alloc_tls_stalled_live_bytes_per_stream",
-        stalled_live_bytes(t, STALLED_STREAMS).await,
     );
     drop(tls);
 
     // The variants' per-request costs, each in its own process, in this order.
-    for (gateway, name, bytes, agent_upload) in [
-        (Gateway::WyeAuth(binary), "auth", false, false),
-        (Gateway::WyeModels(binary), "models", false, false),
-        (Gateway::WyeBedrock(binary), "bedrock", true, false),
-        (Gateway::WyeFailover(binary), "failover", true, true),
-        (Gateway::WyeDiag(binary), "diag", true, true),
+    let mut out = Out {
+        metrics,
+        prefix: "alloc_",
+    };
+    for (variant, name, bytes, agent_upload) in [
+        (Variant::Auth, "auth", false, false),
+        (Variant::Models, "models", false, false),
+        (Variant::Bedrock, "bedrock", true, false),
+        (Variant::Failover, "failover", true, true),
+        (Variant::Diag, "diag", true, true),
     ] {
+        let gateway = Gateway::Wye(binary, variant);
         let process = GatewayProcess::start(gateway, upstream_base_url, None, dir, "alloc").await;
         let t = process.target();
         scenarios::unary(t, CONCURRENCY, 2_000).await;
         let unary_name = format!("{name}_unary");
-        per_request(t, metrics, &unary_name, UNARY_REQUESTS, bytes, unary(t)).await;
+        per_request(t, &mut out, &unary_name, UNARY_REQUESTS, bytes, unary(t)).await;
         if agent_upload {
             let upload_name = format!("{name}_agent_upload");
             per_request(
                 t,
-                metrics,
+                &mut out,
                 &upload_name,
                 UPLOAD_REQUESTS,
                 true,
@@ -284,7 +272,7 @@ pub async fn measure(
 /// `alloc_{name}_bytes_per_request`, for the `requests` requests `work` makes.
 async fn per_request(
     t: &Target,
-    metrics: &mut BTreeMap<String, f64>,
+    out: &mut Out<'_>,
     name: &str,
     requests: usize,
     bytes: bool,
@@ -292,18 +280,8 @@ async fn per_request(
 ) {
     let (allocations, total) = delta(t, work).await;
     let requests = requests as f64;
-    put(
-        metrics,
-        "alloc_",
-        &format!("{name}_per_request"),
-        allocations / requests,
-    );
+    out.put(&format!("{name}_per_request"), allocations / requests);
     if bytes {
-        put(
-            metrics,
-            "alloc_",
-            &format!("{name}_bytes_per_request"),
-            total / requests,
-        );
+        out.put(&format!("{name}_bytes_per_request"), total / requests);
     }
 }

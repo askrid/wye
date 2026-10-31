@@ -1,6 +1,6 @@
 //! Measuring one gateway process against the direct baseline of one upstream path.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -11,8 +11,7 @@ mod upload;
 // The gated scenarios' sizes, for the load and allocation runs to reproduce.
 pub(crate) use paced::{PACED_RAMP, PACED_STREAMS, token_streams};
 use upload::{
-    AGENT_UPLOAD_REQUESTS, UPLOAD_REQUESTS, agent_body, measure_uploads, upload, upload_agent,
-    upload_body,
+    AGENT_UPLOAD_REQUESTS, UPLOAD_REQUESTS, agent_body, measure_uploads, upload, upload_body,
 };
 pub(crate) use upload::{UPLOAD_BYTES, UPLOAD_CONCURRENCY};
 
@@ -23,7 +22,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios::{self, Stream},
-    stats::{PERCENTILES, add, event_delays, percentile, phase, put, sorted},
+    stats::{Out, PERCENTILES, event_delays, percentile, phase, sorted},
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -67,10 +66,10 @@ pub(crate) fn scenario_report() -> Value {
 pub(crate) struct Direct {
     pub(crate) latency: Latency,
     pub(crate) mb_s: f64,
-    upload: (Vec<u64>, usize),
+    upload: Vec<u64>,
     /// Measured on the path without the paced scenario only, so the extra
     /// uploads cannot disturb the paced tail latencies.
-    agent_upload: Option<(Vec<u64>, usize)>,
+    agent_upload: Option<Vec<u64>>,
     paced: Option<Paced>,
     /// Measured with the paced scenario, on the production path.
     stress: Option<(Cold, Stress)>,
@@ -79,12 +78,13 @@ pub(crate) struct Direct {
 impl Direct {
     pub(crate) async fn measure(target: &Target, paced: bool) -> Self {
         let latency = Latency::measure(target).await;
-        let (mb_s, _, _) = throughput(target).await;
-        let upload = upload(target, upload_body(), UPLOAD_REQUESTS).await;
-        let agent_upload = if paced {
-            None
+        let (mb_s, _, throughput_failed) = throughput(target).await;
+        let (uploads, uploads_failed) = upload(target, upload_body(), UPLOAD_REQUESTS).await;
+        let (agent_upload, agent_failed) = if paced {
+            (None, 0)
         } else {
-            Some(upload_agent(target).await)
+            let (samples, failed) = upload(target, agent_body(), AGENT_UPLOAD_REQUESTS).await;
+            (Some(samples), failed)
         };
         let (paced, stress) = if paced {
             (
@@ -97,10 +97,23 @@ impl Direct {
         } else {
             (None, None)
         };
+        let failed = latency.unary_failed
+            + latency.sse_failed
+            + throughput_failed
+            + uploads_failed
+            + agent_failed
+            + paced.as_ref().map_or(0, |p| p.failed_streams)
+            + stress
+                .as_ref()
+                .map_or(0, |(cold, s)| cold.1 + s.mixed_failed + s.stalled_failed);
+        // Nothing gates the baseline, and it skews every `added_` metric of this path.
+        if failed > 0 {
+            eprintln!("warning: {failed} requests or streams failed on the direct baseline");
+        }
         Self {
             latency,
             mb_s,
-            upload,
+            upload: uploads,
             agent_upload,
             paced,
             stress,
@@ -113,8 +126,6 @@ impl Direct {
 pub(crate) struct Scope {
     /// The gateway relays SSE events as they arrive (idle and cancel scenarios).
     pub(crate) streams_sse: bool,
-    /// The path runs the token-paced scenario.
-    pub(crate) paced: bool,
     /// Only per-request scenarios (latency and CPU per request): for variants
     /// whose cost is per request, such as credential verification.
     pub(crate) per_request_only: bool,
@@ -126,7 +137,7 @@ pub(crate) struct Scope {
     pub(crate) event_cpu: bool,
 }
 
-/// Measures `process` against the `direct` baseline, adding `prefix`ed metrics.
+/// Measures `process` against the `direct` baseline, adding metrics to `out`.
 ///
 /// Scenario order matters for memory metrics: idle streams are measured before
 /// the throughput, upload, and paced scenarios, whose freed buffers the idle
@@ -135,13 +146,15 @@ pub(crate) struct Scope {
 pub(crate) async fn measure(
     direct: &Direct,
     process: &GatewayProcess,
-    prefix: &str,
     scope: Scope,
-    metrics: &mut BTreeMap<String, f64>,
+    out: &mut Out<'_>,
 ) {
+    let prefix = out.prefix;
     // First, while the gateway's upstream connections are still cold.
-    if let (true, Some((cold, _))) = (scope.paced && !scope.per_request_only, &direct.stress) {
-        measure_cold(cold, process, prefix, metrics).await;
+    if !scope.per_request_only
+        && let Some((cold, _)) = &direct.stress
+    {
+        measure_cold(cold, process, out).await;
     }
     let via = phase(
         format!("{prefix}latency"),
@@ -158,45 +171,27 @@ pub(crate) async fn measure(
     );
     let cpu_after = process.cpu_secs();
     // `ps` reports CPU time in 10 ms steps; 20,000 requests make that ~0.5 µs per request.
-    put(
-        metrics,
-        prefix,
+    out.put(
         "unary_cpu_us_per_request",
         (cpu_after - cpu_before) * 1e6 / (CPU_PER_REQUEST_TOTAL - failed).max(1) as f64,
     );
 
     let base = &direct.latency;
     // Failures in the CPU phases count too: for some variants they run last.
-    put(
-        metrics,
-        prefix,
-        "unary_failed_requests",
-        (via.unary_failed + failed) as f64,
-    );
+    out.put("unary_failed_requests", (via.unary_failed + failed) as f64);
     let mut sse_failed = via.sse_failed;
     for (label, p) in PERCENTILES {
         let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
-        put(
-            metrics,
-            prefix,
-            &format!("via_unary_{label}_us"),
-            percentile(&via.unary, p),
-        );
-        put(
-            metrics,
-            prefix,
+        out.put(&format!("via_unary_{label}_us"), percentile(&via.unary, p));
+        out.put(
             &format!("unary_added_{label}_us"),
             added(&via.unary, &base.unary),
         );
-        put(
-            metrics,
-            prefix,
+        out.put(
             &format!("sse_ttfb_added_{label}_us"),
             added(&via.ttfb, &base.ttfb),
         );
-        put(
-            metrics,
-            prefix,
+        out.put(
             &format!("sse_event_added_{label}_us"),
             added(&via.event_delay, &base.event_delay),
         );
@@ -216,27 +211,25 @@ pub(crate) async fn measure(
         )
         .await;
         let cpu_after = process.cpu_secs();
-        sse_failed += streams.iter().filter(|s| s.failed).count();
-        let events: usize = streams.iter().map(|s| s.event_delays_us.len()).sum();
+        sse_failed += scenarios::count_failed(&streams);
+        let events = scenarios::count_events(&streams);
         // CPU time comes in 10 ms steps; 128,000 events make that < 0.1 µs per event.
-        put(
-            metrics,
-            prefix,
+        out.put(
             "sse_cpu_us_per_event",
             (cpu_after - cpu_before) * 1e6 / events.max(1) as f64,
         );
     }
-    put(metrics, prefix, "sse_failed_streams", sse_failed as f64);
+    out.put("sse_failed_streams", sse_failed as f64);
     if scope.per_request_only {
         if scope.uploads {
-            measure_uploads(direct, process, prefix, metrics).await;
+            measure_uploads(direct, process, out).await;
         }
         return;
     }
     if scope.streams_sse {
         phase(
             format!("{prefix}idle+cancel"),
-            measure_idle_and_cancel(process, prefix, metrics),
+            measure_idle_and_cancel(process, out),
         )
         .await;
     }
@@ -245,64 +238,48 @@ pub(crate) async fn measure(
     let (mb_s, mb, failed) =
         phase(format!("{prefix}throughput"), throughput(process.target())).await;
     let cpu_after = process.cpu_secs();
-    add(metrics, prefix, "sse_failed_streams", failed as f64);
-    put(metrics, prefix, "via_throughput_mb_s", mb_s);
+    out.add("sse_failed_streams", failed as f64);
+    out.put("via_throughput_mb_s", mb_s);
     // CPU time comes in 10 ms steps; the scenario streams enough data to
     // make that negligible.
-    put(
-        metrics,
-        prefix,
+    out.put(
         "throughput_cpu_ms_per_mb",
         (cpu_after - cpu_before) * 1_000.0 / mb,
     );
 
-    measure_uploads(direct, process, prefix, metrics).await;
+    measure_uploads(direct, process, out).await;
 
-    if let (true, Some(direct_paced)) = (scope.paced, &direct.paced) {
-        measure_paced(direct_paced, process, prefix, metrics).await;
+    if let Some(direct_paced) = &direct.paced {
+        measure_paced(direct_paced, process, out).await;
     }
 
     // Stalled streams would make a buffering gateway hold whole responses.
-    if let (true, true, Some((_, stress))) = (scope.paced, scope.streams_sse, &direct.stress) {
-        measure_stress(stress, process, prefix, metrics).await;
+    if scope.streams_sse
+        && let Some((_, stress)) = &direct.stress
+    {
+        measure_stress(stress, process, out).await;
     }
 
-    put(metrics, prefix, "rss_after_load_kb", process.rss_kb());
+    out.put("rss_after_load_kb", process.rss_kb());
 }
 
 /// Memory per open idle stream, and upstream release after a client disconnect.
-async fn measure_idle_and_cancel(
-    process: &GatewayProcess,
-    prefix: &str,
-    metrics: &mut BTreeMap<String, f64>,
-) {
+async fn measure_idle_and_cancel(process: &GatewayProcess, out: &mut Out<'_>) {
     tokio::time::sleep(Duration::from_millis(500)).await;
     let rss_before = process.rss_kb();
-    let held = scenarios::open_idle_streams(process.target(), IDLE_STREAMS).await;
+    let held = scenarios::open_idle_streams(process.target(), IDLE_STREAMS, None).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     let rss_open = process.rss_kb();
     drop(held);
-    put(
-        metrics,
-        prefix,
+    out.put(
         "idle_rss_kb_per_stream",
         (rss_open - rss_before) / IDLE_STREAMS as f64,
     );
-    put(metrics, prefix, "rss_idle_kb", rss_before);
+    out.put("rss_idle_kb", rss_before);
 
     let cancel = sorted(scenarios::cancel_latency(process.target(), CANCEL_ROUNDS).await);
-    put(
-        metrics,
-        prefix,
-        "cancel_upstream_release_p50_us",
-        percentile(&cancel, 50.0),
-    );
-    put(
-        metrics,
-        prefix,
-        "cancel_upstream_release_max_us",
-        percentile(&cancel, 100.0),
-    );
+    out.put("cancel_upstream_release_p50_us", percentile(&cancel, 50.0));
+    out.put("cancel_upstream_release_max_us", percentile(&cancel, 100.0));
 }
 
 /// Sorted latency samples of the unary and SSE scenarios, of the requests
@@ -343,7 +320,7 @@ impl Latency {
                     .map(|s| s.ttfb_us)
                     .collect(),
             ),
-            sse_failed: streams.iter().filter(|s| s.failed).count(),
+            sse_failed: scenarios::count_failed(&streams),
             event_delay: event_delays(streams),
         }
     }
@@ -370,6 +347,6 @@ async fn throughput(target: &Target) -> (f64, f64, usize) {
     )
     .await;
     let mb = streams.iter().map(|s| s.bytes).sum::<u64>() as f64 / 1e6;
-    let failed = streams.iter().filter(|s| s.failed).count();
+    let failed = scenarios::count_failed(&streams);
     (mb / start.elapsed().as_secs_f64(), mb, failed)
 }

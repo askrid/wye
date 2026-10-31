@@ -1,5 +1,7 @@
 //! Request forwarding, credential replacement, errors, and local endpoints.
 
+use wye_testkit::TempDir;
+
 use super::harness::*;
 
 #[tokio::test]
@@ -218,12 +220,11 @@ async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected
 
 #[tokio::test]
 async fn api_key_file_is_read_relative_to_the_config_and_trimmed() {
-    let dir = std::env::temp_dir().join(format!("wye-key-test-{}", std::process::id()));
+    let dir = TempDir::new("key");
     std::fs::create_dir_all(dir.join("secrets")).unwrap();
     std::fs::write(dir.join("secrets/provider-key"), "sk-from-file\n").unwrap();
     let (handler, mut rx) = recording(|seen| seen.headers);
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let (upstream, hits) = spawn_counted(handler).await;
     let config = Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n[upstream]\nbase_url = \"http://{upstream}\"\n\
          api_key_file = \"secrets/provider-key\""
@@ -245,5 +246,4 @@ async fn api_key_file_is_read_relative_to_the_config_and_trimmed() {
     std::fs::write(dir.join("secrets/provider-key"), " \n").unwrap();
     let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
     assert!(err.contains("file is empty"), "{err}");
-    std::fs::remove_dir_all(&dir).unwrap();
 }

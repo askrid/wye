@@ -1,6 +1,7 @@
 use proptest::prelude::*;
 
 use super::*;
+use crate::usage::tests::{arbitrary_chunks, feed_cut};
 
 /// A Codex-like stream: created, a reasoning item, a function call, a hosted
 /// web search, text deltas, and the terminal event with the full output.
@@ -119,20 +120,21 @@ proptest! {
     #[test]
     fn any_chunking_reads_the_same(cuts in proptest::collection::vec(0usize..2000, 0..12)) {
         let full = stream("héllo wörld", "response.completed", USAGE, "default");
-        let bytes = full.as_bytes();
-        let whole = scan(bytes);
-        let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (bytes.len() + 1)).collect();
-        cuts.sort_unstable();
+        let whole = scan(full.as_bytes());
         let mut scanner = ResponsesUsageScanner::new();
-        let mut at = 0;
-        for cut in cuts {
-            scanner.feed(&bytes[at..cut]);
-            at = cut;
-        }
-        scanner.feed(&bytes[at..]);
+        feed_cut(full.as_bytes(), cuts, |piece| scanner.feed(piece));
         prop_assert_eq!(scanner.usage(), whole.usage());
         prop_assert_eq!(scanner.model(), whole.model());
         prop_assert_eq!(scanner.status(), UsageStatus::Complete);
         prop_assert_eq!(scanner.tools, whole.tools);
+    }
+
+    #[test]
+    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks()) {
+        let mut scanner = ResponsesUsageScanner::new();
+        for chunk in &chunks {
+            scanner.feed(chunk);
+        }
+        let _ = (scanner.status(), scanner.usage(), scanner.model());
     }
 }

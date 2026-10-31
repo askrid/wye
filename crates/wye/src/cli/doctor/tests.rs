@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used)]
-
 use super::*;
 
 #[tokio::test]
@@ -99,8 +97,7 @@ fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
 /// be an HTTP header fails here, not first at startup.
 #[tokio::test]
 async fn a_key_serve_would_refuse_fails_the_check() {
-    let dir = std::env::temp_dir().join(format!("wye-doctor-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = wye_testkit::TempDir::new("doctor");
     std::fs::write(dir.join("key"), "sk-\u{1}broken\n").unwrap();
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
@@ -108,7 +105,6 @@ async fn a_key_serve_would_refuse_fails_the_check() {
     )
     .unwrap();
     let (report, ok) = doctor(&config, &dir).await;
-    std::fs::remove_dir_all(&dir).unwrap();
     assert!(!ok, "{report}");
     assert!(
         report.contains(

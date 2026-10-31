@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+use proptest::prelude::*;
 
 use super::*;
 
@@ -155,11 +155,37 @@ fn escaped_or_malformed_input_matches_nothing() {
         findings(r#"["thinking",{"type":"disabled"}]"#),
         Findings::default()
     );
+}
+
+#[test]
+fn every_rule_names_its_source_and_fix() {
     for rule in Rule::ALL {
         assert!(
             rule.source().starts_with("https://platform.claude.com/"),
             "{rule:?}"
         );
         assert!(!rule.fix().is_empty());
+    }
+}
+
+proptest! {
+    #[test]
+    fn arbitrary_bytes_never_panic(
+        chunks in prop::collection::vec(
+            prop::collection::vec(
+                prop_oneof![
+                    any::<u8>(),
+                    prop::sample::select(b"{}[],:\"\\ thinkgoolesmaryp_".to_vec()),
+                ],
+                0..256,
+            ),
+            0..32,
+        ),
+    ) {
+        let mut scanner = UpgradeScanner::new();
+        for chunk in &chunks {
+            scanner.feed(chunk);
+        }
+        let _ = scanner.findings();
     }
 }

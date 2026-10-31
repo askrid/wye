@@ -1,5 +1,3 @@
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-
 use super::*;
 
 fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -> Line<'static> {

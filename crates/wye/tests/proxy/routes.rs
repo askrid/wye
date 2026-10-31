@@ -69,8 +69,7 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
 #[tokio::test]
 async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
     let (handler, mut rx) = recording(|seen| seen.headers);
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
          [routes.claude]\n[[routes.claude.upstreams]]\nid = \"aws\"\n\
@@ -95,8 +94,7 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
 #[tokio::test]
 async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
     let (handler, mut rx) = recording(|seen| (seen.headers, seen.body));
-    let hits = Arc::new(AtomicUsize::new(0));
-    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
          [routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\n\

@@ -4,13 +4,24 @@ use std::{collections::BTreeMap, fmt::Display, future::Future, time::Instant};
 
 pub(crate) const PERCENTILES: [(&str, f64); 2] = [("p50", 50.0), ("p99", 99.0)];
 
-pub(crate) fn put(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str, value: f64) {
-    metrics.insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
+/// Where a scenario writes its metrics: `prefix` goes before every name.
+pub(crate) struct Out<'a> {
+    pub(crate) metrics: &'a mut BTreeMap<String, f64>,
+    pub(crate) prefix: &'a str,
 }
 
-/// Adds `value` to a metric already put: failures a later phase found.
-pub(crate) fn add(metrics: &mut BTreeMap<String, f64>, prefix: &str, name: &str, value: f64) {
-    *metrics.entry(format!("{prefix}{name}")).or_insert(0.0) += value;
+impl Out<'_> {
+    pub(crate) fn put(&mut self, name: &str, value: f64) {
+        let prefix = self.prefix;
+        self.metrics
+            .insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
+    }
+
+    /// Adds `value` to a metric already put: failures a later phase found.
+    pub(crate) fn add(&mut self, name: &str, value: f64) {
+        let prefix = self.prefix;
+        *self.metrics.entry(format!("{prefix}{name}")).or_insert(0.0) += value;
+    }
 }
 
 /// Whether `name` counts failures: merged by the worst round and gated at

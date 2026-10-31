@@ -1,6 +1,27 @@
 use super::*;
 use proptest::prelude::*;
 
+/// Feeds `bytes` to `feed` in pieces, cut wherever `cuts` say (any values).
+pub(in crate::usage) fn feed_cut(bytes: &[u8], cuts: Vec<usize>, mut feed: impl FnMut(&[u8])) {
+    let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (bytes.len() + 1)).collect();
+    cuts.sort_unstable();
+    let mut at = 0;
+    for cut in cuts {
+        feed(&bytes[at..cut]);
+        at = cut;
+    }
+    feed(&bytes[at..]);
+}
+
+/// Chunks of arbitrary bytes, half of them from the scanners' own vocabulary.
+pub(in crate::usage) fn arbitrary_chunks() -> impl Strategy<Value = Vec<Vec<u8>>> {
+    let byte = prop_oneof![
+        any::<u8>(),
+        prop::sample::select(b"{}[],:\"\\ \n0datevnmolusgyp_".to_vec()),
+    ];
+    prop::collection::vec(prop::collection::vec(byte, 0..256), 0..32)
+}
+
 /// Shape of a real Messages stream, including a `ping` and a multi-byte character.
 const STREAM: &str = concat!(
     "event: message_start\n",

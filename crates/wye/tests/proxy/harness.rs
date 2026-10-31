@@ -80,35 +80,24 @@ pub(crate) struct Harness {
 impl Harness {
     /// Gateway in front of a plain-HTTP mock upstream.
     pub(crate) async fn start(handler: Handler, upstream_extra: &str, auth: UpstreamAuth) -> Self {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let (upstream, hits) = spawn_counted(handler).await;
         let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
-        Self::launch(
-            &format!("http://{upstream}"),
-            "",
-            upstream_extra,
-            resources,
-            hits,
-        )
-        .await
+        let base_url = format!("http://{upstream}");
+        Self::launch(&base_url, "", upstream_extra, resources, hits).await
+    }
+
+    /// API-key gateway in front of a plain mock upstream, with extra `[upstream]` lines.
+    pub(crate) async fn keyed(handler: Handler, upstream_extra: &str) -> Self {
+        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
+        Self::start(handler, &extra, UpstreamAuth::api_key(API_KEY).unwrap()).await
     }
 
     /// API-key gateway in front of a plain mock upstream, with extra `[server]` lines.
     pub(crate) async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
-        let resources = with_upstreams(vec![UpstreamResources::new(
-            UpstreamAuth::api_key(API_KEY).unwrap(),
-        )]);
+        let (upstream, hits) = spawn_counted(handler).await;
         let base_url = format!("http://{upstream}");
-        Self::launch(
-            &base_url,
-            server_extra,
-            "api_key_env = \"UNUSED\"",
-            resources,
-            hits,
-        )
-        .await
+        let key = "api_key_env = \"UNUSED\"";
+        Self::launch(&base_url, server_extra, key, keyed_resources(), hits).await
     }
 
     /// API-key gateway with cache diagnostics on, keyed with `key`, with extra
@@ -118,15 +107,10 @@ impl Harness {
         key: &[u8],
         diagnostics_extra: &str,
     ) -> Self {
-        let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let (upstream, hits) = spawn_counted(handler).await;
         let resources = Resources {
-            upstreams: vec![UpstreamResources::new(
-                UpstreamAuth::api_key(API_KEY).unwrap(),
-            )],
-            verifier: None,
             prompt_key: Some(HashKey::new(key).unwrap()),
-            otlp_headers: HeaderMap::new(),
+            ..keyed_resources()
         };
         let base_url = format!("http://{upstream}");
         let extra = format!(
@@ -150,19 +134,14 @@ impl Harness {
     ) -> Self {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca), mock_max_streams).await;
-        let resources = Resources {
-            upstreams: vec![UpstreamResources {
-                auth: UpstreamAuth::api_key(API_KEY).unwrap(),
-                extra_roots: if trusted {
-                    vec![ca.ca_cert()]
-                } else {
-                    Vec::new()
-                },
-            }],
-            verifier: None,
-            prompt_key: None,
-            otlp_headers: HeaderMap::new(),
-        };
+        let resources = with_upstreams(vec![UpstreamResources {
+            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            extra_roots: if trusted {
+                vec![ca.ca_cert()]
+            } else {
+                Vec::new()
+            },
+        }]);
         let base_url = format!("https://{upstream}");
         let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
         Self::launch(&base_url, "", &extra, resources, hits).await
@@ -225,26 +204,17 @@ impl Harness {
         telemetry_extra: &str,
         otlp_headers: HeaderMap,
     ) -> Self {
-        let collector = spawn_upstream(collector, Arc::new(AtomicUsize::new(0)), None, None).await;
-        let hits = Arc::new(AtomicUsize::new(0));
-        let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+        let (collector, _) = spawn_counted(collector).await;
+        let (upstream, hits) = spawn_counted(handler).await;
         let resources = Resources {
             otlp_headers,
-            ..with_upstreams(vec![UpstreamResources::new(
-                UpstreamAuth::api_key(API_KEY).unwrap(),
-            )])
+            ..keyed_resources()
         };
         let telemetry = format!(
             "api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\"\n{telemetry_extra}"
         );
-        Self::launch(
-            &format!("http://{upstream}"),
-            "",
-            &telemetry,
-            resources,
-            hits,
-        )
-        .await
+        let base_url = format!("http://{upstream}");
+        Self::launch(&base_url, "", &telemetry, resources, hits).await
     }
 
     /// Closes the usage log's reading end, as when the process reading
@@ -259,13 +229,18 @@ impl Harness {
         let _ = self.shutdown.take().unwrap().send(());
     }
 
+    /// Triggers shutdown and waits for serve to end; returns whether the usage
+    /// log was written out.
+    pub(crate) async fn shut_down(&mut self) -> bool {
+        self.begin_shutdown();
+        tokio::time::timeout(WAIT, &mut self.served)
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
     pub(crate) async fn api_key(handler: Handler) -> Self {
-        Self::start(
-            handler,
-            "api_key_env = \"UNUSED\"",
-            UpstreamAuth::api_key(API_KEY).unwrap(),
-        )
-        .await
+        Self::keyed(handler, "").await
     }
 
     pub(crate) async fn send(
@@ -337,6 +312,20 @@ pub(crate) fn with_upstreams(upstreams: Vec<UpstreamResources>) -> Resources {
     }
 }
 
+/// [`with_upstreams`] of one upstream with the provider key [`API_KEY`].
+pub(crate) fn keyed_resources() -> Resources {
+    with_upstreams(vec![UpstreamResources::new(
+        UpstreamAuth::api_key(API_KEY).unwrap(),
+    )])
+}
+
+/// A plain-HTTP mock upstream, and the count of requests it receives.
+pub(crate) async fn spawn_counted(handler: Handler) -> (SocketAddr, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let upstream = spawn_upstream(handler, Arc::clone(&hits), None, None).await;
+    (upstream, hits)
+}
+
 pub(crate) async fn spawn_upstream(
     handler: Handler,
     hits: Arc<AtomicUsize>,
@@ -399,6 +388,20 @@ pub(crate) fn answering(reply: impl Fn() -> Response<UpBody> + Send + Sync + 'st
     })
 }
 
+/// An upstream that answers its one request with `respond(value)`; another
+/// request is a panic the gateway sees as a broken connection.
+pub(crate) fn once<T, Fut>(value: T, respond: impl Fn(T) -> Fut + Send + Sync + 'static) -> Handler
+where
+    T: Send + 'static,
+    Fut: Future<Output = Response<UpBody>> + Send + 'static,
+{
+    let value = std::sync::Mutex::new(Some(value));
+    Arc::new(move |_| {
+        let value = value.lock().unwrap().take().unwrap();
+        Box::pin(respond(value))
+    })
+}
+
 /// An upstream that answers `200 {}`.
 pub(crate) fn ok() -> Handler {
     answering(|| full(StatusCode::OK, "{}"))
@@ -445,6 +448,20 @@ pub(crate) fn messages() -> http::request::Builder {
         .header("x-claude-code-session-id", "s-1")
 }
 
+/// [`messages`], carrying `token` as a bearer token.
+pub(crate) fn bearer(token: &str) -> http::request::Builder {
+    messages().header("authorization", format!("Bearer {token}"))
+}
+
+/// The next frame of `body`, which must come within [`WAIT`].
+pub(crate) async fn next_frame(body: &mut Incoming) -> Frame<Bytes> {
+    tokio::time::timeout(WAIT, body.frame())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+}
+
 pub(crate) async fn read_body(res: Response<Incoming>) -> Bytes {
     tokio::time::timeout(WAIT, res.into_body().collect())
         .await
@@ -478,6 +495,23 @@ pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
 /// A gateway token signed with `key` as key `k1`.
 pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewCredential<'_>) -> String {
     credential::issue(key, "k1", claims)
+}
+
+/// A gateway token for `sub` with its own model list and output ceiling, if any.
+pub(crate) fn token(
+    key: &Ed25519KeyPair,
+    sub: &str,
+    models: Option<&[&str]>,
+    max_output_tokens: Option<u64>,
+) -> String {
+    issue(
+        key,
+        &NewCredential {
+            models,
+            max_output_tokens,
+            ..claims(sub)
+        },
+    )
 }
 
 /// An `[auth]` section trusting `key` as key `k1`, with `extra` lines.

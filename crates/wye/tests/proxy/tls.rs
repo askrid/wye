@@ -1,5 +1,7 @@
 //! TLS upstreams, trusted roots, and upstream connection spreading.
 
+use wye_testkit::TempDir;
+
 use super::harness::*;
 
 #[tokio::test]
@@ -31,7 +33,7 @@ async fn untrusted_upstream_certificate_is_rejected() {
 #[test]
 fn ca_file_resolves_relative_to_the_config_directory() {
     let ca = TestCa::generate();
-    let dir = std::env::temp_dir().join(format!("wye-test-{}", std::process::id()));
+    let dir = TempDir::new("ca");
     std::fs::create_dir_all(dir.join("certs")).unwrap();
     std::fs::write(dir.join("certs/ca.pem"), ca.ca_pem()).unwrap();
     let config = Config::from_toml_str(
@@ -46,7 +48,6 @@ fn ca_file_resolves_relative_to_the_config_directory() {
     std::fs::write(dir.join("certs/ca.pem"), "not a certificate").unwrap();
     let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
     assert!(err.contains("no PEM certificates found"), "{err}");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[tokio::test]

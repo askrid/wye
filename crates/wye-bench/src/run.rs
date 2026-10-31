@@ -8,10 +8,10 @@ use wye_testkit::TestCa;
 use crate::{
     allocations,
     client::Target,
-    gateway_process::{Gateway, GatewayProcess},
+    gateway_process::{Gateway, GatewayProcess, Variant},
     measure::{self, Direct, Scope},
     mock,
-    stats::{PERCENTILES, merge, percentile, phase, put},
+    stats::{Out, PERCENTILES, merge, percentile, phase},
 };
 
 /// One way of reaching the mock upstream.
@@ -42,7 +42,7 @@ pub async fn run(
     out: &str,
     repeat: usize,
 ) {
-    let mut gateways = vec![Gateway::Wye(wye)];
+    let mut gateways = vec![Gateway::Wye(wye, Variant::Plain)];
     gateways.extend_from_slice(others);
     // Competitors may parse events and drop what is not Anthropic-shaped, so
     // comparisons stream complete Anthropic frames, through every gateway
@@ -90,31 +90,26 @@ pub async fn run(
                 Direct::measure(&path.direct, path.paced),
             )
             .await;
-            put(
-                &mut metrics,
-                path.prefix,
-                "direct_throughput_mb_s",
-                direct.mb_s,
-            );
+            let mut out = Out {
+                metrics: &mut metrics,
+                prefix: path.prefix,
+            };
+            out.put("direct_throughput_mb_s", direct.mb_s);
             for (label, p) in PERCENTILES {
                 let name = format!("direct_unary_{label}_us");
-                put(
-                    &mut metrics,
-                    path.prefix,
-                    &name,
-                    percentile(&direct.latency.unary, p),
-                );
+                out.put(&name, percentile(&direct.latency.unary, p));
             }
             let variants = [
-                Gateway::WyeAuth(wye),
-                Gateway::WyeModels(wye),
-                Gateway::WyeDiag(wye),
-                Gateway::WyeOtlp(wye),
-                Gateway::WyeOpenai(wye),
-                Gateway::WyeBedrock(wye),
-                Gateway::WyeFailover(wye),
-                Gateway::WyeRefused(wye),
-            ];
+                Variant::Auth,
+                Variant::Models,
+                Variant::Diag,
+                Variant::Otlp,
+                Variant::Openai,
+                Variant::Bedrock,
+                Variant::Failover,
+                Variant::Refused,
+            ]
+            .map(|variant| Gateway::Wye(wye, variant));
             let variants = if path.variants { &variants[..] } else { &[] };
             for &gateway in gateways.iter().chain(variants) {
                 eprintln!(
@@ -130,28 +125,21 @@ pub async fn run(
                 let prefix = format!("{}{}", path.prefix, gateway.prefix());
                 let scope = Scope {
                     streams_sse: gateway.streams_sse(),
-                    paced: path.paced,
-                    per_request_only: matches!(
-                        gateway,
-                        Gateway::WyeAuth(_)
-                            | Gateway::WyeModels(_)
-                            | Gateway::WyeDiag(_)
-                            | Gateway::WyeOtlp(_)
-                            | Gateway::WyeOpenai(_)
-                            | Gateway::WyeBedrock(_)
-                            | Gateway::WyeFailover(_)
-                            | Gateway::WyeRefused(_)
-                    ),
+                    per_request_only: matches!(gateway, Gateway::Wye(_, v) if v != Variant::Plain),
                     uploads: matches!(
                         gateway,
-                        Gateway::WyeModels(_)
-                            | Gateway::WyeDiag(_)
-                            | Gateway::WyeFailover(_)
-                            | Gateway::WyeRefused(_)
+                        Gateway::Wye(
+                            _,
+                            Variant::Models | Variant::Diag | Variant::Failover | Variant::Refused
+                        )
                     ),
-                    event_cpu: matches!(gateway, Gateway::WyeOpenai(_)),
+                    event_cpu: matches!(gateway, Gateway::Wye(_, Variant::Openai)),
                 };
-                measure::measure(&direct, &process, &prefix, scope, &mut metrics).await;
+                let mut out = Out {
+                    metrics: &mut metrics,
+                    prefix: &prefix,
+                };
+                measure::measure(&direct, &process, scope, &mut out).await;
             }
         }
         if let Some(binary) = wye_alloc {
@@ -199,12 +187,6 @@ fn print_versus(metrics: &Value, other: Gateway<'_>) {
             let Some(metric) = metric_name.strip_prefix(path) else {
                 continue;
             };
-            if metric.starts_with("tls_")
-                || metric.starts_with("krakend_")
-                || metric.starts_with("direct_")
-            {
-                continue;
-            }
             let Some(other_value) = metrics.get(&format!("{path}{}{metric}", other.prefix()))
             else {
                 continue;
@@ -222,19 +204,14 @@ fn print_versus(metrics: &Value, other: Gateway<'_>) {
             };
             println!(
                 "{metric_name:36} {wye:>10.2} {other:>10.2}  {}",
-                if wye_wins { "wye" } else { loser_label(name) }
+                // Upper case, so losses stand out in the table.
+                if wye_wins {
+                    "wye".to_owned()
+                } else {
+                    name.to_uppercase()
+                }
             );
         }
-    }
-}
-
-/// Upper-cased name of the competitor, so losses stand out in the table.
-fn loser_label(name: &str) -> &'static str {
-    match name {
-        "krakend" => "KRAKEND",
-        "litellm" => "LITELLM",
-        "bifrost" => "BIFROST",
-        _ => "OTHER",
     }
 }
 
