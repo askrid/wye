@@ -114,8 +114,14 @@ pub(crate) enum HoldError {
     Body,
 }
 
-/// What a held request carries until its body is fully sent.
-struct Hold {
+/// What a held request carries until its body is fully sent: the start of the
+/// body, read until its model was known.
+///
+/// Boxed, and kept boxed inside [`RequestBody`]: hyper's client channel
+/// stores 32 requests inline per upstream connection, so every byte of the
+/// body type costs 32 bytes per connection (on the plain HTTP/1.1 path,
+/// per stream), restricted or not.
+pub(crate) struct Hold {
     chunks: Chunks,
     /// The [`charge`] of each of `chunks`, counted against the hold budget.
     budget: Held,
@@ -133,35 +139,27 @@ struct Hold {
     check_rest: bool,
 }
 
-/// The start of a request body, read until its model was known.
-///
-/// Boxed, and kept boxed inside [`RequestBody`]: hyper's client channel
-/// stores 32 requests inline per upstream connection, so every byte of the
-/// body type costs 32 bytes per connection (on the plain HTTP/1.1 path,
-/// per stream), restricted or not.
-pub(crate) struct HeldStart(Box<Hold>);
-
-impl HeldStart {
+impl Hold {
     /// The model named by the request.
     pub(crate) fn model(&self) -> Option<&str> {
-        self.0.scanner.model()
+        self.scanner.model()
     }
 
     /// Whether the hold read the whole body.
     pub(crate) fn ended(&self) -> bool {
-        self.0.ended
+        self.ended
     }
 
     /// The request's output-token maximum, if it was read before the hold ended.
     pub(crate) fn max_output_tokens(&self) -> Option<u64> {
-        self.0.scanner.max_output_tokens()
+        self.scanner.max_output_tokens()
     }
 
     /// Streams the rest of the body unchecked. For a request held only to
     /// resolve an alias: the repeated-`model` check protects permissions, and
     /// lexing the rest costs CPU per uploaded MB.
     pub(crate) fn skip_rest_check(&mut self) {
-        self.0.check_rest = false;
+        self.check_rest = false;
     }
 
     /// Replaces the value of `model` with `model` in the held bytes, keeping
@@ -169,17 +167,15 @@ impl HeldStart {
     /// (negative when shorter). Chunks are sliced, not copied, and `model` is
     /// shared. `None` if the model's position is unknown.
     pub(crate) fn splice_model(&mut self, model: Bytes) -> Option<i64> {
-        let span = self.0.scanner.model_span()?;
-        Some(self.0.splice(&span, model))
+        let span = self.scanner.model_span()?;
+        Some(self.splice(&span, model))
     }
 
     /// Where the client's `model` value is in the body as received.
     pub(crate) fn model_span(&self) -> Option<Range<u64>> {
-        self.0.scanner.model_span()
+        self.scanner.model_span()
     }
-}
 
-impl Hold {
     /// Replaces the held bytes at `span` with `value`; returns the change in
     /// length. The hold covers every byte of `span`: it stopped right after
     /// the model's value.
@@ -206,7 +202,7 @@ pub(crate) async fn hold_until_model<B>(
     budget: &Gauge,
     max_held: usize,
     token_limit: Option<u64>,
-) -> Result<HeldStart, HoldError>
+) -> Result<Box<Hold>, HoldError>
 where
     B: Body<Data = Bytes> + Unpin,
     B::Error: Into<BoxError>,
@@ -244,7 +240,7 @@ where
             return Err(HoldError::Model(error));
         }
     }
-    Ok(HeldStart(hold))
+    Ok(hold)
 }
 
 /// The client's body failed while held: past the size limit ([`ClientBody`]),
@@ -286,10 +282,10 @@ impl<B> RequestBody<B> {
     }
 
     /// `held` followed by the rest of `inner`.
-    pub(crate) fn after_hold(held: HeldStart, inner: B) -> Self {
+    pub(crate) fn after_hold(held: Box<Hold>, inner: B) -> Self {
         Self {
-            inner: (!held.0.ended).then_some(inner),
-            hold: Some(held.0),
+            inner: (!held.ended).then_some(inner),
+            hold: Some(held),
         }
     }
 }

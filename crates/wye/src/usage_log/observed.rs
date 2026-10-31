@@ -8,10 +8,10 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::usage::UsageScanner;
-use http::StatusCode;
+use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
 
-use super::{Outcome, Record, RequestInfo, UsageLog, unix_ms};
+use super::{Outcome, RequestInfo, Seen, UsageLog};
 use crate::gauge::Held;
 
 /// Sent when a successful Messages event stream fails at an event boundary
@@ -21,24 +21,6 @@ use crate::gauge::Held;
 /// Codex and the OpenAI SDKs retry a stream that ends before its terminal
 /// event.
 const STALLED_EVENT: &[u8] = b"event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"upstream stream stalled or broke; retry the request\"}}\n\n";
-
-/// What a response body is, from its `content-type`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BodyKind {
-    EventStream,
-    Json,
-    Other,
-}
-
-impl BodyKind {
-    pub(crate) fn of(content_type: Option<&[u8]>) -> Self {
-        match content_type {
-            Some(t) if t.starts_with(b"text/event-stream") => Self::EventStream,
-            Some(t) if t.starts_with(b"application/json") => Self::Json,
-            _ => Self::Other,
-        }
-    }
-}
 
 /// Response body wrapper that observes usage and emits a record on drop.
 pub(crate) struct Observed<B> {
@@ -64,18 +46,18 @@ impl<B: Body> Observed<B> {
         inner: B,
         info: RequestInfo,
         status: StatusCode,
-        body: BodyKind,
+        content_type: Option<&HeaderValue>,
         log: UsageLog,
         permit: Held,
     ) -> Self {
         let headers_after = info.started.elapsed();
         let api = info.endpoint.api;
         // count_tokens answers with a count, not usage.
-        let scanner = match body {
+        let scanner = match content_type.map(HeaderValue::as_bytes) {
             _ if !status.is_success() || !info.endpoint.generates => None,
-            BodyKind::EventStream => Some(UsageScanner::new(api)),
-            BodyKind::Json => Some(UsageScanner::json(api)),
-            BodyKind::Other => None,
+            Some(t) if t.starts_with(b"text/event-stream") => Some(UsageScanner::new(api)),
+            Some(t) if t.starts_with(b"application/json") => Some(UsageScanner::json(api)),
+            _ => None,
         };
         // hyper never polls a body that is already at its end (a 204, a
         // `content-length: 0`): it is delivered with the headers.
@@ -156,25 +138,15 @@ where
 impl<B> Drop for Observed<B> {
     fn drop(&mut self) {
         let Some(info) = self.info.take() else { return };
-        let (model, usage, tool_calls) = match self.scanner.take() {
-            Some(mut scanner) => (
-                scanner.model().map(Box::from),
-                Some((scanner.usage(), scanner.status())),
-                scanner.take_tool_calls(),
-            ),
-            None => (None, None, None),
-        };
-        let duration = info.started.elapsed();
-        self.log.send(Record {
-            info,
-            status: self.status,
+        let mut seen = Seen {
             headers_after: Some(self.headers_after),
-            duration,
-            outcome: self.outcome,
-            model,
-            usage,
-            tool_calls,
-            unix_ms: unix_ms(),
-        });
+            ..Seen::default()
+        };
+        if let Some(mut scanner) = self.scanner.take() {
+            seen.model = scanner.model().map(Box::from);
+            seen.usage = Some((scanner.usage(), scanner.status()));
+            seen.tool_calls = scanner.take_tool_calls();
+        }
+        self.log.record(info, self.status, self.outcome, seen);
     }
 }

@@ -126,11 +126,12 @@ fn usd<S: Serializer>(cost: &Option<Pico>, serializer: S) -> Result<S::Ok, S::Er
 pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     let pricing = context.pricing;
     let usage = r
+        .seen
         .usage
         .as_ref()
         .map(|(usage, _)| *usage)
         .unwrap_or_default();
-    let cost = pricing.map(|pricing| match (&r.model, &r.usage) {
+    let cost = pricing.map(|pricing| match (&r.seen.model, &r.seen.usage) {
         (Some(model), Some((usage, status))) if *status != UsageStatus::Unknown => pricing.cost(
             model,
             r.info.upstream.as_deref(),
@@ -151,7 +152,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         status: r.status.as_u16(),
         outcome: r.outcome,
         duration_ms: ms(r.duration),
-        headers_ms: r.headers_after.map(ms),
+        headers_ms: r.seen.headers_after.map(ms),
         upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         session_id: token(r.info.session_id.as_ref()),
@@ -168,8 +169,9 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             .as_ref()
             .map(|v| ToolDurations(v.as_bytes())),
         requested_model: r.info.requested_model.as_deref(),
-        model: r.model.as_deref(),
+        model: r.seen.model.as_deref(),
         usage_status: r
+            .seen
             .usage
             .as_ref()
             .map_or("not_observed", |(_, status)| status.as_str()),
@@ -180,7 +182,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         cost: cost.and_then(|c| c.pico),
         cost_status: cost.map(|c| c.status.as_str()),
         pricing_version: pricing.map(|p| &*p.version),
-        tool_calls: r.tool_calls.as_deref().map(ToolCallsField),
+        tool_calls: r.seen.tool_calls.as_deref().map(ToolCallsField),
         cache_miss: CacheMiss::classify(
             usage.cache_read_input_tokens,
             usage.cache_creation_input_tokens,

@@ -31,7 +31,7 @@ use gateway_core::{
     route::FailoverReason,
     usage::{ToolCalls, Usage, UsageStatus},
 };
-use http::{HeaderValue, StatusCode};
+use http::{HeaderValue, Response, StatusCode};
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
     sync::mpsc,
@@ -42,7 +42,7 @@ use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
 
 pub(crate) use agent::AgentHeaders;
 use line::{Line, line, push_line};
-pub(crate) use observed::{BodyKind, Observed};
+pub(crate) use observed::Observed;
 pub(crate) use otlp::OtlpTarget;
 
 /// Records buffered before new ones are dropped.
@@ -113,14 +113,20 @@ pub(crate) struct RefusedAttempt {
 pub(crate) struct Record {
     info: RequestInfo,
     status: StatusCode,
-    headers_after: Option<Duration>,
     duration: Duration,
     outcome: Outcome,
+    seen: Seen,
+    unix_ms: u64,
+}
+
+/// What observing a response body showed; a request without one has nothing.
+#[derive(Default)]
+struct Seen {
+    headers_after: Option<Duration>,
     model: Option<Box<str>>,
     usage: Option<(Usage, UsageStatus)>,
     /// `tool_use` blocks the response started.
     tool_calls: Option<Box<ToolCalls>>,
-    unix_ms: u64,
 }
 
 /// What the writer task writes besides the stdout log.
@@ -163,25 +169,22 @@ impl UsageLog {
         }
     }
 
-    /// Records a response Wye generated itself.
-    pub(crate) fn gateway_error(&self, info: RequestInfo, status: StatusCode) {
-        self.unobserved(info, status, Outcome::GatewayError);
-    }
-
-    /// A record without a response body to observe.
-    fn unobserved(&self, info: RequestInfo, status: StatusCode, outcome: Outcome) {
+    fn record(&self, info: RequestInfo, status: StatusCode, outcome: Outcome, seen: Seen) {
         let duration = info.started.elapsed();
         self.send(Record {
             info,
             status,
-            headers_after: None,
             duration,
             outcome,
-            model: None,
-            usage: None,
-            tool_calls: None,
+            seen,
             unix_ms: unix_ms(),
         });
+    }
+
+    /// Records `res`, a response Wye generated itself, and returns it.
+    pub(crate) fn gateway_error<B>(&self, info: RequestInfo, res: Response<B>) -> Response<B> {
+        self.record(info, res.status(), Outcome::GatewayError, Seen::default());
+        res
     }
 }
 
@@ -223,7 +226,8 @@ impl Drop for Unanswered<'_> {
     fn drop(&mut self) {
         if let Some(info) = self.info.take() {
             let status = StatusCode::from_u16(CLIENT_CLOSED).unwrap_or(StatusCode::REQUEST_TIMEOUT);
-            self.log.unobserved(info, status, Outcome::Cancelled);
+            self.log
+                .record(info, status, Outcome::Cancelled, Seen::default());
         }
     }
 }
