@@ -1,11 +1,7 @@
 //! `wye policy-diff`: what a config change does to access, for review and
 //! CI. It compares two configs offline and lists what each change widens,
-//! narrows, or only changes; a change that widens access (a model newly
-//! allowed, a raised ceiling, a longer credential lifetime, a new trusted
-//! signer or key, authentication
-//! removed, a listener beyond loopback or on every interface, a new API
-//! route, the operator's key where callers brought their own) makes the
-//! command exit non-zero, so it can require a second review.
+//! narrows, or only changes; a change that widens access makes the command
+//! exit non-zero, so it can require a second review.
 //!
 //! Model patterns compare by coverage: `claude-*` covers `claude-opus-*`
 //! and `claude-opus-5-5`, so narrowing a list never reads as widening.
@@ -18,6 +14,7 @@ use gateway_core::{
     route::Route,
 };
 
+use super::model_list;
 use crate::{StartupError, startup::key_set};
 
 /// The comparison, line by line.
@@ -266,7 +263,7 @@ fn models(
         (Some(_), None) => diff.widens.push(format!("{what}: every model allowed")),
         (None, Some(new)) => diff
             .narrows
-            .push(format!("{what}: limited to {}", list(new))),
+            .push(format!("{what}: limited to {}", model_list(new))),
         (Some(old), Some(new)) => {
             for pattern in new {
                 if !old.iter().any(|o| o.covers(pattern)) {
@@ -344,14 +341,6 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
             diff.changes.push(format!("{at} removed"));
         }
     }
-}
-
-fn list(patterns: &[ModelPattern]) -> String {
-    patterns
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 //! sampling, the upstream choice and failover, and the response or gateway
 //! error.
 
-use std::{ops::Range, time::Duration};
+use std::time::Duration;
 use tokio::sync::oneshot::error::TryRecvError;
 
 use bytes::Bytes;
@@ -127,7 +127,7 @@ impl Gateway {
         let mut prefix_sent = None;
         if let (Some(at), Some(upstream)) = (&model_span, route.upstreams.get(ranking.first()))
             && let Some((prefix, value)) = model_id_for(at, upstream, prefix_sent)
-            && body.splice(&at.span, value).is_some()
+            && body.splice(&at.span, value)
         {
             prefix_sent = prefix;
         }
@@ -245,12 +245,12 @@ fn with_model_id(
     match model_id_for(at, next, *prefix_sent) {
         None => Some(resend),
         Some((prefix, value)) => {
-            resend
-                .splice(&model_id_span(at, *prefix_sent), value)
-                .then(|| {
-                    *prefix_sent = prefix;
-                    resend
-                })
+            // Where the value is while it carries the prefix sent.
+            let span = at.span.start..at.span.end + prefix_sent.map_or(0, |p| p.len() as u64);
+            resend.splice(&span, value).then(|| {
+                *prefix_sent = prefix;
+                resend
+            })
         }
     }
 }
@@ -316,9 +316,4 @@ fn model_id_for(
         };
         (wanted, value)
     })
-}
-
-/// Where the model's value is in the body while it carries `prefix_sent`.
-fn model_id_span(at: &ModelSpan, prefix_sent: Option<&'static str>) -> Range<u64> {
-    at.span.start..at.span.end + prefix_sent.map_or(0, |p| p.len() as u64)
 }

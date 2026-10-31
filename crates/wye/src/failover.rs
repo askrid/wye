@@ -71,8 +71,7 @@ impl<B> Resend<RequestBody<B>> {
             let shifted = span.start - sent..span.end - sent;
             self.rest
                 .as_mut()
-                .and_then(|rest| rest.splice(&shifted, value))
-                .is_some()
+                .is_some_and(|rest| rest.splice(&shifted, value))
         } else {
             false
         }

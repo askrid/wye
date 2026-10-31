@@ -4,6 +4,19 @@
 
 use std::io::IsTerminal;
 
+/// How `doctor` and `policy-test` start a line; [`Paint::style`] colors the word.
+const OK: &str = "ok ";
+const FAIL: &str = "FAIL ";
+
+/// One line of a check's report: `text` under its verdict, in a fixed column.
+pub(super) fn verdict(ok: bool, text: &str) -> String {
+    if ok {
+        format!("{OK}   {text}\n")
+    } else {
+        format!("{FAIL} {text}\n")
+    }
+}
+
 /// Whether to color one output stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Paint(bool);
@@ -62,8 +75,8 @@ impl Paint {
         let mut out = String::with_capacity(text.len() + 64);
         for line in text.split_inclusive('\n') {
             let verdict = [
-                ("ok ", Self::green as fn(Self, &str) -> String),
-                ("FAIL ", Self::red),
+                (OK, Self::green as fn(Self, &str) -> String),
+                (FAIL, Self::red),
                 ("widens:", Self::red),
                 ("narrows:", Self::green),
                 ("result: access widened", Self::red),

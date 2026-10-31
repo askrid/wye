@@ -30,7 +30,7 @@ impl BodyScanner for PromptScanner {
 }
 
 /// The `prompt` object of a usage record.
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub(crate) struct PromptRecord {
     /// `complete`, or `unknown` when the body was incomplete or could not be followed.
     status: &'static str,
@@ -75,12 +75,7 @@ impl PromptRecord {
         let Some(hashes) = slot.get() else {
             return Self {
                 status: "unknown",
-                tools: None,
-                system: None,
-                messages: None,
-                breakpoint_count: None,
-                breakpoints: Seq::default(),
-                message_prefixes: Seq::default(),
+                ..Self::default()
             };
         };
         let section = |s: Option<gateway_core::prompt::SectionHash>| {

@@ -120,7 +120,7 @@ pub(crate) struct Record {
     usage: Option<(Usage, UsageStatus)>,
     /// `tool_use` blocks the response started.
     tool_calls: Option<Box<ToolCalls>>,
-    unix_ms: u128,
+    unix_ms: u64,
 }
 
 /// What the writer task writes besides the stdout log.
@@ -228,10 +228,8 @@ impl Drop for Unanswered<'_> {
     }
 }
 
-fn unix_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis())
+fn unix_ms() -> u64 {
+    unix_nanos() / 1_000_000
 }
 
 async fn write_records<W>(
@@ -259,10 +257,11 @@ async fn write_records<W>(
     };
     let export_metrics = |batch: &otlp::Batch, metrics: &metrics::Metrics| {
         let lost = batch
-            .dropped()
+            .dropped
+            .load(Ordering::Relaxed)
             .saturating_add(dropped.load(Ordering::Relaxed));
         let body = metrics.encode(
-            &batch.target().resource,
+            &batch.target.resource,
             unix_nanos(),
             sinks.active.current(),
             lost,
@@ -374,7 +373,7 @@ async fn write_records<W>(
     if let Some((mut batch, metrics)) = otlp {
         batch.flush();
         export_metrics(&batch, &metrics);
-        let otlp_lost = batch.lost();
+        let otlp_lost = Arc::clone(&batch.dropped);
         drop(batch);
         if let Some(exporter) = exporter {
             let _ = exporter.await;

@@ -258,7 +258,7 @@ fn held_body_error(error: impl Into<BoxError>) -> HoldError {
 }
 
 /// The request body sent upstream: held chunks first, then the rest of the
-/// client's body, checked for a repeated `model` when permissions apply.
+/// client's body, checked as it streams when the start was held.
 pub(crate) struct RequestBody<B> {
     /// `None` once the client's body has ended or failed the check.
     inner: Option<B>,
@@ -266,7 +266,7 @@ pub(crate) struct RequestBody<B> {
 }
 
 impl<B> RequestBody<B> {
-    /// The client's body unchanged: no permissions apply.
+    /// The client's body unchanged: nothing needed its model.
     pub(crate) fn new(inner: B) -> Self {
         Self {
             inner: Some(inner),
@@ -275,10 +275,14 @@ impl<B> RequestBody<B> {
     }
 
     /// Replaces the bytes at `span` (the model's value) with `value` before
-    /// anything was sent; `None` when the body was not held, so the model's
-    /// position is unknown. Returns the change in length.
-    pub(crate) fn splice(&mut self, span: &Range<u64>, value: Bytes) -> Option<i64> {
-        Some(self.hold.as_mut()?.splice(span, value))
+    /// anything was sent; `false` when the body was not held, so the model's
+    /// position is unknown.
+    pub(crate) fn splice(&mut self, span: &Range<u64>, value: Bytes) -> bool {
+        let Some(hold) = self.hold.as_mut() else {
+            return false;
+        };
+        hold.splice(span, value);
+        true
     }
 
     /// `held` followed by the rest of `inner`.

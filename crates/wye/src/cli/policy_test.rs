@@ -26,7 +26,10 @@ use std::{fmt::Write as _, path::Path};
 use gateway_core::{config::Config, credential::Identity, policy::ModelPattern};
 use serde::Deserialize;
 
-use super::explain::{Credential, explain};
+use super::{
+    explain::{Credential, explain},
+    paint::verdict,
+};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,12 +80,10 @@ pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, boo
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         match run_case(config, request, now) {
-            Ok(()) => {
-                let _ = writeln!(report, "ok    {name}");
-            }
+            Ok(()) => report.push_str(&verdict(true, &name)),
             Err(why) => {
                 failed += 1;
-                let _ = writeln!(report, "FAIL  {name}: {why}");
+                report.push_str(&verdict(false, &format!("{name}: {why}")));
             }
         }
     }

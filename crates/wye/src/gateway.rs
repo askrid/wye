@@ -79,7 +79,7 @@ pub struct Gateway {
     /// Prices usage records in the writer task, when `[pricing]` is configured.
     pricing: Option<Arc<Pricing>>,
     /// `[upgrade_check]`: target models and the share of sessions checked.
-    upgrade_check: Option<Arc<UpgradeCheck>>,
+    upgrade_check: Option<UpgradeCheck>,
     max_request_body_bytes: usize,
     in_flight: Gauge,
     max_concurrent_requests: usize,
@@ -100,6 +100,7 @@ struct ApiRoute {
 }
 
 impl Gateway {
+    /// `resources` come from [`Resources::resolve`] on the same `config`.
     pub fn new(config: &Config, resources: Resources) -> Result<Self, StartupError> {
         if resources.upstreams.len() != config.routes.upstreams().count() {
             return Err(StartupError::UpstreamCount);
@@ -147,17 +148,15 @@ impl Gateway {
             failover_held: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
-            otlp: match &config.telemetry {
-                Some(telemetry) => Some(Arc::new(otlp_target(
-                    telemetry,
-                    &otlp_roots,
-                    resources.otlp_headers.clone(),
-                )?)),
-                None => None,
-            },
+            otlp: config
+                .telemetry
+                .as_ref()
+                .map(|telemetry| OtlpTarget::new(telemetry, &otlp_roots, resources.otlp_headers))
+                .transpose()?
+                .map(Arc::new),
             prompt_key: resources.prompt_key.map(Arc::new),
             pricing: config.pricing.clone().map(Arc::new),
-            upgrade_check: config.upgrade_check.clone().map(Arc::new),
+            upgrade_check: config.upgrade_check.clone(),
             prompt_sample_percent: config
                 .cache_diagnostics
                 .as_ref()
@@ -231,13 +230,11 @@ impl Gateway {
         log: &UsageLog,
         connection: &ConnectionAuth,
     ) -> Response<ResBody> {
-        let endpoint = match (req.method(), req.uri().path()) {
-            (&Method::GET, "/v1/models")
-                if self.catalog.is_some() && !is_codex_catalog(req.uri().query()) =>
-            {
-                return self.models(&req, connection);
+        let endpoint = match (req.method(), req.uri().path(), &self.catalog) {
+            (&Method::GET, "/v1/models", Some(catalog)) if !is_codex_catalog(req.uri().query()) => {
+                return self.models(catalog, &req, connection);
             }
-            (&Method::POST, path) => match api::endpoint(path) {
+            (&Method::POST, path, _) => match api::endpoint(path) {
                 Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
                 Some(endpoint) => {
                     let refusal = Refusal::NoRoute {
@@ -248,7 +245,7 @@ impl Gateway {
                 }
                 None => return self.local(req.method(), path),
             },
-            (method, path) => return self.local(method, path),
+            (method, path, _) => return self.local(method, path),
         };
         let api = endpoint.api;
         let mut info = RequestInfo {
@@ -288,10 +285,12 @@ impl Gateway {
     /// proxied request when `[auth]` is set, since the answer reveals the
     /// credential's permissions. Not a usage record: nothing reaches the
     /// provider.
-    fn models(&self, req: &Request<Incoming>, connection: &ConnectionAuth) -> Response<ResBody> {
-        let Some(catalog) = &self.catalog else {
-            return self.local(req.method(), req.uri().path());
-        };
+    fn models(
+        &self,
+        catalog: &ModelCatalog,
+        req: &Request<Incoming>,
+        connection: &ConnectionAuth,
+    ) -> Response<ResBody> {
         let identity = match &self.verifier {
             None => None,
             Some(verifier) => match authenticate(verifier, req.headers(), connection) {
@@ -311,24 +310,6 @@ impl Gateway {
 /// format, not Claude Code's: a 404 makes it use its bundled catalog.
 fn is_codex_catalog(query: Option<&str>) -> bool {
     query.is_some_and(|q| q.split('&').any(|pair| pair.starts_with("client_version=")))
-}
-
-/// The OTLP export client trusts the same roots as the upstream connection.
-fn otlp_target(
-    telemetry: &gateway_core::config::Telemetry,
-    extra_roots: &[rustls::pki_types::CertificateDer<'static>],
-    headers: http::HeaderMap,
-) -> Result<OtlpTarget, StartupError> {
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build(crate::tls::https_connector(extra_roots)?);
-    Ok(OtlpTarget::new(
-        telemetry.otlp_logs_uri.clone(),
-        telemetry.otlp_metrics_uri.clone(),
-        telemetry.otlp_traces_uri.clone(),
-        headers,
-        client,
-        &telemetry.service_name,
-    ))
 }
 
 /// A request's declared `content-length`, if it has a valid one.

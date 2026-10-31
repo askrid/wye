@@ -58,18 +58,6 @@ pub fn public_key(key: &Ed25519KeyPair) -> String {
 }
 
 /// `wye token keygen`: a new key, and what to add to the config.
-pub fn keygen(path: &Path) -> Result<String, String> {
-    let key = new_key(path)?;
-    Ok(format!(
-        "wrote {} (keep it secret, outside the gateway)\n\n\
-         Add to wye.toml, under [auth]:\n[[auth.keys]]\nid = \"<a new id>\"\n\
-         ed25519_public_key = \"{}\"\n",
-        path.display(),
-        public_key(&key),
-    ))
-}
-
-/// `wye token keygen`, from its options.
 pub fn run_keygen(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
@@ -78,7 +66,14 @@ pub fn run_keygen(
         Some(out) => out.into(),
         None => files::in_home(SIGNING_KEY_FILE, "pass --out", env)?,
     };
-    keygen(&out)
+    let key = new_key(&out)?;
+    Ok(format!(
+        "wrote {} (keep it secret, outside the gateway)\n\n\
+         Add to wye.toml, under [auth]:\n[[auth.keys]]\nid = \"<a new id>\"\n\
+         ed25519_public_key = \"{}\"\n",
+        out.display(),
+        public_key(&key),
+    ))
 }
 
 /// `wye token issue`, from its options.

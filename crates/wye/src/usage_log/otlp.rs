@@ -18,17 +18,23 @@ use std::{
 };
 
 use bytes::Bytes;
+use gateway_core::config::Telemetry;
 use http::{HeaderMap, HeaderValue, Method, Request, Uri, header::CONTENT_TYPE};
 use http_body_util::{BodyExt, Full};
 use hyper_rustls::HttpsConnector;
-use hyper_util::client::legacy::{Client, connect::HttpConnector};
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
 use ring::rand::SystemRandom;
+use rustls::pki_types::CertificateDer;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 mod encode;
 
 use super::Line;
-pub(super) use encode::{Value, write_attribute};
+use crate::StartupError;
+pub(super) use encode::{Value, write_attributes};
 use encode::{write_log_record, write_span};
 
 /// Records per batch before it is sent without waiting for the timer.
@@ -57,21 +63,22 @@ pub(crate) struct OtlpTarget {
 }
 
 impl OtlpTarget {
+    /// The export client trusts `extra_roots`, as the upstream connections do.
     pub(crate) fn new(
-        logs_uri: Uri,
-        metrics_uri: Uri,
-        traces_uri: Uri,
+        telemetry: &Telemetry,
+        extra_roots: &[CertificateDer<'static>],
         headers: HeaderMap,
-        client: ExportClient,
-        service_name: &str,
-    ) -> Self {
+    ) -> Result<Self, StartupError> {
         let mut resource = br#"{"attributes":["#.to_vec();
-        write_attribute(&mut resource, "service.name", Value::Str(service_name));
-        resource.push(b',');
-        write_attribute(
+        write_attributes(
             &mut resource,
-            "service.version",
-            Value::Str(env!("CARGO_PKG_VERSION")),
+            &[
+                ("service.name", Some(Value::Str(&telemetry.service_name))),
+                (
+                    "service.version",
+                    Some(Value::Str(env!("CARGO_PKG_VERSION"))),
+                ),
+            ],
         );
         resource.extend_from_slice(b"]}");
         let envelope = |open: &[u8], scope: &[u8]| {
@@ -80,7 +87,7 @@ impl OtlpTarget {
             prefix.extend_from_slice(scope);
             prefix.into_boxed_slice()
         };
-        Self {
+        Ok(Self {
             logs_prefix: envelope(
                 br#"{"resourceLogs":[{"resource":"#,
                 br#","scopeLogs":[{"scope":{"name":"wye"},"logRecords":["#,
@@ -89,22 +96,15 @@ impl OtlpTarget {
                 br#"{"resourceSpans":[{"resource":"#,
                 br#","scopeSpans":[{"scope":{"name":"wye"},"spans":["#,
             ),
-            logs_uri,
-            metrics_uri,
-            traces_uri,
+            logs_uri: telemetry.otlp_logs_uri.clone(),
+            metrics_uri: telemetry.otlp_metrics_uri.clone(),
+            traces_uri: telemetry.otlp_traces_uri.clone(),
             headers,
-            client,
+            client: Client::builder(TokioExecutor::new())
+                .build(crate::tls::https_connector(extra_roots)?),
             resource: resource.into(),
-        }
+        })
     }
-}
-
-/// The OTLP signal an export carries.
-#[derive(Clone, Copy)]
-enum Signal {
-    Logs,
-    Metrics,
-    Traces,
 }
 
 /// One signal's records waiting to be sent.
@@ -117,13 +117,14 @@ struct Buffer {
 /// The batches being filled by the writer task: each usage record becomes
 /// a log record and a span.
 pub(super) struct Batch {
-    target: Arc<OtlpTarget>,
+    pub(super) target: Arc<OtlpTarget>,
     logs: Buffer,
     spans: Buffer,
     random: SystemRandom,
     queue: mpsc::Sender<Export>,
-    /// Records lost to a full queue or a failed export.
-    dropped: Arc<AtomicU64>,
+    /// Records lost to a full queue or a failed export; the exporter task
+    /// keeps adding to it after the batch is gone.
+    pub(super) dropped: Arc<AtomicU64>,
 }
 
 impl Batch {
@@ -159,59 +160,39 @@ impl Batch {
 
     /// Hands the batches to the exporter, or drops them if the queue is full.
     pub(super) fn flush(&mut self) {
-        self.send(Signal::Logs);
-        self.send(Signal::Traces);
-    }
-
-    fn send(&mut self, signal: Signal) {
-        let buffer = match signal {
-            Signal::Logs => &mut self.logs,
-            Signal::Traces => &mut self.spans,
-            Signal::Metrics => return,
-        };
-        if buffer.records == 0 {
-            return;
+        for (buffer, uri) in [
+            (&mut self.logs, &self.target.logs_uri),
+            (&mut self.spans, &self.target.traces_uri),
+        ] {
+            if buffer.records == 0 {
+                continue;
+            }
+            buffer.buf.extend_from_slice(b"]}]}]}");
+            let body = Bytes::copy_from_slice(&buffer.buf);
+            let records = std::mem::take(&mut buffer.records);
+            buffer.buf.clear();
+            // Log records and spans are counted alike: a collector can take one
+            // signal and refuse the other (one without a traces pipeline).
+            let export = Export {
+                uri: uri.clone(),
+                body,
+                records,
+            };
+            if self.queue.try_send(export).is_err() {
+                // Statistics counter only.
+                self.dropped.fetch_add(records as u64, Ordering::Relaxed);
+            }
         }
-        buffer.buf.extend_from_slice(b"]}]}]}");
-        let body = Bytes::copy_from_slice(&buffer.buf);
-        let records = std::mem::take(&mut buffer.records);
-        buffer.buf.clear();
-        // Log records and spans are counted alike: a collector can take one
-        // signal and refuse the other (one without a traces pipeline).
-        let export = Export {
-            signal,
-            body,
-            records,
-        };
-        if self.queue.try_send(export).is_err() {
-            // Statistics counter only.
-            self.dropped.fetch_add(records as u64, Ordering::Relaxed);
-        }
-    }
-
-    /// Records lost so far.
-    pub(super) fn dropped(&self) -> u64 {
-        self.dropped.load(Ordering::Relaxed)
-    }
-
-    /// The loss counter, which the exporter task keeps adding to after the
-    /// batch is gone.
-    pub(super) fn lost(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.dropped)
     }
 
     /// Queues a metrics export; a full queue skips it, and the next one
     /// carries the cumulative totals.
     pub(super) fn send_metrics(&self, body: Vec<u8>) {
         let _ = self.queue.try_send(Export {
-            signal: Signal::Metrics,
+            uri: self.target.metrics_uri.clone(),
             body: body.into(),
             records: 0,
         });
-    }
-
-    pub(super) fn target(&self) -> &OtlpTarget {
-        &self.target
     }
 }
 
@@ -228,7 +209,7 @@ fn append(buffer: &mut Buffer, prefix: &[u8], write: impl FnOnce(&mut Vec<u8>)) 
 
 /// One request for the exporter task.
 struct Export {
-    signal: Signal,
+    uri: Uri,
     body: Bytes,
     /// Log records or spans in `body`, counted as lost if it is not delivered.
     records: usize,
@@ -236,19 +217,10 @@ struct Export {
 
 /// Sends queued batches one at a time until the writer drops its sender.
 async fn export(target: Arc<OtlpTarget>, mut rx: mpsc::Receiver<Export>, dropped: Arc<AtomicU64>) {
-    while let Some(Export {
-        signal,
-        body,
-        records,
-    }) = rx.recv().await
-    {
+    while let Some(Export { uri, body, records }) = rx.recv().await {
         let mut req = Request::new(Full::new(body));
         *req.method_mut() = Method::POST;
-        *req.uri_mut() = match signal {
-            Signal::Logs => target.logs_uri.clone(),
-            Signal::Metrics => target.metrics_uri.clone(),
-            Signal::Traces => target.traces_uri.clone(),
-        };
+        *req.uri_mut() = uri;
         let headers = req.headers_mut();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         for (name, value) in &target.headers {

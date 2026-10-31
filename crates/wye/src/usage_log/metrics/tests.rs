@@ -178,9 +178,9 @@ fn tool_calls_are_summed_by_name() {
             ..line("/v1/messages", 200, 1.0, None)
         });
     }
-    assert_eq!(&*metrics.tool_calls[0].0, "Bash");
-    assert_eq!(metrics.tool_calls[0].1, 4);
-    assert_eq!(metrics.tool_calls[1].1, 2);
+    assert_eq!(&*metrics.tool_calls[0].key, "Bash");
+    assert_eq!(metrics.tool_calls[0].count, 4);
+    assert_eq!(metrics.tool_calls[1].count, 2);
 }
 
 #[test]

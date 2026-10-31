@@ -71,9 +71,8 @@ pub async fn serve(
     http.max_buf_size(MAX_CONNECTION_BUFFER);
     // Owns every connection task; aborted after the grace period.
     let mut connections = JoinSet::new();
-    // Takes `connections` as an argument, not a capture, so the select loops can
-    // also reap from it between calls.
-    // Returns the accept error to pause after, if any.
+    // `connections` is an argument, not a capture, so the select loops can also
+    // reap from it. Returns whether to pause.
     let accept = |connections: &mut JoinSet<_>,
                   accepted: std::io::Result<(TcpStream, SocketAddr)>| {
         // Accept errors (file descriptor exhaustion, say) are transient: they
@@ -83,7 +82,7 @@ pub async fn serve(
             Err(e) => return pause_after(&e),
         };
         let _ = stream.set_nodelay(true);
-        // Best effort: without it the kernel autotunes, as before.
+        // Best effort: without it the kernel autotunes.
         let _ = socket2::SockRef::from(&stream).set_send_buffer_size(CLIENT_SEND_BUFFER);
         let io = TokioIo::new(WriteTimeout::new(stream, gateway.client_write_timeout));
         let gateway = Arc::clone(&gateway);

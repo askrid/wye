@@ -159,17 +159,7 @@ impl Launch {
 
 /// `value` as a TOML basic string, as Codex parses `-c` values.
 fn toml_string(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for c in value.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    serde_json::Value::from(value).to_string()
 }
 
 /// The gateway to use: `url` (`--url`), else `$WYE_URL`, else this machine's.

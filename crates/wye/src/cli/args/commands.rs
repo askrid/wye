@@ -12,23 +12,30 @@ const CONFIG: Opt = Opt {
     repeats: false,
 };
 
+/// A command with no arguments, options, or notes.
+const BASE: Command = Command {
+    name: "",
+    summary: "",
+    args: "",
+    arity: (0, 0),
+    options: &[],
+    passthrough: false,
+    notes: "",
+};
+
 /// The commands, in the order help lists them.
 pub const COMMANDS: &[Command] = &[
     Command {
         name: "serve",
         summary: "Run the gateway in the foreground",
-        args: "",
-        arity: (0, 0),
         options: &[CONFIG],
-        passthrough: false,
         notes: "One JSON usage record per request on stdout; messages on stderr. Keep them \
                 with `wye serve >> ~/.wye/usage.jsonl`.",
+        ..BASE
     },
     Command {
         name: "service install",
         summary: "Run the gateway in the background, now and at every login",
-        args: "",
-        arity: (0, 0),
         options: &[
             CONFIG,
             Opt {
@@ -37,55 +44,40 @@ pub const COMMANDS: &[Command] = &[
             },
             Opt::flag("dry-run", "Show the plan and the file; change nothing"),
         ],
-        passthrough: false,
         notes: "On macOS a LaunchAgent (launchd), on Linux a systemd user unit: both run \
                 as you, without sudo. Shows what it writes and runs, and asks first.",
+        ..BASE
     },
     Command {
         name: "service status",
         summary: "Show whether the background gateway is installed and answering",
-        args: "",
-        arity: (0, 0),
-        options: &[],
-        passthrough: false,
-        notes: "",
+        ..BASE
     },
     Command {
         name: "service restart",
         summary: "Restart the background gateway, after checking its config",
-        args: "",
-        arity: (0, 0),
-        options: &[],
-        passthrough: false,
         notes: "Run it after editing the config or installing a new wye.",
+        ..BASE
     },
     Command {
         name: "service uninstall",
         summary: "Stop the background gateway and remove it",
-        args: "",
-        arity: (0, 0),
-        options: &[],
-        passthrough: false,
         notes: "The config and the usage log stay.",
+        ..BASE
     },
     Command {
         name: "validate",
         summary: "Check a config without starting the gateway",
-        args: "",
-        arity: (0, 0),
         options: &[CONFIG],
-        passthrough: false,
         notes: "Reads the identity providers' key sets too; secrets in the environment are \
                 left to `wye doctor`.",
+        ..BASE
     },
     Command {
         name: "doctor",
         summary: "Check a config's keys, files, and endpoints",
-        args: "",
-        arity: (0, 0),
         options: &[CONFIG],
-        passthrough: false,
-        notes: "",
+        ..BASE
     },
     Command {
         name: "claude",
@@ -110,16 +102,13 @@ pub const COMMANDS: &[Command] = &[
         summary: "Summarize a usage log",
         args: "[<log>]",
         arity: (0, 1),
-        options: &[],
-        passthrough: false,
         notes: "Reads ~/.wye/usage.jsonl, the log `wye service install` keeps, unless \
                 given a file; `-` reads standard input.",
+        ..BASE
     },
     Command {
         name: "init",
         summary: "Write a starter config",
-        args: "",
-        arity: (0, 0),
         options: &[
             Opt::flag(
                 "api-key",
@@ -136,24 +125,22 @@ pub const COMMANDS: &[Command] = &[
                 "Where to write it (default: ~/.wye/wye.toml; with --team, ./wye.toml)",
             ),
         ],
-        passthrough: false,
         notes: "By default, for you on this machine: Claude Code's login, or any API key a \
                 caller sends, goes through, and the gateway holds no secret. Never \
                 overwrites a file.",
+        ..BASE
     },
     Command {
         name: "token keygen",
         summary: "Make a signing key for gateway tokens",
-        args: "",
-        arity: (0, 0),
         options: &[Opt::value(
             "out",
             "path",
             "Where to write it (default: ~/.wye/issuer.key)",
         )],
-        passthrough: false,
         notes: "Prints the public half for [[auth.keys]]. `wye init --team` makes the first \
                 key; this one is for rotation.",
+        ..BASE
     },
     Command {
         name: "token issue",
@@ -180,9 +167,9 @@ pub const COMMANDS: &[Command] = &[
                 "Write it to a new file only you can read (default: stdout)",
             ),
         ],
-        passthrough: false,
         notes: "The issuer, audience, and key id come from the config's [auth], the key id \
                 found by the signing key's public half.",
+        ..BASE
     },
     Command {
         name: "explain",
@@ -203,9 +190,9 @@ pub const COMMANDS: &[Command] = &[
                 )
             },
         ],
-        passthrough: false,
         notes: "Offline: calls what the server calls. `-` reads the request from standard \
                 input.",
+        ..BASE
     },
     Command {
         name: "policy-test",
@@ -213,29 +200,26 @@ pub const COMMANDS: &[Command] = &[
         args: "[<dir>]",
         arity: (0, 1),
         options: &[CONFIG],
-        passthrough: false,
         notes: "Each <name>.json is a request and <name>.expect.toml its decision. The \
                 default directory is policy-tests, next to the config.",
+        ..BASE
     },
     Command {
         name: "policy-diff",
         summary: "Show what a config change widens or narrows",
         args: "<old> <new>",
         arity: (2, 2),
-        options: &[],
-        passthrough: false,
-        notes: "",
+        ..BASE
     },
     Command {
         name: "probe",
         summary: "Check that a gateway or URL answers 2xx",
         args: "[<url>]",
         arity: (0, 1),
-        options: &[],
-        passthrough: false,
         notes: "The default is the gateway `wye claude` would use: $WYE_URL, else this \
                 machine's. A URL without a path names a gateway, and asks its /healthz; \
                 give /readyz for a load balancer's view. For images without curl.",
+        ..BASE
     },
 ];
 
