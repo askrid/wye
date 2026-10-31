@@ -41,7 +41,9 @@ static EPOCH: OnceLock<Instant> = OnceLock::new();
 /// Set once before any stream starts; see [`use_anthropic_frames`].
 static ANTHROPIC_FRAMES: AtomicBool = AtomicBool::new(false);
 
-/// Frames every SSE stream as a complete Anthropic Messages stream.
+/// Frames every SSE stream as a complete Anthropic Messages stream, and gives
+/// every unary Messages reply the fields a real one has (`model`,
+/// `stop_reason`): a gateway that parses responses rejects one without.
 pub fn use_anthropic_frames() {
     ANTHROPIC_FRAMES.store(true, Ordering::Relaxed);
 }
@@ -111,6 +113,11 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
             (
                 r#"{"id":"resp_bench","object":"response","model":"openai/bench","output":[{"type":"message","content":[{"type":"output_text","text":""#,
                 r#""}]}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
+            )
+        } else if ANTHROPIC_FRAMES.load(Ordering::Relaxed) {
+            (
+                r#"{"id":"msg_bench","type":"message","role":"assistant","model":"bench","stop_reason":"end_turn","stop_sequence":null,"content":[{"type":"text","text":""#,
+                r#""}],"usage":{"input_tokens":1,"output_tokens":1}}"#,
             )
         } else {
             (

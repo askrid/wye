@@ -1,4 +1,5 @@
-//! The gateway under test (Wye, KrakenD, LiteLLM, or Bifrost), as a child process.
+//! The gateway under test (Wye, KrakenD, LiteLLM, Bifrost, or agentgateway), as a
+//! child process.
 
 use std::{collections::HashSet, path::Path, process::Stdio, time::Duration};
 
@@ -17,6 +18,7 @@ pub enum Gateway<'a> {
     KrakenD(&'a str),
     LiteLlm(&'a str),
     Bifrost(&'a str),
+    Agentgateway(&'a str),
 }
 
 /// What a Wye under test does on top of forwarding.
@@ -62,6 +64,7 @@ impl Gateway<'_> {
             Self::KrakenD(_) => "krakend",
             Self::LiteLlm(_) => "litellm",
             Self::Bifrost(_) => "bifrost",
+            Self::Agentgateway(_) => "agentgateway",
         }
     }
 
@@ -80,6 +83,7 @@ impl Gateway<'_> {
             Self::KrakenD(_) => "krakend_",
             Self::LiteLlm(_) => "litellm_",
             Self::Bifrost(_) => "bifrost_",
+            Self::Agentgateway(_) => "agentgateway_",
         }
     }
 

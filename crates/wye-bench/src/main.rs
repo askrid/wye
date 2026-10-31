@@ -55,6 +55,7 @@ fn main() -> ExitCode {
                     "--krakend" => others.push(Gateway::KrakenD(value)),
                     "--litellm" => others.push(Gateway::LiteLlm(value)),
                     "--bifrost" => others.push(Gateway::Bifrost(value)),
+                    "--agentgateway" => others.push(Gateway::Agentgateway(value)),
                     "--wye-alloc" => wye_alloc = Some(*value),
                     _ => return usage(),
                 }
@@ -142,7 +143,7 @@ fn compare_scope(flags: &[&str]) -> Option<gate::Scope> {
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>]\n  \
+        "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>] [--agentgateway <path>]\n  \
          wye-bench compare <reference.json> <results.json> [--only <pattern,...>] [--accept <pattern,...>] [--allow-new]\n  \
          wye-bench median <out.json> <results.json>...\n  \
          wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"
