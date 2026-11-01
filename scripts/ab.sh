@@ -8,8 +8,11 @@
 # rounds per metric and B's change relative to A. Use it for any change whose
 # expected effect is below the commit gate's sensitivity.
 set -euo pipefail
+# Resolved before the cd, so paths relative to the caller's directory work.
+a=$(realpath "${1:?usage: scripts/ab.sh <wye-a> <wye-b> [rounds]}")
+b=$(realpath "${2:?usage: scripts/ab.sh <wye-a> <wye-b> [rounds]}")
+rounds=${3:-3}
 cd "$(dirname "$0")/.."
-a=$1; b=$2; rounds=${3:-3}
 out=target/bench/ab; rm -rf "$out"; mkdir -p "$out"
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 cargo build --locked --release --quiet -p wye-bench

@@ -12,10 +12,11 @@ staged=$(git diff --cached --name-only)
 site_files=$(grep -E '^site/' <<<"$staged" | grep -vE '\.md$' || true)
 if [[ -n $site_files ]] || grep -qxE \
   'README\.md|CHANGELOG\.md|bench/baseline\.json|Cargo\.toml|crates/wye/Cargo\.toml' <<<"$staged"; then
-  # site/check.sh builds the working tree too.
-  if ! git diff --quiet -- site; then
-    echo "pre-commit: unstaged changes in site/ would be checked but not committed;" \
-      "stage or stash them" >&2
+  # site/check.sh builds the working tree too, site/ and the files it reads.
+  if ! git diff --quiet -- site README.md CHANGELOG.md bench/baseline.json Cargo.toml \
+    crates/wye/Cargo.toml; then
+    echo "pre-commit: unstaged changes the site reads would be checked but not" \
+      "committed; stage or stash them" >&2
     exit 1
   fi
   untracked=$(git ls-files --others --exclude-standard -- site)
@@ -29,8 +30,10 @@ fi
 
 if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md|site/.*)$' <<<"$staged" \
   || grep -qx 'docs/policy\.md' <<<"$staged"; }; then
-  # check.sh builds the working tree: it must be what is committed.
-  if ! git diff --quiet; then
+  # check.sh builds the working tree: it must be what is committed. The
+  # website is its own workspace, which check.sh never builds, so edits in
+  # progress there do not block (the site check above covers it when it runs).
+  if ! git diff --quiet -- . ':(exclude)site'; then
     echo "pre-commit: unstaged changes would be benchmarked but not committed;" \
       "stage or stash them" >&2
     exit 1
