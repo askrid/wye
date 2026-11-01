@@ -49,17 +49,18 @@ apps on the official SDKs, upgrades, and troubleshooting.
 
 ## What it does
 
-- **Works with the clients you have.** Claude Code, Codex, and apps on the
-  official Anthropic and OpenAI SDKs connect by base URL; `wye claude` and
-  `wye codex` set it for you. Anthropic Messages, OpenAI Responses, and Chat
-  Completions pass through as sent, and streams event by event, never buffered.
-  ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
-- **Shows usage and cost.** One record per request: tokens, cost, model,
-  session, subagent, request class, tool calls and their time. `wye report`
-  summarizes them with no backend; OTLP sends logs, metrics, and one trace per
-  Claude Code session to yours. Prompt-cache misses are sorted into expected and
-  unexplained. ([reading the report](docs/guide.md#reading-wye-report),
+- **Shows usage and cost.** One record per request with its tokens, cost, and
+  model, and for Claude Code and Codex its session, subagent, request class,
+  and tool calls. `wye report` summarizes them with no backend; OTLP sends logs,
+  metrics, and one trace per Claude Code session to yours. Prompt-cache misses
+  are sorted into expected and unexplained. ([reading the report](docs/guide.md#reading-wye-report),
   [telemetry](docs/operations.md#telemetry), [prices](docs/policy.md#pricing-metadata))
+- **Gives a team its own access.** Scoped gateway tokens instead of the
+  provider key, signed by Wye or by your identity provider (GitHub Actions, or
+  your SSO through Claude Code's `apiKeyHelper`). Each token carries the models
+  and output-token ceiling it may use, checked before the provider is called,
+  and with `[discovery]` Claude Code's model picker lists only those models.
+  ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across API keys and providers.** Several Anthropic keys,
   Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys
   too), shared by weight. Each session stays on one key, so its prompt cache
@@ -67,13 +68,6 @@ apps on the official SDKs, upgrades, and troubleshooting.
   before any output. Bedrock and Claude Platform on AWS are not yet checked
   against the live services.
   ([several keys or providers](docs/guide.md#several-keys-or-providers))
-- **Gives a team its own access.** Gateway tokens signed by Wye or by your
-  identity provider (GitHub Actions, or your SSO through Claude Code's
-  `apiKeyHelper`), each with the models and output-token ceiling it may use,
-  checked before the provider is called. Callers never see the provider key,
-  and with `[discovery]` Claude Code's model picker lists only the models a
-  token may use.
-  ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Changes models in one place.** Aliases map a stable name to a model per team
   or token, and upgrade checks report which requests a newer model would reject
   before you move. Requests are never changed to fit.
@@ -82,6 +76,11 @@ apps on the official SDKs, upgrades, and troubleshooting.
   would do with a request, offline; `wye policy-test` and `wye policy-diff` check
   policy in CI and fail when a change widens access; `wye doctor` checks keys and
   endpoints without billing anything. ([commands](docs/operations.md#commands))
+- **Works with the clients you have.** Claude Code, Codex, and apps on the
+  official Anthropic and OpenAI SDKs connect by base URL; `wye claude` and
+  `wye codex` set it for you. Anthropic Messages, OpenAI Responses, and Chat
+  Completions pass through as sent, and streams event by event, never buffered.
+  ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs where you need it.** `wye service` installs a macOS LaunchAgent or a
   systemd user unit; for a team, any number of identical replicas behind a load
   balancer, with no coordination between them, health checks, and graceful
@@ -103,6 +102,34 @@ apps on the official SDKs, upgrades, and troubleshooting.
   of application code, and a model upgrade is a config change once the upgrade
   check shows nothing breaks. Wye does not protect a public endpoint from abuse
   by itself: per-user sign-in and quotas stay in your backend.
+
+## How it compares
+
+What teams usually want from an LLM gateway, and Wye's answer. The
+differences come from two choices: each client keeps its provider's own API,
+and Wye keeps no state between requests.
+
+| Teams usually want | Wye |
+|---|---|
+| Spend by team, user, and app | Yes, down to the agent session, subagent, and tool, with prompt-cache misses explained |
+| Scoped keys instead of the provider key | Yes: a signed token per developer, CI job, or app, from Wye or your identity provider |
+| Spend caps and rate limits | Per-request output ceilings today, and the provider's own rate limits. Spend caps per team come next, enforced by the provider on each team's own key (planned); Wye keeps no counters |
+| Failover and load across keys | Yes, before any output, each session kept on one key so its prompt cache stays warm |
+| Logs, metrics, and traces | Yes, in your OpenTelemetry backend, one trace per Claude Code session |
+| Switching models centrally | Yes, and upgrade checks report what a newer model would reject before you move |
+| Policy you can review and test | Yes: one TOML file in Git, checked in CI by `wye policy-test` and `wye policy-diff` |
+| One API for every provider | No: each client keeps its provider's API. For many providers behind one API, LiteLLM or OpenRouter fit better |
+| Guardrails, redaction, response caching | No ([why](#what-wye-will-not-do)) |
+| Little to run | One binary, no database ([speed](#speed)) |
+
+Why native APIs: a provider integration keeps needing work after it ships. On
+Anthropic's API, in one year, `thinking.budget_tokens`, sampling parameters,
+assistant prefill, forced `tool_choice`, and `output_format` all broke on
+newer models. A gateway that translates every request into one format lags
+each such change. Wye forwards requests as sent, so new provider features on
+the endpoints it serves work on the day they ship. The only body field it
+changes is `model` (an alias, or Bedrock's `anthropic.` ids), spliced in place,
+and the response names the model that ran.
 
 ## Speed
 
@@ -142,29 +169,6 @@ and on memory beside stalled clients, and KrakenD on bulk transfer and TLS
 uploads.
 [docs/benchmarks.md](docs/benchmarks.md) has the method, the full tables, the
 configurations used, and where Wye loses.
-
-## Why
-
-A provider integration keeps needing work after it ships. On Anthropic's API,
-in one year, `thinking.budget_tokens`, sampling parameters, assistant prefill,
-forced `tool_choice`, and `output_format` all broke on newer models. Keys,
-accounts, and rate limits change, and every service grows its own retries,
-logging, and cost tracking. Many gateways take that work on by translating
-every request into one common format, which then lags each new provider field.
-
-Wye takes the opposite approach:
-
-- It does not translate. Anthropic Messages, OpenAI Responses, and Chat
-  Completions are forwarded as they are, so new provider features on the
-  endpoints Wye serves work through it on the day they ship. The only body
-  rewrite is the `model` field (an alias, or Bedrock's `anthropic.` model ids),
-  spliced in place.
-- It reads coding-agent traffic. Claude Code's session, subagent, request
-  class, compaction, and tool timing headers become usage records, one trace
-  per session, and an explanation of prompt-cache misses. Codex's session and
-  subagent headers map onto the same fields.
-- It keeps no state between requests. Limits are per request; rate limits and
-  budgets stay with the provider, which already keeps that ledger.
 
 ## Configuration
 
@@ -274,10 +278,11 @@ Not checked against the real services yet:
   background sessions); not yet with an API key.
 
 Next (planned): a report of which tokens were waste and what each fix saves,
-and a smaller model for small background requests.
+and a smaller model for small background requests; then spend caps per team,
+enforced by the provider on each team's own key.
 
 Not built yet: a published container image, Vertex AI, AWS SigV4 signing,
-per-request cost ceilings, budgets held by the provider, and reloading
+per-request cost ceilings, and reloading
 short-lived provider keys without a restart.
 [docs/roadmap.md](docs/roadmap.md) tracks all of it.
 

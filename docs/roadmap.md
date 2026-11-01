@@ -10,7 +10,7 @@ Each milestone leaves a runnable system with focused tests. Order of the next wo
 | Realistic-workload benchmark | Done: uploads, 2,000 token-paced streams, capacity per core, stress scenarios, agentgateway, Bifrost, LiteLLM, and KrakenD comparisons |
 | M1: team-ready Claude Code | Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service` (the systemd path is tested but has not run on a real Linux machine), `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test, release archives from a `v*` tag (`0.1.0-rc.1` published). Open: published images, Compose example, Helm chart, secrets from files for every key, a deny list, a Docker Swarm service updating without dropping streams, the exit check |
 | M1b: agent-aware visibility | Built: A1-A4 (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). Open: A5 |
-| M2: cost policy | Built: pricing ([policy.md](policy.md#pricing-metadata)) in records, OTLP, `wye report`, and `wye explain`; cache-miss diagnostics (opt-in, sampled per session). Not started: cost bound, provider-held budgets |
+| M2: cost policy | Built: pricing ([policy.md](policy.md#pricing-metadata)) in records, OTLP, `wye report`, and `wye explain`; cache-miss diagnostics (opt-in, sampled per session). Next after M2c: provider-held budgets. Not started: cost bound |
 | M2b: model aliases and upgrade checks | Done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit check, a real alias move |
 | M2c: fewer expensive tokens | Next ([product.md](product.md#next)); not started. Evidence: [where the tokens go](research.md#where-the-tokens-go) |
 | M3: Codex | Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, stored responses reaching their account by affinity ([as built](architecture.md#upstream-held-state)). Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision |
@@ -30,7 +30,7 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 - Every secret from a file too: `hash_key_file` for cache diagnostics and `otlp_headers_file` for OTLP, since `wye service` cannot pass environment secrets ([running as a service](operations.md#running-as-a-service)).
 - A deny list in config (token subjects or key ids), so offboarding need not wait for the last token to expire; it takes effect on the next restart or rollout ([revocation](policy.md#revocation)).
 - A Docker Swarm service updating without dropping streams.
-- Narrowable tokens: a token holder hands a subagent or a CI job a narrower token (fewer models, a lower ceiling, a shorter life) without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)); fifth in [product.md](product.md#next)'s order.
+- Narrowable tokens: a token holder hands a subagent or a CI job a narrower token (fewer models, a lower ceiling, a shorter life) without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)); sixth in [product.md](product.md#next)'s order.
 
 Exit: a team runs Claude Code through a shared Wye with per-developer tokens and sees usage per developer and session in its existing OTel backend.
 
@@ -44,9 +44,9 @@ Exit: a team sees, in its own OTel backend or with `wye report`, each Claude Cod
 
 ### M2: cost policy for Claude
 
+- **Provider-held budgets, next after M2c** ([design](policy.md#provider-held-budgets)). An upstream lists the token subjects it serves, so each team's requests use its own Anthropic workspace key and the spend limit set on it; failover stays among that team's keys, never another budget's; an exhausted limit comes back as an explicit budget error. First: check how hard and how fast Anthropic's workspace limits stop requests ([research](research.md#verification-needed)).
 - The [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
-- [Provider-held budgets](policy.md#provider-held-budgets): identity → Anthropic workspace key mapping and explicit budget-exhausted errors.
-- `wye explain` and policy tests report the cost decision.
+- `wye explain` and policy tests report which key and budget a request uses, and the cost decision.
 
 Exit: a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.
 

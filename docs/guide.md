@@ -227,6 +227,10 @@ A config decides where your credentials go, so one in a repository you just clon
 
 Yes, for Claude Code on a claude.ai plan (Pro or Max), with the default `wye init`. It counts against your plan, on this machine only: the mode refuses to listen beyond loopback and cannot combine with gateway tokens. Unset `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN`, either of which replaces your login. `wye codex` uses an OpenAI key.
 
+### Can I cap what a team spends?
+
+Not in Wye itself: it keeps no counters, so it cannot add up spend across requests or replicas. Today a token's output-token ceiling bounds each request, and the spend limit you set on a provider workspace bounds its key. Next ([planned](policy.md#provider-held-budgets)): each team's tokens use its own workspace key, so the provider's limit becomes the team's budget.
+
 ### Why is there no cost column?
 
 `wye init` writes no prices: [seeing costs](#seeing-costs).

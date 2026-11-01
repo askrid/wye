@@ -1,6 +1,6 @@
 # Wye docs
 
-New here: the [README](../README.md#what-it-does) says what Wye does and how fast it is, and the [guide](guide.md) shows how to use each part. What Wye is for and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
+New here: the [README](../README.md#what-it-does) says what Wye does, [how it compares](../README.md#how-it-compares) with what teams expect of a gateway, and how fast it is, and the [guide](guide.md) shows how to use each part. What Wye is for and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
 
 ## Use it
 

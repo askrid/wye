@@ -45,11 +45,12 @@ Endpoints: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), Ope
 In this order ([roadmap.md](roadmap.md)):
 
 1. Fewer expensive tokens (M2c): the waste report in `wye report`, size-aware model routing for small background requests, and an estimate of what Wye saved.
-2. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
-3. The rest of cost (M2): the provable per-request cost ceiling and provider-held budgets.
-4. Packaging: a published container image and a Compose example.
-5. Narrowable tokens: a token holder hands a subagent or a job a narrower token without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)).
-6. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
+2. Spend caps per team, held by the provider (M2): each team's tokens use its own Anthropic workspace key, whose spend limit Anthropic enforces ([design](policy.md#provider-held-budgets)).
+3. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
+4. The rest of cost (M2): the provable per-request cost ceiling.
+5. Packaging: a published container image and a Compose example.
+6. Narrowable tokens: a token holder hands a subagent or a job a narrower token without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)).
+7. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
 
 ### Later
 
@@ -106,6 +107,6 @@ Weaknesses:
 
 - Few providers so far, API keys only, with no Vertex yet, and Bedrock and Codex not yet checked live ([status](roadmap.md#status)).
 - Prerelease only: `0.1.0-rc.1` archives exist, but no container image is published. That hurts "easy to use" more than any missing feature.
-- No cumulative limits, by design: budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
+- No cumulative limits, by design: budgets need the provider ([planned next after M2c](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - Little real-world validation ([status](roadmap.md#status)): one developer's Claude Code sessions on a subscription, no production deployment, and numbers from one laptop against a mock.
 - Ongoing upkeep: Claude Code's gateway contract changes per release, and upgrade checks need a table of each model's breaking changes.

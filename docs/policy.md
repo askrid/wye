@@ -198,10 +198,11 @@ Defaults: [`examples/wye.toml`](../examples/wye.toml).
 
 ### Provider-held budgets
 
-Proposal, not built. Providers already keep an authoritative per-account spend ledger. Wye can use it instead of building one:
+Planned next after [fewer expensive tokens](roadmap.md#m2c-fewer-expensive-tokens); not built. Providers already keep an authoritative per-account spend ledger. Wye can use it instead of building one:
 
 - Create one provider project or workspace per budget owner (team, project, environment), each with its own API key and a spend limit set at the provider.
-- Map gateway identities to provider keys in config: a token's `sub` (or a `budget` claim) selects which provider key Wye uses.
+- Map gateway identities to provider keys in config: an upstream lists the token subjects it serves (patterns, as model permissions use), so a team's requests go only to its own keys.
+- Failover stays among a team's own keys. Moving a refused request to another owner's key would spend another budget.
 - When the provider limit is exhausted, the provider rejects requests; Wye relays that as an explicit budget error.
 
 This gives cumulative budgets enforced by the party that bills, with no Wye state and no coordination between replicas. Limits are as strict as the provider makes them: some providers enforce spend limits as hard stops, others only alert, and enforcement may lag actual usage. Verify each provider before relying on it ([research.md](research.md#verification-needed)). Combined with the [provable per-request ceiling](#provable-cost-ceiling), overshoot past the provider limit is bounded by the in-flight requests at the moment of cutoff.
