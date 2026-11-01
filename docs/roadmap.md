@@ -14,7 +14,7 @@ Each milestone leaves a runnable system with focused tests. Order of the next wo
 | M2b: model aliases and upgrade checks | Done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit check, a real alias move |
 | M2c: fewer expensive tokens | Next ([product.md](product.md#next)); not started. Evidence: [where the tokens go](research.md#where-the-tokens-go) |
 | M3: Codex | Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, stored responses reaching their account by affinity ([as built](architecture.md#upstream-held-state)). Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision |
-| M4: Claude across providers and accounts | Built: routes with several accounts, `cache_affine` or `ordered`, failover before output, Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-accounts)). Open: one live Bedrock request, SigV4, Vertex; these need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
+| M4: Claude across providers and accounts | Built: routes with several accounts, `cache_affine` or `ordered`, failover before output, Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-accounts)). Open: one live request each on Bedrock and Claude Platform on AWS, SigV4, Vertex; these need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
 | M5: benchmarks and optimization | Started early: the commit gate since M0, with provider, failover, and refusal variants; agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)). Open: agent trace replay, a floor baseline, a separate Linux load machine, the remaining competitors |
 | M6: optional extensions | `wye policy-diff` done (the CI half of [queryable policy](research.md#5-queryable-and-provable-policy)); the rest not started |
 
@@ -56,7 +56,7 @@ Exit: a team moves a model alias for all its services by one reviewed config cha
 
 ### M2c: fewer expensive tokens
 
-In agent traffic most prompt tokens are already cache reads at 5 to 10 percent of the input price; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt: a changed byte in a cached prefix turns those reads into writes at 12.5 to 25 times the price.
+In agent traffic most prompt tokens are already cache reads at 5 to 10 percent of the input price; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt: a changed byte in a cached prefix turns those reads into writes at 12.5 to 40 times the price.
 
 - **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the log: context carried past a threshold and what clearing or compacting earlier would have cost; cache rebuilds with their cause (from [cache diagnostics](research.md#2-cache-miss-diagnostics)); the cache TTL, 5 minutes or 1 hour, that would have cost least for this user's idle gaps; background and subagent requests on large models; tool definitions sent on every request and never called. Records gain the two inputs the report lacks: cache writes split by TTL, and the size of the tools section.
 - **Size-aware model routing.** An opt-in policy that sends small requests of a class (auxiliary first) to a smaller model through the allowlisted `model` rewrite. It decides from headers and the body's length, so every replica agrees and nothing is read beyond what an alias already reads. It never touches a main-thread request, or a request large enough to be reading another model's cache. `wye explain` shows the decision; the client sees it too, since the response names the model that ran, and records keep both the requested and the served model. Off by default until quality is measured per request class ([research](research.md#1-agent-aware-routing)).
@@ -74,7 +74,7 @@ Exit: a team runs Claude Code and Codex through one Wye, under one policy, and s
 
 ### M4: Claude across providers and accounts
 
-- One live Bedrock request; contract tests per provider against recorded responses.
+- One live request each on Bedrock and Claude Platform on AWS; contract tests per provider against recorded responses.
 - A small opt-in real-provider smoke test per provider (planned; none exists yet). It checks SDK compatibility and does not replace deterministic protocol tests.
 - SigV4 for Bedrock and Claude Platform on AWS.
 - Google Vertex AI: model in the URL, `anthropic_version` splice (property-tested: every other byte unchanged), access tokens.
@@ -103,7 +103,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 |---|---|
 | No minimum read rate: a client that accepts one window update a minute keeps its stream, permit, and about 0.7 MB, since the write timeout resets on any progress | Bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate |
 | Client connections are not capped, and `/healthz` and `/readyz` take no permit, so a connection flood is bounded only by the open-file limit | A connection cap is a new limit to size and document; accept errors already pause instead of spinning |
-| Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s) | Some front ends answer frequent pings with `GOAWAY`; needs a check against each provider |
+| Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s), or `stream_idle_timeout_secs` (120 s) once a stream has started | Some front ends answer frequent pings with `GOAWAY`; needs a check against each provider |
 | Chat Completions' `n` asks for several choices, each up to the output-token ceiling, so one request may generate `n` times the ceiling ([policy.md](policy.md#per-request-ceilings)) | Reading `n` is one more field under the hold; refuse or multiply is a policy choice |
 | Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-tokens)) | Each such field is provider-specific; a list of them is a design change |
 | OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process | The excess is counted in `wye.telemetry.lost`; per-attribute caps need a design |
@@ -158,7 +158,7 @@ Postponed while solo-maintained: CONTRIBUTING, issue forms, Discussions, SECURIT
 - [ ] Signature, issuer, audience, expiry, and model permissions enforced before upstream dispatch.
 - [ ] Model permissions and ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused.
 - [ ] Config references and environment secrets validated; errors fail closed.
-- [ ] Caller-credential passthrough refuses to start on a non-loopback bind.
+- [x] Caller-credential passthrough refuses to start on a non-loopback bind (config test `rejects_non_loopback_listen`).
 - [ ] Provider credentials and prompt bodies not logged by default.
 - [ ] Hard per-request cost mode rejects unbounded or unknown billable dimensions.
 - [ ] Hard cost mode is enabled only for models whose tokens-≤-bytes bound and reasoning-token billing are verified.

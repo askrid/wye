@@ -62,7 +62,7 @@ A release: bump `version` in `crates/wye/Cargo.toml`, commit through the gate, t
 | Path or variant | Scenarios |
 |---|---|
 | Plain HTTP/1.1 (no prefix) | unary latency and CPU, SSE time to first byte and per-event delay, CPU per token-sized event (128,000 unpaced 64-byte events), bulk CPU per MB, 1,000 idle streams, cancel release, 1 MiB uploads, the Claude Code-shaped `agent_upload` |
-| TLS + HTTP/2 (`tls_`, the production shape) | the same, plus 2,000 token-paced streams and the stress scenarios: 32 requests on cold connections, paced streams during back-to-back 1 MiB uploads (`mixed_`), paced streams beside 200 stalled clients (`stalled_`) |
+| TLS + HTTP/2 (`tls_`, the production shape) | the same except the Claude Code-shaped `agent_upload`, plus 2,000 token-paced streams and the stress scenarios: 32 requests on cold connections, paced streams during back-to-back 1 MiB uploads (`mixed_`), paced streams beside 200 stalled clients (`stalled_`) |
 | `auth_`, `models_`, `diag_`, `otlp_` (plain path) | per-request scenarios; `models_` and `diag_` also uploads |
 | `bedrock_` (plain path) | Wye with a Claude route to one Bedrock upstream: every request held until its `model` and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations |
 | `failover_` (plain path) | Wye with a Claude route of two accounts (both the mock) and `failover`: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload |
@@ -79,7 +79,7 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 
 - `upload`, `tls-upload`: 1 MiB uploads on the plain or the TLS path.
 - `paced`: the soak test. Resident memory, and with an alloc-stats build the live heap, after every batch of 2,000 streams.
-- `capacity`: Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more), stepping paced streams up until the added p99 passes 10 ms; `--seconds` is ignored.
+- `capacity`: Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more), stepping paced streams up until streams fail, the worker saturates, or the added p99 passes 100 ms, and reporting the largest step within 10 ms; `--seconds` is ignored.
 - `events`: the gated CPU-per-event scenario (unpaced 64-byte events; `WYE_BENCH_EVENT_BYTES` changes the payload), printing CPU per event; with `--wye-openai` the events are OpenAI Responses.
 
 `--wye-refused` runs the `refused_` variant (uploads to an account that refuses one in four) and prints failed requests.

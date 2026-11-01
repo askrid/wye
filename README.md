@@ -113,7 +113,7 @@ and Wye keeps no state between requests.
 |---|---|
 | Spend by team, user, and app | Yes, down to the agent session, subagent, and tool, with prompt-cache misses explained |
 | Scoped keys instead of the provider key | Yes: a signed token per developer, CI job, or app, from Wye or your identity provider |
-| Spend caps and rate limits | Per-request output ceilings today, and the provider's own rate limits. Spend caps per team come next, enforced by the provider on each team's own key (planned); Wye keeps no counters |
+| Spend caps and rate limits | Per-request output ceilings today, and the provider's own rate limits. Spend caps per team come after the waste report, enforced by the provider on each team's own key (planned); Wye keeps no counters |
 | Failover and load across keys | Yes, before any output, each session kept on one key so its prompt cache stays warm |
 | Logs, metrics, and traces | Yes, in your OpenTelemetry backend, one trace per Claude Code session |
 | Switching models centrally | Yes, and upgrade checks report what a newer model would reject before you move |
@@ -149,7 +149,7 @@ i9-9880H, macOS) against a local mock provider, not production measurements.
 | Memory per open stream at that load | | 9.3 KB |
 
 A heavy Claude Code user, about five streams at once, costs Wye about 1% of a
-core and under 100 KB of memory ([sizing](docs/operations.md#sizing-estimate),
+core and about 250 KB of memory ([sizing](docs/operations.md#sizing-estimate),
 an estimate). The delay per event does not add up over a stream, so Wye does
 not lower tokens per second.
 
@@ -164,9 +164,9 @@ the same run as Wye. Each cell is the other gateway's figure divided by Wye's
 | [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
 | [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
 
-agentgateway beats Wye on paced-stream latency (1.0 vs 1.2 ms p50 in that run)
-and on memory beside stalled clients, and KrakenD on bulk transfer and TLS
-uploads.
+agentgateway beats Wye on paced-stream latency (1.0 vs 1.2 ms p50 in that run),
+event latency during uploads, cold connections, and memory beside stalled
+clients, and KrakenD on bulk transfer and TLS uploads.
 [docs/benchmarks.md](docs/benchmarks.md) has the method, the full tables, the
 configurations used, and where Wye loses.
 

@@ -7,6 +7,13 @@
   priced cache reads on Opus 5.5 and Sonnet 5.5 at 0.1 times input; Anthropic
   charges 0.05 times. A table copied from them counts cache reads at twice their
   cost: set `cache_read = "0.20"` for Opus 5.5 and `"0.10"` for Sonnet 5.5.
+- `examples/wye.toml` sets the `[server]` and `[upstream]` options live at
+  their defaults instead of in comments, so which keys exist is visible.
+- Docs: the README says what Wye does, who it is for, how it compares with
+  what teams expect of a gateway, and how fast it is; the guide gains how-tos
+  for several keys, costs, model aliases and upgrades, and an OTel backend.
+- `wye-bench --agentgateway` runs the benchmark through agentgateway; results
+  in `docs/benchmarks.md`.
 
 ## 0.1.0-rc.1
 

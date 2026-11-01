@@ -26,7 +26,7 @@ Performance is a requirement: the gateway must never be the bottleneck, whether 
 Every feature follows these, and a feature that cannot is not built.
 
 - **Native and transparent.** Each client's native API passes through to its own provider, and bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract). New provider features work through Wye without a Wye release. Telemetry carries ids, counts, and keyed hashes, never prompt text.
-- **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for: the one field it changes, the model, changes only where reviewed config says so (an alias, or a routing rule the operator turned on), and never out of sight, since the response names the model that ran and the record keeps both.
+- **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for: the one field it changes, the model, changes only where reviewed config says so (an alias, a provider's own model id such as Bedrock's, or, planned, a routing rule the operator turns on), and never out of sight, since the response names the model that ran and the record keeps both.
 - **Request-local and stateless.** A decision uses only the request, its token, and the immutable config; correlation across requests happens in the user's telemetry backend. Nothing authoritative carries across requests, and nothing moves between replicas ([policy.md](policy.md#state-boundary)).
 - **Fast and light.** The request path reads headers; hashing, encoding, and aggregation happen in the telemetry writer task. A streamed event costs no allocation, and every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they are cheap enough to run on every request.
 - **Easy to use.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a token for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
@@ -46,7 +46,7 @@ In this order ([roadmap.md](roadmap.md)):
 
 1. Fewer expensive tokens (M2c): the waste report in `wye report`, size-aware model routing for small background requests, and an estimate of what Wye saved.
 2. Spend caps per team, held by the provider (M2): each team's tokens use its own Anthropic workspace key, whose spend limit Anthropic enforces ([design](policy.md#provider-held-budgets)).
-3. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
+3. Verification against the real services: a real Codex session, one live request each on Bedrock and Claude Platform on AWS, and the Claude Code exit check with an API key.
 4. The rest of cost (M2): the provable per-request cost ceiling.
 5. Packaging: a published container image and a Compose example.
 6. Narrowable tokens: a token holder hands a subagent or a job a narrower token without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)).
@@ -67,6 +67,9 @@ Status per client and provider: [roadmap.md](roadmap.md#status). A route counts 
 - No dashboard, mutable admin API, authentication database, or migrations.
 - No Redis, PostgreSQL, SQLite, distributed actors, leader election, peer discovery, or quota ownership.
 - No exact global RPM/TPM, global concurrency cap, cumulative or monthly budget in Wye, or single-use token redemption.
+- No circuit breakers, cooldowns, or balancing by measured latency: they remember across requests. Failover handles a refusal within the request.
+- No swapping in another model when one fails, no content filtering (guardrails, redaction), and no stored prompts.
+- No TLS termination: the load balancer, ingress, or Caddy in front does it and renews the certificate.
 - No MCP proxying, tool execution, or agent orchestration.
 - No prompt compression or request rewriting beyond the [allowlist](architecture.md#forwarding-contract).
 - No required cloud platform or observability vendor.

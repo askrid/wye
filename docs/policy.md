@@ -174,7 +174,7 @@ Wye has no external store and no coordination by design, so it cannot enforce ex
 | Signature, identity, expiry, audience | Yes | Request plus static public key |
 | Model allowlist and static policy | Yes | Request plus immutable config |
 | Per-request token limits | Yes, where the protocol gives enforceable bounds | Request-local |
-| Per-request billed-cost ceiling | Conditional | Hard only when all billable charges are bounded |
+| Per-request billed-cost ceiling | Planned, not built ([provable cost ceiling](#provable-cost-ceiling)) | Hard only when all billable charges are bounded |
 | Global RPM / TPM | No | Needs accumulated consumption and coordination |
 | Global concurrent streams | No | Needs coordinated permits |
 | Team or monthly budget | Not in Wye; delegated to the [provider](#provider-held-budgets) | Needs an authoritative ledger; the provider already has one |

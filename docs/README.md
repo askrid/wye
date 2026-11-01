@@ -6,7 +6,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does, [how it co
 
 | Document | Answers |
 | --- | --- |
-| [guide.md](guide.md) | Choosing a setup, running it, reading `wye report`, teams, apps, several keys or providers, upgrades, troubleshooting, FAQ |
+| [guide.md](guide.md) | Choosing a setup, running it, reading `wye report`, teams, apps, several keys or providers, costs, model aliases and upgrades, an OTel backend, changing or upgrading, troubleshooting, FAQ |
 | [examples/wye.toml](../examples/wye.toml) | Every configuration field: its default, limits, and meaning (parsed by a test with every section enabled) |
 | [CHANGELOG.md](../CHANGELOG.md) | What each release contains and what it leaves unverified |
 
@@ -30,7 +30,8 @@ New here: the [README](../README.md#what-it-does) says what Wye does, [how it co
 | --- | --- |
 | [development.md](development.md) | Commit gate, CI, benchmark scenarios, releases, design principles, review rounds |
 | [roadmap.md](roadmap.md) | Status, open work, exit criteria, open findings, release checklists |
-| [research.md](research.md) | Open questions, feature directions, related work, performance techniques |
+| [research.md](research.md) | Facts to verify, related work, feature directions, where the tokens go, visibility for one developer, performance techniques |
+| [product.md](product.md) | Why Wye exists, its principles, scope and build order, use cases, alternatives |
 
 ## Terms
 

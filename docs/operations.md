@@ -15,7 +15,7 @@ Release archives and a local OCI image are built; the rest of this list is plann
 
 `wye --help` lists the commands and `wye <command> --help` a command's options. Both are generated from the table the parser reads, so help cannot drift. Options follow the GNU conventions: any order, `--name value` or `--name=value`, `-c` for `--config`, and `--` before arguments that start with a dash.
 
-**Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that does not answer.
+**Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that is not installed or does not answer.
 
 **Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors. It is off when the output is not a terminal, `NO_COLOR` is set, or `TERM=dumb`.
 
@@ -234,7 +234,7 @@ For container platforms, `upstream.api_key_file` reads the provider key from a m
 
 ### Sizing (estimate)
 
-From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) costs Wye about 10 ms of CPU per second, about 1% of a core, and under 100 KB of memory. A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
+From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) costs Wye about 10 ms of CPU per second, about 1% of a core, and about 250 KB of memory (49 KB of heap per stream after a large upload, from the allocation benchmark). A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
 
 Wye does not lower a stream's tokens per second. It adds a roughly constant delay per event that does not accumulate: about 0.2 ms p50 at light load and 1.4 ms with 2,000 streams on the laptop, against the provider's 10-20 ms between tokens. Model permissions and cache diagnostics add cost per request and per uploaded MB, not per streamed event.
 

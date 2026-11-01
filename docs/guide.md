@@ -171,7 +171,7 @@ otlp_endpoint = "http://localhost:4318"
 otlp_headers_env = "OTLP_HEADERS"     # "key=value,...": a hosted backend's API key
 ```
 
-Each request becomes a log record and a span carrying its subject, session, tokens, and cost, each Claude Code session one trace, and metrics count requests, tokens, and cost by model, request class, and upstream ([what is exported](operations.md#telemetry)). Records still go to stdout. Under `wye service`, which does not see your shell's environment, export headers cannot be set yet; send to a local collector that adds them.
+Each request becomes a log record and a span carrying its subject, session, tokens, and cost, each Claude Code session one trace, and metrics count requests by route, upstream, status, and outcome, and tokens and cost by model, request class, and upstream ([what is exported](operations.md#telemetry)). Records still go to stdout. Under `wye service`, which does not see your shell's environment, export headers cannot be set yet; send to a local collector that adds them.
 
 ## Changing or upgrading
 
@@ -229,7 +229,7 @@ Yes, for Claude Code on a claude.ai plan (Pro or Max), with the default `wye ini
 
 ### Can I cap what a team spends?
 
-Not in Wye itself: it keeps no counters, so it cannot add up spend across requests or replicas. Today a token's output-token ceiling bounds each request, and the spend limit you set on a provider workspace bounds its key. Next ([planned](policy.md#provider-held-budgets)): each team's tokens use its own workspace key, so the provider's limit becomes the team's budget.
+Not in Wye itself: it keeps no counters, so it cannot add up spend across requests or replicas. Today a token's output-token ceiling bounds each request, and the spend limit you set on a provider workspace bounds its key. Planned after the waste report ([design](policy.md#provider-held-budgets)): each team's tokens use its own workspace key, so the provider's limit becomes the team's budget.
 
 ### Why is there no cost column?
 
