@@ -27,7 +27,7 @@
   <section class="hero" aria-labelledby="top">
     <div class="hero-copy">
       <h1 id="top">Native APIs, passed through.</h1>
-      <p class="lede">Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Requests go out as clients sent them; the only change is the model name, when an alias or a provider's own ids call for it. Which account a request uses, who may use which model, failover, upgrades, and prices sit in one TOML file you keep in Git.</p>
+      <p class="lede">Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Requests go out as clients sent them; the only change is the model name, when an alias or a provider's own ids call for it. Which account a request uses, who may use which model, failover, upgrades, and prices sit in one TOML file you keep in Git, and every request leaves a record of its tokens and cost.</p>
     </div>
 
     <div class="hero-install">
@@ -68,8 +68,13 @@
           <circle class="event" cx="200" cy="115" r="4.5"/>
         </g>
       </svg>
-      <figcaption>Each session stays on one account. Here <code>anthropic</code> answers 429 before any output, so Wye sends the same request to <code>bedrock-us</code>, and the stream comes back event by event. After the first response byte, Wye never switches.</figcaption>
+      <figcaption>A team setup with two accounts. Each session stays on one account, chosen from its session id the same way on every replica, so its prompt cache stays warm. Here <code>anthropic</code> answers 429 before any output, so Wye sends the same request to <code>bedrock-us</code>, and the stream comes back event by event. After the first response byte, Wye never switches.</figcaption>
     </figure>
+  </section>
+
+  <section class="part" aria-labelledby="features">
+    <h2 id="features">What it does</h2>
+    <div class="prose features">{{section README.md|What it does}}</div>
   </section>
 
   <section class="part" aria-labelledby="records">
@@ -81,15 +86,15 @@
 
   <section class="part" aria-labelledby="config">
     <h2 id="config">One file, kept in Git</h2>
-    <p>A route with two accounts, failover, and a price table. Each Claude Code session stays on one account, chosen by hashing its session id, so its prompt cache stays warm and every replica picks the same account. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+    <p>A route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
     {{fence README.md|[server]}}
     <p><code>wye explain</code> shows what the server would do with a request, offline, by calling the same functions in the same order.</p>
     <div class="long-lines">{{fence README.md|$ wye explain}}</div>
     <p>Every option, with its default and limits: <a href="{{repo}}/blob/main/examples/wye.toml">examples/wye.toml</a>.</p>
   </section>
 
-  <section class="part" aria-labelledby="costs">
-    <h2 id="costs">What it costs</h2>
+  <section class="part" aria-labelledby="overhead">
+    <h2 id="overhead">Overhead</h2>
     <p>Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent on that machine, and a change that makes Wye slower or heavier past the gate's tolerances is not committed.</p>
     <div class="table-scroll">
       <table class="numbers">
@@ -106,7 +111,7 @@
         </tbody>
       </table>
     </div>
-    <p>KrakenD CE beats Wye on bulk transfer and TLS uploads, though it cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the full tables, the competitors, and where Wye loses</a>.</p>
+    <p>Where Wye loses: agentgateway beats it on token-paced stream latency and on memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
   </section>
 
   <section class="part" aria-labelledby="status">

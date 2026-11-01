@@ -154,6 +154,17 @@ h1 { font-size: var(--h1); font-weight: 800; line-height: 1.02; letter-spacing: 
 .part > p, .prose { max-width: var(--measure); }
 .prose { display: grid; gap: 0.9rem; }
 .prose ul { padding-left: 1.25rem; display: grid; gap: 0.4rem; }
+/* README's "What it does": each item opens with a bold lead, which works as
+   its heading; two columns where they fit, no bullets, no boxes. */
+.prose.features { max-width: none; }
+.features ul {
+  list-style: none;
+  padding: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: 1.75rem 3rem;
+}
+.features li { max-width: var(--measure); }
+.features li > strong:first-child { display: block; font-size: var(--large); font-weight: 800; letter-spacing: -0.01em; margin-bottom: 0.25rem; }
 
 /* Code and output, as the repository has them */
 pre.code {
