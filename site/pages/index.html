@@ -11,7 +11,7 @@
 <link rel="preload" href="assets/fonts/wye-mono-semibold.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-<script src="assets/copy.js" defer></script>
+<script src="assets/site.js" defer></script>
 </head>
 <body>
 <header class="wrap bar">
@@ -105,7 +105,7 @@ claude code o<span class="r1">───────┤</span>
             </tbody>
           </table>
         </div>
-        <p>Where Wye loses: agentgateway beats it on token-paced stream latency and on memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
+        <p>Where Wye loses: agentgateway beats it on token-paced stream latency (1.0 vs 1.2 ms p50 in the comparison run), event latency during uploads, cold connections, and memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
       </section>
 
       <section class="part stop" id="record" aria-labelledby="record-h">

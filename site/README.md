@@ -5,7 +5,7 @@ The Wye website: a landing page built from the repository's own files and publis
 | Path | Contents |
 | --- | --- |
 | `pages/` | HTML pages with directives that pull from the repository; `src/render.rs` lists them |
-| `assets/` | The stylesheet, the copy-button script, the icon, and the font (Wye Mono: IBM Plex Mono subset and renamed, under the SIL Open Font License in `assets/fonts/OFL-Plex.txt`) |
+| `assets/` | The stylesheet, the script (copy buttons, and a play button under reduced motion), the icon, and the font (Wye Mono: IBM Plex Mono subset and renamed, under the SIL Open Font License in `assets/fonts/OFL-Plex.txt`) |
 | `src/` | The generator: renders `pages/` into `out/`, copies `assets/`, and checks the result |
 | `check.sh` | `cargo fmt --check`, clippy, tests, the build, and the page budget |
 

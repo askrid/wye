@@ -22,7 +22,7 @@ Check: every claim links to the doc section that backs it, and nothing contradic
 
 ### Never the slow part
 
-*From fast and light.* HTML and CSS; a script may add conveniences such as copy buttons, but every page reads and works without it. At most two self-hosted, subset font files, with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
+*From fast and light.* HTML and CSS; a script may add conveniences, such as copy buttons and a play button for a reader who asked for reduced motion, but every page reads and works without it. At most two self-hosted, subset font files, with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
 
 Check: `site/check.sh` fails a page over budget, the way the benchmark gate fails a slower gateway.
 
@@ -48,7 +48,7 @@ Check: a diagram changes in the same commit as the behaviour it shows.
 
 *From streaming and failover.* Wye's work happens in time: a request takes the junction, a refusal switches the points before the first byte, a stream comes back event by event. Motion is how the page shows that, replayed from a recorded run, never with invented timing. Each page gets one orchestrated sequence; apart from it, motion only answers the reader (opening, expanding, copying, the position in the table of contents), and one blinking cursor sits where a terminal would leave it. No fade-and-rise entrances, no hover effects on every block, no parallax.
 
-CSS only, no animation library: transitions, keyframes, `@starting-style`, scroll-driven animations, and view transitions, each degrading to a still page where a browser lacks it. Animate `transform` and `opacity`, so motion stays off the main thread. Under `prefers-reduced-motion` the sequence becomes a still diagram that says the same thing.
+CSS only, no animation library: transitions, keyframes, `@starting-style`, scroll-driven animations, and view transitions, each degrading to a still page where a browser lacks it. Animate `transform` and `opacity`, so motion stays off the main thread. Under `prefers-reduced-motion` the sequence becomes a still diagram that says the same thing, with a play button that runs it once when the reader asks.
 
 Check: with motion off, the page says everything it says with motion on.
 

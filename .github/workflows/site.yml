@@ -4,7 +4,9 @@
 
 name: site
 
-# The two path lists are the same: the site and every file it reads.
+# The two path lists are the same: the site, the files its build reads
+# (render.rs), and the files this job's checks use: deny.toml for cargo-deny
+# and rust-toolchain.toml for the toolchain.
 on:
   push:
     branches: [main]
