@@ -9,18 +9,18 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
   const button = document.createElement("button");
   button.type = "button";
   button.className = "copy";
-  button.textContent = "Copy";
+  button.textContent = "[copy]";
   button.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(pre.innerText);
-      button.textContent = "Copied";
+      button.textContent = "[copied]";
     } catch {
       // No clipboard access: select the text instead.
       getSelection().selectAllChildren(pre);
-      button.textContent = "Selected";
+      button.textContent = "[selected]";
     }
     setTimeout(() => {
-      button.textContent = "Copy";
+      button.textContent = "[copy]";
     }, 1500);
   });
   wrap.append(button);

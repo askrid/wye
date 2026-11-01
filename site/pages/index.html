@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Wye: a stateless gateway for coding agents</title>
-<meta name="description" content="Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Native APIs pass through; accounts, permissions, failover, and prices live in one TOML file in Git.">
-<link rel="preload" href="assets/fonts/overpass-latin.woff2" as="font" type="font/woff2" crossorigin>
+<title>Wye: run your agents like infrastructure</title>
+<meta name="description" content="Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your apps and the model providers. Keys, models, failover, limits, and cost live in one TOML file in Git; every request passes through as it was sent.">
+<link rel="preload" href="assets/fonts/departure-mono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="assets/fonts/overpass-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
@@ -15,126 +15,98 @@
 <header class="wrap bar">
   <a class="mark" href="./">
     <svg viewBox="0 0 32 32" aria-hidden="true"><path class="route-2" d="M14 16 L22 24 H28"/><path class="route-1" d="M4 16 H14 L22 8 H28"/></svg>
-    Wye
+    wye
   </a>
   <nav aria-label="Documentation">
-    <a href="{{repo}}/blob/main/docs/guide.md">Guide</a>
-    <a href="{{repo}}/blob/main/examples/wye.toml">Configuration</a>
-    <a href="{{repo}}">GitHub</a>
+    <a href="{{repo}}/blob/main/docs/guide.md">guide</a>
+    <a href="{{repo}}/blob/main/examples/wye.toml">config</a>
+    <a href="{{repo}}">github</a>
   </nav>
 </header>
 
 <main class="wrap">
   <section class="hero" aria-labelledby="top">
     <div class="hero-copy">
-      <h1 id="top">Native APIs, passed through.</h1>
-      <p class="lede">Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your own apps and the model providers. Requests go out as clients sent them; the only change is the model name, when an alias or a provider's own ids call for it. Which account a request uses, who may use which model, failover, upgrades, and prices sit in one TOML file you keep in Git, and every request leaves a record of its tokens and cost.</p>
+      <h1 id="top">Run your agents like infrastructure.<span class="cursor" aria-hidden="true">█</span></h1>
+      <p class="lede">Wye is a small, stateless gateway between your coding agents (Claude Code, Codex) or your apps and the model providers. Keys, models, failover, limits, and cost live in one TOML file in Git. Requests go out as clients sent them; the only change is a model name your config maps. Every request leaves a record of its tokens and cost.</p>
     </div>
 
     <div class="hero-install">
       {{fence README.md|cargo install}}
-      <p class="release">Release {{version}} is a prerelease. <a href="{{repo}}/blob/main/CHANGELOG.md">What it contains and what is not yet verified</a>.</p>
+      <p class="release">Release {{version}} is a prerelease: <a href="{{repo}}/blob/main/CHANGELOG.md">what it contains and what is not yet verified</a>.</p>
     </div>
 
     <figure class="junction">
-      <svg viewBox="0 0 640 230" role="img" aria-labelledby="junction-title">
-        <title id="junction-title">A request from Claude Code reaches the wye and takes its session's account, anthropic. anthropic answers 429 before any output, so the request goes to bedrock-us, whose stream comes back event by event.</title>
-        <path class="casing" d="M48 115 H300 L360 55 H584"/>
-        <path class="casing" d="M300 115 L360 175 H584"/>
-        <path class="track route-2" d="M300 115 L360 175 H584"/>
-        <path class="track route-1" d="M48 115 H300 L360 55 H584"/>
-        <circle class="station" cx="48" cy="115" r="9"/>
-        <circle class="station" cx="584" cy="55" r="9"/>
-        <circle class="station" cx="584" cy="175" r="9"/>
-        <text class="label" x="24" y="152">Claude Code</text>
-        <text class="label" x="300" y="152" text-anchor="middle">wye</text>
-        <text class="label" x="584" y="32" text-anchor="end">anthropic</text>
-        <text class="label" x="584" y="212" text-anchor="end">bedrock-us</text>
-        <g class="anim">
-          <path class="points points-up" d="M300 115 L318 97"/>
-          <path class="points points-down" d="M300 115 L318 133"/>
-          <g class="flag"><rect x="530" y="68" width="54" height="26" rx="3"/><text x="557" y="86" text-anchor="middle">429</text></g>
-          <circle class="request request-1" r="7"/>
-          <circle class="request request-2" r="7"/>
-          <circle class="event" r="4.5"/>
-          <circle class="event e2" r="4.5"/>
-          <circle class="event e3" r="4.5"/>
-          <circle class="event e4" r="4.5"/>
-        </g>
-        <g class="still">
-          <path class="points" d="M300 115 L318 133"/>
-          <g class="flag"><rect x="530" y="68" width="54" height="26" rx="3"/><text x="557" y="86" text-anchor="middle">429</text></g>
-          <circle class="event" cx="520" cy="175" r="4.5"/>
-          <circle class="event" cx="440" cy="175" r="4.5"/>
-          <circle class="event" cx="200" cy="115" r="4.5"/>
-        </g>
-      </svg>
+      <div role="img" aria-label="A request from Claude Code reaches wye and takes its session's account, anthropic. anthropic answers 429 before any output, so wye sends the same request to bedrock-us, whose stream comes back event by event.">
+<pre>                    <span class="r1">╭───────────</span>o anthropic
+claude code o<span class="r1">───────┤</span>
+                <span class="lbl">wye</span> <span class="r2">╰───────────</span>o bedrock-us<span class="anim"><span class="cell sw-up" style="--c:20;--r:1">┘</span><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell request request-1" style="--c:12;--r:1">■</span><span class="cell request request-2" style="--c:20;--r:1">■</span><span class="cell event" style="--c:32;--r:2">·</span><span class="cell event e2" style="--c:32;--r:2">·</span><span class="cell event e3" style="--c:32;--r:2">·</span><span class="cell event e4" style="--c:32;--r:2">·</span></span><span class="still"><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell event" style="--c:27;--r:2">·</span><span class="cell event" style="--c:23;--r:2">·</span><span class="cell event" style="--c:16;--r:1">·</span></span></pre>
+      </div>
       <figcaption>A team setup with two accounts. Each session stays on one account, chosen from its session id the same way on every replica, so its prompt cache stays warm. Here <code>anthropic</code> answers 429 before any output, so Wye sends the same request to <code>bedrock-us</code>, and the stream comes back event by event. After the first response byte, Wye never switches.</figcaption>
     </figure>
   </section>
 
   <div class="route">
     <nav class="rail" aria-label="A request's route through Wye">
-      <p class="rail-title">A request's route</p>
-      <ol>
-        <li class="to-client"><a href="#client">Client</a></li>
-        <li class="to-gate"><a href="#gate">Gate</a></li>
-        <li class="to-model"><a href="#model">Model</a></li>
-        <li class="to-account"><a href="#account">Account</a></li>
-        <li class="to-stream"><a href="#stream">Stream</a></li>
-        <li class="to-record"><a href="#record">Record</a></li>
+      <ol class="tree">
+        <li class="root">route/</li>
+        <li class="to-client"><a href="#client"><span class="branch" aria-hidden="true">├── </span><span class="name">client</span></a></li>
+        <li class="to-gate"><a href="#gate"><span class="branch" aria-hidden="true">├── </span><span class="name">gate</span></a></li>
+        <li class="to-model"><a href="#model"><span class="branch" aria-hidden="true">├── </span><span class="name">model</span></a></li>
+        <li class="to-account"><a href="#account"><span class="branch" aria-hidden="true">├── </span><span class="name">account</span></a></li>
+        <li class="to-stream"><a href="#stream"><span class="branch" aria-hidden="true">├── </span><span class="name">stream</span></a></li>
+        <li class="to-record"><a href="#record"><span class="branch" aria-hidden="true">└── </span><span class="name">record</span></a></li>
+        <li class="root">also/</li>
+        <li class="to-config"><a href="#config"><span class="branch" aria-hidden="true">├── </span><span class="name">config</span></a></li>
+        <li class="to-status"><a href="#status"><span class="branch" aria-hidden="true">├── </span><span class="name">status</span></a></li>
+        <li class="to-limits"><a href="#limits"><span class="branch" aria-hidden="true">└── </span><span class="name">will-not-do</span></a></li>
       </ol>
-      <ul class="rail-more">
-        <li class="to-config"><a href="#config">One file</a></li>
-        <li class="to-status"><a href="#status">Status</a></li>
-        <li class="to-limits"><a href="#limits">Will not do</a></li>
-      </ul>
     </nav>
 
     <div class="stops">
       <section class="part stop" id="client" aria-labelledby="client-h">
-        <h2 id="client-h">Client</h2>
+        <h2 id="client-h"><a class="hash" href="#client" aria-label="Link to client">#</a> client</h2>
         {{item README.md|What it does|Works with}}
       </section>
 
       <section class="part stop" id="gate" aria-labelledby="gate-h">
-        <h2 id="gate-h">Gate</h2>
+        <h2 id="gate-h"><a class="hash" href="#gate" aria-label="Link to gate">#</a> gate</h2>
         {{item README.md|What it does|Gives a team}}
       </section>
 
       <section class="part stop" id="model" aria-labelledby="model-h">
-        <h2 id="model-h">Model</h2>
+        <h2 id="model-h"><a class="hash" href="#model" aria-label="Link to model">#</a> model</h2>
         {{item README.md|What it does|Changes models}}
       </section>
 
       <section class="part stop" id="account" aria-labelledby="account-h">
-        <h2 id="account-h">Account</h2>
+        <h2 id="account-h"><a class="hash" href="#account" aria-label="Link to account">#</a> account</h2>
         {{item README.md|What it does|Spreads load}}
       </section>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
-        <h2 id="stream-h">Stream</h2>
+        <h2 id="stream-h"><a class="hash" href="#stream" aria-label="Link to stream">#</a> stream</h2>
         <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent on that machine, and a change that makes Wye slower or heavier past the gate's tolerances is not committed.</p></div>
         <div class="table-scroll">
-      <table class="numbers">
-        <thead>
-          <tr><th scope="col">What Wye adds</th><th scope="col" class="n">Plain HTTP/1.1</th><th scope="col" class="n">TLS + HTTP/2</th></tr>
-        </thead>
-        <tbody>
-          <tr><th scope="row">Latency per request (p50)</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_added_p50_us/1000|2}} ms</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_added_p50_us/1000|2}} ms</td></tr>
-          <tr><th scope="row">CPU per request</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_cpu_us_per_request|0}} µs</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_cpu_us_per_request|0}} µs</td></tr>
-          <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n"></td></tr>
-          <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n"></td></tr>
-          <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
-          <tr><th scope="row">Memory per open stream at that load</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
-        </tbody>
-      </table>
-    </div>
+          <table class="numbers">
+            <thead>
+              <tr><th scope="col">What Wye adds</th><th scope="col" class="n">Plain HTTP/1.1</th><th scope="col" class="n">TLS + HTTP/2</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Latency per request (p50)</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_added_p50_us/1000|2}} ms</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_added_p50_us/1000|2}} ms</td></tr>
+              <tr><th scope="row">CPU per request</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_cpu_us_per_request|0}} µs</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_cpu_us_per_request|0}} µs</td></tr>
+              <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n"></td></tr>
+              <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n"></td></tr>
+              <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
+              <tr><th scope="row">Memory per open stream at that load</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
+            </tbody>
+          </table>
+        </div>
         <p>Where Wye loses: agentgateway beats it on token-paced stream latency and on memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
       </section>
 
       <section class="part stop" id="record" aria-labelledby="record-h">
-        <h2 id="record-h">Record</h2>
+        <h2 id="record-h"><a class="hash" href="#record" aria-label="Link to record">#</a> record</h2>
         {{item README.md|What it does|Shows usage}}
         {{fence README.md|$ wye report}}
         {{fence README.md|{}}
@@ -142,8 +114,8 @@
       </section>
 
       <section class="part" id="config" aria-labelledby="config-h">
-        <h2 id="config-h">One file, kept in Git</h2>
-        <p>A route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+        <h2 id="config-h"><a class="hash" href="#config" aria-label="Link to config">#</a> config</h2>
+        <p>One file, kept in Git: a route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
         {{fence README.md|[server]}}
         {{item README.md|What it does|Checks decisions}}
         <div class="long-lines">{{fence README.md|$ wye explain}}</div>
@@ -153,12 +125,12 @@
       </section>
 
       <section class="part" id="status" aria-labelledby="status-h">
-        <h2 id="status-h">Status</h2>
+        <h2 id="status-h"><a class="hash" href="#status" aria-label="Link to status">#</a> status</h2>
         <div class="prose">{{section README.md|Status}}</div>
       </section>
 
       <section class="part" id="limits" aria-labelledby="limits-h">
-        <h2 id="limits-h">What Wye will not do</h2>
+        <h2 id="limits-h"><a class="hash" href="#limits" aria-label="Link to will not do">#</a> will not do</h2>
         <div class="prose">{{section README.md|What Wye will not do}}</div>
       </section>
     </div>
@@ -166,8 +138,8 @@
 </main>
 
 <footer class="wrap foot">
-  <p>Wye {{version}}, under the {{license}} license. <a href="{{repo}}">Source, issues, and releases on GitHub</a>.</p>
-  <p>This page is built from the repository: the numbers come from <code>bench/baseline.json</code>, and the commands, output, and status from <code>README.md</code>.</p>
+  <p>wye {{version}}, under the {{license}} license. Source, issues, and releases: <a href="{{repo}}">github.com/askrid/wye</a>.</p>
+  <p>Built from the repository: the numbers come from <code>bench/baseline.json</code>, and the commands, output, and status from <code>README.md</code>.</p>
 </footer>
 </body>
 </html>

@@ -46,7 +46,7 @@ Check: a diagram changes in the same commit as the behaviour it shows.
 
 ### Motion shows what happens over time
 
-*From streaming and failover.* Wye's work happens in time: a request takes the junction, a refusal switches the points before the first byte, a stream comes back event by event. Motion is how the page shows that, replayed from a recorded run, never with invented timing. Each page gets one orchestrated sequence; apart from it, motion only answers the reader (opening, expanding, copying). No fade-and-rise entrances, no hover effects on every block, no parallax.
+*From streaming and failover.* Wye's work happens in time: a request takes the junction, a refusal switches the points before the first byte, a stream comes back event by event. Motion is how the page shows that, replayed from a recorded run, never with invented timing. Each page gets one orchestrated sequence; apart from it, motion only answers the reader (opening, expanding, copying, the position in the table of contents), and one blinking cursor sits where a terminal would leave it. No fade-and-rise entrances, no hover effects on every block, no parallax.
 
 CSS only, no animation library: transitions, keyframes, `@starting-style`, scroll-driven animations, and view transitions, each degrading to a still page where a browser lacks it. Animate `transform` and `opacity`, so motion stays off the main thread. Under `prefers-reduced-motion` the sequence becomes a still diagram that says the same thing.
 
@@ -58,9 +58,9 @@ Check: with motion off, the page says everything it says with motion on.
 
 Check: the review of each page names its job and its one bold element.
 
-## Direction: route map
+## Direction: terminal route
 
-Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output). Wye's config already names routes and upstreams; the site draws them as a transit map draws lines: thick strokes, turns at 45° only, a station for each real upstream id. The junction on the first screen is the wye.
+The route map, drawn as a terminal draws it. Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output), then moved to a terminal ("hacker") style the same day at the user's request. Wye's config already names routes and upstreams, and Wye is a command-line tool whose output is the evidence on the page; so the page is set in monospace throughout, its diagram is box-drawing characters on a character grid, its table of contents prints like `tree`, and the junction on the first screen is the wye. Not green on black: the colours are the route's, terminal-like on a navy ground in dark mode and on paper in light mode.
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
@@ -73,11 +73,11 @@ Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotate
 
 Ratios are WCAG contrast against `paper`. Blue and ochre are the only route colours, chosen to stay apart under red-green colour blindness.
 
-Type: Overpass for all text and Overpass Mono for code and output, both variable, self-hosted as Latin subsets under the SIL Open Font License. Overpass is an open revival of Highway Gothic, the US road-sign face: wayfinding type for a product made of routes.
+Type: Departure Mono for headings, the diagram, and the table of contents; Overpass Mono for text, code, and output. Both self-hosted under the SIL Open Font License (Overpass Mono as a variable Latin subset). Departure Mono is drawn on an 11 px grid, so its sizes are multiples of 11 where they can be; it carries the box-drawing characters the diagram and the rail need, which the Overpass Mono subset does not. Overpass Mono is an open revival of Highway Gothic, the US road-sign face: wayfinding type for a product made of routes.
 
-Diagrams: strokes 10 units wide on a `paper` casing, round joins, stations as `paper` circles ringed in `ink`. Only real upstream ids are drawn.
+Diagrams: box-drawing characters on a grid of whole character cells, the route in `line`, the branch in `branch`, stations as `o`, labels in `graphite`. Moving parts jump a cell at a time (`steps()` in `ch` and `lh` units) on a `paper` background, so a moving glyph replaces the character under it. Only real upstream ids are drawn.
 
-Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (the config, status, what Wye will not do). On wide screens a rail beside them is the table of contents, drawn as the route's line, and the stop being read fills in through scroll-driven animations; on narrow screens the line runs down the stops' left edge. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
+Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (the config, status, what Wye will not do), each headed by a lowercase name after a `#` that links to it. On wide screens a rail beside them is the table of contents, printed like `tree`, and the stop being read is selected in inverse video through scroll-driven animations; on narrow screens the route runs down the stops' left edge as a line. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
 
 ## Defaults we do not use
 

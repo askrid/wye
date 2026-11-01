@@ -5,7 +5,7 @@ The Wye website: a landing page built from the repository's own files and publis
 | Path | Contents |
 | --- | --- |
 | `pages/` | HTML pages with directives that pull from the repository; `src/render.rs` lists them |
-| `assets/` | The stylesheet, the icon, and the fonts (Overpass and Overpass Mono, SIL Open Font License, `assets/fonts/OFL.txt`) |
+| `assets/` | The stylesheet, the copy-button script, the icon, and the fonts (Departure Mono and Overpass Mono, each under the SIL Open Font License in `assets/fonts/`) |
 | `src/` | The generator: renders `pages/` into `out/`, copies `assets/`, and checks the result |
 | `check.sh` | `cargo fmt --check`, clippy, tests, the build, and the page budget |
 
