@@ -50,14 +50,15 @@ Detail and stages: [roadmap.md](roadmap.md#status).
 
 In this order ([roadmap.md](roadmap.md)):
 
-1. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
-2. The rest of cost (M2): the provable per-request cost ceiling and provider-held budgets.
-3. Packaging: a published container image and a Compose example.
-4. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
+1. Fewer expensive tokens (M2c): the waste report in `wye report`, size-aware model routing for small background requests, and a ledger of what Wye saved.
+2. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
+3. The rest of cost (M2): the provable per-request cost ceiling and provider-held budgets.
+4. Packaging: a published container image and a Compose example.
+5. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
 
 ### Later
 
-Agent-aware model routing within a provider, a Helm chart, and other agents on their native APIs.
+Wider agent-aware model routing (by subagent type, beyond size), a Helm chart, and other agents on their native APIs.
 
 ### Support
 

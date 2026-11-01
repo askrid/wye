@@ -58,7 +58,11 @@ Request-local, no shared state, config in Git, analysis in the user's backend. B
 
 ### 1. Agent-aware routing
 
-Policy such as "auxiliary requests use Haiku", applied as the allowlisted `model` rewrite within one model family, keyed on Claude Code's request-class and agent-type headers. Weights fitted offline from telemetry and committed as config. Simple tables match complex routers; choosing an output budget with the model saves more than the model alone; watch for drift toward the strongest model. Needs `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` and a quality measurement per request class before any default.
+Agents already route by phase and send the result as an explicit model name or effort: Claude Code's `opusplan` (Opus in plan mode, Sonnet when executing) and per-subagent models ([model config](https://code.claude.com/docs/en/model-config), [subagents](https://code.claude.com/docs/en/sub-agents)), Codex's plan-mode reasoning effort ([config](https://learn.chatgpt.com/docs/config-file/config-reference)), Aider's architect, editor, and weak models ([modes](https://aider.chat/docs/usage/modes.html)), Cline's plan and act models ([plan and act](https://docs.cline.bot/core-workflows/plan-and-act)). Routers that classify each request (Cursor's router, Copilot's auto selection, OpenRouter's auto router, LiteLLM's complexity router) read the prompt and pin a session or switch only at cache boundaries ([Copilot](https://docs.github.com/en/copilot/concepts/models/auto-model-selection), [OpenRouter](https://openrouter.ai/docs/guides/routing/routers/auto-router), [LiteLLM](https://docs.litellm.ai/docs/proxy/auto_routing)), because each model has its own cache and a switch re-reads the whole conversation uncached ([caching](https://code.claude.com/docs/en/prompt-caching)). 2026 studies find that routing needs the agent's own trajectory, which only the agent has ([SWE-Router](https://arxiv.org/abs/2607.00053), [Agent-as-a-Router](https://arxiv.org/abs/2606.22902)). Survey of 2026-11-01.
+
+So the phase decision stays in the agent, which knows the phase; Claude Code does not signal plan mode to a gateway. Wye holds the request-local policy around it: what the model names agents send resolve to for each team (aliases), which models each token may use, rules where the signal is in headers and no cache is lost, and the cost per request class to fit those rules offline. Rules: small auxiliary requests first ([M2c](roadmap.md#m2c-fewer-expensive-tokens)); later by subagent type, applied to every turn of that subagent so its cache survives. Not proposed: classifying prompt content, or switching a conversation's model mid-session.
+
+Applied as the allowlisted `model` rewrite within one model family, keyed on Claude Code's request-class and agent-type headers, with weights fitted offline from telemetry and committed as config. Simple tables match complex routers; choosing an output budget with the model saves more than the model alone; watch for drift toward the strongest model. Needs `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1` and a quality measurement per request class before any default.
 
 ### 2. Cache-miss diagnostics
 
@@ -125,6 +129,30 @@ Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or
 6. **Failure ledger.** 429, 529, and 5xx answers, cancellations, and time lost, with the expected session-start probe separated out.
 
 Not worth building: live 5h/7d headroom, which Claude Code already reads from the headers Wye forwards. Unverified: the status line's `rate_limits` behind Wye (likely, for the same reason).
+
+### Where the tokens go
+
+Measured on 2026-11-01 from one developer's log: 595 Claude Code requests in 3 sessions, all on Opus 5.5 through a claude.ai subscription. Spend is in units of the input price, with Opus 5.5's ratios: output 5, cache read 0.05, cache write 2 on the main conversation (Claude Code's 1-hour TTL on a subscription) and 1.25 elsewhere (5 minutes) ([pricing](https://platform.claude.com/docs/en/about-claude/pricing), [Claude Code caching](https://code.claude.com/docs/en/prompt-caching)). The log does not split cache writes by TTL, so those follow Claude Code's documented defaults. One developer and one model: the shares will differ by workload. This is the evidence behind [M2c](roadmap.md#m2c-fewer-expensive-tokens).
+
+| Spend | Share |
+|---|---|
+| Cache reads | 43.2%; 97.6% of prompt tokens came from the cache |
+| Of those, main-thread context beyond 200k tokens | 20.7%; the median main request carried 400k tokens, and sessions ran to about 968k before their one compaction |
+| Cache writes | 31.3% |
+| Of those, large conversations resumed after hours away | 19.1% in 5 requests: four rebuilt 181k-497k tokens after the session sat idle 7.5-15.6 hours, past any cache TTL, and one session opened with 879k tokens of context |
+| Of those, other session and subagent starts | 2.5%, expected |
+| Output | 18.3% |
+| Uncached input | 7.3% |
+| Auxiliary requests (176, all on Opus) | 14.8%; the 141 under 50k tokens took 10.8% |
+
+What follows:
+
+- Shortening or compressing prompts at the gateway would raise the bill: a changed byte in a cached prefix turns reads at 0.05 into writes at 1.25 or 2, 25 to 40 times the price, and it breaks report-don't-rewrite.
+- The spend that can be cut is context carried from turn to turn and conversations resumed after a break (only the user or agent can act: clear, compact, or start fresh before stepping away), rebuilds with a cause to fix, and the main model on small background work.
+- Cache TTL advice must be computed per user. Here the main conversation already had Claude Code's 1-hour TTL, and the costly rebuilds came after hours, not minutes; an API key defaults to 5 minutes.
+- Each model has its own cache ([source](https://code.claude.com/docs/en/prompt-caching)). A large auxiliary request reads the main thread's cache, so moving it to a smaller model would rebuild that context at write prices; routing only small requests keeps the saving.
+- On a subscription, Claude Code runs background requests on the main model ([source](https://code.claude.com/docs/en/llm-gateway-protocol)), which is why every auxiliary request here ran on Opus.
+- One request cannot tell that it starts a session or a subagent, so its record says `cache_miss: unexplained`; `wye report` already counts those first writes as starts. Idle time past the TTL is visible only across requests, so the waste report derives it from timestamps.
 
 ### Excluded: needs shared state
 

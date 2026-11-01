@@ -12,6 +12,7 @@ Each milestone leaves a runnable system with focused tests. Order of the next wo
 | M1b: agent-aware visibility | Built: A1-A4 (retry headers, `GET /v1/models`, spend by work type, cache-miss reasons, session traces, `wye report`, tool calls). Open: A5 |
 | M2: cost policy | Built: pricing ([policy.md](policy.md#pricing-metadata)) in records, OTLP, `wye report`, and `wye explain`; cache-miss diagnostics (opt-in, sampled per session). Not started: cost bound, provider-held budgets |
 | M2b: model aliases and upgrade checks | Done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit check, a real alias move |
+| M2c: fewer expensive tokens | Next ([product.md](product.md#next)); not started. Evidence: [where the tokens go](research.md#where-the-tokens-go) |
 | M3: Codex | Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, stored responses reaching their account by affinity ([as built](architecture.md#upstream-held-state)). Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision |
 | M4: Claude across providers and accounts | Built: routes with several accounts, `cache_affine` or `ordered`, failover before output, Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-m4)). Open: one live Bedrock request, SigV4, Vertex; these need the auth decisions in [architecture.md](architecture.md#open-design-decisions) |
 | M5: benchmarks and optimization | Started early: the commit gate since M0, with provider, failover, and refusal variants; KrakenD, LiteLLM, and Bifrost comparisons ([benchmarks.md](benchmarks.md)). Open: agent trace replay, a floor baseline, a separate Linux load machine, the remaining competitors |
@@ -46,6 +47,18 @@ Exit: a team's monthly Claude spend is capped by Anthropic workspace limits with
 ### M2b: model aliases and upgrade checks
 
 Exit: a team moves a model alias for all its services by one reviewed config change, after the upgrade check showed no failing client.
+
+### M2c: fewer expensive tokens
+
+In agent traffic most prompt tokens are already cache reads at a tenth of the input price; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt: a changed byte in a cached prefix turns those reads into writes at 12.5 times the price.
+
+- **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the log: context carried past a threshold and what clearing or compacting earlier would have cost; cache rebuilds with their cause (from [cache diagnostics](research.md#2-cache-miss-diagnostics)); the cache TTL, 5 minutes or 1 hour, that would have cost least for this user's idle gaps; background and subagent requests on large models; tool definitions sent on every request and never called. Records gain the two inputs the report lacks: cache writes split by TTL, and the size of the tools section.
+- **Size-aware model routing.** An opt-in policy that sends small requests of a class (auxiliary first) to a smaller model through the allowlisted `model` rewrite. It decides from headers and the body's length, so every replica agrees and nothing is read beyond what an alias already reads. It never touches a main-thread request, or a request large enough to be reading another model's cache. `wye explain` shows the decision, and records keep both the requested and the served model. Off by default until quality is measured per request class ([research](research.md#1-agent-aware-routing)).
+- **Savings ledger.** A request whose model Wye changed records what the same tokens would have cost at the requested model's price. `wye report` and an OTLP metric show "saved by Wye", the sum of those estimates with the reason, apart from "waste found", what the report's fixes would save, which Wye does not claim. Savings with no per-request counterfactual, such as the cache hits that session affinity keeps, are not counted.
+
+Open decision: adding cache markers to app requests that send none. It changes cost, not output, but it is a rewrite beyond the allowlist.
+
+Exit: on real logs, every line of waste the report names comes with a priced fix, and every saved dollar it shows traces to request records; size-aware routing saves measurable spend on auxiliary requests with no measured loss of quality; no gated metric worse.
 
 ### M3: Codex
 
