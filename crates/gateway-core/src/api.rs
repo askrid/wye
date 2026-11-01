@@ -84,12 +84,41 @@ impl Api {
         }
     }
 
-    /// The config sections that give this API a route, for messages that say
-    /// what to add.
-    pub fn route_sections(self) -> &'static str {
+    /// The route that serves this API.
+    pub fn route(self) -> RouteId {
         match self {
-            Self::Messages => "[upstream] or [routes.claude]",
-            Self::Responses | Self::ChatCompletions => "[routes.openai]",
+            Self::Messages => RouteId::Claude,
+            Self::Responses | Self::ChatCompletions => RouteId::OpenAi,
+        }
+    }
+}
+
+/// A route: the upstreams that serve one provider family's native APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteId {
+    /// `[upstream]` or `[routes.claude]`: Anthropic Messages.
+    Claude,
+    /// `[routes.openai]`: OpenAI Responses and Chat Completions.
+    OpenAi,
+}
+
+impl RouteId {
+    pub const ALL: [Self; 2] = [Self::Claude, Self::OpenAi];
+
+    /// Its name in config (`[routes.<name>]`) and in messages.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::OpenAi => "openai",
+        }
+    }
+
+    /// The config sections that give it upstreams, for messages that say
+    /// what to add.
+    pub fn sections(self) -> &'static str {
+        match self {
+            Self::Claude => "[upstream] or [routes.claude]",
+            Self::OpenAi => "[routes.openai]",
         }
     }
 }

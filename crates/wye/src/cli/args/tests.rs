@@ -143,3 +143,13 @@ fn a_typo_gets_the_closest_command() {
         "options go after the command: `wye <command> -c`"
     );
 }
+
+#[test]
+fn every_command_has_its_own_id() {
+    // BASE's placeholder id would otherwise hide a command that set none.
+    for (i, a) in COMMANDS.iter().enumerate() {
+        for b in COMMANDS.iter().skip(i + 1) {
+            assert_ne!(a.id, b.id, "{} and {}", a.name, b.name);
+        }
+    }
+}

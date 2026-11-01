@@ -140,14 +140,34 @@ pub enum Refusal {
     TokenLimit(TokenLimitError),
     /// A known endpoint whose API no route serves.
     NoRoute { api: Api, path: Box<str> },
+    /// A path or method the gateway does not proxy.
+    NotProxied,
+    /// A missing or invalid gateway token.
+    Unauthenticated,
+    /// A body past `server.max_request_body_bytes`, declared or sent.
+    TooLarge,
 }
 
 impl Refusal {
     pub fn status(&self) -> u16 {
         match self {
             Self::Invalid(_) => 400,
+            Self::Unauthenticated => 401,
             Self::Model(_) | Self::TokenLimit(_) => 403,
-            Self::NoRoute { .. } => 404,
+            Self::NoRoute { .. } | Self::NotProxied => 404,
+            Self::TooLarge => 413,
+        }
+    }
+
+    /// The message of a refusal that never varies, so a response needs no
+    /// formatting. A token failure has one message for every reason: the
+    /// reason is not the caller's business.
+    pub fn fixed_message(&self) -> Option<&'static str> {
+        match self {
+            Self::NotProxied => Some("unsupported endpoint"),
+            Self::Unauthenticated => Some("invalid or missing gateway token"),
+            Self::TooLarge => Some("request body exceeds the gateway limit"),
+            Self::Invalid(_) | Self::Model(_) | Self::TokenLimit(_) | Self::NoRoute { .. } => None,
         }
     }
 
@@ -155,8 +175,10 @@ impl Refusal {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "invalid_request_error",
+            Self::Unauthenticated => "authentication_error",
             Self::Model(_) | Self::TokenLimit(_) => "permission_error",
-            Self::NoRoute { .. } => "not_found_error",
+            Self::NoRoute { .. } | Self::NotProxied => "not_found_error",
+            Self::TooLarge => "request_too_large",
         }
     }
 }
@@ -168,7 +190,10 @@ impl fmt::Display for Refusal {
             Self::Model(model) => write!(f, "this gateway token may not use the model {model:?}"),
             Self::TokenLimit(e) => e.fmt(f),
             Self::NoRoute { api, path } => {
-                write!(f, "no route serves {path}: add {}", api.route_sections())
+                write!(f, "no route serves {path}: add {}", api.route().sections())
+            }
+            Self::NotProxied | Self::Unauthenticated | Self::TooLarge => {
+                f.write_str(self.fixed_message().unwrap_or_default())
             }
         }
     }

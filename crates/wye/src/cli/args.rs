@@ -56,9 +56,33 @@ const ENVIRONMENT: &str = "Environment:
 /// Where option descriptions start.
 const DESCRIPTION_COLUMN: usize = 28;
 
+/// Which command a [`Command`] is: what `main` dispatches on, so a command
+/// the tables list cannot go unhandled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Id {
+    Serve,
+    ServiceInstall,
+    ServiceStatus,
+    ServiceRestart,
+    ServiceUninstall,
+    Validate,
+    Doctor,
+    Claude,
+    Codex,
+    Report,
+    Init,
+    TokenKeygen,
+    TokenIssue,
+    Explain,
+    PolicyTest,
+    PolicyDiff,
+    Probe,
+}
+
 /// One command: what it does and what it takes.
 #[derive(Debug)]
 pub struct Command {
+    pub id: Id,
     /// As typed after `wye`: `serve`, `token issue`.
     pub name: &'static str,
     pub summary: &'static str,

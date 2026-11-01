@@ -70,17 +70,15 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
 /// reports.
 pub(super) fn refuse(api: Api, refusal: &Refusal) -> Response<ResBody> {
     let status = StatusCode::from_u16(refusal.status()).unwrap_or(StatusCode::FORBIDDEN);
-    error(api, status, refusal.kind(), &refusal.to_string())
+    match refusal.fixed_message() {
+        Some(message) => error(api, status, refusal.kind(), message),
+        None => error(api, status, refusal.kind(), &refusal.to_string()),
+    }
 }
 
 /// A body past `server.max_request_body_bytes`, declared or sent.
 pub(super) fn too_large(api: Api) -> Response<ResBody> {
-    error(
-        api,
-        StatusCode::PAYLOAD_TOO_LARGE,
-        "request_too_large",
-        "request body exceeds the gateway limit",
-    )
+    refuse(api, &Refusal::TooLarge)
 }
 
 /// An overload Wye generated before contacting the provider: always safe to
@@ -105,15 +103,14 @@ pub(super) fn empty(status: StatusCode) -> Response<ResBody> {
     res
 }
 
-/// A missing or invalid gateway token. One message for every failure:
-/// the reason is not the caller's business.
+/// A missing or invalid gateway token.
 pub(super) fn unauthorized(api: Api) -> Response<ResBody> {
-    error(
-        api,
-        StatusCode::UNAUTHORIZED,
-        "authentication_error",
-        "invalid or missing gateway token",
-    )
+    refuse(api, &Refusal::Unauthenticated)
+}
+
+/// A path or method the gateway does not proxy, in the Messages shape.
+pub(super) fn not_proxied() -> Response<ResBody> {
+    refuse(Api::Messages, &Refusal::NotProxied)
 }
 
 /// Gateway-generated errors use the provider's error shape, so clients

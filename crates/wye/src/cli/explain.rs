@@ -136,7 +136,12 @@ pub fn explain(
     // The server matches the path; the query string is forwarded.
     let path = path.split_once('?').map_or(path, |(path, _)| path);
     let Some(endpoint) = api::endpoint(path) else {
-        return out.refuse(404, "not_found_error", format!("{path} is not proxied"));
+        let refusal = Refusal::NotProxied;
+        return out.refuse(
+            refusal.status(),
+            refusal.kind(),
+            format!("{path} is not proxied"),
+        );
     };
     let Some(route) = config.routes.get(endpoint.api) else {
         return out.refuse_policy(&Refusal::NoRoute {
@@ -154,7 +159,8 @@ pub fn explain(
         None => out.step("token: not required (no [auth])".into()),
         Some(_) => match credential {
             Credential::None => {
-                return out.refuse(401, "authentication_error", "no gateway token".into());
+                let refusal = Refusal::Unauthenticated;
+                return out.refuse(refusal.status(), refusal.kind(), "no gateway token".into());
             }
             Credential::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
@@ -164,7 +170,10 @@ pub fn explain(
                     ));
                     identity = Some(verified);
                 }
-                Err(e) => return out.refuse(401, "authentication_error", e.to_string()),
+                Err(e) => {
+                    let refusal = Refusal::Unauthenticated;
+                    return out.refuse(refusal.status(), refusal.kind(), e.to_string());
+                }
             },
             Credential::Trusted(claims) => {
                 out.step(format!(
@@ -178,9 +187,10 @@ pub fn explain(
 
     let limit = config.server.max_request_body_bytes;
     if body.len() as u64 > limit {
+        let refusal = Refusal::TooLarge;
         return out.refuse(
-            413,
-            "request_too_large",
+            refusal.status(),
+            refusal.kind(),
             format!("{} bytes exceed max_request_body_bytes {limit}", body.len()),
         );
     }

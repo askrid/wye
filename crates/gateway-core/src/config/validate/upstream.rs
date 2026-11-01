@@ -70,7 +70,7 @@ pub(crate) fn validate_routes(
                 None,
             ))
         }
-        (None, Some(route)) => Some(validate_route(route, Api::Messages)?),
+        (None, Some(route)) => Some(validate_route(route, RouteId::Claude)?),
         (None, None) => None,
         (Some(_), Some(_)) => {
             return Err(ConfigError::Invalid(
@@ -79,7 +79,7 @@ pub(crate) fn validate_routes(
         }
     };
     let openai = openai
-        .map(|route| validate_route(route, Api::Responses))
+        .map(|route| validate_route(route, RouteId::OpenAi))
         .transpose()?;
     if claude.is_none() && openai.is_none() {
         return Err(ConfigError::Invalid(
@@ -97,7 +97,7 @@ pub(crate) fn validate_routes(
     let claude_ids = ids(&claude);
     if let Some(id) = ids(&openai).into_iter().find(|id| claude_ids.contains(id)) {
         return Err(ConfigError::RouteUpstream {
-            route: "openai",
+            route: RouteId::OpenAi.name(),
             id: id.into(),
             error: Box::new(ConfigError::Invalid("id is used by routes.claude too")),
         });
@@ -106,7 +106,7 @@ pub(crate) fn validate_routes(
 }
 
 /// One `[routes.<route>]`: its upstreams, selection, and failover.
-fn validate_route(raw: RawRoute, api: Api) -> Result<Route, ConfigError> {
+fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
     let select = match raw.select.as_deref() {
         None | Some("cache_affine") => Select::CacheAffine,
         Some("ordered") => Select::Ordered,
@@ -163,17 +163,18 @@ fn validate_route(raw: RawRoute, api: Api) -> Result<Route, ConfigError> {
             Some(failover)
         }
     };
-    let upstreams = validate_route_upstreams(raw.upstreams, api)?;
+    let upstreams = validate_route_upstreams(raw.upstreams, id)?;
     Ok(Route::new(upstreams, select, failover))
 }
 
 fn validate_route_upstreams(
     raw_upstreams: Vec<RawUpstream>,
-    api: Api,
+    id: RouteId,
 ) -> Result<Vec<Upstream>, ConfigError> {
-    let (route, provider) = match api {
-        Api::Messages => ("claude", Provider::Anthropic),
-        Api::Responses | Api::ChatCompletions => ("openai", Provider::OpenAi),
+    // The provider an upstream has unless it names one.
+    let (route, provider) = match id {
+        RouteId::Claude => (id.name(), Provider::Anthropic),
+        RouteId::OpenAi => (id.name(), Provider::OpenAi),
     };
     if raw_upstreams.is_empty() || raw_upstreams.len() > MAX_UPSTREAMS {
         return Err(ConfigError::Invalid(

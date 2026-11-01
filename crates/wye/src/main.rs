@@ -16,7 +16,7 @@ use wye::{
     Gateway, Resources,
     cli::{
         Agent,
-        args::{self, ArgsError, Command},
+        args::{self, ArgsError, Command, Id},
         current_thread, emit, files, gateway_url,
         paint::Paint,
         probe_blocking, run_agent, run_explain, run_init, run_report,
@@ -80,13 +80,13 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     };
     let env = |name: &str| std::env::var(name).ok();
     let config_path = || files::config_path(&parsed, &env);
-    match command.name {
-        "serve" => {
+    match command.id {
+        Id::Serve => {
             let path = config_path()?;
             serve(files::load(&path)?, &path)?;
             Ok(0)
         }
-        "service install" => {
+        Id::ServiceInstall => {
             service::install(
                 &Context::new(env)?,
                 &config_path()?,
@@ -95,16 +95,16 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             )?;
             Ok(0)
         }
-        "service status" => Ok(found(service::status(&Context::new(env)?)?)),
-        "service restart" => {
+        Id::ServiceStatus => Ok(found(service::status(&Context::new(env)?)?)),
+        Id::ServiceRestart => {
             service::restart(&Context::new(env)?)?;
             Ok(0)
         }
-        "service uninstall" => {
+        Id::ServiceUninstall => {
             service::uninstall(&Context::new(env)?)?;
             Ok(0)
         }
-        "validate" => {
+        Id::Validate => {
             let path = config_path()?;
             // Key sets are files too; secrets in the environment are not checked.
             let verified = wye::verifier(&files::load(&path)?, files::config_dir(&path));
@@ -116,7 +116,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             ));
             Ok(0)
         }
-        "doctor" => {
+        Id::Doctor => {
             let path = config_path()?;
             let config = files::load(&path)?;
             let (report, ok) =
@@ -124,29 +124,29 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let shown = files::tilde(&path, &env);
             Ok(verdicts(&format!("config: {shown}\n{report}"), ok))
         }
-        "claude" => std::process::exit(run_agent(Agent::Claude, &parsed, env)?),
-        "codex" => std::process::exit(run_agent(Agent::Codex, &parsed, env)?),
-        "report" => {
+        Id::Claude => std::process::exit(run_agent(Agent::Claude, &parsed, env)?),
+        Id::Codex => std::process::exit(run_agent(Agent::Codex, &parsed, env)?),
+        Id::Report => {
             emit(&run_report(&parsed, &env, Paint::stdout())?);
             Ok(0)
         }
-        "init" => {
+        Id::Init => {
             emit(&Paint::stdout().style(&run_init(&parsed, &env)?));
             Ok(0)
         }
-        "token keygen" => {
+        Id::TokenKeygen => {
             emit(&Paint::stdout().style(&token::run_keygen(&parsed, &env)?));
             Ok(0)
         }
-        "token issue" => {
+        Id::TokenIssue => {
             token::run_issue(&parsed, &env)?;
             Ok(0)
         }
-        "explain" => {
+        Id::Explain => {
             let (report, forwarded) = run_explain(&parsed, &env)?;
             Ok(verdicts(&report, forwarded))
         }
-        "policy-test" => {
+        Id::PolicyTest => {
             let path = config_path()?;
             let config = files::load(&path)?;
             let dir = match parsed.positional.first() {
@@ -157,7 +157,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let shown = files::tilde(&path, &env);
             Ok(verdicts(&format!("config: {shown}\n{report}"), passed))
         }
-        "policy-diff" => {
+        Id::PolicyDiff => {
             let [old, new] = parsed.positional.as_slice() else {
                 return Err("policy-diff takes two configs".into());
             };
@@ -172,13 +172,12 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             )?;
             Ok(verdicts(&diff.report(), !diff.widens()))
         }
-        "probe" => {
+        Id::Probe => {
             let url = gateway_url(parsed.positional.first().copied(), &env);
             let checked = probe_blocking(&url)?;
             emit(&format!("{checked}: {}\n", Paint::stdout().green("ok")));
             Ok(0)
         }
-        other => Err(format!("`{other}` is listed but not handled").into()),
     }
 }
 

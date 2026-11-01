@@ -13,7 +13,7 @@ use bytes::Bytes;
 use gateway_core::{
     admission::Refusal,
     alias::Aliases,
-    api::{self, Api},
+    api::{self, Api, RouteId},
     config::{Config, DEFAULT_SAMPLE_PERCENT, UpgradeCheck},
     credential::Verifier,
     policy::ModelPattern,
@@ -38,7 +38,7 @@ mod admit;
 mod forward;
 mod responses;
 
-use responses::{empty, error, unauthorized};
+use responses::{empty, unauthorized};
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
@@ -174,9 +174,9 @@ impl Gateway {
     }
 
     fn route(&self, api: Api) -> Option<&ApiRoute> {
-        match api {
-            Api::Messages => self.claude.as_ref(),
-            Api::Responses | Api::ChatCompletions => self.openai.as_ref(),
+        match api.route() {
+            RouteId::Claude => self.claude.as_ref(),
+            RouteId::OpenAi => self.openai.as_ref(),
         }
     }
 
@@ -194,12 +194,7 @@ impl Gateway {
             (&Method::GET, "/debug/alloc") => {
                 responses::json(Bytes::from(crate::alloc_stats::snapshot().to_json()))
             }
-            _ => error(
-                Api::Messages,
-                StatusCode::NOT_FOUND,
-                "not_found_error",
-                "unsupported endpoint",
-            ),
+            _ => responses::not_proxied(),
         }
     }
 

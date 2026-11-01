@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use gateway_core::{
+    api::RouteId,
     config::{Auth, Config, Issuer, UpstreamCredential},
     policy::ModelPattern,
     route::Route,
@@ -107,11 +108,13 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
         (Some(old), Some(new)) => auth(&mut diff, old, new),
         (None, None) => {}
     }
-    for (name, old, new) in [
-        ("claude", &old.routes.claude, &new.routes.claude),
-        ("openai", &old.routes.openai, &new.routes.openai),
-    ] {
-        route(&mut diff, name, old.as_ref(), new.as_ref());
+    for id in RouteId::ALL {
+        route(
+            &mut diff,
+            id.name(),
+            old.routes.route(id),
+            new.routes.route(id),
+        );
     }
     diff
 }

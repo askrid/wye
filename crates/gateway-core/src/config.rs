@@ -13,7 +13,13 @@ use http::{
 
 mod validate;
 
-use crate::{alias::Aliases, api::Api, policy::ModelPattern, pricing::Pricing, route::Route};
+use crate::{
+    alias::Aliases,
+    api::{Api, RouteId},
+    policy::ModelPattern,
+    pricing::Pricing,
+    route::Route,
+};
 use validate::{
     RawConfig, env_name, sample_percent, validate_aliases, validate_auth, validate_discovery,
     validate_pricing, validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
@@ -78,20 +84,22 @@ pub struct Routes {
 impl Routes {
     /// The route serving `api`, if configured.
     pub fn get(&self, api: Api) -> Option<&Route> {
-        match api {
-            Api::Messages => self.claude.as_ref(),
-            Api::Responses | Api::ChatCompletions => self.openai.as_ref(),
+        self.route(api.route())
+    }
+
+    /// The route `id`, if configured.
+    pub fn route(&self, id: RouteId) -> Option<&Route> {
+        match id {
+            RouteId::Claude => self.claude.as_ref(),
+            RouteId::OpenAi => self.openai.as_ref(),
         }
     }
 
-    /// Every configured route with its API, Claude's first.
-    pub fn iter(&self) -> impl Iterator<Item = (Api, &Route)> {
-        [
-            (Api::Messages, &self.claude),
-            (Api::Responses, &self.openai),
-        ]
-        .into_iter()
-        .filter_map(|(api, route)| route.as_ref().map(|r| (api, r)))
+    /// Every configured route with its id, Claude's first.
+    pub fn iter(&self) -> impl Iterator<Item = (RouteId, &Route)> {
+        RouteId::ALL
+            .into_iter()
+            .filter_map(|id| self.route(id).map(|route| (id, route)))
     }
 
     /// Every upstream of every route, in [`Self::iter`] order.

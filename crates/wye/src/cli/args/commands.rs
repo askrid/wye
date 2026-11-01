@@ -1,7 +1,7 @@
 //! The commands: every command's options, summary, and notes, and how help
 //! groups them. The parser and the help both read these tables.
 
-use super::{Command, Opt};
+use super::{Command, Id, Opt};
 
 /// `-c, --config <path>`, on every command that reads a config.
 const CONFIG: Opt = Opt {
@@ -14,6 +14,7 @@ const CONFIG: Opt = Opt {
 
 /// A command with no arguments, options, or notes.
 const BASE: Command = Command {
+    id: Id::Serve,
     name: "",
     summary: "",
     args: "",
@@ -26,6 +27,7 @@ const BASE: Command = Command {
 /// The commands, in the order help lists them.
 pub const COMMANDS: &[Command] = &[
     Command {
+        id: Id::Serve,
         name: "serve",
         summary: "Run the gateway in the foreground",
         options: &[CONFIG],
@@ -34,6 +36,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::ServiceInstall,
         name: "service install",
         summary: "Run the gateway in the background, now and at every login",
         options: &[
@@ -49,23 +52,27 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::ServiceStatus,
         name: "service status",
         summary: "Show whether the background gateway is installed and answering",
         ..BASE
     },
     Command {
+        id: Id::ServiceRestart,
         name: "service restart",
         summary: "Restart the background gateway, after checking its config",
         notes: "Run it after editing the config or installing a new wye.",
         ..BASE
     },
     Command {
+        id: Id::ServiceUninstall,
         name: "service uninstall",
         summary: "Stop the background gateway and remove it",
         notes: "The config and the usage log stay.",
         ..BASE
     },
     Command {
+        id: Id::Validate,
         name: "validate",
         summary: "Check a config without starting the gateway",
         options: &[CONFIG],
@@ -74,12 +81,14 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::Doctor,
         name: "doctor",
         summary: "Check a config's keys, files, and endpoints",
         options: &[CONFIG],
         ..BASE
     },
     Command {
+        id: Id::Claude,
         name: "claude",
         summary: "Start Claude Code through the gateway",
         args: "[<claude args>...]",
@@ -89,6 +98,7 @@ pub const COMMANDS: &[Command] = &[
         notes: WRAPPER_NOTES,
     },
     Command {
+        id: Id::Codex,
         name: "codex",
         summary: "Start Codex through the gateway",
         args: "[<codex args>...]",
@@ -98,6 +108,7 @@ pub const COMMANDS: &[Command] = &[
         notes: WRAPPER_NOTES,
     },
     Command {
+        id: Id::Report,
         name: "report",
         summary: "Summarize a usage log",
         args: "[<log>]",
@@ -107,6 +118,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::Init,
         name: "init",
         summary: "Write a starter config",
         options: &[
@@ -131,6 +143,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::TokenKeygen,
         name: "token keygen",
         summary: "Make a signing key for gateway tokens",
         options: &[Opt::value(
@@ -143,6 +156,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::TokenIssue,
         name: "token issue",
         summary: "Issue a gateway token",
         args: "<subject>",
@@ -172,6 +186,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::Explain,
         name: "explain",
         summary: "Show what the gateway would do with one request",
         args: "<request.json>",
@@ -195,6 +210,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::PolicyTest,
         name: "policy-test",
         summary: "Check sample requests against expected decisions",
         args: "[<dir>]",
@@ -205,6 +221,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::PolicyDiff,
         name: "policy-diff",
         summary: "Show what a config change widens or narrows",
         args: "<old> <new>",
@@ -212,6 +229,7 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
+        id: Id::Probe,
         name: "probe",
         summary: "Check that a gateway or URL answers 2xx",
         args: "[<url>]",
