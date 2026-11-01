@@ -55,6 +55,24 @@ fn the_examples_parse_as_they_stand() {
     Config::from_toml_str(SUBSCRIPTION).unwrap();
 }
 
+/// The reference's live options are set to their defaults, so that every key
+/// shows: it must run exactly as its required lines alone.
+#[test]
+fn the_reference_sets_only_defaults() {
+    const REQUIRED: &str = "[server]\nlisten = \"127.0.0.1:8080\"\n\n[upstream]\n\
+        base_url = \"https://api.anthropic.com\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n";
+    let reference = Config::from_toml_str(REFERENCE).unwrap();
+    let required = Config::from_toml_str(REQUIRED).unwrap();
+    assert_eq!(
+        format!("{:?}", reference.server),
+        format!("{:?}", required.server)
+    );
+    assert_eq!(
+        format!("{:?}", reference.routes),
+        format!("{:?}", required.routes)
+    );
+}
+
 #[test]
 fn the_reference_parses_with_every_section_enabled() {
     let enabled = every_section_enabled(REFERENCE);
