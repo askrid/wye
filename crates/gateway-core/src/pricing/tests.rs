@@ -175,8 +175,11 @@ fn overflow_fails_closed() {
 
 proptest! {
     /// The cost is the exact sum of tokens times prices, whenever it fits.
+    /// Half the cases are small enough that the sum always fits, so the exact
+    /// branch runs as often as the overflow branch.
     #[test]
     fn cost_is_the_exact_checked_sum(
+        small in any::<bool>(),
         input in 0u64..1 << 40,
         output in 0u64..1 << 40,
         read in 0u64..1 << 40,
@@ -185,6 +188,12 @@ proptest! {
         price_in in 0u64..1 << 30,
         price_out in 0u64..1 << 30,
     ) {
+        // Tokens under 2^26 and prices under 2^25 keep every product under
+        // 2^51, so five of them sum well under 2^64.
+        let (tokens, prices) = if small { ((1 << 26) - 1, (1 << 24) - 1) } else { (u64::MAX, u64::MAX) };
+        let (input, output, read, five, one) =
+            (input & tokens, output & tokens, read & tokens, five & tokens, one & tokens);
+        let (price_in, price_out) = (price_in & prices, price_out & prices);
         let p = Prices {
             input: price_in,
             output: price_out,
