@@ -93,3 +93,89 @@ async fn explain_and_the_server_answer_alike() {
         h.usage_record().await;
     }
 }
+
+/// The same agreement on the OpenAI route, whose errors carry the kind as
+/// `code`, and for an API no route serves.
+#[tokio::test]
+async fn explain_and_the_server_answer_alike_on_responses() {
+    let key = keypair();
+    let (upstream, hits) = spawn_counted(ok()).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\n\
+         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
+         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n{}\n",
+        auth_section(&key, "models = [\"gpt-5*\"]\nmax_output_tokens = 1000")
+    );
+    let parsed = Config::from_toml_str(&config).unwrap();
+    let verifier = wye::verifier(&parsed, Path::new("/")).unwrap().unwrap();
+    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let open = token(&key, "alice", None, None);
+    let cases: [(&str, &str, &str); 6] = [
+        (
+            "allowed",
+            "/v1/responses",
+            r#"{"model":"gpt-5","max_output_tokens":5}"#,
+        ),
+        (
+            "beyond config",
+            "/v1/responses",
+            r#"{"model":"o3","max_output_tokens":5}"#,
+        ),
+        (
+            "over the ceiling",
+            "/v1/responses",
+            r#"{"model":"gpt-5","max_output_tokens":5000}"#,
+        ),
+        (
+            "no ceiling field",
+            "/v1/responses",
+            r#"{"model":"gpt-5","input":[]}"#,
+        ),
+        (
+            "a second value",
+            "/v1/responses",
+            r#"{"model":"gpt-5","max_output_tokens":5}{"x":1}"#,
+        ),
+        (
+            "no route",
+            "/v1/messages",
+            r#"{"model":"claude-haiku-4-5","max_tokens":5}"#,
+        ),
+    ];
+    for (name, path, body) in cases {
+        let explained = explain(
+            &parsed,
+            path,
+            Credential::Token(&open, &verifier),
+            None,
+            body.as_bytes(),
+            now(),
+            &[],
+        );
+        let req = Request::post(path)
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {open}"));
+        let res = h.send(req, body.to_owned()).await;
+        let status = res.status().as_u16();
+        let answer = read_body(res).await;
+        let served = (status != 200).then(|| {
+            let error: serde_json::Value = serde_json::from_slice(&answer).unwrap();
+            let error = &error["error"];
+            // Anthropic's shape names the kind `type`; OpenAI's, `code`.
+            let kind = error["code"].as_str().or(error["type"].as_str()).unwrap();
+            (
+                status,
+                kind.to_owned(),
+                error["message"].as_str().unwrap().to_owned(),
+            )
+        });
+        let explained = explained
+            .refused
+            .map(|(status, kind, message)| (status, kind.to_owned(), message));
+        assert_eq!(served, explained, "{name}");
+        // A request no route serves is refused before it is recorded.
+        if name != "no route" {
+            h.usage_record().await;
+        }
+    }
+}

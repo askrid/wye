@@ -279,10 +279,7 @@ async fn a_late_second_model_aborts_the_upstream_request() {
         String::from_utf8_lossy(&text).contains("request names model more than once"),
         "{text:?}"
     );
-    assert!(
-        bodies.try_recv().is_err(),
-        "the upstream received a complete body"
-    );
+    assert_quiet(&mut bodies, "the upstream received a complete body").await;
 }
 
 /// The client streams the body, model first and max_tokens in a later
@@ -305,10 +302,7 @@ async fn late_max_tokens_is_refused(
         String::from_utf8_lossy(&text).contains("max_tokens 9000"),
         "{text:?}"
     );
-    assert!(
-        bodies.try_recv().is_err(),
-        "the upstream received a complete body"
-    );
+    assert_quiet(bodies, "the upstream received a complete body").await;
 }
 
 #[tokio::test]

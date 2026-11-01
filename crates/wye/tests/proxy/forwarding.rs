@@ -137,10 +137,7 @@ async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
             .await
             .starts_with(br#"{"type":"error","error":{"type":"request_too_large""#)
     );
-    assert!(
-        bodies.try_recv().is_err(),
-        "the upstream got the body whole"
-    );
+    assert_quiet(&mut bodies, "the upstream got the body whole").await;
 }
 
 #[tokio::test]

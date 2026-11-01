@@ -36,6 +36,16 @@ pub(crate) use wye_testkit::{TestCa, ed25519_keypair as keypair};
 
 pub(crate) const API_KEY: &str = "sk-test-provider-key";
 pub(crate) const WAIT: Duration = Duration::from_secs(5);
+/// How long a check that something never arrives waits for it: far longer
+/// than a request over loopback takes, so a bug shows within it.
+pub(crate) const QUIET: Duration = Duration::from_millis(200);
+
+/// Asserts that `rx` receives nothing within [`QUIET`].
+pub(crate) async fn assert_quiet<T: std::fmt::Debug>(rx: &mut mpsc::Receiver<T>, why: &str) {
+    if let Ok(Some(got)) = tokio::time::timeout(QUIET, rx.recv()).await {
+        panic!("{why}: {got:?}");
+    }
+}
 
 /// Upstream response body that yields chunks as the test sends them.
 pub(crate) struct ChannelBody(pub(crate) mpsc::Receiver<Bytes>);

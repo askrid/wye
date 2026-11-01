@@ -160,6 +160,38 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
     assert_eq!(record["path"], "/v1/messages");
 }
 
+/// A client that leaves before the response headers also cancels the
+/// upstream request: on HTTP/2 the stream is reset, and the provider stops.
+#[tokio::test]
+async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
+    use tokio::io::AsyncWriteExt;
+    let ca = TestCa::generate();
+    let (guard, released) = oneshot::channel::<()>();
+    // The upstream holds `guard` until its request is dropped.
+    let handler = once(guard, |guard| async move {
+        let _guard = guard;
+        std::future::pending::<Response<UpBody>>().await
+    });
+    let h = Harness::start_tls(handler, &ca, true).await;
+    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    client
+        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-length: 2\r\n\r\n{}")
+        .await
+        .unwrap();
+    tokio::time::timeout(WAIT, async {
+        while h.upstream_hits.load(Ordering::Relaxed) == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    drop(client);
+    assert!(
+        tokio::time::timeout(WAIT, released).await.is_ok(),
+        "the upstream request outlived its client"
+    );
+}
+
 /// A client body that breaks mid-upload (bad chunk framing here) is the
 /// client's error, `400`, never an upstream failure (`502`).
 #[tokio::test]

@@ -212,5 +212,10 @@ async fn client_that_stops_reading_is_disconnected() {
         .await
         .expect("upstream stream was not released")
         .unwrap();
-    drop(res);
+    // And the client's connection is closed: reading what reached it ends
+    // in an error, since the stream never finished.
+    let read = tokio::time::timeout(WAIT, res.into_body().collect())
+        .await
+        .expect("the client's connection stayed open");
+    assert!(read.is_err(), "the response ended as if it were complete");
 }

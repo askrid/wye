@@ -158,3 +158,32 @@ async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
         .unwrap();
     assert!(!flushed);
 }
+
+/// Shutdown cuts only what outlives the grace: a stream that ends within it
+/// reaches the client whole.
+#[tokio::test]
+async fn a_stream_that_ends_within_the_grace_is_delivered_whole() {
+    const FIRST: &[u8] = b"event: ping\ndata: {\"type\":\"ping\"}\n\n";
+    const LAST: &[u8] = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+    let handler: Handler = Arc::new(|_| {
+        Box::pin(async {
+            let (tx, rx) = mpsc::channel::<Bytes>(2);
+            tokio::spawn(async move {
+                tx.send(Bytes::from_static(FIRST)).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                let _ = tx.send(Bytes::from_static(LAST)).await;
+            });
+            streaming(rx)
+        })
+    });
+    let mut h = Harness::with_server_config(handler, "shutdown_grace_secs = 2").await;
+    let stream = h.send(messages(), "{}").await;
+    assert_eq!(stream.status(), StatusCode::OK);
+    h.begin_shutdown();
+    let body = tokio::time::timeout(WAIT, stream.into_body().collect())
+        .await
+        .expect("the stream hung")
+        .expect("the stream was cut within the grace")
+        .to_bytes();
+    assert_eq!(body, [FIRST, LAST].concat());
+}
