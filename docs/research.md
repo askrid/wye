@@ -30,6 +30,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | Bedrock's Messages endpoint takes its API key in `x-api-key` (Anthropic's page) or `Authorization: Bearer` (AWS's page), and its `anthropic.`-prefixed ids for every current model | Bedrock provider (built with `x-api-key`) | One request with each header and a recorded stream |
 | Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-and-accounts)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |
+| Codex on a ChatGPT login can go through a loopback gateway: its endpoint, request encoding, and terms of use | Codex for one developer without an OpenAI key | Codex's source; OpenAI's terms; one session through a loopback gateway |
 | `429`/`529` from each Claude provider means the request was not processed | Failover without duplicate billing | Provider docs; billing records |
 | Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks) | Built from Anthropic's migration guide (2026-10-26); one opt-in live request per rule still open |
 
@@ -130,7 +131,7 @@ Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or
 3. **A per-prompt bill with labels.** Main, subagent, and auxiliary requests rolled up per prompt, labeled with the prompt's first line by joining Claude Code's local transcripts (which carry `promptId`) in the CLI, so prompt text never enters the log.
 4. **`wye statusline`.** Reads the end of the log for the status line's session and prompt: this prompt's cost with its subagents and retries, the last cache rebuild, the costliest carried tool. The delivery channel for 1-3.
 5. **Complete API-equivalent spend.** Subscription value at API prices including what transcripts miss; prices applied at report time would price old logs too (a log written without `[pricing]` has no `cost_usd`).
-6. **Failure ledger.** 429, 529, and 5xx answers, cancellations, and time lost, with the expected session-start probe separated out.
+6. **Failure summary.** 429, 529, and 5xx answers, cancellations, and time lost, with the expected session-start probe separated out.
 
 Not worth building: live 5h/7d headroom, which Claude Code already reads from the headers Wye forwards. Unverified: the status line's `rate_limits` behind Wye (likely, for the same reason).
 

@@ -75,7 +75,7 @@ wye token issue alice -c wye.toml --out alice.token # valid for a week
 docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
 
-Put it behind HTTPS: Wye speaks plain HTTP, and `wye claude` and `wye codex` refuse a remote gateway over plain http ([deployment](operations.md#deployment-modes)). Each developer then runs:
+Put it behind HTTPS: Wye speaks plain HTTP and leaves certificates to what sits in front, a load balancer, an ingress, or Caddy, which gets and renews one by itself ([example](operations.md#deployment-modes)). `wye claude` and `wye codex` refuse a remote gateway over plain http. Each developer then runs:
 
 ```bash
 export WYE_URL=https://wye.example.com WYE_TOKEN=<their token>

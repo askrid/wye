@@ -30,6 +30,7 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 - Every secret from a file too: `hash_key_file` for cache diagnostics and `otlp_headers_file` for OTLP, since `wye service` cannot pass environment secrets ([running as a service](operations.md#running-as-a-service)).
 - A deny list in config (token subjects or key ids), so offboarding need not wait for the last token to expire; it takes effect on the next restart or rollout ([revocation](policy.md#revocation)).
 - A Docker Swarm service updating without dropping streams.
+- Narrowable tokens: a token holder hands a subagent or a CI job a narrower token (fewer models, a lower ceiling, a shorter life) without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)); fifth in [product.md](product.md#next)'s order.
 
 Exit: a team runs Claude Code through a shared Wye with per-developer tokens and sees usage per developer and session in its existing OTel backend.
 
@@ -58,16 +59,16 @@ Exit: a team moves a model alias for all its services by one reviewed config cha
 In agent traffic most prompt tokens are already cache reads at 5 to 10 percent of the input price; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt: a changed byte in a cached prefix turns those reads into writes at 12.5 to 25 times the price.
 
 - **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the log: context carried past a threshold and what clearing or compacting earlier would have cost; cache rebuilds with their cause (from [cache diagnostics](research.md#2-cache-miss-diagnostics)); the cache TTL, 5 minutes or 1 hour, that would have cost least for this user's idle gaps; background and subagent requests on large models; tool definitions sent on every request and never called. Records gain the two inputs the report lacks: cache writes split by TTL, and the size of the tools section.
-- **Size-aware model routing.** An opt-in policy that sends small requests of a class (auxiliary first) to a smaller model through the allowlisted `model` rewrite. It decides from headers and the body's length, so every replica agrees and nothing is read beyond what an alias already reads. It never touches a main-thread request, or a request large enough to be reading another model's cache. `wye explain` shows the decision, and records keep both the requested and the served model. Off by default until quality is measured per request class ([research](research.md#1-agent-aware-routing)).
-- **Savings ledger.** A request whose model Wye changed records what the same tokens would have cost at the requested model's price. `wye report` and an OTLP metric show "saved by Wye", the sum of those estimates with the reason, apart from "waste found", what the report's fixes would save, which Wye does not claim. Savings with no per-request counterfactual, such as the cache hits that session affinity keeps, are not counted.
+- **Size-aware model routing.** An opt-in policy that sends small requests of a class (auxiliary first) to a smaller model through the allowlisted `model` rewrite. It decides from headers and the body's length, so every replica agrees and nothing is read beyond what an alias already reads. It never touches a main-thread request, or a request large enough to be reading another model's cache. `wye explain` shows the decision; the client sees it too, since the response names the model that ran, and records keep both the requested and the served model. Off by default until quality is measured per request class ([research](research.md#1-agent-aware-routing)).
+- **Savings estimate.** A request whose model Wye changed records what the same tokens would have cost at the requested model's price. `wye report` and an OTLP metric show "saved by Wye", the sum of those estimates with the reason, apart from "waste found", what the report's fixes would save, which Wye does not claim. Savings with no per-request counterfactual, such as the cache hits that session affinity keeps, are not counted.
 
-Open decision: adding cache markers to app requests that send none. It changes cost, not output, but it is a rewrite beyond the allowlist.
+Decided (2026-11-01): Wye does not add cache markers to app requests that send none, a rewrite beyond the allowlist. The waste report names those requests and prices what markers would save.
 
 Exit: on real logs, every line of waste the report names comes with a priced fix, and every saved dollar it shows traces to request records; size-aware routing saves measurable spend on auxiliary requests with no measured loss of quality; no gated metric worse.
 
 ### M3: Codex
 
-Open: a real Codex workflow streaming and calling tools through Wye, with tool-event fixtures from it; the `include_usage` policy; the OpenAI SDK with equivalent unary and streaming behavior. Agent-aware telemetry for Codex uses whatever signals Codex sends; the record, metrics, and `wye report` stay one model across agents.
+Open: a real Codex workflow streaming and calling tools through Wye, with tool-event fixtures from it; the `include_usage` policy; the OpenAI SDK with equivalent unary and streaming behavior; Codex on a ChatGPT login, passed through as Claude Code's claude.ai login is, once its endpoint and terms are checked ([research](research.md#verification-needed)). Agent-aware telemetry for Codex uses whatever signals Codex sends; the record, metrics, and `wye report` stay one model across agents.
 
 Exit: a team runs Claude Code and Codex through one Wye, under one policy, and sees both in one telemetry model.
 
@@ -90,7 +91,7 @@ Exit: comparative results document actual performance, workload assumptions, and
 
 ### M6: optional extensions
 
-Edge/WASM adapter, [delegable credentials](research.md#3-delegable-credentials-for-agent-swarms), [signed usage receipts](research.md#4-signed-usage-receipts), the rest of [queryable policy](research.md#5-queryable-and-provable-policy), connect-only hedging, and other request-local experiments.
+Edge/WASM adapter, [signed usage receipts](research.md#4-signed-usage-receipts), the rest of [queryable policy](research.md#5-queryable-and-provable-policy), connect-only hedging, and other request-local experiments.
 
 Exit: each extension preserves or explicitly revises statelessness and compatibility guarantees.
 

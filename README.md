@@ -4,14 +4,16 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-orange)](rust-toolchain.toml)
 
-Wye is a small, fast gateway between coding agents (Claude Code, Codex) or your
-own apps and the model providers. Put it in front of your clients and it records
-what every request used and cost, spreads traffic across your API keys and
-providers with failover, and decides who may use which model. Each provider's
-native API goes through byte for byte, so clients keep the official SDK and
-nothing gets translated. One TOML file in Git holds every decision; Wye itself
-is one Rust binary with no database, and in lab benchmarks adds about a quarter
-of a millisecond to a request.
+**Run your agents like infrastructure.** Keys, models, failover, limits, and
+cost for Claude Code, Codex, and your apps live in one TOML file in Git, and
+every request passes through as it was sent.
+
+Wye is a small, fast gateway between coding agents or your own apps and the
+model providers. It records what every request used and cost, spreads traffic
+across your API keys and providers with failover, and decides who may use which
+model. Clients keep the official SDK, since nothing gets translated. Wye is one
+Rust binary with no database, and in lab benchmarks adds about a quarter of a
+millisecond to a request.
 
 > **Status:** working prototype, `0.x`. It is tested and benchmarked on one
 > machine and has been used with Claude Code through a claude.ai subscription.
@@ -87,10 +89,11 @@ apps on the official SDKs, upgrades, and troubleshooting.
 
 ## Who it's for
 
-- **One developer.** Tokens per session, subagent, and tool, prompt-cache
-  misses flagged, and cost once the config has prices, all from `wye report`
-  with no backend. Your login or key stays yours. Claude Code reports its own
-  totals; Wye shows where they went.
+- **One developer.** See where your tokens and money go: per session,
+  subagent, and tool, with prompt-cache misses flagged and cost once the config
+  has prices, all from `wye report` with no backend. Next (planned): which
+  tokens were waste, and what each fix would save. Your login or key stays
+  yours.
 - **A team.** A token per developer and CI job, provider keys only in the
   deployment, policy reviewed in Git and tested in CI, and usage per developer
   and session in your OpenTelemetry backend. If you run only Claude Code and
@@ -270,6 +273,9 @@ Not checked against the real services yet:
   streaming, tool use, prompt caching, extended thinking, token counting,
   background sessions); not yet with an API key.
 
+Next (planned): a report of which tokens were waste and what each fix saves,
+and a smaller model for small background requests.
+
 Not built yet: a published container image, Vertex AI, AWS SigV4 signing,
 per-request cost ceilings, budgets held by the provider, and reloading
 short-lived provider keys without a restart.
@@ -284,6 +290,8 @@ short-lived provider keys without a restart.
 - Translate between provider APIs, rewrite prompts, swap in another model when
   one fails, or cache responses.
 - Filter content (guardrails, redaction) or store prompts.
+- Terminate TLS: a load balancer, an ingress, or Caddy in front does it, and
+  renews the certificate.
 - Run agents or tools.
 - Grow a dashboard or an admin API. Config changes go through Git and a
   restart or rolling deploy.

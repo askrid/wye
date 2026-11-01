@@ -1,5 +1,7 @@
 # Product
 
+**Run your agents like infrastructure.** Keys, models, failover, limits, and cost for Claude Code, Codex, and your apps live in one TOML file in Git, and every request passes through as it was sent.
+
 Wye is a gateway between AI agents or AI-native apps and the model providers. Clients keep the provider's official SDK and native API, and get every new provider feature on the endpoints Wye serves the day it ships. Everything that is not application logic moves out of their code into one reviewed, Git-managed config: which model and provider serve a request, credentials, limits, failover, upgrades, telemetry, and cost. Wye does this per request and statelessly, as one binary with one TOML file and no database.
 
 Primary users:
@@ -24,7 +26,7 @@ Performance is a requirement: the gateway must never be the bottleneck, whether 
 Every feature follows these, and a feature that cannot is not built.
 
 - **Native and transparent.** Each client's native API passes through to its own provider, and bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract). New provider features work through Wye without a Wye release. Telemetry carries ids, counts, and keyed hashes, never prompt text.
-- **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for.
+- **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for: the one field it changes, the model, changes only where reviewed config says so (an alias, or a routing rule the operator turned on), and never out of sight, since the response names the model that ran and the record keeps both.
 - **Request-local and stateless.** A decision uses only the request, its token, and the immutable config; correlation across requests happens in the user's telemetry backend. Nothing authoritative carries across requests, and nothing moves between replicas ([policy.md](policy.md#state-boundary)).
 - **Fast and light.** The request path reads headers; hashing, encoding, and aggregation happen in the telemetry writer task. A streamed event costs no allocation, and every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they are cheap enough to run on every request.
 - **Easy to use.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a token for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
@@ -42,11 +44,12 @@ Endpoints: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), Ope
 
 In this order ([roadmap.md](roadmap.md)):
 
-1. Fewer expensive tokens (M2c): the waste report in `wye report`, size-aware model routing for small background requests, and a ledger of what Wye saved.
+1. Fewer expensive tokens (M2c): the waste report in `wye report`, size-aware model routing for small background requests, and an estimate of what Wye saved.
 2. Verification against the real services: a real Codex session, one live Bedrock request, and the Claude Code exit check with an API key.
 3. The rest of cost (M2): the provable per-request cost ceiling and provider-held budgets.
 4. Packaging: a published container image and a Compose example.
-5. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
+5. Narrowable tokens: a token holder hands a subagent or a job a narrower token without the issuer ([delegable credentials](research.md#3-delegable-credentials-for-agent-swarms)).
+6. The rest of Claude across providers (M4): Vertex AI and AWS SigV4.
 
 ### Later
 

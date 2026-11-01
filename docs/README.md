@@ -36,7 +36,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does and how fas
 
 | Term | Meaning |
 | --- | --- |
-| Route | The upstreams that serve one native API: `[upstream]` or `[routes.claude]` for Anthropic Messages, `[routes.openai]` for OpenAI Responses and Chat Completions |
+| Route | The upstreams that serve one native API: `[routes.claude]` (or its one-account short form, `[upstream]`) for Anthropic Messages, `[routes.openai]` for OpenAI Responses and Chat Completions |
 | Upstream | One provider account a route sends requests to: an `id`, a `provider`, a base URL, and its key |
 | Provider | Who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai` |
 | Affinity | The choice of upstream from the session id (`cache_affine`), so a session keeps one account and its prompt cache |

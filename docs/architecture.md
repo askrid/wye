@@ -318,7 +318,7 @@ No hot reload; changes require a restart (or rolling deploy). A config snapshot 
 
 ### Schema
 
-[`examples/wye.toml`](../examples/wye.toml) is the reference: every field with its default, its limits, and what it does, kept valid by a test that parses it with every section enabled. Only `listen`, `base_url`, and one credential are required. `[upstream]` and `[routes.claude]` are alternatives (one Anthropic upstream, or several), `[routes.openai]` adds OpenAI, and at least one route is required.
+[`examples/wye.toml`](../examples/wye.toml) is the reference: every field with its default, its limits, and what it does, kept valid by a test that parses it with every section enabled. Only `listen`, `base_url`, and one credential are required. `[upstream]` is the short form of a `[routes.claude]` with one upstream, and the only form that can forward the caller's credential; `[routes.openai]` adds OpenAI, and at least one route is required.
 
 Config defaults are the `DEFAULT_*` constants in `gateway-core/src/config.rs`; the limits a config may set (16 upstreams per route, 256 aliases, ...) are `MAX_*` constants beside their types, and `examples/wye.toml` states those an operator sets (validation errors name the rest, such as the format of an upstream id).
 
