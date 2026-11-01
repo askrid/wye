@@ -109,6 +109,10 @@ fn rejects_what_it_cannot_check() {
         ),
         (br#"["model"]"#, PolicyError::Malformed),
         (br#"{"model":"a"]"#, PolicyError::Malformed),
+        // A second value after the object: a parser that reads only the
+        // first never sees the second object's output-token field.
+        (br#"{"model":"a"}{"max_tokens":1}"#, PolicyError::Malformed),
+        (br#"{"model":"a"} 1"#, PolicyError::Malformed),
     ] {
         assert_eq!(scan(body), Err(error), "{}", String::from_utf8_lossy(body));
     }

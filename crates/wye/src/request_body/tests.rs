@@ -309,3 +309,18 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn a_second_object_after_the_body_aborts_the_upload() {
+    // A parser that reads only the first value would never see the second
+    // object's output-token field, so the ceiling could not hold.
+    let mut client = Client::of(&[r#"{"model":"m","input":[]}"#, r#"{"max_output_tokens":10}"#]);
+    let held = hold_under_ceiling(&mut client, Api::Responses).await;
+    let error = collect(RequestBody::after_hold(held, client))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<PolicyError>(),
+        Some(&PolicyError::Malformed)
+    );
+}

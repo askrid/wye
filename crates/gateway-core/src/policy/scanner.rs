@@ -167,6 +167,10 @@ impl PolicyScanner {
             if byte != b'{' {
                 return Err(PolicyError::Malformed);
             }
+        } else if self.nest.depth() == 0 {
+            // A value after the object: a parser that reads only the first
+            // would not see what this scanner checks in the second.
+            return Err(PolicyError::Malformed);
         }
         match byte {
             b'"' => {
