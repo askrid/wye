@@ -87,7 +87,8 @@ pub(crate) struct RequestInfo {
     pub session_id: Option<HeaderValue>,
     /// W3C `traceparent`, the parent of the request's OTLP span.
     pub traceparent: Option<HeaderValue>,
-    /// Claude Code's agent structure and gateway hint headers.
+    /// Agent headers: Claude Code's structure and hints, or Codex's mapped
+    /// onto the same fields.
     pub agent: AgentHeaders,
     /// Verified gateway token, when tokens are configured.
     pub identity: Option<Arc<Identity>>,
@@ -125,7 +126,7 @@ struct Seen {
     headers_after: Option<Duration>,
     model: Option<Box<str>>,
     usage: Option<(Usage, UsageStatus)>,
-    /// `tool_use` blocks the response started.
+    /// Tool calls the response started.
     tool_calls: Option<Box<ToolCalls>>,
 }
 

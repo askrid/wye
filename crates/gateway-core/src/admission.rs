@@ -43,9 +43,10 @@ pub struct BodyChecks<'a> {
 }
 
 impl<'a> BodyChecks<'a> {
-    /// The checks config's `[auth]` and `aliases`, and `identity`, set for a
-    /// request to `api`. `generates`: the endpoint generates output (not
+    /// The checks config's `[auth]` and `aliases`, and `identity`, set for
+    /// one request. `generates`: the endpoint generates output (not
     /// `count_tokens`), so the output-token ceiling applies.
+    /// `prefixes_model_ids`: an upstream of the route has its own model ids.
     pub fn new(
         configured: Option<&'a [ModelPattern]>,
         configured_max_output_tokens: Option<u64>,

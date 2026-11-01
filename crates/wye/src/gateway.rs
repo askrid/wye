@@ -46,7 +46,8 @@ pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 
 /// Per-process gateway state shared by every connection. Immutable after
-/// startup except the in-flight counter and the draining flag.
+/// startup except its gauges (in flight, held bytes, failover bytes) and the
+/// draining flag.
 pub struct Gateway {
     /// Checks gateway tokens; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,

@@ -6,8 +6,9 @@
 //! is read in passing for model permissions and output-token ceilings, cache
 //! diagnostics, and upgrade checks, when those are on. Of the headers, only
 //! the URI, hop-by-hop headers, `accept-encoding` (always `identity`), the
-//! credential headers (in API-key mode), and `anthropic-workspace-id` (Claude
-//! Platform on AWS) are changed.
+//! credential headers (in API-key mode, with `openai-organization` and
+//! `openai-project`), `anthropic-workspace-id` (Claude Platform on AWS), and
+//! `content-length` (after a `model` rewrite) are changed.
 
 mod body;
 mod connect;
@@ -93,7 +94,8 @@ pub(crate) enum ForwardError {
     /// The connection could not be made: the request never reached the
     /// provider.
     Connect,
-    /// TLS, protocol, or request-body failure, or a connection lost.
+    /// TLS or protocol failure, or a connection lost. A failing client body
+    /// is `Policy(PolicyRefusal::Broken)` instead.
     Upstream,
     /// The request body broke the policy or the size limit after
     /// forwarding began; the upstream request was aborted.

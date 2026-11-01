@@ -4,7 +4,8 @@
 //!
 //! Each entry is serialized once at startup and entries the configured
 //! ceiling excludes are dropped then, so a request only narrows by its
-//! credential's `models` claim and concatenates bytes. Aliases follow the
+//! credential's models (its claim, or an identity provider's grants) and
+//! concatenates bytes. Aliases follow the
 //! models; each is listed when the model it resolves to for the caller is
 //! permitted, since rollout rules make that per subject.
 

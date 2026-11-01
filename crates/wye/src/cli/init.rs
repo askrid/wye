@@ -21,7 +21,8 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// One developer: each caller's own credential goes through, whether
-    /// Claude Code's login or an API key, so the gateway holds no secret.
+    /// Claude Code's login or an API key, so the gateway holds no secret for
+    /// Claude.
     Forward,
     /// One developer whose gateway holds an Anthropic API key, read from a
     /// file next to the config, so a background service finds it too.

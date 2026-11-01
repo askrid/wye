@@ -156,7 +156,7 @@ impl Hold {
     }
 
     /// Streams the rest of the body unchecked. For a request held only to
-    /// resolve an alias: the repeated-`model` check protects permissions, and
+    /// resolve an alias or find the model for a provider's own id: the repeated-`model` check protects permissions, and
     /// lexing the rest costs CPU per uploaded MB.
     pub(crate) fn skip_rest_check(&mut self) {
         self.check_rest = false;

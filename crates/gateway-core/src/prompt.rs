@@ -139,8 +139,8 @@ impl PromptHashes {
     }
 }
 
-/// Whether requests of the Claude Code session `session_id` are diagnosed
-/// when `percent` of sessions are.
+/// Whether requests with affinity key `session_id` (a client session id, or
+/// a token subject for upgrade checks) are sampled when `percent` are.
 ///
 /// A pure function of the session id, so every replica decides alike and a
 /// sampled session keeps its complete request sequence, which explaining a

@@ -1,5 +1,6 @@
-# Correctness gates for pushes to main and every pull request: formatting,
-# lints, rustdoc, tests on Linux and macOS, release builds, and cargo-deny. bench.yml
+# Correctness gates for pushes to main and pull requests (except site-only
+# ones): formatting, lints, rustdoc, tests on Linux and macOS, release builds,
+# and cargo-deny. bench.yml
 # compares allocations, failed requests, and failed streams with the base
 # branch; the latency and CPU gate runs locally before each commit
 # (scripts/check.sh). The website (site/) has its own workflow, site.yml.

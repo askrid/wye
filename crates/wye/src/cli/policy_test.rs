@@ -9,9 +9,9 @@
 //! status = 403               # optional
 //! error = "permission_error" # optional
 //! model = "claude-opus-5-5"  # optional: the model it runs on, after aliases
-//! upstream = "team-a"        # optional: the [routes.claude] upstream it goes to
+//! upstream = "team-a"        # optional: the route upstream it goes to
 //! path = "/v1/messages"      # optional, the default
-//! session = "s-1"            # optional Claude Code session id
+//! session = "s-1"            # optional client session id
 //!
 //! [token]               # optional; claims taken as verified
 //! subject = "alice"

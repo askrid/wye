@@ -1,5 +1,5 @@
 # cargo-deny: licenses, advisories, bans, and sources of every dependency.
-# CI runs it on pushes to main and every pull request (.github/workflows/ci.yml);
+# CI runs it on pushes to main and pull requests (.github/workflows/ci.yml);
 # run `cargo deny check` locally if cargo-deny is installed. Keep the license
 # list as narrow as the locked graph allows.
 

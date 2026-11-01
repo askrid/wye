@@ -33,8 +33,9 @@ pub(super) struct ModelSpan {
 
 impl Gateway {
     /// Resolves model aliases and checks the request body against model
-    /// permissions and the output-token ceiling. Without any of them, the
-    /// body passes untouched; otherwise it is held until its `model` is read,
+    /// permissions and the output-token ceiling. Without any of them, and
+    /// without an upstream that has its own model ids, the body passes
+    /// untouched; otherwise it is held until its `model` is read,
     /// then replayed (with an alias replaced by its model, and `headers`'
     /// `content-length` adjusted) and checked as it streams.
     pub(super) async fn admit_body(

@@ -43,7 +43,8 @@ static ANTHROPIC_FRAMES: AtomicBool = AtomicBool::new(false);
 
 /// Frames every SSE stream as a complete Anthropic Messages stream, and gives
 /// every unary Messages reply the fields a real one has (`model`,
-/// `stop_reason`): a gateway that parses responses rejects one without.
+/// `stop_reason`, `stop_sequence`): a gateway that parses responses rejects
+/// one without.
 pub fn use_anthropic_frames() {
     ANTHROPIC_FRAMES.store(true, Ordering::Relaxed);
 }

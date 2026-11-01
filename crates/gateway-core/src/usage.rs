@@ -54,17 +54,18 @@ pub struct Usage {
     pub cache_creation_5m_tokens: Option<u64>,
     pub cache_creation_1h_tokens: Option<u64>,
     /// The response used something billed outside token prices: per-use
-    /// server tools (`server_tool_use`), or a service tier or speed other
-    /// than standard.
+    /// server tools (`server_tool_use`) or OpenAI's hosted tools, or a
+    /// service tier or speed other than standard.
     pub unpriced: bool,
 }
 
 /// How much of the usage a scan saw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageStatus {
-    /// `message_delta` usage arrived: the counts are the provider's final report.
+    /// The provider's final usage report arrived (Messages `message_delta`,
+    /// a Responses terminal event, a Chat usage chunk, a JSON body's `usage`).
     Complete,
-    /// Only `message_start` arrived (stream ended early): output tokens are a lower bound.
+    /// A Messages stream ended after `message_start`: output tokens are a lower bound.
     Partial,
     /// No usable usage event, or a usage event was malformed or oversized.
     Unknown,

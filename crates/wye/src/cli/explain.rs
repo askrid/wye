@@ -115,8 +115,8 @@ impl Explanation {
     }
 }
 
-/// Explains `POST path` with `body`, `credential`, and the Claude Code
-/// `session` id, at Unix time `now`. Upgrade checks run against `targets`,
+/// Explains `POST path` with `body`, `credential`, and the client's
+/// `session` id (Claude Code's or Codex's), at Unix time `now`. Upgrade checks run against `targets`,
 /// or, when empty, against `[upgrade_check] targets`.
 pub fn explain(
     config: &Config,

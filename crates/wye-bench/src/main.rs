@@ -4,13 +4,9 @@
 //! through a real `wye` binary, and reports what Wye adds: on a plain HTTP/1.1
 //! path (no metric prefix) and on TLS with HTTP/2 (`tls_`), plus the Wye
 //! variants, `--wye-alloc` allocation metrics (`alloc_`), and competitors
-//! (`--krakend`, `--litellm`, `--bifrost`). `docs/development.md` lists each
-//! scenario.
-//!
-//! Knobs for experiments: `WYE_BENCH_UPSTREAM` appends lines to Wye's
-//! `[upstream]` config, `WYE_BENCH_GATEWAY_LOG=1` keeps each gateway's output
-//! in a log next to its config, `WYE_BENCH_BIFROST_POOLS=default` runs Bifrost
-//! with its default pool sizes. Without arguments it prints its usage.
+//! (`--agentgateway`, `--bifrost`, `--litellm`, `--krakend`).
+//! `docs/development.md` lists each scenario and the `WYE_BENCH_*` knobs.
+//! Without arguments it prints its usage.
 
 // Development tool, not on the request path: panics abort a benchmark run.
 #![allow(

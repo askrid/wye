@@ -8,6 +8,7 @@
 #
 # Set WYE_URL (for example http://127.0.0.1:8080) to also time the same
 # request through a running Wye (with upstream.http_version "auto" or "1.1").
+# MODEL picks the model (default claude-haiku-5-5).
 set -euo pipefail
 rounds=${1:-5}
 model=${MODEL:-claude-haiku-5-5}

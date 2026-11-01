@@ -179,14 +179,14 @@ pub const COMMANDS: &[Command] = &[
         options: &[
             CONFIG,
             Opt::value("token-file", "path", "The caller's gateway token"),
-            Opt::value("session", "id", "The Claude Code session id"),
+            Opt::value("session", "id", "The client's session id"),
             Opt::value("path", "path", "The endpoint (default: /v1/messages)"),
             Opt {
                 repeats: true,
                 ..Opt::value(
                     "target-model",
                     "model",
-                    "Check against this model's breaking changes too",
+                    "Check against this model instead of [upgrade_check]",
                 )
             },
         ],

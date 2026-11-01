@@ -1,7 +1,7 @@
 //! `wye probe <url>`: a one-shot health check for container images without
 //! `curl` (for example a Docker `HEALTHCHECK` against `/readyz`), and the
-//! check `wye claude` makes before launching Claude Code against a local or
-//! remote gateway.
+//! check `wye claude` and `wye codex` make before launching their agent
+//! against a local or remote gateway.
 
 use std::time::Duration;
 

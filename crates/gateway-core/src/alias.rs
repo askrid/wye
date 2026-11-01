@@ -32,7 +32,8 @@ struct Rule {
 pub struct AliasError(pub &'static str);
 
 impl Alias {
-    /// `name` and every model are exact names of 1-256 bytes without `*`;
+    /// `name` and every model are exact names of 1-256 bytes without `*` or
+    /// escapes;
     /// subjects are exact names or prefixes ending in `*`, as in model
     /// permissions.
     pub fn new(
@@ -47,7 +48,7 @@ impl Alias {
         }
         if !policy::is_model_name(model) {
             return Err(AliasError(
-                "aliases: model must be a model name of 1-256 bytes without *",
+                "aliases: model must be a model name of 1-256 bytes without * or escapes",
             ));
         }
         let mut rules = Vec::new();
@@ -57,7 +58,7 @@ impl Alias {
             }
             if !policy::is_model_name(&model) {
                 return Err(AliasError(
-                    "aliases.when: model must be a model name of 1-256 bytes without *",
+                    "aliases.when: model must be a model name of 1-256 bytes without * or escapes",
                 ));
             }
             if subjects.is_empty() {

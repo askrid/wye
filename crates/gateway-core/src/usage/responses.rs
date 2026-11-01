@@ -6,8 +6,8 @@
 //! line is lexed as it streams, with constant memory: only `response.model`,
 //! `response.service_tier`, and the small `response.usage` object are kept.
 //! `response.output_item.added` lines, small because an item starts without
-//! its content, are parsed to count tool calls. Every other event is skipped
-//! after its `event:` line.
+//! its content, are parsed to count tool calls, and `response.created` is
+//! lexed for the model. Every other event is skipped after its `event:` line.
 //!
 //! OpenAI's `input_tokens` include cached tokens; [`Usage::input_tokens`]
 //! does not (Anthropic's meaning), so the cached share moves to

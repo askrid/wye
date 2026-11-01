@@ -8,7 +8,8 @@ use crate::json::{Kept, Nesting, StringEnd, is_space, short_string_len};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Capture {
     None,
-    /// A top-level key, kept to compare with `model`.
+    /// A top-level key, kept to compare with `model` and the output-token
+    /// fields.
     Key,
     /// The value of `model`.
     Model,

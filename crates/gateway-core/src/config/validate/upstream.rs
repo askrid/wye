@@ -25,7 +25,7 @@ pub(crate) struct RawRoute {
 }
 
 /// `[upstream]`, or one `[[routes.<route>.upstreams]]` entry, which also
-/// takes `id`, `provider`, and `weight`.
+/// takes `id`, `provider`, `weight`, and `workspace_id`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawUpstream {

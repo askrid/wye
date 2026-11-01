@@ -30,8 +30,8 @@ pub use startup::{Resources, UpstreamAuth, UpstreamResources, verifier};
 /// An error from a request body or the connection under it.
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Where the gateway answers that it is up; `wye probe`, `wye claude`, and
-/// `wye service` ask here.
+/// Where the gateway answers that it is up; `wye probe`, `wye claude`,
+/// `wye codex`, and `wye service` ask here.
 pub(crate) const HEALTH_PATH: &str = "/healthz";
 
 /// Anthropic's API-key header: a gateway token arrives in it, and

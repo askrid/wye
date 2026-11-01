@@ -130,7 +130,8 @@ impl Ranking {
 /// The key a request is routed and sampled by: the client's session id,
 /// else the credential subject. Every replica computes the same key, so a
 /// session keeps its upstream across them. Without either (no `[auth]`: one
-/// loopback user), [`Route::rank`] takes the empty key and sampling none.
+/// loopback user), [`Route::rank`] takes the empty key, and sampling takes
+/// such requests only at 100%.
 pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> Option<&'k [u8]> {
     session.or(subject.map(str::as_bytes))
 }
