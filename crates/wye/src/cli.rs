@@ -12,6 +12,7 @@ mod policy_test;
 mod probe;
 mod report;
 pub mod service;
+mod text;
 pub mod token;
 mod wrapper;
 

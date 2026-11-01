@@ -17,7 +17,7 @@ use ring::{
 };
 
 use super::{
-    args::{self, Parsed, show_duration},
+    args::Parsed,
     emit,
     files::{self, SIGNING_KEY_FILE},
 };
@@ -85,8 +85,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
     let ttl_secs = parsed
         .value("ttl")
         .map(|ttl| {
-            args::duration_secs(ttl)
-                .ok_or_else(|| format!("--ttl {ttl}: write it as 30m, 8h, or 7d"))
+            duration_secs(ttl).ok_or_else(|| format!("--ttl {ttl}: write it as 30m, 8h, or 7d"))
         })
         .transpose()?;
     let request = Issue {
@@ -187,6 +186,33 @@ pub fn issue(
     ))
 }
 
+/// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.
+fn duration_secs(text: &str) -> Option<u64> {
+    let (digits, unit) = match text.char_indices().last()? {
+        (i, c) if c.is_ascii_alphabetic() => (text.get(..i)?, c),
+        _ => (text, 's'),
+    };
+    let n: u64 = digits.parse().ok()?;
+    let scale = match unit {
+        's' => 1,
+        'm' => 60,
+        'h' => 3600,
+        'd' => 86_400,
+        _ => return None,
+    };
+    n.checked_mul(scale).filter(|&secs| secs > 0)
+}
+
+/// Seconds as `duration_secs` reads them back: `7d`, `8h`, `90s`.
+fn show_duration(secs: u64) -> String {
+    match secs {
+        s if s % 86_400 == 0 => format!("{}d", s / 86_400),
+        s if s % 3600 == 0 => format!("{}h", s / 3600),
+        s if s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -262,5 +288,22 @@ mod tests {
                 .contains("no [auth]")
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn durations_read_as_written() {
+        for (text, secs) in [
+            ("45s", 45),
+            ("30m", 1800),
+            ("8h", 28_800),
+            ("7d", 604_800),
+            ("90", 90),
+        ] {
+            assert_eq!(duration_secs(text), Some(secs), "{text}");
+            assert_eq!(duration_secs(&show_duration(secs)), Some(secs));
+        }
+        for bad in ["", "d", "7w", "-1d", "0", "1.5h"] {
+            assert_eq!(duration_secs(bad), None, "{bad}");
+        }
     }
 }

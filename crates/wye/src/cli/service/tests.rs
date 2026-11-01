@@ -99,7 +99,7 @@ fn the_plan_says_what_changes_and_how_to_undo_it() {
     }
     // Prose wraps at 80 columns; a command stays whole, so it can be copied.
     for line in text.lines().filter(|l| !l.starts_with("  ")) {
-        assert!(line.len() <= crate::cli::args::WIDTH, "{line}");
+        assert!(line.len() <= crate::cli::text::WIDTH, "{line}");
     }
     assert_eq!(
         start_commands(Manager::Systemd, "1000", &file, false),

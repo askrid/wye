@@ -12,7 +12,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    args::{self, Parsed},
+    args::Parsed,
     files::{self, CONFIG_FILE, SIGNING_KEY_FILE},
     token,
 };
@@ -183,7 +183,7 @@ impl InitOptions {
         for (i, (words, command)) in steps.iter().enumerate() {
             // Words wrap under themselves; a command stays on one line, so
             // it can be copied.
-            let wrapped = args::wrap(words, 5);
+            let wrapped = super::text::wrap(words, 5);
             out.push_str(&format!("  {}. {}", i + 1, wrapped.trim_start()));
             if !command.is_empty() {
                 out.push_str(&format!("     {command}\n"));

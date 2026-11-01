@@ -1,4 +1,5 @@
 use super::*;
+use crate::cli::text::WIDTH;
 
 fn command(name: &str) -> &'static Command {
     COMMANDS.iter().find(|c| c.name == name).unwrap()
@@ -141,21 +142,4 @@ fn a_typo_gets_the_closest_command() {
         unknown_command("-c"),
         "options go after the command: `wye <command> -c`"
     );
-}
-
-#[test]
-fn durations_read_as_written() {
-    for (text, secs) in [
-        ("45s", 45),
-        ("30m", 1800),
-        ("8h", 28_800),
-        ("7d", 604_800),
-        ("90", 90),
-    ] {
-        assert_eq!(duration_secs(text), Some(secs), "{text}");
-        assert_eq!(duration_secs(&show_duration(secs)), Some(secs));
-    }
-    for bad in ["", "d", "7w", "-1d", "0", "1.5h"] {
-        assert_eq!(duration_secs(bad), None, "{bad}");
-    }
 }

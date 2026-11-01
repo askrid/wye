@@ -5,6 +5,7 @@
 
 mod commands;
 
+use super::text::wrap;
 pub use commands::COMMANDS;
 use commands::{FAMILIES, GROUPS};
 
@@ -52,8 +53,6 @@ const ENVIRONMENT: &str = "Environment:
   NO_COLOR     No color, even on a terminal
 ";
 
-/// Help is wrapped to this width, which fits a split terminal.
-pub const WIDTH: usize = 80;
 /// Where option descriptions start.
 const DESCRIPTION_COLUMN: usize = 28;
 
@@ -258,35 +257,6 @@ fn row(left: &str, text: &str) -> String {
     out
 }
 
-/// `text` wrapped at word boundaries to [`WIDTH`] characters, every line
-/// indented by `indent`; ends with a newline. Only ASCII whitespace breaks a
-/// line, so a no-break space keeps two words together.
-pub fn wrap(text: &str, indent: usize) -> String {
-    let mut out = String::new();
-    let mut line = 0;
-    for word in text
-        .split(|c: char| c.is_ascii_whitespace())
-        .filter(|w| !w.is_empty())
-    {
-        let width = word.chars().count();
-        if line > indent && line + 1 + width > WIDTH {
-            out.push('\n');
-            line = 0;
-        }
-        if line == 0 {
-            out.push_str(&" ".repeat(indent));
-            line = indent;
-        } else {
-            out.push(' ');
-            line += 1;
-        }
-        out.push_str(word);
-        line += width;
-    }
-    out.push('\n');
-    out
-}
-
 /// `wye --help`: the commands, grouped.
 pub fn overview() -> String {
     let mut out = format!(
@@ -374,33 +344,6 @@ fn distance(a: &str, b: &str) -> usize {
         }
     }
     row.last().copied().unwrap_or_default()
-}
-
-/// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.
-pub fn duration_secs(text: &str) -> Option<u64> {
-    let (digits, unit) = match text.char_indices().last()? {
-        (i, c) if c.is_ascii_alphabetic() => (text.get(..i)?, c),
-        _ => (text, 's'),
-    };
-    let n: u64 = digits.parse().ok()?;
-    let scale = match unit {
-        's' => 1,
-        'm' => 60,
-        'h' => 3600,
-        'd' => 86_400,
-        _ => return None,
-    };
-    n.checked_mul(scale).filter(|&secs| secs > 0)
-}
-
-/// Seconds as `duration_secs` reads them back: `7d`, `8h`, `90s`.
-pub fn show_duration(secs: u64) -> String {
-    match secs {
-        s if s % 86_400 == 0 => format!("{}d", s / 86_400),
-        s if s % 3600 == 0 => format!("{}h", s / 3600),
-        s if s % 60 == 0 => format!("{}m", s / 60),
-        s => format!("{s}s"),
-    }
 }
 
 #[cfg(test)]

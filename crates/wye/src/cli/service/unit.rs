@@ -274,7 +274,7 @@ pub(super) fn plan(
     commands: &Commands,
     show: &dyn Fn(&Path) -> String,
 ) -> String {
-    let mut out = crate::cli::args::wrap(
+    let mut out = crate::cli::text::wrap(
         &format!(
             "wye service install sets up the gateway as {}: {} No sudo; nothing outside \
              your home directory changes.",
