@@ -22,7 +22,7 @@ Check: every claim links to the doc section that backs it, and nothing contradic
 
 ### Never the slow part
 
-*From fast and light.* HTML and CSS; no page needs a script to be read or used. At most two self-hosted, subset font files, with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
+*From fast and light.* HTML and CSS; a script may add conveniences such as copy buttons, but every page reads and works without it. At most two self-hosted, subset font files, with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
 
 Check: `site/check.sh` fails a page over budget, the way the benchmark gate fails a slower gateway.
 
@@ -40,7 +40,7 @@ Check: a Claude Code user can start Wye from the first screen without scrolling.
 
 ### Draw the mechanism
 
-*From the name.* A wye is a Y-shaped fitting or junction: one line splitting into branches. Wye's request path is that shape: one client, several accounts, a session held on one account by hashing, and failover switched only before the first response byte, the way points are set before the train reaches them. Diagrams show this and nothing decorative, drawn from [architecture.md](../docs/architecture.md#claude-across-providers-m4). Colour marks meaning (route, upstream, failover, refusal), never ornament. The motif must not slide into signal-light green on black or a hairline broadsheet layout; both are on the list below.
+*From the name.* A wye is a Y-shaped fitting or junction: one line splitting into branches. Wye's request path is that shape: one client, several accounts, a session held on one account by hashing, and failover switched only before the first response byte, the way points are set before the train reaches them. Diagrams show this and nothing decorative, drawn from [architecture.md](../docs/architecture.md#claude-across-providers-and-accounts). Colour marks meaning (route, upstream, failover, refusal), never ornament. The motif must not slide into signal-light green on black or a hairline broadsheet layout; both are on the list below.
 
 Check: a diagram changes in the same commit as the behaviour it shows.
 
@@ -76,6 +76,8 @@ Ratios are WCAG contrast against `paper`. Blue and ochre are the only route colo
 Type: Overpass for all text and Overpass Mono for code and output, both variable, self-hosted as Latin subsets under the SIL Open Font License. Overpass is an open revival of Highway Gothic, the US road-sign face: wayfinding type for a product made of routes.
 
 Diagrams: strokes 10 units wide on a `paper` casing, round joins, stations as `paper` circles ringed in `ink`. Only real upstream ids are drawn.
+
+Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (the config, status, what Wye will not do). On wide screens a rail beside them is the table of contents, drawn as the route's line, and the stop being read fills in through scroll-driven animations; on narrow screens the line runs down the stops' left edge. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
 
 ## Defaults we do not use
 

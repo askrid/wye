@@ -8,8 +8,10 @@
 //! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
 //! | `{{fence FILE\|PREFIX}}` | the first fenced block in FILE whose first line starts with PREFIX, highlighted |
 //! | `{{section FILE\|HEADING}}` | the Markdown under `## HEADING` in FILE, rendered |
+//! | `{{item FILE\|HEADING\|LEAD}}` | the item of that section's list whose bold lead starts with LEAD, rendered |
+//! | `{{rest FILE\|HEADING}}` | every item of that list the page has not placed yet, so a new one is never dropped |
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
@@ -62,7 +64,8 @@ impl Sources {
         })
     }
 
-    fn expand(&self, directive: &str) -> Result<String, String> {
+    /// `placed` names the list items this page has rendered so far.
+    fn expand(&self, directive: &str, placed: &mut BTreeSet<String>) -> Result<String, String> {
         let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
         let args: Vec<&str> = match args.trim() {
             "" => Vec::new(),
@@ -88,8 +91,43 @@ impl Sources {
                     .ok_or_else(|| format!("{file}: no section \"## {heading}\""))?;
                 Ok(markdown::to_html(text, &self.repo_url, file))
             }
+            ("item", [file, heading, prefix]) => {
+                let items = self.items(file, heading)?;
+                let item = items
+                    .iter()
+                    .find(|item| markdown::lead(item).is_some_and(|lead| lead.starts_with(prefix)))
+                    .ok_or_else(|| {
+                        format!("{file}: no item under \"## {heading}\" opens with {prefix:?}")
+                    })?;
+                if !placed.insert(item_key(file, heading, item)) {
+                    return Err(format!("{file}: the item {prefix:?} is placed twice"));
+                }
+                Ok(self.item_html(item, file))
+            }
+            ("rest", [file, heading]) => {
+                let mut out = String::new();
+                for item in self.items(file, heading)? {
+                    if placed.insert(item_key(file, heading, &item)) {
+                        out.push_str(&self.item_html(&item, file));
+                    }
+                }
+                Ok(out)
+            }
             _ => Err(format!("unknown directive {{{{{directive}}}}}")),
         }
+    }
+
+    fn items(&self, file: &str, heading: &str) -> Result<Vec<String>, String> {
+        let text = markdown::section(self.document(file)?, heading)
+            .ok_or_else(|| format!("{file}: no section \"## {heading}\""))?;
+        Ok(markdown::list_items(text))
+    }
+
+    fn item_html(&self, item: &str, file: &str) -> String {
+        format!(
+            "<div class=\"item\">{}</div>",
+            markdown::to_html(item, &self.repo_url, file)
+        )
     }
 
     fn metric(&self, expression: &str, decimals: &str) -> Result<String, String> {
@@ -127,6 +165,7 @@ impl Sources {
 /// Expands every `{{directive}}` in a page.
 pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
     let mut out = String::with_capacity(template.len() * 2);
+    let mut placed = BTreeSet::new();
     let mut rest = template;
     while let Some(start) = rest.find("{{") {
         let (before, directive) = rest.split_at(start);
@@ -134,11 +173,17 @@ pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
         let directive = directive.strip_prefix("{{").unwrap_or(directive);
         let end = directive.find("}}").ok_or("a {{ without its }}")?;
         let (directive, after) = directive.split_at(end);
-        out.push_str(&sources.expand(directive.trim())?);
+        out.push_str(&sources.expand(directive.trim(), &mut placed)?);
         rest = after.strip_prefix("}}").unwrap_or(after);
     }
     out.push_str(rest);
     Ok(out)
+}
+
+/// Names a list item by its document, section, and lead (the whole item if it
+/// has no lead).
+fn item_key(file: &str, heading: &str, item: &str) -> String {
+    format!("{file}|{heading}|{}", markdown::lead(item).unwrap_or(item))
 }
 
 /// The value of the first `key = "value"` line in a Cargo manifest.
@@ -194,7 +239,9 @@ mod tests {
             .collect(),
             documents: [(
                 "README.md",
-                "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n## Status\n\nBuilt.\n"
+                "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n## Status\n\nBuilt.\n\n\
+                 ## What it does\n\n- **Shows usage.** Records.\n- **Gives access.** Tokens.\n\
+                 - **Runs.** Anywhere.\n"
                     .to_owned(),
             )]
             .into_iter()
@@ -220,6 +267,39 @@ mod tests {
         .unwrap();
         assert!(page.starts_with("<pre class=\"code\" data-lang=\"console\"><code><span class=\"prompt\">$</span> wye report\n3 requests</code></pre>"));
         assert!(page.ends_with("<p>Built.</p>\n"));
+    }
+
+    #[test]
+    fn places_list_items_and_the_rest() {
+        let s = sources();
+        let page = render(
+            "{{item README.md|What it does|Gives}}|{{rest README.md|What it does}}",
+            &s,
+        )
+        .unwrap();
+        assert_eq!(
+            page,
+            "<div class=\"item\"><p><strong>Gives access.</strong> Tokens.</p>\n</div>|\
+             <div class=\"item\"><p><strong>Shows usage.</strong> Records.</p>\n</div>\
+             <div class=\"item\"><p><strong>Runs.</strong> Anywhere.</p>\n</div>"
+        );
+        // Everything placed: the rest adds nothing.
+        let all = "{{item README.md|What it does|Shows}}{{item README.md|What it does|Gives}}\
+                   {{item README.md|What it does|Runs}}{{rest README.md|What it does}}";
+        assert_eq!(
+            render(all, &s)
+                .unwrap()
+                .matches("<div class=\"item\">")
+                .count(),
+            3
+        );
+        let twice = "{{item README.md|What it does|Runs}}{{item README.md|What it does|Runs}}";
+        assert!(render(twice, &s).unwrap_err().contains("placed twice"));
+        assert!(
+            render("{{item README.md|What it does|Nothing}}", &s)
+                .unwrap_err()
+                .contains("opens with")
+        );
     }
 
     #[test]

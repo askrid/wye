@@ -58,6 +58,33 @@ pub fn section<'a>(doc: &'a str, heading: &str) -> Option<&'a str> {
     doc.get(start?..)
 }
 
+/// The items of the first `- ` list in a section, each without its marker
+/// and with its continuation lines unindented. The list ends at the first
+/// unindented line that does not start an item.
+pub fn list_items(section: &str) -> Vec<String> {
+    let mut items: Vec<String> = Vec::new();
+    for line in section.lines() {
+        if let Some(text) = line.strip_prefix("- ") {
+            items.push(text.to_owned());
+        } else if let Some(item) = items.last_mut() {
+            if line.starts_with("  ") {
+                item.push('\n');
+                item.push_str(line.trim_start());
+            } else if !line.trim().is_empty() {
+                break;
+            }
+        }
+    }
+    items
+}
+
+/// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
+pub fn lead(item: &str) -> Option<&str> {
+    item.strip_prefix("**")?
+        .split_once("**")
+        .map(|(lead, _)| lead)
+}
+
 /// Renders Markdown from `source` (a path relative to the repository root).
 pub fn to_html(markdown: &str, repo_url: &str, source: &str) -> String {
     let events = Parser::new_ext(markdown, Options::ENABLE_TABLES).map(|event| match event {
@@ -220,6 +247,20 @@ mod tests {
         );
         assert_eq!(fence(DOC, "ls"), Some(("bash", "ls".to_owned())));
         assert_eq!(fence(DOC, "nothing"), None);
+    }
+
+    #[test]
+    fn splits_a_list_into_items_with_their_leads() {
+        let section = "Intro.\n\n- **One.** first\n  continued\n\n- **Two.** second\n- plain\n\nAfter the list.\n- not an item\n";
+        let items = list_items(section);
+        assert_eq!(
+            items,
+            ["**One.** first\ncontinued", "**Two.** second", "plain"]
+        );
+        assert_eq!(
+            items.iter().map(|i| lead(i)).collect::<Vec<_>>(),
+            [Some("One."), Some("Two."), None]
+        );
     }
 
     #[test]

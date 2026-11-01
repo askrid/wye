@@ -9,6 +9,7 @@
 <link rel="preload" href="assets/fonts/overpass-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<script src="assets/copy.js" defer></script>
 </head>
 <body>
 <header class="wrap bar">
@@ -72,31 +73,49 @@
     </figure>
   </section>
 
-  <section class="part" aria-labelledby="features">
-    <h2 id="features">What it does</h2>
-    <div class="prose features">{{section README.md|What it does}}</div>
-  </section>
+  <div class="route">
+    <nav class="rail" aria-label="A request's route through Wye">
+      <p class="rail-title">A request's route</p>
+      <ol>
+        <li class="to-client"><a href="#client">Client</a></li>
+        <li class="to-gate"><a href="#gate">Gate</a></li>
+        <li class="to-model"><a href="#model">Model</a></li>
+        <li class="to-account"><a href="#account">Account</a></li>
+        <li class="to-stream"><a href="#stream">Stream</a></li>
+        <li class="to-record"><a href="#record">Record</a></li>
+      </ol>
+      <ul class="rail-more">
+        <li class="to-config"><a href="#config">One file</a></li>
+        <li class="to-status"><a href="#status">Status</a></li>
+        <li class="to-limits"><a href="#limits">Will not do</a></li>
+      </ul>
+    </nav>
 
-  <section class="part" aria-labelledby="records">
-    <h2 id="records">What it records</h2>
-    <p>Each request becomes one JSON line, and with telemetry turned on, an OTLP log record, a span, and metrics. <code>wye report</code> reads the log without a backend. Costs are exact decimal strings computed in integers; a model with no price is recorded as unknown, never as $0.</p>
-    {{fence README.md|$ wye report}}
-    {{fence README.md|{}}
-  </section>
+    <div class="stops">
+      <section class="part stop" id="client" aria-labelledby="client-h">
+        <h2 id="client-h">Client</h2>
+        {{item README.md|What it does|Works with}}
+      </section>
 
-  <section class="part" aria-labelledby="config">
-    <h2 id="config">One file, kept in Git</h2>
-    <p>A route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
-    {{fence README.md|[server]}}
-    <p><code>wye explain</code> shows what the server would do with a request, offline, by calling the same functions in the same order.</p>
-    <div class="long-lines">{{fence README.md|$ wye explain}}</div>
-    <p>Every option, with its default and limits: <a href="{{repo}}/blob/main/examples/wye.toml">examples/wye.toml</a>.</p>
-  </section>
+      <section class="part stop" id="gate" aria-labelledby="gate-h">
+        <h2 id="gate-h">Gate</h2>
+        {{item README.md|What it does|Gives a team}}
+      </section>
 
-  <section class="part" aria-labelledby="overhead">
-    <h2 id="overhead">Overhead</h2>
-    <p>Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent on that machine, and a change that makes Wye slower or heavier past the gate's tolerances is not committed.</p>
-    <div class="table-scroll">
+      <section class="part stop" id="model" aria-labelledby="model-h">
+        <h2 id="model-h">Model</h2>
+        {{item README.md|What it does|Changes models}}
+      </section>
+
+      <section class="part stop" id="account" aria-labelledby="account-h">
+        <h2 id="account-h">Account</h2>
+        {{item README.md|What it does|Spreads load}}
+      </section>
+
+      <section class="part stop" id="stream" aria-labelledby="stream-h">
+        <h2 id="stream-h">Stream</h2>
+        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent on that machine, and a change that makes Wye slower or heavier past the gate's tolerances is not committed.</p></div>
+        <div class="table-scroll">
       <table class="numbers">
         <thead>
           <tr><th scope="col">What Wye adds</th><th scope="col" class="n">Plain HTTP/1.1</th><th scope="col" class="n">TLS + HTTP/2</th></tr>
@@ -111,18 +130,39 @@
         </tbody>
       </table>
     </div>
-    <p>Where Wye loses: agentgateway beats it on token-paced stream latency and on memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
-  </section>
+        <p>Where Wye loses: agentgateway beats it on token-paced stream latency and on memory beside stalled clients, and KrakenD CE on bulk transfer and TLS uploads, though KrakenD cannot stream. <a href="{{repo}}/blob/main/docs/benchmarks.md">The method, the comparison with other gateways, and the full tables</a>.</p>
+      </section>
 
-  <section class="part" aria-labelledby="status">
-    <h2 id="status">Status</h2>
-    <div class="prose">{{section README.md|Status}}</div>
-  </section>
+      <section class="part stop" id="record" aria-labelledby="record-h">
+        <h2 id="record-h">Record</h2>
+        {{item README.md|What it does|Shows usage}}
+        {{fence README.md|$ wye report}}
+        {{fence README.md|{}}
+        <p>Costs are exact decimal strings computed in integers; a model with no price is recorded as unknown, never as $0.</p>
+      </section>
 
-  <section class="part" aria-labelledby="limits">
-    <h2 id="limits">What Wye will not do</h2>
-    <div class="prose">{{section README.md|What Wye will not do}}</div>
-  </section>
+      <section class="part" id="config" aria-labelledby="config-h">
+        <h2 id="config-h">One file, kept in Git</h2>
+        <p>A route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+        {{fence README.md|[server]}}
+        {{item README.md|What it does|Checks decisions}}
+        <div class="long-lines">{{fence README.md|$ wye explain}}</div>
+        {{item README.md|What it does|Runs where}}
+        {{rest README.md|What it does}}
+        <p>Every option, with its default and limits: <a href="{{repo}}/blob/main/examples/wye.toml">examples/wye.toml</a>.</p>
+      </section>
+
+      <section class="part" id="status" aria-labelledby="status-h">
+        <h2 id="status-h">Status</h2>
+        <div class="prose">{{section README.md|Status}}</div>
+      </section>
+
+      <section class="part" id="limits" aria-labelledby="limits-h">
+        <h2 id="limits-h">What Wye will not do</h2>
+        <div class="prose">{{section README.md|What Wye will not do}}</div>
+      </section>
+    </div>
+  </div>
 </main>
 
 <footer class="wrap foot">

@@ -154,17 +154,149 @@ h1 { font-size: var(--h1); font-weight: 800; line-height: 1.02; letter-spacing: 
 .part > p, .prose { max-width: var(--measure); }
 .prose { display: grid; gap: 0.9rem; }
 .prose ul { padding-left: 1.25rem; display: grid; gap: 0.4rem; }
-/* README's "What it does": each item opens with a bold lead, which works as
-   its heading; two columns where they fit, no bullets, no boxes. */
-.prose.features { max-width: none; }
-.features ul {
-  list-style: none;
-  padding: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
-  gap: 1.75rem 3rem;
+/* An item of README's "What it does", placed at its stop: its bold lead
+   reads as the stop's subheading. */
+.item { max-width: var(--measure); }
+.item p > strong:first-child {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: var(--large);
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
-.features li { max-width: var(--measure); }
-.features li > strong:first-child { display: block; font-size: var(--large); font-weight: 800; letter-spacing: -0.01em; margin-bottom: 0.25rem; }
+
+/* The request's route: the sections are stops in the order a request meets
+   them, and the rail beside them is the page's table of contents
+   (site/DESIGN.md, "Layout"). */
+.route {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  column-gap: clamp(2rem, 4vw, 4rem);
+  timeline-scope: --client, --gate, --model, --account, --stream, --record, --config, --status, --limits;
+}
+.stops { min-width: 0; }
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: grid;
+  gap: 1.5rem;
+  padding-block: clamp(2rem, 5vw, 3.75rem);
+  font-size: 1rem;
+}
+.rail-title { color: var(--graphite); font-size: var(--small); }
+.rail ol, .rail ul { list-style: none; margin: 0; padding: 0; display: grid; }
+.rail ol { position: relative; gap: 1.25rem; }
+/* The line, drawn like the hero's tracks, and a station per stop. */
+.rail ol::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0.5em;
+  bottom: 0.5em;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.rail li { position: relative; padding-left: 1.75rem; }
+.rail ol li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+}
+.rail ul { gap: 0.6rem; }
+.rail a { color: var(--graphite); font-weight: 600; text-decoration: none; }
+.rail a:hover { color: var(--ink); text-decoration: underline; }
+
+/* The stop being read: its station fills in. Each section is a view
+   timeline narrowed to a band a third of the way down the screen, so one
+   stop at a time is current; browsers without scroll-driven animations keep
+   a plain table of contents. This follows the reader's scrolling, so it is
+   not the page's one motion sequence. */
+@supports (animation-timeline: view()) {
+  .stops > section { view-timeline-axis: block; view-timeline-inset: 33% 66%; }
+  #client { view-timeline-name: --client; }
+  #gate { view-timeline-name: --gate; }
+  #model { view-timeline-name: --model; }
+  #account { view-timeline-name: --account; }
+  #stream { view-timeline-name: --stream; }
+  #record { view-timeline-name: --record; }
+  #config { view-timeline-name: --config; }
+  #status { view-timeline-name: --status; }
+  #limits { view-timeline-name: --limits; }
+  .to-client { --stop: --client; }
+  .to-gate { --stop: --gate; }
+  .to-model { --stop: --model; }
+  .to-account { --stop: --account; }
+  .to-stream { --stop: --stream; }
+  .to-record { --stop: --record; }
+  .to-config { --stop: --config; }
+  .to-status { --stop: --status; }
+  .to-limits { --stop: --limits; }
+  .rail li > a {
+    animation: wye-current-label linear;
+    animation-timeline: var(--stop);
+    animation-range: cover 0% cover 100%;
+  }
+  .rail ol li::before {
+    animation: wye-current-station linear;
+    animation-timeline: var(--stop);
+    animation-range: cover 0% cover 100%;
+  }
+}
+@keyframes wye-current-label { from, to { color: var(--ink); } }
+@keyframes wye-current-station { from, to { background: var(--ink); } }
+
+/* Narrow screens: no rail; the route runs down the stops' left edge, a
+   station at each heading. */
+@media (max-width: 64rem) {
+  .route { display: block; }
+  .rail { display: none; }
+  .stop {
+    position: relative;
+    margin-left: 6px;
+    padding-left: 1.5rem;
+    border-left: 4px solid var(--line);
+  }
+  .stop > h2 { position: relative; }
+  .stop > h2::before {
+    content: "";
+    position: absolute;
+    left: calc(-1.5rem - 12px);
+    top: 0.3em;
+    width: 20px;
+    height: 20px;
+    box-sizing: border-box;
+    border: 4px solid var(--ink);
+    border-radius: 50%;
+    background: var(--paper);
+  }
+}
+
+/* Copy buttons, added by assets/copy.js; without it the text stays
+   selectable. */
+.code-wrap { position: relative; width: fit-content; max-width: 100%; }
+.code-wrap pre.code { padding-right: 5rem; }
+.copy {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 600 0.8125rem var(--sans);
+  cursor: pointer;
+}
+.copy:hover { border-color: var(--graphite); }
 
 /* Code and output, as the repository has them */
 pre.code {

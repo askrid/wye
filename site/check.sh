@@ -13,12 +13,15 @@ cargo clippy --locked --all-targets --quiet -- -D warnings
 cargo test --locked --quiet
 cargo run --locked --quiet
 
-# What a first visit downloads, compressed as a server sends it: each page,
-# the stylesheet, and the icon gzipped, the fonts as they are
+# What a first visit downloads, compressed as a server sends it: each page
+# and every stylesheet, script, and SVG gzipped, the fonts as they are
 # (site/DESIGN.md, "Never the slow part").
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }
-shared=$(( $(gz out/assets/site.css) + $(gz out/assets/icon.svg) + $(cat out/assets/fonts/*.woff2 | wc -c) ))
+shared=$(cat out/assets/fonts/*.woff2 | wc -c)
+for asset in out/assets/*.css out/assets/*.js out/assets/*.svg; do
+  shared=$(( shared + $(gz "$asset") ))
+done
 for page in out/*.html; do
   total=$(( $(gz "$page") + shared ))
   echo "site: ${page#out/} weighs $(( total / 1024 )) KiB of its $(( budget / 1024 )) KiB budget"
