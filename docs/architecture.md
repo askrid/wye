@@ -143,8 +143,8 @@ Never buffer the generated response. Relay SSE bytes without parsing or rebuildi
 
 | Field | When | Why |
 |---|---|---|
-| `model` | [Model alias](#model-aliases-and-upgrade-checks) (implemented, M2b); a Claude provider's model id (Bedrock, implemented); agent-aware routing (planned, M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
-| `model` → URL, `anthropic_version` | Vertex AI (planned, M4) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
+| `model` | [Model alias](#model-aliases-and-upgrade-checks) (implemented); a Claude provider's model id (Bedrock, implemented); agent-aware routing (planned, M4) | Replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family |
+| `model` → URL, `anthropic_version` | Vertex AI (planned) | Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged |
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode (planned) | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting (planned, off: see open decisions) | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)); until the default is decided, clients that want usage set it themselves |
 
@@ -185,7 +185,7 @@ Shutdown: [operations.md](operations.md#health-and-shutdown).
 
 Wye does not retry an ambiguous failure or fall back after output: an ambiguous failure may already have incurred charges, and switching providers after output starts cannot preserve the response. It does not retry the same provider either: clients retry on their own, guided by the `x-should-retry` and `retry-after` headers Wye forwards, and gateway retries would multiply attempts and risk duplicate billing.
 
-The one exception is [failover](#claude-across-providers-m4) to a route's next upstream, on `[routes.claude]` and `[routes.openai]` alike, after a refusal that proves the request was not processed (`429`, `529`, a connection refused or cut before the body was delivered whole), before any response byte was sent. Do not claim exactly-once execution.
+The one exception is [failover](#claude-across-providers-and-accounts) to a route's next upstream, on `[routes.claude]` and `[routes.openai]` alike, after a refusal that proves the request was not processed (`429`, `529`, a connection refused or cut before the body was delivered whole), before any response byte was sent. Do not claim exactly-once execution.
 
 ## Providers
 
@@ -222,7 +222,7 @@ Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key se
 
 Hashing a stable request prefix for SDK callers without a session id is not implemented: it would need the body before choosing. The cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
 
-Pure affinity can overload one candidate when a few keys dominate traffic, a capacity loss recent serving research reports ([research.md](research.md#2-cache-miss-diagnostics)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one very heavy session still stays on one account. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
+Pure affinity can overload one candidate when a few keys dominate traffic, a capacity loss recent serving research reports ([related work](research.md#related-work)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one very heavy session still stays on one account. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
 ### Model aliases and upgrade checks
 
@@ -243,7 +243,7 @@ when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 - Policy applies to the model that runs: model permissions apply to the resolved model, and pricing to the model the provider reports, which is the resolved one. `GET /v1/models` lists aliases after the catalog's models, each when the model it resolves to for that caller is permitted. Claude Code's model picker keeps only ids containing `claude` or `anthropic`, so aliases meant for it are named accordingly (`claude-coding`).
 - Visibility: `requested_model` in records ([operations.md](operations.md#telemetry)); `wye explain` prints the resolution, and a policy test can pin the resolved model, so a rollout is reviewed like any policy change.
 - Cost, with every benchmark request aliased: one allocation per request for the hold, one more when the name's length changes, CPU per request within noise. With aliases alone the rest of the body is not lexed (Claude Code-shaped uploads 1.64 vs 1.49 ms per MB, within noise; with the repeated-`model` check, 2.16).
-- An alias names one model. Mapping one name to several providers of that model is [M4](#claude-across-providers-m4)'s route, not a second alias mechanism.
+- An alias names one model. Mapping one name to several providers of that model is [a route](#claude-across-providers-and-accounts), not a second alias mechanism.
 
 #### Upgrade checks
 
@@ -272,7 +272,7 @@ sample_percent = 10                    # share of sessions (or, without one, cli
 - Offline: `wye explain --config wye.toml --target-model claude-opus-5-5 request.json` (repeatable; without it, the configured targets) prints each issue with the fix and its source; `wye report` lists issues by target, rule, and client.
 - Report only: the request is forwarded unchanged ([non-goal](product.md#non-goals)). The rule table is versioned with Wye.
 
-### Claude across providers (M4)
+### Claude across providers and accounts
 
 Status: several accounts, `cache_affine` and `ordered` selection, failover before output, and Claude Platform on AWS and Bedrock with API keys are implemented; Vertex, SigV4, and excluding a candidate by model or feature are planned.
 

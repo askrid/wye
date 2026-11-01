@@ -207,12 +207,13 @@ The suite measures the gateway's own cost under agent-shaped load, and each part
 | Missing: floor baseline | Add (M5) | Wye against a dumb streaming proxy shows what its features cost |
 | Missing: separate load machine, Linux | Add (M5) | The laptop's load generator saturates first at multi-core load |
 
-**Competitors.** KrakenD was the first reference (a mature general gateway); LiteLLM is the most-used open-source LLM gateway. Neither is Wye's closest rival now. Proposed set, each in pass-through at its best case:
+**Competitors.** KrakenD was the first reference (a mature general gateway); LiteLLM is the most-used open-source LLM gateway; agentgateway is the closest in kind. The set, each in pass-through at its best case:
 
 | Gateway | Why |
 |---|---|
 | nginx or Envoy, plain streaming proxy (`proxy_buffering off`) | The floor: the cost of a proxy that does nothing |
 | Envoy AI Gateway | The infrastructure-standard data plane with LLM routing |
+| agentgateway (Rust) | Done ([above](#against-agentgateway)): an AI-agent proxy in Rust, the closest in kind |
 | Bifrost (Go) | Done ([above](#against-bifrost)): markets low overhead against LiteLLM, Wye's own claim |
 | LiteLLM Rust gateway | Next: its July 2026 benchmark claims 0.7 ms p99 overhead against Bifrost's 4.5 ms |
 | Helicone AI Gateway (Rust) | Same language and speed pitch |

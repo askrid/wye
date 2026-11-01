@@ -6,7 +6,7 @@ What Wye authorizes and enforces per request, what it cannot enforce without sha
 
 Provider credentials authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed gateway tokens. Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every proxied request must carry a valid token.
 
-Claims of Wye's own tokens (`max_request_cost_usd` is planned for M2; the others are implemented; identity-provider tokens are below):
+Claims of Wye's own tokens (identity-provider tokens are below):
 
 ```json
 {
@@ -16,14 +16,13 @@ Claims of Wye's own tokens (`max_request_cost_usd` is planned for M2; the others
   "iat": 1791996400,
   "exp": 1792000000,
   "models": ["claude-sonnet-*", "claude-haiku-*"],
-  "max_output_tokens": 4096,
-  "max_request_cost_usd": "0.05"
+  "max_output_tokens": 4096
 }
 ```
 
 The issuer signs tokens outside the runtime, with `wye token issue` (offline, from a private key file) or an external issuer producing the same format. Replicas hold verification keys only, selected by key ID so keys can rotate. All checks run before contacting upstream.
 
-Tokens are compact JWTs with `alg` pinned to `EdDSA`, so identity-provider tokens share one strict parser.
+Tokens are compact JWTs, parsed by one strict parser whatever their issuer; the key, not the token, fixes the algorithm (below).
 
 - Rejected with `401 authentication_error` before any upstream contact: another `alg`, an unknown header field (including `crit`), a `kid` not in `[[auth.keys]]` or an issuer's key set, a bad signature, the wrong `iss` or `aud`, expiry, `iat`/`nbf` more than 60 s ahead, or `exp - iat` above `max_token_ttl_secs` (default one week). Claims are parsed only after the signature verifies.
 - Read from `Authorization: Bearer` or `x-api-key`; replaced by the provider key, never forwarded.
@@ -71,7 +70,7 @@ Short lifetimes need automatic renewal: [token renewal](operations.md#token-rene
 
 ## Per-request ceilings
 
-Admission rejects requests that violate model allowances, payload or token bounds, or (planned, M2) a monetary ceiling that can be computed conservatively.
+Admission rejects requests that violate model allowances, payload or token bounds, or (planned) a monetary ceiling that can be computed conservatively.
 
 Output-token ceilings are implemented. `[auth] max_output_tokens` and a token's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bound the `max_tokens` a `/v1/messages` request may ask for, the `max_output_tokens` of a `/v1/responses` request, and the `max_completion_tokens` (or older `max_tokens`) of a `/v1/chat/completions` request, where a body naming both is refused; the stricter applies. On Responses the field is optional and its absence means the model's maximum, so under a ceiling a request without it is refused (`max_output_tokens is required`), before the provider sees a complete request; Codex does not set it, so give Codex users a token without a ceiling.
 
@@ -84,7 +83,7 @@ A hard cost ceiling requires conservative bounds on every billable dimension: in
 
 ### Provable cost ceiling
 
-Planned (M2), not built: nothing below runs yet. Wye could bound cost without a tokenizer, and therefore without per-provider tokenizer dependencies or network calls:
+Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built: nothing below runs yet. Wye could bound cost without a tokenizer, and therefore without per-provider tokenizer dependencies or network calls:
 
 ```text
 max_input_tokens = min(input_bytes, model_context_window) + provider_overhead
@@ -104,7 +103,7 @@ The context window caps the input bound: a request larger than the window is rej
 
 The bound is loose on purpose, and it always holds. Telemetry reports both the bound and the actual cost from usage.
 
-That makes it a runaway guard. Agent traffic such as Claude Code reads most input from the prompt cache at roughly a tenth of the input price, while the bound must assume cache writes, so the bound can exceed actual cost by an order of magnitude. Use it to stop pathological requests (an enormous context at the most expensive tier, an unbounded output), and [provider-held budgets](#provider-held-budgets) to cap spend. Hard mode would be off by default on the Claude Code route; when enabled, it must not lower `max_tokens` below what the client requested unless the operator accepts truncated responses, and it rejects instead when the request's own `max_tokens` already exceeds the configured cap.
+That makes it a runaway guard. Agent traffic such as Claude Code reads most input from the prompt cache at 5 to 10 percent of the input price, while the bound must assume cache writes, so the bound can exceed actual cost by an order of magnitude. Use it to stop pathological requests (an enormous context at the most expensive tier, an unbounded output), and [provider-held budgets](#provider-held-budgets) to cap spend. Hard mode would be off by default on the Claude Code route; when enabled, it must not lower `max_tokens` below what the client requested unless the operator accepts truncated responses, and it rejects instead when the request's own `max_tokens` already exceeds the configured cap.
 
 ### Pricing metadata
 
@@ -157,7 +156,7 @@ Rules:
 
 - Fields: `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config. A tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - Matching: by the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
-- Per upstream (implemented): Claude through another provider ([M4](architecture.md#claude-across-providers-m4)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` (upstream ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
+- Per upstream (implemented): Claude through another provider ([across providers](architecture.md#claude-across-providers-and-accounts)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` (upstream ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 - Money is never floating point. Each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error. A request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`. Floating point appears only where a number is displayed.
 - Cache writes by TTL: Anthropic reports `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; the usage scanner reads both. Cache writes the split does not cover (no split reported, or a total `cache_creation_input_tokens` larger than it) are priced at `cache_write_1h` when it is set, else `cache_write_5m`, so the reported cost does not undercount, and the cost is `partial`.
 - Not priced: fast mode, priority or other service tiers, regional inference premiums, and server tools billed per use (web search) are reported in `usage` but not in the table; a request that used any of them (a positive count in `usage.server_tool_use`, a `service_tier` or `speed` other than `standard`) is `partial`, with the token cost still recorded. A stream that ended before its final usage is `partial`. Batch requests do not pass through the gateway.
