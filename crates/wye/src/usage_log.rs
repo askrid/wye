@@ -50,7 +50,9 @@ const QUEUE_CAPACITY: usize = 4096;
 /// The status of a request the client left before it was answered.
 const CLIENT_CLOSED: u16 = 499;
 /// Queued records batched into one write at most: bounds the write buffer,
-/// and lets the export ticks run while records keep arriving.
+/// and lets the export ticks run while records keep arriving. While a write
+/// waits with OTLP on, up to [`QUEUE_CAPACITY`] records taken for export are
+/// kept for the next write.
 const WRITE_BATCH: usize = 256;
 /// A partly filled OTLP batch is sent after at most this long.
 const OTLP_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
@@ -301,7 +303,9 @@ async fn write_records<W>(
     // A log that failed a write (its reader is gone) is not written again;
     // OTLP export goes on without it.
     let mut log_open = true;
-    // Records taken while the log's write waits: for the next write.
+    // Records taken while the log's write waits, for OTLP: kept for the next
+    // write up to the queue's capacity, as many as the queue would have held
+    // for the log without OTLP.
     let mut spill = Vec::new();
     let mut spilled: u64 = 0;
     let mut queue_open = true;
@@ -341,12 +345,16 @@ async fn write_records<W>(
                         written = &mut write => break written.is_ok(),
                         record = rx.recv(), if queue_open && otlp.is_some() => {
                             let Some(r) = record else {
+                                // Shutdown: export what was counted now,
+                                // not after a write that may never end.
                                 queue_open = false;
+                                flush(&mut otlp);
+                                export(&otlp);
                                 continue;
                             };
                             let line = line(&r, &context);
                             to_otlp(&mut otlp, &line);
-                            if spilled < WRITE_BATCH as u64 {
+                            if spilled < QUEUE_CAPACITY as u64 {
                                 push_line(&mut spill, &line);
                                 spilled += 1;
                             } else {

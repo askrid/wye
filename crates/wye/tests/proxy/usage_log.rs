@@ -591,6 +591,59 @@ async fn a_blocked_log_leaves_otlp_export_running() {
     assert_eq!(exported, REQUESTS);
 }
 
+/// OTLP keeps a blocked log no smaller than the queue: records taken off it
+/// for export while the write waits are kept for the log too.
+#[tokio::test]
+async fn a_blocked_log_with_otlp_keeps_what_the_queue_would() {
+    const REQUESTS: usize = 1000;
+    let (collector, _collected) = recording(|seen| seen);
+    let h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
+    for _ in 0..REQUESTS {
+        read_body(h.send(messages(), "{}").await).await;
+    }
+    let mut logged = 0;
+    while logged < REQUESTS {
+        let record = h.usage_record().await;
+        assert_eq!(record["event"], "request", "{record}");
+        logged += 1;
+    }
+}
+
+/// At shutdown, a blocked log does not hold OTLP back: what was counted is
+/// exported when the queue closes, not after a write that may never end.
+#[tokio::test]
+async fn shutdown_exports_metrics_while_the_log_is_blocked() {
+    const REQUESTS: usize = 400;
+    let (collector, mut collected) = recording(|seen| seen);
+    let mut h = Harness::with_telemetry(ok(), collector, "", HeaderMap::new()).await;
+    for _ in 0..REQUESTS {
+        read_body(h.send(messages(), "{}").await).await;
+    }
+    h.begin_shutdown();
+    // The periodic export is 10 s after start; this one must come first.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let seen = tokio::time::timeout_at(deadline, collected.recv())
+            .await
+            .expect("metrics exported at shutdown")
+            .unwrap();
+        if seen.uri.path() != "/v1/metrics" {
+            continue;
+        }
+        let metrics: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
+        let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+            .as_array()
+            .unwrap();
+        let requests = list.iter().find(|m| m["name"] == "wye.requests").unwrap();
+        assert_eq!(
+            requests["sum"]["dataPoints"][0]["asInt"],
+            REQUESTS.to_string(),
+            "{requests}"
+        );
+        break;
+    }
+}
+
 #[tokio::test]
 async fn spans_a_collector_refuses_are_counted_as_lost() {
     // A collector without a traces pipeline: logs in, traces refused.
