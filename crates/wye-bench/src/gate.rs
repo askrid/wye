@@ -17,7 +17,9 @@ const RELEASE_CEILING_US: f64 = 1_000_000.0;
 ///
 /// Reported but not gated: p99 time to first byte (swung from -521 to 1694 µs
 /// between identical runs; in the paced scenario it is dominated by connection
-/// bursts), the TLS unary p99, and upload p99. The paced scenario runs only on
+/// bursts), the TLS unary p99, and upload p99; the `refused_` latency and CPU
+/// per request, the `bedrock_` and `failover_` time to first byte, and the TLS
+/// CPU per unpaced event, which have no A/A tolerances yet. The paced scenario runs only on
 /// the TLS + HTTP/2 path. Upload allocation counts for the agent-shaped body
 /// are reported but not gated, since they swing about 20% with read timing,
 /// except on the `failover_` variant: there every kept chunk is an
@@ -221,6 +223,16 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
         "metric", "reference", "current", "limit"
     );
     let mut ok = true;
+    // A pattern that names no gate (a typo) would enforce nothing.
+    for pattern in &scope.only {
+        if !GATES
+            .iter()
+            .any(|&(name, ..)| matches(std::slice::from_ref(pattern), name))
+        {
+            println!("--only {pattern}: matches no gated metric");
+            ok = false;
+        }
+    }
     for &(name, rel, abs) in GATES {
         let enforced = scope.enforces(name);
         let (b, c) = match (
@@ -229,7 +241,21 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
         ) {
             (Some(b), Some(c)) => (b, c),
             (None, Some(c)) if scope.allow_new => {
-                println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-");
+                // A limit that does not depend on the reference still holds.
+                let limit = if stats::counts_failures(name) {
+                    Some(abs)
+                } else if name.ends_with("_release_max_us") {
+                    Some(RELEASE_CEILING_US)
+                } else {
+                    None
+                };
+                match limit {
+                    Some(limit) if c > limit => {
+                        println!("{name:36} {:>10} {c:>10.2} {limit:>10.2}  REGRESSED", "-");
+                        ok &= !enforced;
+                    }
+                    _ => println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-"),
+                }
                 continue;
             }
             // `missing` fails the gate; `absent`, outside the gated set, not.
@@ -404,6 +430,37 @@ mod tests {
         let stuck = report(&dir, "stuck.json", json!({metric: 5_000_000.0}));
         let slow = report(&dir, "slow.json", json!({metric: 2_000_000.0}));
         assert!(!compare(&stuck, &slow, &only(metric)));
+        // A metric the reference lacks still has its absolute limit.
+        let new = |name: &str| Scope {
+            allow_new: true,
+            ..only(name)
+        };
+        let empty = report(&dir, "empty.json", json!({}));
+        let fails = report(
+            &dir,
+            "fails.json",
+            json!({"bedrock_unary_failed_requests": 4.0}),
+        );
+        assert!(!compare(
+            &empty,
+            &fails,
+            &new("bedrock_unary_failed_requests")
+        ));
+        assert!(compare(&empty, &none, &new("unary_failed_requests")));
+        let hung = report(&dir, "hung.json", json!({metric: 2_000_000.0}));
+        assert!(!compare(&empty, &hung, &new(metric)));
+    }
+
+    #[test]
+    fn a_pattern_that_names_no_gate_fails() {
+        // A typo in --only would otherwise enforce nothing and pass.
+        let dir = TempDir::new("bench-pattern");
+        let run = report(&dir, "run.json", json!({"alloc_unary_per_request": 20.0}));
+        let typo = Scope {
+            only: vec!["alloc_unary_per_requst".into()],
+            ..Scope::default()
+        };
+        assert!(!compare(&run, &run, &typo));
     }
 
     #[test]
