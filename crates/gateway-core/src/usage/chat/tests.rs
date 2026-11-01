@@ -86,3 +86,10 @@ proptest! {
         let _ = (s.status(), s.usage(), s.model());
     }
 }
+
+#[test]
+fn an_overlong_model_name_is_not_kept() {
+    let long = "m".repeat(1000);
+    let s = scan(stream(true).replace("gpt-5.5", &long).as_bytes());
+    assert_eq!(s.model(), None);
+}

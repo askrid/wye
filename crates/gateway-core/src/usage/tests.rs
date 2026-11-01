@@ -249,3 +249,19 @@ fn reads_cache_write_ttls_and_flags_unpriced_extras() {
     let usage = scan(&[start.as_bytes(), delta.as_bytes()]).usage();
     assert!(!usage.unpriced);
 }
+
+#[test]
+fn an_overlong_model_name_is_not_kept() {
+    // Every record, OTLP batch, and metric series carries the model, so an
+    // upstream must not be able to make it 64 KiB.
+    let long = "m".repeat(1000);
+    let start = format!(
+        "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"model\":\"{long}\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n\n"
+    );
+    assert_eq!(scan(&[start.as_bytes()]).model(), None);
+    let fits = start.replace(&long, &"m".repeat(MAX_MODEL_BYTES));
+    assert_eq!(
+        scan(&[fits.as_bytes()]).model().map(str::len),
+        Some(MAX_MODEL_BYTES)
+    );
+}

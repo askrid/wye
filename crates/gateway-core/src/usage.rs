@@ -36,6 +36,14 @@ const MAX_BLOCK_START_LINE_BYTES: usize = 4 * 1024;
 pub const MAX_TOOL_NAMES: usize = 8;
 /// Longest tool name counted by name.
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
+/// Longest model name kept from a response. Every record, OTLP batch, and
+/// metric series carries it, so a longer one is dropped.
+pub const MAX_MODEL_BYTES: usize = 128;
+
+/// `model` when it fits [`MAX_MODEL_BYTES`].
+fn kept_model<M: AsRef<str>>(model: Option<M>) -> Option<M> {
+    model.filter(|m| m.as_ref().len() <= MAX_MODEL_BYTES)
+}
 
 /// Whether an OpenAI `service_tier` is billed outside the token prices:
 /// any tier but `default` makes the cost partial.
@@ -350,7 +358,7 @@ impl SseUsageScanner {
             Event::MessageStart => match serde_json::from_slice::<StartData>(data) {
                 Ok(start) => {
                     self.saw_start = true;
-                    self.model = start.message.model.map(String::into_boxed_str);
+                    self.model = kept_model(start.message.model).map(String::into_boxed_str);
                     if let Some(raw) = start.message.usage {
                         raw.merge_into(&mut self.usage);
                     }

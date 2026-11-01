@@ -83,7 +83,7 @@ impl ChatUsageScanner {
         if has_usage {
             match serde_json::from_slice::<UsageChunk<'_>>(data) {
                 Ok(chunk) => {
-                    if let Some(model) = chunk.model {
+                    if let Some(model) = super::kept_model(chunk.model) {
                         self.model = Some(model.into());
                     }
                     if super::unpriced_tier(chunk.service_tier) {
@@ -97,7 +97,7 @@ impl ChatUsageScanner {
                 Err(_) => self.corrupt = true,
             }
         } else if first && let Ok(chunk) = serde_json::from_slice::<ModelChunk<'_>>(data) {
-            self.model = chunk.model.map(Box::from);
+            self.model = super::kept_model(chunk.model).map(Box::from);
         }
         if self.tool_calls_key.find(data).is_some()
             && self.name_key.find(data).is_some()

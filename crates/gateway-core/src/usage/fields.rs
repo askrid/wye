@@ -13,7 +13,7 @@ use crate::json::{Kept, Lexeme, Lexer};
 /// Longest `response.usage` object kept; larger marks usage unknown.
 const MAX_USAGE_BYTES: usize = 2 * 1024;
 /// Longest `model` or `service_tier` kept.
-const MAX_FIELD_BYTES: usize = 128;
+const MAX_FIELD_BYTES: usize = super::MAX_MODEL_BYTES;
 
 /// `usage`, as OpenAI's Responses API reports it.
 #[derive(Deserialize)]
