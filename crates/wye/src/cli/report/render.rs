@@ -257,13 +257,14 @@ fn skipped(s: &Summary) -> String {
     }
 }
 
-/// `name count` pairs, in name order, comma-separated.
+/// `name count` pairs, in name order, comma-separated. A no-break space
+/// joins each name to its count, so wrapping never parts them.
 fn pairs(counts: &HashMap<impl std::fmt::Display + Ord, u64>) -> String {
     let mut pairs: Vec<_> = counts.iter().collect();
     pairs.sort();
     pairs
         .iter()
-        .map(|(k, v)| format!("{k} {v}"))
+        .map(|(k, v)| format!("{k}\u{a0}{v}"))
         .collect::<Vec<_>>()
         .join(", ")
 }

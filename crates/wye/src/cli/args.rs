@@ -258,13 +258,18 @@ fn row(left: &str, text: &str) -> String {
     out
 }
 
-/// `text` wrapped at word boundaries to [`WIDTH`], every line indented by
-/// `indent`; ends with a newline.
+/// `text` wrapped at word boundaries to [`WIDTH`] characters, every line
+/// indented by `indent`; ends with a newline. Only ASCII whitespace breaks a
+/// line, so a no-break space keeps two words together.
 pub fn wrap(text: &str, indent: usize) -> String {
     let mut out = String::new();
     let mut line = 0;
-    for word in text.split_whitespace() {
-        if line > indent && line + 1 + word.len() > WIDTH {
+    for word in text
+        .split(|c: char| c.is_ascii_whitespace())
+        .filter(|w| !w.is_empty())
+    {
+        let width = word.chars().count();
+        if line > indent && line + 1 + width > WIDTH {
             out.push('\n');
             line = 0;
         }
@@ -276,7 +281,7 @@ pub fn wrap(text: &str, indent: usize) -> String {
             line += 1;
         }
         out.push_str(word);
-        line += word.len();
+        line += width;
     }
     out.push('\n');
     out

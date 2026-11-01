@@ -249,3 +249,25 @@ not a record
         "{out}"
     );
 }
+
+#[test]
+fn a_count_stays_on_the_line_of_its_name() {
+    // Every padding of the first name moves the break to another place.
+    for pad in 0..40 {
+        let first = format!("{}cancelled", "a".repeat(pad));
+        let log: String = [first.as_str(), "completed", "gateway_error", "refused"]
+            .iter()
+            .map(|o| {
+                format!("{{\"event\":\"request\",\"outcome\":\"{o}\",\"session_id\":\"s\"}}\n")
+            })
+            .collect();
+        let out = report(log.as_bytes(), Paint::OFF).unwrap();
+        let summary: Vec<&str> = out.lines().take_while(|l| !l.is_empty()).collect();
+        for line in summary.iter().skip(1) {
+            assert!(
+                !line.starts_with(|c: char| c.is_ascii_digit()),
+                "a count wrapped away from its name: {out}"
+            );
+        }
+    }
+}
