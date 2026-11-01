@@ -9,13 +9,13 @@
 use super::{args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
-    api::{self, Api},
-    config::{Config, UpstreamCredential},
+    api::{self, Api, Endpoint},
+    config::{Config, Upstream, UpstreamCredential},
     credential::{Identity, Verifier},
     policy,
     pricing::{Pico, PricedModels, Usd},
     prompt,
-    route::{self, FailoverReason, Select},
+    route::{self, FailoverReason, Route, Select},
     upgrade::{self, UpgradeScanner},
 };
 
@@ -93,134 +93,130 @@ pub struct Explanation {
     pub upstream: Option<String>,
 }
 
+/// A refusal ends the walk; its answer is already in the [`Explanation`].
+struct Refused;
+
+/// One stage of the walk: `Err` once the request is refused.
+type Stage<T = ()> = Result<T, Refused>;
+
 impl Explanation {
     fn step(&mut self, line: String) {
         self.steps.push(line);
     }
 
-    fn refuse(mut self, status: u16, kind: &'static str, message: String) -> Self {
+    fn refuse(&mut self, status: u16, kind: &'static str, message: String) -> Refused {
         self.steps
             .push(format!("decision: refuse {status} {kind}: {message}"));
         self.refused = Some((status, kind, message));
-        self
+        Refused
+    }
+
+    /// The server's status and type for `refusal`, with explain's own, more
+    /// specific message.
+    fn refuse_as(&mut self, refusal: &Refusal, message: String) -> Refused {
+        self.refuse(refusal.status(), refusal.kind(), message)
     }
 
     /// A policy refusal, worded as the server words it.
-    fn refuse_policy(self, refusal: &Refusal) -> Self {
+    fn refuse_policy(&mut self, refusal: &Refusal) -> Refused {
         self.refuse(refusal.status(), refusal.kind(), refusal.to_string())
     }
 
     pub fn report(&self) -> String {
         self.steps.join("\n") + "\n"
     }
-}
 
-/// Explains `POST path` with `body`, `credential`, and the client's
-/// `session` id (Claude Code's or Codex's), at Unix time `now`. Upgrade checks run against `targets`,
-/// or, when empty, against `[upgrade_check] targets`.
-pub fn explain(
-    config: &Config,
-    path: &str,
-    credential: Credential<'_>,
-    session: Option<&str>,
-    body: &[u8],
-    now: u64,
-    targets: &[&str],
-) -> Explanation {
-    let mut out = Explanation {
-        steps: Vec::new(),
-        refused: None,
-        model: None,
-        upstream: None,
-    };
-    // The server matches the path; the query string is forwarded.
-    let path = path.split_once('?').map_or(path, |(path, _)| path);
-    let Some(endpoint) = api::endpoint(path) else {
-        let refusal = Refusal::NotProxied;
-        return out.refuse(
-            refusal.status(),
-            refusal.kind(),
-            format!("{path} is not proxied"),
-        );
-    };
-    let Some(route) = config.routes.get(endpoint.api) else {
-        return out.refuse_policy(&Refusal::NoRoute {
-            api: endpoint.api,
-            path: path.into(),
-        });
-    };
-    let api = endpoint.api;
-    out.step(format!("endpoint: POST {path}"));
-    // Chat Completions carries no session header: the server never sees one.
-    let session = session.filter(|_| api.session_header().is_some());
+    /// The endpoint `path` names and the route serving it.
+    fn endpoint<'c>(&mut self, config: &'c Config, path: &str) -> Stage<(Endpoint, &'c Route)> {
+        let Some(endpoint) = api::endpoint(path) else {
+            return Err(self.refuse_as(&Refusal::NotProxied, format!("{path} is not proxied")));
+        };
+        let Some(route) = config.routes.get(endpoint.api) else {
+            return Err(self.refuse_policy(&Refusal::NoRoute {
+                api: endpoint.api,
+                path: path.into(),
+            }));
+        };
+        self.step(format!("endpoint: POST {path}"));
+        Ok((endpoint, route))
+    }
 
-    let mut identity = None;
-    match &config.auth {
-        None => out.step("token: not required (no [auth])".into()),
-        Some(_) => match credential {
+    /// The caller's identity, verified as the server verifies it.
+    fn token(
+        &mut self,
+        config: &Config,
+        credential: Credential<'_>,
+        now: u64,
+    ) -> Stage<Option<Identity>> {
+        if config.auth.is_none() {
+            self.step("token: not required (no [auth])".into());
+            return Ok(None);
+        }
+        match credential {
             Credential::None => {
-                let refusal = Refusal::Unauthenticated;
-                return out.refuse(refusal.status(), refusal.kind(), "no gateway token".into());
+                Err(self.refuse_as(&Refusal::Unauthenticated, "no gateway token".into()))
             }
             Credential::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
-                    out.step(format!(
+                    self.step(format!(
                         "token: valid; subject {}, key {}, expires at {}",
                         verified.subject, verified.key_id, verified.expires_at
                     ));
-                    identity = Some(verified);
+                    Ok(Some(verified))
                 }
-                Err(e) => {
-                    let refusal = Refusal::Unauthenticated;
-                    return out.refuse(refusal.status(), refusal.kind(), e.to_string());
-                }
+                Err(e) => Err(self.refuse_as(&Refusal::Unauthenticated, e.to_string())),
             },
             Credential::Trusted(claims) => {
-                out.step(format!(
+                self.step(format!(
                     "token: taken as verified (signature not checked); subject {}",
                     claims.subject
                 ));
-                identity = Some(claims);
+                Ok(Some(claims))
             }
-        },
+        }
     }
 
-    let limit = config.server.max_request_body_bytes;
-    if body.len() as u64 > limit {
-        let refusal = Refusal::TooLarge;
-        return out.refuse(
-            refusal.status(),
-            refusal.kind(),
-            format!("{} bytes exceed max_request_body_bytes {limit}", body.len()),
-        );
+    /// The body's size against `max_request_body_bytes`.
+    fn body_size(&mut self, config: &Config, body: &[u8]) -> Stage {
+        let limit = config.server.max_request_body_bytes;
+        if body.len() as u64 > limit {
+            return Err(self.refuse_as(
+                &Refusal::TooLarge,
+                format!("{} bytes exceed max_request_body_bytes {limit}", body.len()),
+            ));
+        }
+        self.step(format!(
+            "body: {} bytes (limit {})",
+            body.len(),
+            size(limit)
+        ));
+        Ok(())
     }
-    out.step(format!(
-        "body: {} bytes (limit {})",
-        body.len(),
-        size(limit)
-    ));
 
-    let configured = config.auth.as_ref().and_then(|a| a.models.as_deref());
-    let list = |patterns: Option<&[policy::ModelPattern]>| match patterns {
-        None => "any".to_owned(),
-        // An identity provider's token that matched no grant.
-        Some([]) => "none".to_owned(),
-        Some(p) => model_list(p),
-    };
-    let checks = BodyChecks::new(
-        configured,
-        config.auth.as_ref().and_then(|a| a.max_output_tokens),
-        config.aliases.as_ref(),
-        identity.as_ref(),
-        endpoint.generates,
-        route.prefixes_model_ids(),
-    );
-    if !checks.hold() {
-        out.step(
-            "model aliases, permissions, and output-token ceiling: none apply; the body is not read"
-                .into(),
-        );
-    } else {
+    /// Aliases, model permissions, and output-token ceilings, read from the
+    /// body as the server's hold reads it.
+    fn policy(
+        &mut self,
+        config: &Config,
+        api: Api,
+        checks: &BodyChecks<'_>,
+        identity: Option<&Identity>,
+        body: &[u8],
+    ) -> Stage {
+        let configured = config.auth.as_ref().and_then(|a| a.models.as_deref());
+        let list = |patterns: Option<&[policy::ModelPattern]>| match patterns {
+            None => "any".to_owned(),
+            // An identity provider's token that matched no grant.
+            Some([]) => "none".to_owned(),
+            Some(p) => model_list(p),
+        };
+        if !checks.hold() {
+            self.step(
+                "model aliases, permissions, and output-token ceiling: none apply; the body is not read"
+                    .into(),
+            );
+            return Ok(());
+        }
         // The server holds the body until its model is read, decides on what
         // it knows then, and checks the rest as it streams; explain reads the
         // file the same way, as if the hold ended right after the model.
@@ -230,12 +226,12 @@ pub fn explain(
         scanner.feed(start);
         let sent = match scanner.finish() {
             Ok(m) => m.to_owned(),
-            Err(e) => return out.refuse_policy(&Refusal::Invalid(e)),
+            Err(e) => return Err(self.refuse_policy(&Refusal::Invalid(e))),
         };
-        let subject = identity.as_ref().map(|i| &*i.subject);
+        let subject = identity.map(|i| &*i.subject);
         let model = match checks.resolve(&sent, subject) {
             Some((_, resolved)) => {
-                out.step(format!(
+                self.step(format!(
                     "alias: {sent} resolves to {resolved}{}; the body names {resolved} upstream",
                     subject.map_or(String::new(), |s| format!(" for subject {s}"))
                 ));
@@ -243,123 +239,157 @@ pub fn explain(
             }
             None => sent.clone(),
         };
-        out.model = Some(model.clone());
-        out.step(format!(
+        self.model = Some(model.clone());
+        self.step(format!(
             "model: {model}; allowed by config: {}; by token: {}",
             list(configured),
             list(checks.granted)
         ));
         if let Err(refusal) = checks.permit(&model, &sent) {
-            return out.refuse_policy(&refusal);
+            return Err(self.refuse_policy(&refusal));
         }
         if let Err(refusal) = checks.check_tokens(api, scanner.max_output_tokens(), rest.is_empty())
         {
-            return out.refuse_policy(&refusal);
+            return Err(self.refuse_policy(&refusal));
         }
         // A refusal in the rest aborts the upstream request mid-body, with
         // the same answer.
         if checks.checks_rest() {
             scanner.feed(rest);
             if let Some(e) = scanner.error() {
-                return out.refuse_policy(&Refusal::Invalid(e));
+                return Err(self.refuse_policy(&Refusal::Invalid(e)));
             }
         }
         if let Some(limit) = checks.token_limit {
             let requested = scanner.max_output_tokens();
             if let Err(refusal) = checks.check_tokens(api, requested, true) {
-                return out.refuse_policy(&refusal);
+                return Err(self.refuse_policy(&refusal));
             }
             let field = api.token_field();
-            out.step(match requested {
+            self.step(match requested {
                 Some(requested) => format!("{field}: {requested} (limit {limit})"),
                 None => format!("{field}: absent (limit {limit}; the provider requires it)"),
             });
         }
+        Ok(())
     }
 
-    let ranking = route.rank(
-        route::affinity_key(
-            session.map(str::as_bytes),
-            identity.as_ref().map(|i| &*i.subject),
-        )
-        .unwrap_or_default(),
-    );
-    let upstreams = route.upstreams();
-    let Some(upstream) = upstreams.get(ranking.first()) else {
-        unreachable!("a route has at least one upstream")
-    };
-    if let Some(id) = &upstream.id {
-        out.upstream = Some(id.to_string());
-        let how = match (route.select(), session, &identity) {
-            (Select::Ordered, _, _) => "ordered: the first in config",
-            (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
-            (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
-            (Select::CacheAffine, None, None) => "cache_affine by nothing: no session id or token",
+    /// The upstream the route picks for this request, and the order
+    /// failover would follow.
+    fn route<'r>(
+        &mut self,
+        route: &'r Route,
+        session: Option<&str>,
+        identity: Option<&Identity>,
+    ) -> &'r Upstream {
+        let ranking = route.rank(
+            route::affinity_key(session.map(str::as_bytes), identity.map(|i| &*i.subject))
+                .unwrap_or_default(),
+        );
+        let upstreams = route.upstreams();
+        let Some(upstream) = upstreams.get(ranking.first()) else {
+            unreachable!("a route has at least one upstream")
         };
-        out.step(format!(
-            "route: upstream {id} of {} ({how})",
-            upstreams.len()
-        ));
+        if let Some(id) = &upstream.id {
+            self.upstream = Some(id.to_string());
+            let how = match (route.select(), session, identity) {
+                (Select::Ordered, _, _) => "ordered: the first in config",
+                (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
+                (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
+                (Select::CacheAffine, None, None) => {
+                    "cache_affine by nothing: no session id or token"
+                }
+            };
+            self.step(format!(
+                "route: upstream {id} of {} ({how})",
+                upstreams.len()
+            ));
+        }
+        if let Some(failover) = route.failover() {
+            let next: Vec<&str> = ranking
+                .iter()
+                .skip(1)
+                .filter_map(|i| upstreams.get(i)?.id.as_deref())
+                .collect();
+            let reasons: Vec<&str> = failover.reasons().map(FailoverReason::as_str).collect();
+            self.step(format!(
+                "failover: on {} to {} in that order, for bodies up to {}",
+                reasons.join(", "),
+                next.join(", "),
+                size(failover.max_body_bytes)
+            ));
+        }
+        upstream
     }
-    if let Some(failover) = route.failover() {
-        let next: Vec<&str> = ranking
-            .iter()
-            .skip(1)
-            .filter_map(|i| upstreams.get(i)?.id.as_deref())
-            .collect();
-        let reasons: Vec<&str> = failover.reasons().map(FailoverReason::as_str).collect();
-        out.step(format!(
-            "failover: on {} to {} in that order, for bodies up to {}",
-            reasons.join(", "),
-            next.join(", "),
-            size(failover.max_body_bytes)
-        ));
-    }
-    out.step(format!("upstream: POST {}{path}", upstream.base_url()));
-    let header = upstream.provider.key_header();
-    if let Some(workspace) = &upstream.workspace_id {
-        out.step(format!(
-            "workspace: anthropic-workspace-id {workspace} (Claude Platform on AWS)"
-        ));
-    }
-    out.step(match &upstream.credential {
-        UpstreamCredential::ForwardCaller => "provider key: the caller's own".into(),
-        source => format!("provider key: {header} from {source}"),
-    });
-    // The gateway reads the model on a route that rewrites its id even when no
-    // policy does; explain reads it for the price too.
-    let model = out.model.clone().or_else(|| {
-        let mut scanner = admission::scanner(api, checks.token_limit);
-        scanner.feed(body);
-        scanner.finish().ok().map(str::to_owned)
-    });
-    if let (Some(prefix), Some(model)) = (upstream.provider.model_prefix(), &model)
-        && !model.starts_with(prefix)
-    {
-        out.step(format!(
-            "model id: the body names {prefix}{model} upstream, the provider's id for {model}"
-        ));
-    }
-    if let (Some(pricing), Some(model)) = (&config.pricing, &model) {
-        let at = upstream
-            .id
-            .as_deref()
-            .map_or(String::new(), |id| format!(" at {id}"));
-        out.step(match pricing.entry(model, upstream.id.as_deref()) {
-            Some(entry) => format!(
-                "price: {model}{at}: {} (pricing version {})",
-                prices(entry),
-                pricing.version
-            ),
-            None => format!("price: none for {model}{at}; its cost is recorded as unknown"),
+
+    /// Where the request goes and the key it carries.
+    fn upstream(&mut self, upstream: &Upstream, path: &str) {
+        self.step(format!("upstream: POST {}{path}", upstream.base_url()));
+        if let Some(workspace) = &upstream.workspace_id {
+            self.step(format!(
+                "workspace: anthropic-workspace-id {workspace} (Claude Platform on AWS)"
+            ));
+        }
+        let header = upstream.provider.key_header();
+        self.step(match &upstream.credential {
+            UpstreamCredential::ForwardCaller => "provider key: the caller's own".into(),
+            source => format!("provider key: {header} from {source}"),
         });
     }
-    // Prompt hashes and upgrade checks read Anthropic request bodies.
-    if api == Api::Messages {
+
+    /// The provider's own model id and the price, for the model the body
+    /// names.
+    fn model_and_price(
+        &mut self,
+        config: &Config,
+        upstream: &Upstream,
+        api: Api,
+        token_limit: Option<u64>,
+        body: &[u8],
+    ) {
+        // The gateway reads the model on a route that rewrites its id even
+        // when no policy does; explain reads it for the price too.
+        let model = self.model.clone().or_else(|| {
+            let mut scanner = admission::scanner(api, token_limit);
+            scanner.feed(body);
+            scanner.finish().ok().map(str::to_owned)
+        });
+        if let (Some(prefix), Some(model)) = (upstream.provider.model_prefix(), &model)
+            && !model.starts_with(prefix)
+        {
+            self.step(format!(
+                "model id: the body names {prefix}{model} upstream, the provider's id for {model}"
+            ));
+        }
+        if let (Some(pricing), Some(model)) = (&config.pricing, &model) {
+            let at = upstream
+                .id
+                .as_deref()
+                .map_or(String::new(), |id| format!(" at {id}"));
+            self.step(match pricing.entry(model, upstream.id.as_deref()) {
+                Some(entry) => format!(
+                    "price: {model}{at}: {} (pricing version {})",
+                    prices(entry),
+                    pricing.version
+                ),
+                None => format!("price: none for {model}{at}; its cost is recorded as unknown"),
+            });
+        }
+    }
+
+    /// Cache diagnostics and upgrade checks, which read Anthropic request
+    /// bodies. Upgrade checks run against `targets`, else `[upgrade_check]`'s.
+    fn body_scans(
+        &mut self,
+        config: &Config,
+        session: Option<&str>,
+        body: &[u8],
+        targets: &[&str],
+    ) {
         if let Some(diagnostics) = &config.cache_diagnostics {
             let sampled =
                 prompt::session_sampled(session.map(str::as_bytes), diagnostics.sample_percent);
-            out.step(format!(
+            self.step(format!(
                 "cache diagnostics: {} (sample_percent {})",
                 if sampled {
                     "this request is hashed"
@@ -378,27 +408,77 @@ pub fn explain(
         } else {
             targets.to_vec()
         };
-        if !targets.is_empty() {
-            let mut scanner = UpgradeScanner::new();
-            scanner.feed(body);
-            let findings = scanner.findings();
-            for target in targets {
-                let rules: Vec<upgrade::Rule> = upgrade::issues(&findings, target).collect();
-                if rules.is_empty() {
-                    out.step(format!("upgrade check: {target} accepts this request"));
-                }
-                for rule in rules {
-                    out.step(format!(
-                        "upgrade check: {target} would reject it: {} ({}; {})",
-                        rule.name(),
-                        rule.fix(),
-                        rule.source()
-                    ));
-                }
+        if targets.is_empty() {
+            return;
+        }
+        let mut scanner = UpgradeScanner::new();
+        scanner.feed(body);
+        let findings = scanner.findings();
+        for target in targets {
+            let rules: Vec<upgrade::Rule> = upgrade::issues(&findings, target).collect();
+            if rules.is_empty() {
+                self.step(format!("upgrade check: {target} accepts this request"));
+            }
+            for rule in rules {
+                self.step(format!(
+                    "upgrade check: {target} would reject it: {} ({}; {})",
+                    rule.name(),
+                    rule.fix(),
+                    rule.source()
+                ));
             }
         }
     }
-    out.step("decision: forward".into());
+}
+
+/// Explains `POST path` with `body`, `credential`, and the client's
+/// `session` id (Claude Code's or Codex's), at Unix time `now`. Upgrade
+/// checks run against `targets`, or, when empty, against
+/// `[upgrade_check] targets`.
+pub fn explain(
+    config: &Config,
+    path: &str,
+    credential: Credential<'_>,
+    session: Option<&str>,
+    body: &[u8],
+    now: u64,
+    targets: &[&str],
+) -> Explanation {
+    let mut out = Explanation {
+        steps: Vec::new(),
+        refused: None,
+        model: None,
+        upstream: None,
+    };
+    // The server's checks, in its order. Each stage records its steps; a
+    // refusal ends the walk with its answer already recorded.
+    let _ = (|| -> Stage {
+        // The server matches the path; the query string is forwarded.
+        let path = path.split_once('?').map_or(path, |(path, _)| path);
+        let (endpoint, route) = out.endpoint(config, path)?;
+        let api = endpoint.api;
+        // Chat Completions carries no session header: the server never sees one.
+        let session = session.filter(|_| api.session_header().is_some());
+        let identity = out.token(config, credential, now)?;
+        out.body_size(config, body)?;
+        let checks = BodyChecks::new(
+            config.auth.as_ref().and_then(|a| a.models.as_deref()),
+            config.auth.as_ref().and_then(|a| a.max_output_tokens),
+            config.aliases.as_ref(),
+            identity.as_ref(),
+            endpoint.generates,
+            route.prefixes_model_ids(),
+        );
+        out.policy(config, api, &checks, identity.as_ref(), body)?;
+        let upstream = out.route(route, session, identity.as_ref());
+        out.upstream(upstream, path);
+        out.model_and_price(config, upstream, api, checks.token_limit, body);
+        if api == Api::Messages {
+            out.body_scans(config, session, body, targets);
+        }
+        out.step("decision: forward".into());
+        Ok(())
+    })();
     out
 }
 
