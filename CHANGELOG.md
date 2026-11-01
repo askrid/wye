@@ -14,6 +14,16 @@
   for several keys, costs, model aliases and upgrades, and an OTel backend.
 - `wye-bench --agentgateway` runs the benchmark through agentgateway; results
   in `docs/benchmarks.md`.
+- Fix: under an output-token ceiling, a body with a second JSON value after
+  the object (`{...}{"max_output_tokens":10}`) is refused. It passed on the
+  OpenAI routes, and a provider whose parser reads only the first value would
+  have seen no limit.
+- Fix: a model name longer than 128 bytes from the provider is no longer kept
+  in records and metrics (Messages and Chat Completions streams).
+- Fix: with OTLP on, a usage log whose reader stalls keeps as many records as
+  without OTLP, and shutdown exports the final metrics even while the log is
+  blocked.
+- `wye report` keeps each count on the line of its name when it wraps.
 
 ## 0.1.0-rc.1
 
