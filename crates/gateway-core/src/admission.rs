@@ -108,8 +108,7 @@ impl<'a> BodyChecks<'a> {
         }
     }
 
-    /// The output-token check: a value is final once read, a missing field
-    /// only once `body_read` (the whole body was read without one).
+    /// The output-token check ([`TokenCeiling::check`]).
     pub fn check_tokens(
         &self,
         api: Api,
@@ -117,12 +116,29 @@ impl<'a> BodyChecks<'a> {
         body_read: bool,
     ) -> Result<(), Refusal> {
         match self.token_limit {
-            Some(limit) if requested.is_some() || body_read => {
-                TokenLimitError::check(api, limit, requested)
-                    .map_or(Ok(()), |e| Err(Refusal::TokenLimit(e)))
-            }
-            _ => Ok(()),
+            Some(limit) => TokenCeiling { api, limit }
+                .check(requested, body_read)
+                .map_or(Ok(()), |e| Err(Refusal::TokenLimit(e))),
+            None => Ok(()),
         }
+    }
+}
+
+/// One request's output-token ceiling, on its API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenCeiling {
+    pub api: Api,
+    pub limit: u64,
+}
+
+impl TokenCeiling {
+    /// The check as a body is read: a value is final once read, a missing
+    /// field only once `body_read` (the whole body was read without one).
+    pub fn check(self, requested: Option<u64>, body_read: bool) -> Option<TokenLimitError> {
+        if requested.is_none() && !body_read {
+            return None;
+        }
+        TokenLimitError::check(self.api, self.limit, requested)
     }
 }
 

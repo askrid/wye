@@ -1,4 +1,4 @@
-use gateway_core::api::Api;
+use gateway_core::{admission::TokenLimitError, api::Api};
 
 use super::*;
 use crate::test_body::Client;

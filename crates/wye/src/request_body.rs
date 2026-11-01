@@ -25,8 +25,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    admission,
-    admission::TokenLimitError,
+    admission::{self, TokenCeiling},
     api::Api,
     policy::{PolicyError, PolicyScanner},
 };
@@ -129,10 +128,7 @@ pub(crate) struct Hold {
     /// The whole body is in `chunks`.
     ended: bool,
     /// The request's output-token ceiling, checked again as the rest streams.
-    token_limit: Option<u64>,
-    /// The API: which field holds the output-token maximum, and whether a
-    /// ceiling requires it.
-    api: Api,
+    ceiling: Option<TokenCeiling>,
     /// Whether the rest of the body is checked as it streams (a repeated
     /// `model`, a late output-token field); off when no permission or ceiling
     /// applies.
@@ -212,8 +208,7 @@ where
         budget: budget.hold_none(),
         scanner: admission::scanner(api, token_limit),
         ended: false,
-        token_limit,
-        api,
+        ceiling: token_limit.map(|limit| TokenCeiling { api, limit }),
         check_rest: true,
     });
     let deadline = Instant::now() + HOLD_TIMEOUT;
@@ -325,15 +320,12 @@ where
                 this.inner = None;
                 return Poll::Ready(Some(Err(Box::new(error))));
             }
-            if let Some(limit) = hold.token_limit {
+            if let Some(ceiling) = hold.ceiling {
                 // The field may still come later: only a value is final
                 // before the body ends. Trailers end it: hyper polls no
                 // further.
                 let ended = frame.is_trailers() || this.inner.as_ref().is_none_or(B::is_end_stream);
-                let requested = hold.scanner.max_output_tokens();
-                if (requested.is_some() || ended)
-                    && let Some(refusal) = TokenLimitError::check(hold.api, limit, requested)
-                {
+                if let Some(refusal) = ceiling.check(hold.scanner.max_output_tokens(), ended) {
                     this.inner = None;
                     return Poll::Ready(Some(Err(Box::new(refusal))));
                 }
@@ -343,9 +335,8 @@ where
         // required field is refused instead of ending the request.
         if let (Poll::Ready(None), Some(hold)) = (&polled, this.hold.as_ref())
             && hold.check_rest
-            && let Some(limit) = hold.token_limit
-            && let Some(refusal) =
-                TokenLimitError::check(hold.api, limit, hold.scanner.max_output_tokens())
+            && let Some(ceiling) = hold.ceiling
+            && let Some(refusal) = ceiling.check(hold.scanner.max_output_tokens(), true)
         {
             this.inner = None;
             return Poll::Ready(Some(Err(Box::new(refusal))));
