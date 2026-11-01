@@ -1,6 +1,6 @@
 # Product
 
-Wye is an efficient, easy-to-use gateway between AI agents or AI-native apps and the model providers. Clients keep the provider's official SDK and native API, and get every new provider feature on the endpoints Wye serves the day it ships. Everything that is not application logic moves out of their code into one reviewed, Git-managed config: which model and provider serve a request, credentials, limits, failover, upgrades, telemetry, and cost. Wye does this per request and statelessly, as one binary with one TOML file and no database.
+Wye is a gateway between AI agents or AI-native apps and the model providers. Clients keep the provider's official SDK and native API, and get every new provider feature on the endpoints Wye serves the day it ships. Everything that is not application logic moves out of their code into one reviewed, Git-managed config: which model and provider serve a request, credentials, limits, failover, upgrades, telemetry, and cost. Wye does this per request and statelessly, as one binary with one TOML file and no database.
 
 Primary users:
 
@@ -34,17 +34,9 @@ Every feature follows these, and a feature that cannot is not built.
 
 ### Built
 
-Detail and stages: [roadmap.md](roadmap.md#status).
+What Wye does today: [README](../README.md#what-it-does); status per milestone, and what is not yet checked against the live services: [roadmap.md](roadmap.md#status).
 
-- Native passthrough of Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), OpenAI Responses, and OpenAI Chat Completions. It honors Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract) and serves the same calls from SDK clients, plus `GET /v1/models` answered from policy; batches, files, and other endpoints are not proxied. Streams are relayed as they arrive, with backpressure, cancellation, timeouts, a graceful two-phase shutdown, and bounds on concurrency and memory.
-- Several Claude accounts per route, each session kept on one, with failover before output, across Anthropic, Claude Platform on AWS, and Bedrock with API keys ([design](architecture.md#claude-across-providers-m4)).
-- Wye's own Ed25519 tokens (`wye token`), or identity-provider tokens verified directly (CI workload identity such as GitHub Actions, or the team's IdP through Claude Code's `apiKeyHelper`). Model permissions and output-token ceilings are checked before the provider is contacted.
-- Caller-credential passthrough for a single developer, loopback only: a claude.ai login counts against the plan, and an API key bills the API.
-- Model aliases and upgrade checks. Clients ask for a stable name (`coding-default`) that config maps to a model per team or token, so upgrading or retiring a model is a reviewed config change instead of edits across repositories. Before an alias moves, Wye checks live requests against the new model's known breaking changes and reports which clients would fail and why ([design](architecture.md#model-aliases-and-upgrade-checks)).
-- A price table in config ([format](policy.md#pricing-metadata)) turns usage into dollars in records, metrics, and `wye report`.
-- Agent-aware telemetry for Claude Code and Codex: usage records with subject, session, subagent, request class, prompt, compaction, and tool calls; OTLP logs, metrics, and traces, with a whole Claude Code session as one trace across replicas; tokens by work type; cache misses classified as expected or unexplained; opt-in keyed prompt hashes that explain a miss.
-- Offline tools: `wye report` (a usage log summary without a backend), `wye explain` and `wye policy-test` (policy decisions checked in CI), `wye policy-diff` (fails CI when a config change widens access), `wye doctor`, `wye init`, `wye service`, and `wye probe`.
-- Release archives for Linux and macOS built from a tag, and an OCI image built from the repository (not published).
+Endpoints: Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), OpenAI Responses, OpenAI Chat Completions, and `GET /v1/models` answered from policy. It honors Claude Code's [gateway contract](architecture.md#claude-code-gateway-contract) and serves the same calls from SDK clients. Batches, files, and other endpoints are not proxied.
 
 ### Next
 
@@ -77,7 +69,7 @@ Status per client and provider: [roadmap.md](roadmap.md#status). A route counts 
 
 ## Use cases
 
-**Single developer.** `wye service install` and `wye claude`; `wye report` reads the usage log. [Caller-credential passthrough](policy.md#caller-credential-passthrough) keeps the developer's own login or API key, and the gateway holds no secret. The value here is modest, since Claude Code already exports its own usage; the point is that the developer later uses the same setup with a team.
+**Single developer.** `wye service install` and `wye claude`; `wye report` reads the usage log. [Caller-credential passthrough](policy.md#caller-credential-passthrough) keeps the developer's own login or API key, and the gateway holds no secret. The value today is the breakdown Claude Code's own totals lack: by session, subagent, and tool, with cache misses flagged. The waste report (next, [roadmap](roadmap.md#m2c-fewer-expensive-tokens)) is meant to make it worth installing on its own.
 
 **Engineering team with coding agents.** Developers and CI reach a shared Wye behind HTTPS. Provider keys stay in the deployment, callers hold gateway or IdP tokens, policy is reviewed in Git, and usage arrives in the team's OTel backend attributed by subject, session, subagent, and work type. Attribution comes from verified tokens, so a client cannot switch it off.
 
@@ -92,7 +84,7 @@ The landscape as of 2026-10. Competitor features change quickly; re-check them b
 | No gateway | SDK calls straight to the provider, keys per service, the provider console's workspaces, spend limits, and usage reports; agents' own telemetry | Keys, models, limits, and failover out of application code; one telemetry and cost model across clients; upgrade checks. For a few services on one provider, no gateway is enough |
 | Claude apps gateway | Anthropic's self-hosted Claude Code gateway: SSO sign-in, model access by IdP group, OTLP | Service and CI tokens, SDK apps and other agents, aliases, multi-provider Claude, policy tests. A team that uses only Claude Code and has SSO should prefer it, since it tracks every Claude Code release by construction |
 | LiteLLM | The common open-source gateway: unified API across many providers, virtual keys, budgets, fallbacks, admin UI; needs a database for spend | No database; native APIs passed through, so no feature lag; about 9× less CPU per streamed event in the same benchmark ([benchmarks.md](benchmarks.md#against-litellm)); far fewer providers by design |
-| Newer lean gateways (agentgateway, Bifrost, Portkey, Helicone's gateway, and others) | Fast open-source gateways, several with dashboards, budgets, and many providers | Agent-aware attribution, stateless GitOps policy, upgrade checks. They compete on speed too; against Bifrost at its best case, Wye used 6.6× less CPU per request, added 11× less latency, and used 20× less memory under load ([benchmarks.md](benchmarks.md#against-bifrost)) |
+| Newer lean gateways (agentgateway, Bifrost, Portkey, Helicone's gateway, and others) | Fast open-source gateways, several with dashboards, budgets, and many providers | Agent-aware attribution, stateless GitOps policy, upgrade checks. They compete on speed too; in each comparison on the same machine, Wye used less CPU per request ([speed](../README.md#speed)) |
 | Hosted gateways (Cloudflare, Vercel, Kong, OpenRouter) | Managed, nothing to run | Self-hosted; the customer controls the path and the data |
 | Observability tools (Langfuse, Arize, provider analytics) | Traces and analytics of LLM calls, through SDKs or exports | Captured at the gateway from verified tokens, without instrumentation; no replacement for evaluation tooling |
 
@@ -110,11 +102,7 @@ Strengths:
 Weaknesses:
 
 - Few providers so far, API keys only, with no Vertex yet, and Bedrock and Codex not yet checked live ([status](roadmap.md#status)).
-- Not released: no version and no image is published yet. That hurts "easy to use" more than any missing feature.
+- Prerelease only: `0.1.0-rc.1` archives exist, but no container image is published. That hurts "easy to use" more than any missing feature.
 - No cumulative limits, by design: budgets need the provider ([not built yet](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - Little real-world validation ([status](roadmap.md#status)): one developer's Claude Code sessions on a subscription, no production deployment, and numbers from one laptop against a mock.
 - Ongoing upkeep: Claude Code's gateway contract changes per release, and upgrade checks need a table of each model's breaking changes.
-
-## Moat
-
-Speed, statelessness, and single-binary distribution are necessary, and others can copy them. Two things build up over time: an understanding of agent traffic, turned into attribution and explanations, and a maintained record of each model's breaking changes, turned into upgrade checks so teams can upgrade models by config with evidence. Correctness proven for each client release and policy as code without a database add to that. Provider gateways can add the same analytics for their own clients, and lean gateways can add agent awareness. Neither serves several clients and providers behind one native-passthrough policy and one telemetry and cost model, with CI and service identities and the data in the team's own backend; that is where Wye can hold its ground.

@@ -10,8 +10,8 @@ what every request used and cost, spreads traffic across your API keys and
 providers with failover, and decides who may use which model. Each provider's
 native API goes through byte for byte, so clients keep the official SDK and
 nothing gets translated. One TOML file in Git holds every decision; Wye itself
-is one Rust binary with no database, and adds about a quarter of a millisecond
-to a request.
+is one Rust binary with no database, and in lab benchmarks adds about a quarter
+of a millisecond to a request.
 
 > **Status:** working prototype, `0.x`. It is tested and benchmarked on one
 > machine and has been used with Claude Code through a claude.ai subscription.
@@ -40,8 +40,10 @@ wye report            # what it recorded
 ```
 
 Your claude.ai login or API key goes through, on this machine only, and the
-gateway holds no secret. [docs/guide.md](docs/guide.md) covers the other setups: a
-team behind HTTPS, apps on the official SDKs, upgrades, and troubleshooting.
+gateway holds no secret. Prebuilt archives for Linux and macOS are on the
+[releases page](https://github.com/askrid/wye/releases).
+[docs/guide.md](docs/guide.md) covers the other setups: a team behind HTTPS,
+apps on the official SDKs, upgrades, and troubleshooting.
 
 ## What it does
 
@@ -60,16 +62,20 @@ team behind HTTPS, apps on the official SDKs, upgrades, and troubleshooting.
   Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys
   too), shared by weight. Each session stays on one key, so its prompt cache
   stays warm, and a request refused with `429` or `529` moves to the next key
-  before any output. ([several keys or providers](docs/guide.md#several-keys-or-providers))
+  before any output. Bedrock and Claude Platform on AWS are not yet checked
+  against the live services.
+  ([several keys or providers](docs/guide.md#several-keys-or-providers))
 - **Gives a team its own access.** Gateway tokens signed by Wye or by your
   identity provider (GitHub Actions, or your SSO through Claude Code's
   `apiKeyHelper`), each with the models and output-token ceiling it may use,
-  checked before the provider is called. Callers never see the provider key.
+  checked before the provider is called. Callers never see the provider key,
+  and with `[discovery]` Claude Code's model picker lists only the models a
+  token may use.
   ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Changes models in one place.** Aliases map a stable name to a model per team
   or token, and upgrade checks report which requests a newer model would reject
   before you move. Requests are never changed to fit.
-  ([aliases and upgrades](docs/architecture.md#model-aliases-and-upgrade-checks))
+  ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
 - **Checks decisions before they ship.** `wye explain` shows what the gateway
   would do with a request, offline; `wye policy-test` and `wye policy-diff` check
   policy in CI and fail when a change widens access; `wye doctor` checks keys and
@@ -78,6 +84,22 @@ team behind HTTPS, apps on the official SDKs, upgrades, and troubleshooting.
   systemd user unit; for a team, any number of identical replicas behind a load
   balancer, with no coordination between them, health checks, and graceful
   shutdown. ([deployment](docs/operations.md#deployment-modes))
+
+## Who it's for
+
+- **One developer.** Tokens per session, subagent, and tool, prompt-cache
+  misses flagged, and cost once the config has prices, all from `wye report`
+  with no backend. Your login or key stays yours. Claude Code reports its own
+  totals; Wye shows where they went.
+- **A team.** A token per developer and CI job, provider keys only in the
+  deployment, policy reviewed in Git and tested in CI, and usage per developer
+  and session in your OpenTelemetry backend. If you run only Claude Code and
+  sign in with SSO, Anthropic's own self-hosted gateway for Claude Code may fit
+  better: it follows every Claude Code release.
+- **Apps on the official SDKs.** Model names, keys, failover, and cost move out
+  of application code, and a model upgrade is a config change once the upgrade
+  check shows nothing breaks. Wye does not protect a public endpoint from abuse
+  by itself: per-user sign-in and quotas stay in your backend.
 
 ## Speed
 
@@ -112,19 +134,20 @@ the same run as Wye. Each cell is the other gateway's figure divided by Wye's
 | [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
 | [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
 
-agentgateway beats Wye on paced-stream latency (1.0 vs 1.2 ms p50) and on memory
-beside stalled clients, and KrakenD on bulk transfer and TLS uploads.
+agentgateway beats Wye on paced-stream latency (1.0 vs 1.2 ms p50 in that run)
+and on memory beside stalled clients, and KrakenD on bulk transfer and TLS
+uploads.
 [docs/benchmarks.md](docs/benchmarks.md) has the method, the full tables, the
 configurations used, and where Wye loses.
 
 ## Why
 
-Teams that run Claude Code or Codex at scale end up wanting the same things:
-spend per team and per session, the same model behind a stable name while it
-gets upgraded, more than one account or provider, and limits that apply before
-a request reaches the provider. Most gateways get there by translating every
-request into one common format, which breaks the moment a provider ships a new
-field.
+A provider integration keeps needing work after it ships. On Anthropic's API,
+in one year, `thinking.budget_tokens`, sampling parameters, assistant prefill,
+forced `tool_choice`, and `output_format` all broke on newer models. Keys,
+accounts, and rate limits change, and every service grows its own retries,
+logging, and cost tracking. Many gateways take that work on by translating
+every request into one common format, which then lags each new provider field.
 
 Wye takes the opposite approach:
 
@@ -174,16 +197,10 @@ cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 ```
 
-Each Claude Code session stays on one account, chosen by hashing its session
-id, so its prompt cache stays warm and every replica picks the same account. If
-that account answers `429` or `529`, or the connection fails before the request
-body was delivered, Wye sends the request to the next account in the same turn,
-never after the first response byte. This relies on `429` and `529` meaning the
-provider did not process the request (not yet confirmed for every provider).
-Two keys of one provider work the same way.
-
-Secrets are read from environment variables or files and never appear in the
-config. Unknown fields are rejected at startup.
+Each session stays on one account, and a request refused with `429` or `529`
+goes to the other before any output; two keys of one provider work the same way
+([how](docs/guide.md#several-keys-or-providers)). Secrets come from environment
+variables or files, never from the config, and unknown fields stop startup.
 [examples/wye.toml](examples/wye.toml) is the reference: every option with its
 default and limits, kept valid by a test.
 
@@ -262,21 +279,20 @@ short-lived provider keys without a restart.
 
 - Global rate limits, spending budgets, or quota counters. They need shared
   state; providers already enforce them per key or workspace.
-- Translate between provider APIs, rewrite prompts, or cache responses.
+- Circuit breakers, cooldowns, or balancing by measured latency: they remember
+  across requests. Failover handles a refusal within the request.
+- Translate between provider APIs, rewrite prompts, swap in another model when
+  one fails, or cache responses.
+- Filter content (guardrails, redaction) or store prompts.
 - Run agents or tools.
 - Grow a dashboard or an admin API. Config changes go through Git and a
   restart or rolling deploy.
 
 ## Development
 
-```bash
-git clone https://github.com/askrid/wye && cd wye
-git config core.hooksPath .githooks   # run the full check before each commit
-scripts/check.sh                      # fmt, clippy, tests, release build, benchmark vs HEAD
-```
-
-Tests use local mock upstreams and never call a paid API.
-[docs/development.md](docs/development.md) explains the benchmark gate and CI.
+Tests use local mock upstreams and never call a paid API, and every commit
+passes a benchmark gate against its parent:
+[docs/development.md](docs/development.md).
 
 ## Documentation
 

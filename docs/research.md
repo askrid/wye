@@ -28,7 +28,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | OpenAI `input_tokens` include `cached_tokens`; reasoning tokens are part of `output_tokens` | Responses cost | OpenAI API reference; one recorded response with a cache hit |
 | Which SDKs tolerate the extra empty-`choices` usage chunk | `include_usage` default | SDK conformance tests |
 | Bedrock's Messages endpoint takes its API key in `x-api-key` (Anthropic's page) or `Authorization: Bearer` (AWS's page), and its `anthropic.`-prefixed ids for every current model | Bedrock provider (built with `x-api-key`) | One request with each header and a recorded stream |
-| Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-m4)) | One signed request per endpoint |
+| Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD` | Signing streamed bodies ([M4](architecture.md#claude-across-providers-and-accounts)) | One signed request per endpoint |
 | Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider | M4 | Platform docs; one recorded stream per provider |
 | `429`/`529` from each Claude provider means the request was not processed | Failover without duplicate billing | Provider docs; billing records |
 | Each upgrade-check rule (a field a model rejects) | [Upgrade checks](architecture.md#model-aliases-and-upgrade-checks) | Built from Anthropic's migration guide (2026-10-26); one opt-in live request per rule still open |
@@ -51,6 +51,10 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 | [IETF Attenuating Agent Tokens](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00) (draft) | JWT-based offline attenuation for agent delegation | A standard format for delegable credentials |
 
 Summaries come from abstracts; check figures against the papers before citing them.
+
+### Where Wye can hold its ground
+
+Speed, statelessness, and single-binary distribution are necessary, and others can copy them. Two things build up over time: an understanding of agent traffic, turned into attribution and explanations, and a maintained record of each model's breaking changes, turned into upgrade checks so teams can upgrade models by config with evidence. Correctness proven for each client release and policy as code without a database add to that. Provider gateways can add the same analytics for their own clients, and lean gateways can add agent awareness. Neither serves several clients and providers behind one native-passthrough policy and one telemetry and cost model, with CI and service identities and the data in the team's own backend; that is where Wye can hold its ground.
 
 ## Feature directions
 
