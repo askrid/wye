@@ -24,7 +24,7 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 git config core.hooksPath .githooks
 ```
 
-`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts); a comparison that fails without naming a metric fails the gate. A stored result would carry the machine's state on the day it was recorded ([why](benchmarks.md#gate-method-the-parent-in-alternating-rounds)), so nothing is recorded first and the gate runs on any machine.
+`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate. A stored result would carry the machine's state on the day it was recorded ([why](benchmarks.md#gate-method-the-parent-in-alternating-rounds)), so nothing is recorded first and the gate runs on any machine.
 
 - **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
