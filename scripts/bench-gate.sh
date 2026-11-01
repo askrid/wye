@@ -25,7 +25,25 @@ compare() {
   ./target/release/wye-bench compare "$out/reference.json" "$out/current.json" "$@" \
     | tee "$out/compare.txt"
   local status=${PIPESTATUS[0]}
-  awk '$NF == "REGRESSED" || $NF == "missing" { print $1 }' "$out/compare.txt" | sort > "$failed"
+  # The reference's own limits too (its wye-bench, built by bench-against.sh),
+  # so a commit cannot pass by loosening the gate it is judged by. Only what
+  # they add is printed. A reference too old for these flags fails without
+  # naming a metric, and is skipped.
+  local ref_status=0
+  target/reference/target/release/wye-bench compare "$out/reference.json" "$out/current.json" \
+    "$@" > "$out/compare-reference-limits.txt" 2>&1 || ref_status=$?
+  local stricter
+  stricter=$(awk '$NF == "REGRESSED" || $NF == "missing" { print $1 }' \
+    "$out/compare-reference-limits.txt")
+  if [[ $ref_status -ne 0 && -n $stricter ]]; then
+    echo "past the reference's own limits: $(tr '\n' ' ' <<<"$stricter")"
+    status=1
+  elif [[ $ref_status -ne 0 ]]; then
+    echo "note: the reference's wye-bench could not compare; its limits are skipped" >&2
+  fi
+  # An empty $stricter adds one empty line, which sort -u keeps once; drop it.
+  { awk '$NF == "REGRESSED" || $NF == "missing" { print $1 }' "$out/compare.txt"
+    echo "$stricter"; } | grep -v '^$' | sort -u > "$failed" || true
   if [[ $status -ne 0 && ! -s $failed ]]; then
     echo "the comparison failed (exit $status) without naming a metric" >&2
     exit 1
