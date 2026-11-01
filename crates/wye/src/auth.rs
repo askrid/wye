@@ -76,7 +76,7 @@ fn authenticate_at(
     if let Some(verified) = last.as_ref()
         && constant_time_eq(&verified.token, token.as_bytes())
     {
-        if now >= verified.identity.expires_at {
+        if verified.identity.expired(now) {
             *last = None;
             return Err(CredentialError::Expired);
         }

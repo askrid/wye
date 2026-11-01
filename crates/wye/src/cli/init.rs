@@ -305,7 +305,7 @@ mod tests {
             }
         }
 
-        let dir = std::env::temp_dir().join(format!("wye-init-{}", std::process::id()));
+        let dir = wye_testkit::TempDir::new("init");
         let out = dir.join("home/wye.toml");
         let env = |_: &str| None;
         let team = options(Mode::Team, false, &out);
@@ -321,7 +321,6 @@ mod tests {
         let printed = init(&again, &env).unwrap();
         assert!(!printed.contains("signing key"), "{printed}");
         assert!(printed.contains("\n     wye doctor -c "), "{printed}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

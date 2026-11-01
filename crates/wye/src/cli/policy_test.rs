@@ -190,8 +190,7 @@ mod tests {
 
     #[test]
     fn reports_passing_and_failing_cases() {
-        let dir = std::env::temp_dir().join(format!("wye-policy-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = wye_testkit::TempDir::new("policy");
         let config = Config::from_toml_str(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
              api_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\nmodels = [\"claude-*\"]\n\
@@ -244,13 +243,11 @@ mod tests {
             "{report}"
         );
         assert!(report.ends_with("3 passed, 2 failed\n"), "{report}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn checks_the_upstream_a_session_reaches() {
-        let dir = std::env::temp_dir().join(format!("wye-policy-route-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = wye_testkit::TempDir::new("policy-route");
         let config = Config::from_toml_str(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
              [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"A\"\n\
@@ -286,6 +283,5 @@ mod tests {
             )),
             "{report}"
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

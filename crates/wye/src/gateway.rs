@@ -228,7 +228,7 @@ impl Gateway {
     ) -> Response<ResBody> {
         let endpoint = match (req.method(), req.uri().path(), &self.catalog) {
             (&Method::GET, "/v1/models", Some(catalog)) if !is_codex_catalog(req.uri().query()) => {
-                return self.models(catalog, &req, connection);
+                return self.list_models(catalog, &req, connection);
             }
             (&Method::POST, path, _) => match api::endpoint(path) {
                 Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
@@ -277,7 +277,7 @@ impl Gateway {
     /// proxied request when `[auth]` is set, since the answer reveals the
     /// credential's permissions. Not a usage record: nothing reaches the
     /// provider.
-    fn models(
+    fn list_models(
         &self,
         catalog: &ModelCatalog,
         req: &Request<Incoming>,

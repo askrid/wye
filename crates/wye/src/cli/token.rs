@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn issue_takes_claims_and_the_key_id_from_the_config() {
-        let dir = std::env::temp_dir().join(format!("wye-token-{}", std::process::id()));
+        let dir = wye_testkit::TempDir::new("token");
         // keygen's default path sits in a home that may not exist yet.
         let path = dir.join("new-home/issuer.key");
         let (key, created) = signing_key(&path).unwrap();
@@ -287,7 +287,6 @@ mod tests {
                 .unwrap_err()
                 .contains("no [auth]")
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

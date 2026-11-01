@@ -51,6 +51,18 @@ pub struct Identity {
     pub max_output_tokens: Option<u64>,
 }
 
+impl Identity {
+    /// Whether the credential has expired at Unix time `now`.
+    pub fn expired(&self, now: u64) -> bool {
+        is_expired(self.expires_at, now)
+    }
+}
+
+/// A credential expiring at `exp` is valid strictly before it.
+fn is_expired(exp: u64, now: u64) -> bool {
+    now >= exp
+}
+
 /// Why a credential was rejected. Deliberately coarse in client responses;
 /// the variants exist for logs and tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,7 +346,7 @@ impl Verifier {
         if !r.aud.contains(&source.audience) {
             return Err(CredentialError::WrongAudience);
         }
-        if now >= r.exp {
+        if is_expired(r.exp, now) {
             return Err(CredentialError::Expired);
         }
         let earliest = r.nbf.unwrap_or(r.iat).max(r.iat);
