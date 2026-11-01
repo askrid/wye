@@ -3,6 +3,10 @@
 ## Unreleased
 
 - License: MIT, instead of WTFPL.
+- The sample price tables (README, `docs/policy.md`, `examples/wye.toml`)
+  priced cache reads on Opus 5.5 and Sonnet 5.5 at 0.1 times input; Anthropic
+  charges 0.05 times. A table copied from them counts cache reads at twice their
+  cost: set `cache_read = "0.20"` for Opus 5.5 and `"0.10"` for Sonnet 5.5.
 
 ## 0.1.0-rc.1
 

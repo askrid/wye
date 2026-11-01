@@ -1,12 +1,12 @@
 # Wye docs
 
-What Wye is and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
+New here: the [README](../README.md#what-it-does) says what Wye does and how fast it is, and the [guide](guide.md) shows how to use each part. What Wye is for and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
 
 ## Use it
 
 | Document | Answers |
 | --- | --- |
-| [guide.md](guide.md) | Choosing a setup, running it, reading `wye report`, teams, apps, upgrades, troubleshooting, FAQ |
+| [guide.md](guide.md) | Choosing a setup, running it, reading `wye report`, teams, apps, several keys or providers, upgrades, troubleshooting, FAQ |
 | [examples/wye.toml](../examples/wye.toml) | Every configuration field: its default, limits, and meaning (parsed by a test with every section enabled) |
 | [CHANGELOG.md](../CHANGELOG.md) | What each release contains and what it leaves unverified |
 

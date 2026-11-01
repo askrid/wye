@@ -230,7 +230,7 @@ Because Wye keeps no state, every multi-node setup has the same shape: a load ba
 
 For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`. Load balancers in front must not buffer SSE, and their idle timeout must exceed silent gaps in a stream (around 300 s; the AWS ALB default of 60 s is too short).
 
-For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`.
+For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several keys or accounts behind one route: [guide](guide.md#several-keys-or-providers).
 
 ### Sizing (estimate)
 
@@ -239,16 +239,6 @@ From the TLS-path benchmark on a laptop, not yet measured on EC2: a heavy Claude
 Wye does not lower a stream's tokens per second. It adds a roughly constant delay per event that does not accumulate: about 0.2 ms p50 at light load and 1.4 ms with 2,000 streams on the laptop, against the provider's 10-20 ms between tokens. Model permissions and cache diagnostics add cost per request and per uploaded MB, not per streamed event.
 
 One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms of added p99. Latency, not CPU, sets the limit, so size by streams per core ([measurements](benchmarks.md#current-harness-and-baseline)). Multi-core figures need a separate load machine.
-
-### Several Anthropic accounts
-
-A team whose usage outgrows one account's rate limits, or that splits spend across accounts, lists them under `[routes.claude]` instead of `[upstream]` ([example](../examples/wye.toml)). `[routes.openai]` works the same way.
-
-- Each session stays on one account, chosen from its session id (SDK callers without one: from the token subject), so prompt caches keep hitting ([cache-affine routing](architecture.md#cache-affine-routing)).
-- Weights share sessions, not tokens. Adding an account moves only the sessions it now wins; removing one moves only its own, and their next turn writes the cache again at the new account.
-- With `failover = ["429", "529", "connect"]`, a refused request goes to the session's next account within the same turn ([failover](architecture.md#claude-across-providers-m4)). Without it, a `429` goes back to the client, whose retry reaches the same account.
-- `select = "ordered"` makes the first account primary and the others standby.
-- `wye explain --session <id>` shows which account a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Telemetry
 

@@ -193,20 +193,26 @@ api_key_env = "ANTHROPIC_API_KEY"
 # upstream first, then the first unscoped match. Unknown prices are
 # "unknown", never $0 (rules: docs/policy.md, "Pricing metadata").
 # [pricing]
-# version = "anthropic-2026-10-06"     # recorded with every cost
+# version = "anthropic-2026-11-01"     # recorded with every cost
 # [[pricing.models]]
 # models = ["claude-opus-5-5"]
 # upstreams = ["aws-us-west-2"]        # only for these route upstreams (partner or regional prices)
 # input = "4.00"
 # output = "20.00"
-# cache_read = "0.40"                  # optional, like the cache writes below
+# cache_read = "0.20"                  # optional, like the cache writes below
 # cache_write_5m = "5.00"
 # cache_write_1h = "8.00"
+#
+# [[pricing.models]]
+# models = ["claude-haiku-5-5"]
+# input = "0.10"
+# output = "0.50"
 # Up to 8 tiers per entry: prices above a prompt length (input plus cache
 # reads and writes), the rest inherited from the entry:
 # [[pricing.models.tiers]]
-# above_prompt_tokens = 200000
-# input = "8.00"
+# above_prompt_tokens = 100000
+# input = "0.50"
+# output = "2.50"
 
 # Upgrade checks: before an alias or a client moves to a newer model, report
 # which requests that model would reject (a manual thinking budget, forced

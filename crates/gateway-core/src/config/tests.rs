@@ -508,11 +508,13 @@ fn documented_pricing_example_parses() {
         .unwrap()
         .pricing
         .unwrap();
-    assert_eq!(&*pricing.version, "anthropic-2026-10-06");
-    assert_eq!(pricing.entries.len(), 3);
+    assert_eq!(&*pricing.version, "anthropic-2026-11-01");
+    assert_eq!(pricing.entries.len(), 4);
     assert_eq!(pricing.entries[0].prices.input, 4_000_000);
-    assert_eq!(pricing.entries[2].prices.cache_read, None);
-    assert_eq!(pricing.entries[2].tiers[0].above_prompt_tokens, 100_000);
+    // Opus 5.5 reads its cache at 0.05 times input, not the usual 0.1.
+    assert_eq!(pricing.entries[0].prices.cache_read, Some(200_000));
+    assert_eq!(pricing.entries[3].prices.cache_read, None);
+    assert_eq!(pricing.entries[3].tiers[0].above_prompt_tokens, 100_000);
 
     let one = |extra: &str| {
         parse(&format!(

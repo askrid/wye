@@ -112,7 +112,7 @@ Prices are declarative, versioned, and live in `wye.toml` next to the policy tha
 
 ```toml
 [pricing]
-version = "anthropic-2026-10-06"     # required; recorded with every cost
+version = "anthropic-2026-11-01"     # required; recorded with every cost
 
 # USD per million tokens, as decimal strings. Entries scoped to the
 # serving upstream (`upstreams = [...]`) are tried first; among the rest,
@@ -121,12 +121,20 @@ version = "anthropic-2026-10-06"     # required; recorded with every cost
 models = ["claude-opus-5-5"]         # same patterns as [auth] models
 input = "4.00"
 output = "20.00"
-cache_read = "0.40"                  # 0.1 x input
+cache_read = "0.20"                  # 0.05 x input here; 0.1 x on most models
 cache_write_5m = "5.00"              # 1.25 x input
 cache_write_1h = "8.00"              # 2 x input
 
 [[pricing.models]]
-models = ["claude-sonnet-5-5", "claude-sonnet-5"]
+models = ["claude-sonnet-5-5"]
+input = "2.00"
+output = "10.00"
+cache_read = "0.10"
+cache_write_5m = "2.50"
+cache_write_1h = "4.00"
+
+[[pricing.models]]
+models = ["claude-sonnet-5"]
 input = "2.00"
 output = "10.00"
 cache_read = "0.20"

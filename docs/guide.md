@@ -2,6 +2,14 @@
 
 How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operations.md](operations.md) for the CLI, deployment, and telemetry; [policy.md](policy.md) for tokens, permissions, and pricing; [examples/wye.toml](../examples/wye.toml) for every option.
 
+- Set it up for yourself: [choosing a setup](#choosing-a-setup), [running it](#running-it)
+- See what your agents used and spent: [reading `wye report`](#reading-wye-report)
+- Share one gateway with a team: [using it for a team](#using-it-for-a-team)
+- Connect your own apps: [using it from apps](#using-it-from-apps)
+- Spread load across API keys or providers: [several keys or providers](#several-keys-or-providers)
+- Change the config, a model, or Wye itself: [changing or upgrading](#changing-or-upgrading)
+- Fix something: [troubleshooting](#troubleshooting)
+
 ## Choosing a setup
 
 Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.98 or later). Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases).
@@ -93,6 +101,34 @@ The key depends on the gateway:
 - A gateway that holds a key (`wye init --api-key`): any non-empty placeholder, since the SDKs refuse to send a request without a key.
 
 Streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add.
+
+## Several keys or providers
+
+When one key's rate limits are not enough, or spend is split across accounts, list the keys under `[routes.claude]` instead of `[upstream]`:
+
+```toml
+[routes.claude]
+failover = ["429", "529", "connect"]
+
+[[routes.claude.upstreams]]
+id = "key-a"
+weight = 2                     # twice the sessions of key-b
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_KEY_A"
+
+[[routes.claude.upstreams]]
+id = "key-b"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_KEY_B"
+```
+
+- Each session stays on one key, chosen from its session id (SDK callers without one: from the token subject), so its prompt cache keeps hitting ([cache-affine routing](architecture.md#cache-affine-routing)). Without either, as for a local app with no gateway token, every request goes to the same key.
+- Weights share sessions, not tokens. Adding a key moves only the sessions it now wins; removing one moves only its own, and their next turn writes the cache again at the new key.
+- With `failover`, a request refused with `429` or `529`, or a connection that fails before the body was delivered, goes to the session's next key in the same turn, never after output has started ([failover](architecture.md#claude-across-providers-m4)). Without it, a `429` goes back to the client, whose retry reaches the same key.
+- `select = "ordered"` makes the first key primary and the others standby.
+- Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI keys the same way.
+- A route holds its own keys, so it does not combine with the default `wye init`, where each caller's credential goes through. Under `wye service`, which does not see your shell's environment, give each key with `api_key_file` instead of `api_key_env`.
+- `wye explain --session <id>` shows which key a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Changing or upgrading
 
