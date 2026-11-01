@@ -54,30 +54,35 @@ Check: with motion off, the page says everything it says with motion on.
 
 ### One bold thing
 
-*From one responsibility.* Each page has one job and one memorable element, and everything around it stays quiet. The quality floor is never announced: usable at 320 px wide, visible keyboard focus, text contrast that meets WCAG AA, light and dark.
+*From one responsibility.* Each page has one job and one memorable element, and everything around it stays quiet. The quality floor is never announced: usable at 320 px wide, visible keyboard focus, text contrast that meets WCAG AA.
 
 Check: the review of each page names its job and its one bold element.
 
 ## Direction: terminal route
 
-The route map, drawn as a terminal draws it. Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output), then moved to a terminal ("hacker") style the same day at the user's request. Wye's config already names routes and upstreams, and Wye is a command-line tool whose output is the evidence on the page; so the page is set in monospace throughout, its diagram is box-drawing characters on a character grid, its table of contents prints like `tree`, and the junction on the first screen is the wye. Not green on black: the colours are the route's, terminal-like on a navy ground in dark mode and on paper in light mode.
+The route map, drawn as a terminal draws it. Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output), then moved to a terminal ("hacker") style the same day at the user's request. Wye's config already names routes and upstreams, and Wye is a command-line tool whose output is the evidence on the page; so the page is set in monospace throughout, its diagram is box-drawing characters on a character grid, its table of contents prints like `tree`, and the junction on the first screen is the wye. Not green on black: the colours are the route's, on a deep blue-black ground. The page is dark only, whatever the system's theme: a v2 decision of the user's on 2026-11-01, from the "Wye site v2" design canvas, which also chose the type and the mark below.
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `paper` | `#FFFFFF` | `#0E1A22` | Page ground |
-| `ink` | `#14212B` (16.4:1) | `#E8EEF2` (15.1:1) | Text, request marks |
-| `graphite` | `#5B6770` (5.8:1) | `#9AA8B2` (7.2:1) | Secondary text |
-| `line` | `#0067B1` (5.9:1) | `#5AA9E6` (6.9:1) | First route, links |
-| `branch` | `#B97F00` (3.4:1) | `#F2B630` (9.7:1) | Second route; lines only, never text |
-| `signal` | `#C8102E` (5.9:1) | `#FF6B7A` (6.4:1) | Refusals (429, 529), nothing else |
+| Token | Value | Use (WCAG contrast against `paper`) |
+| --- | --- | --- |
+| `paper` | `#070B0F` | Page ground |
+| `ground` | `#0E151B` | Code and output |
+| `rule` | `#1A242C` | Dividers |
+| `ink` | `#DDE6EC` | Headings, emphasis, request marks (15.6:1) |
+| `text` | `#C4CED5` | Running text |
+| `graphite` | `#8D9BA6` | Secondary text (6.9:1) |
+| `line` | `#58A6E6` | First route, links (7.5:1) |
+| `branch` | `#E8AA2E` | Second route (9.6:1) |
+| `signal` | `#FF6474` | Refusals (429, 529), nothing else (6.9:1) |
 
-Ratios are WCAG contrast against `paper`. Blue and ochre are the only route colours, chosen to stay apart under red-green colour blindness.
+Blue and amber are the only route colours, chosen to stay apart under red-green colour blindness.
 
-Type: Departure Mono for headings, the diagram, and the table of contents; Overpass Mono for text, code, and output. Both self-hosted under the SIL Open Font License (Overpass Mono as a variable Latin subset). Departure Mono is drawn on an 11 px grid, so its sizes are multiples of 11 where they can be; it carries the box-drawing characters the diagram and the rail need, which the Overpass Mono subset does not. Overpass Mono is an open revival of Highway Gothic, the US road-sign face: wayfinding type for a product made of routes.
+Type: Wye Mono for everything, Regular for text and SemiBold for headings. It is IBM Plex Mono, subset to Latin, box drawing, and block elements, and renamed, since "Plex" is a Reserved Font Name under its SIL Open Font License (`assets/fonts/OFL-Plex.txt`). Plex Mono was chosen for reading comfort over the pixel face it replaced, and because it carries the box-drawing characters the diagram and the rail need. Its box-drawing glyphs are 1.3 em tall, so the diagram and the rail use that line height and their strokes join from line to line.
 
-Diagrams: box-drawing characters on a grid of whole character cells, the route in `line`, the branch in `branch`, stations as `o`, labels in `graphite`. Moving parts jump a cell at a time (`steps()` in `ch` and `lh` units) on a `paper` background, so a moving glyph replaces the character under it. Only real upstream ids are drawn.
+Diagrams: box-drawing characters on a grid of whole character cells, the route in `line`, the branch in `branch`, stations as `o`, the request as `█`, labels in `graphite`. Moving parts jump a cell at a time (`steps()` in `ch` and `lh` units) on a `paper` background, so a moving glyph replaces the character under it. Only real upstream ids are drawn.
 
-Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (the config, status, what Wye will not do), each headed by a lowercase name after a `#` that links to it. On wide screens a rail beside them is the table of contents, printed like `tree`, and the stop being read is selected in inverse video through scroll-driven animations; on narrow screens the route runs down the stops' left edge as a line. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
+Mark: the junction drawn as the letter Y, a stem and arm in `line` and an arm in `branch`, square-capped on a `ground` tile, so it reads at 16 px in a browser tab on light and dark bars alike.
+
+Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (how it compares, the config, status, what Wye will not do), each headed by a lowercase name after a `#` that links to it. On wide screens a rail beside them is the table of contents, printed like `tree`, and the stop being read is selected in inverse video through scroll-driven animations; on narrow screens the route runs down the stops' left edge as a line. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
 
 ## Defaults we do not use
 
@@ -95,4 +100,4 @@ These appear on generated pages whatever the subject. None is used unless chosen
 - Plan before code with Anthropic's `frontend-design` skill: 4–6 named colours, type roles, ASCII wireframes. Review the plan against these principles and revise any part that would come out the same for any other gateway.
 - Run `npx impeccable detect` on the built page and check it against Vercel's web interface guidelines, locally; neither is a site dependency. Run Impeccable from `site/`, never from the repository root: it treats this file as its design file and keeps its own files (`PRODUCT.md`, `.impeccable/`) beside it.
 - Review every animation with the `review-animations` skill, and its cost with `animation-performance`.
-- Look at screenshots at phone and desktop widths, light and dark, before each commit that changes the look.
+- Look at screenshots at phone and desktop widths before each commit that changes the look.

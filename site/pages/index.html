@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Wye: run your agents like infrastructure</title>
 <meta name="description" content="Wye is a small, stateless gateway between coding agents (Claude Code, Codex) or your apps and the model providers. Keys, models, failover, limits, and cost live in one TOML file in Git; every request passes through as it was sent.">
-<link rel="preload" href="assets/fonts/departure-mono.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="assets/fonts/overpass-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b0f">
+<link rel="preload" href="assets/fonts/wye-mono-regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/wye-mono-semibold.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 <script src="assets/copy.js" defer></script>
@@ -14,7 +16,7 @@
 <body>
 <header class="wrap bar">
   <a class="mark" href="./">
-    <svg viewBox="0 0 32 32" aria-hidden="true"><path class="route-2" d="M14 16 L22 24 H28"/><path class="route-1" d="M4 16 H14 L22 8 H28"/></svg>
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect class="tile" x="0.5" y="0.5" width="31" height="31" rx="7"/><path class="route-1" d="M16 27 V17 L8.5 7"/><path class="route-2" d="M16 17 L23.5 7"/></svg>
     wye
   </a>
   <nav aria-label="Documentation">
@@ -40,7 +42,7 @@
       <div role="img" aria-label="A request from Claude Code reaches wye and takes its session's account, anthropic. anthropic answers 429 before any output, so wye sends the same request to bedrock-us, whose stream comes back event by event.">
 <pre>                    <span class="r1">╭───────────</span>o anthropic
 claude code o<span class="r1">───────┤</span>
-                <span class="lbl">wye</span> <span class="r2">╰───────────</span>o bedrock-us<span class="anim"><span class="cell sw-up" style="--c:20;--r:1">┘</span><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell request request-1" style="--c:12;--r:1">■</span><span class="cell request request-2" style="--c:20;--r:1">■</span><span class="cell event" style="--c:32;--r:2">·</span><span class="cell event e2" style="--c:32;--r:2">·</span><span class="cell event e3" style="--c:32;--r:2">·</span><span class="cell event e4" style="--c:32;--r:2">·</span></span><span class="still"><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell event" style="--c:27;--r:2">·</span><span class="cell event" style="--c:23;--r:2">·</span><span class="cell event" style="--c:16;--r:1">·</span></span></pre>
+                <span class="lbl">wye</span> <span class="r2">╰───────────</span>o bedrock-us<span class="anim"><span class="cell sw-up" style="--c:20;--r:1">┘</span><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell request request-1" style="--c:12;--r:1">█</span><span class="cell request request-2" style="--c:20;--r:1">█</span><span class="cell event" style="--c:32;--r:2">·</span><span class="cell event e2" style="--c:32;--r:2">·</span><span class="cell event e3" style="--c:32;--r:2">·</span><span class="cell event e4" style="--c:32;--r:2">·</span></span><span class="still"><span class="cell sw-down" style="--c:20;--r:1">┐</span><span class="cell blocked" style="--c:32;--r:0"><b>x</b> anthropic <b>429</b></span><span class="cell event" style="--c:27;--r:2">·</span><span class="cell event" style="--c:23;--r:2">·</span><span class="cell event" style="--c:16;--r:1">·</span></span></pre>
       </div>
       <figcaption>A team setup with two accounts. Each session stays on one account, chosen from its session id the same way on every replica, so its prompt cache stays warm. Here <code>anthropic</code> answers 429 before any output, so Wye sends the same request to <code>bedrock-us</code>, and the stream comes back event by event. After the first response byte, Wye never switches.</figcaption>
     </figure>
@@ -57,6 +59,7 @@ claude code o<span class="r1">───────┤</span>
         <li class="to-stream"><a href="#stream"><span class="branch" aria-hidden="true">├── </span><span class="name">stream</span></a></li>
         <li class="to-record"><a href="#record"><span class="branch" aria-hidden="true">└── </span><span class="name">record</span></a></li>
         <li class="root">also/</li>
+        <li class="to-compare"><a href="#compare"><span class="branch" aria-hidden="true">├── </span><span class="name">compare</span></a></li>
         <li class="to-config"><a href="#config"><span class="branch" aria-hidden="true">├── </span><span class="name">config</span></a></li>
         <li class="to-status"><a href="#status"><span class="branch" aria-hidden="true">├── </span><span class="name">status</span></a></li>
         <li class="to-limits"><a href="#limits"><span class="branch" aria-hidden="true">└── </span><span class="name">will-not-do</span></a></li>
@@ -111,6 +114,11 @@ claude code o<span class="r1">───────┤</span>
         {{fence README.md|$ wye report}}
         {{fence README.md|{}}
         <p>Costs are exact decimal strings computed in integers; a model with no price is recorded as unknown, never as $0.</p>
+      </section>
+
+      <section class="part" id="compare" aria-labelledby="compare-h">
+        <h2 id="compare-h"><a class="hash" href="#compare" aria-label="Link to compare">#</a> compare</h2>
+        <div class="prose">{{section README.md|How it compares}}</div>
       </section>
 
       <section class="part" id="config" aria-labelledby="config-h">
