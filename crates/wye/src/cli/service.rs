@@ -22,8 +22,12 @@ use super::{
     probe_blocking as probe, say,
 };
 
+mod run;
 mod unit;
 
+#[cfg(test)]
+use run::retry;
+use run::{run_all, uid, wait_for, write_atomically};
 #[cfg(test)]
 use unit::UNIT;
 use unit::{Commands, plan, restart_commands, shell, start_commands, stop_commands, systemctl};
@@ -31,9 +35,6 @@ pub use unit::{Manager, Service};
 
 /// How long the gateway may take to answer once started.
 const START_WAIT: Duration = Duration::from_secs(5);
-/// How often `install` asks launchd to load the service while the old gateway
-/// finishes its requests.
-const RETRY_EVERY: Duration = Duration::from_millis(500);
 
 /// Environment variables a config's secrets come from: a service does not
 /// inherit the shell's environment, so they would be missing.
@@ -376,84 +377,9 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs each command, printing it first. A `bootout` of a service that is not
-/// loaded is not an error. launchd reports `bootout` done while the old gateway
-/// still finishes its requests, and refuses `bootstrap` until it has exited, so
-/// that one is retried for as long as the old gateway may take: `settle`.
-fn run_all(
-    commands: &Commands,
-    show: &dyn Fn(&Path) -> String,
-    settle: Duration,
-) -> Result<(), String> {
-    for command in commands {
-        say!("  $ {}", shell(command, show));
-        let (program, args) = command.split_first().ok_or("an empty command")?;
-        let verb = args.first().map(String::as_str);
-        let run = || {
-            let output = std::process::Command::new(program)
-                .args(args)
-                .output()
-                .map_err(|e| format!("cannot run {program}: {e}"))?;
-            if output.status.success() {
-                Ok(())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-            }
-        };
-        let result = if verb == Some("bootstrap") {
-            retry(run, settle, RETRY_EVERY)
-        } else {
-            run()
-        };
-        if let Err(why) = result
-            && verb != Some("bootout")
-        {
-            return Err(format!("{} failed: {why}", shell(command, show)));
-        }
-    }
-    Ok(())
-}
-
-/// `attempt` until it succeeds or `settle` has passed; the last error then.
-fn retry(
-    mut attempt: impl FnMut() -> Result<(), String>,
-    settle: Duration,
-    every: Duration,
-) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + settle;
-    loop {
-        match attempt() {
-            Ok(()) => return Ok(()),
-            Err(_) if std::time::Instant::now() < deadline => std::thread::sleep(every),
-            Err(why) => return Err(why),
-        }
-    }
-}
-
 /// How long the running gateway may take to stop.
 fn stopping(service: &Service) -> Duration {
     Duration::from_secs(service.stop_secs)
-}
-
-/// Waits up to `wait` for the gateway to answer, and says so.
-fn wait_for(
-    url: &str,
-    errors: &Path,
-    show: &dyn Fn(&Path) -> String,
-    wait: Duration,
-) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + wait;
-    while std::time::Instant::now() < deadline {
-        if probe(url).is_ok() {
-            say!("The gateway answers at {url}.");
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
-    Err(format!(
-        "nothing answers at {url} yet; the end of {} may say why",
-        show(errors)
-    ))
 }
 
 /// A file's size as people read it: `913 KB`, `4.2 MB`.
@@ -464,24 +390,6 @@ fn file_size(bytes: u64) -> String {
         b if b >= 1 << 10 => format!("{} KB", b >> 10),
         b => format!("{b} bytes"),
     }
-}
-
-/// The user id, for launchd's `gui/<uid>` domain.
-fn uid() -> Result<String, String> {
-    let output = std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .map_err(|e| format!("cannot run id -u: {e}"))?;
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
-/// Writes `text` to `path` through a temporary file, so a half-written
-/// definition is never loaded.
-fn write_atomically(path: &Path, text: &str) -> Result<(), String> {
-    let temporary = path.with_extension("tmp");
-    std::fs::write(&temporary, text)
-        .and_then(|()| std::fs::rename(&temporary, path))
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 #[cfg(test)]
