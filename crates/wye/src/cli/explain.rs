@@ -354,8 +354,8 @@ impl Explanation {
             scanner.feed(body);
             scanner.finish().ok().map(str::to_owned)
         });
-        if let (Some(prefix), Some(model)) = (upstream.provider.model_prefix(), &model)
-            && !model.starts_with(prefix)
+        if let Some(model) = &model
+            && let Some(prefix) = upstream.provider.prefix_for(model)
         {
             self.step(format!(
                 "model id: the body names {prefix}{model} upstream, the provider's id for {model}"

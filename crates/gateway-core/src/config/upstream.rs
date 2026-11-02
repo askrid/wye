@@ -69,6 +69,13 @@ impl Provider {
             Self::Anthropic | Self::ClaudePlatformAws | Self::OpenAi => None,
         }
     }
+
+    /// The prefix `model` needs at this provider: none when the provider has
+    /// none, or when the client already sent the prefixed id.
+    pub fn prefix_for(self, model: &str) -> Option<&'static str> {
+        self.model_prefix()
+            .filter(|prefix| !model.starts_with(prefix))
+    }
 }
 
 /// Protocols Wye offers a TLS upstream through ALPN.

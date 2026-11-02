@@ -119,8 +119,8 @@ pub(crate) struct Upstream {
     pub(crate) id: Option<Arc<str>>,
     /// `anthropic-workspace-id` for Claude Platform on AWS, built once.
     workspace: Option<HeaderValue>,
-    /// The prefix the provider's model ids carry (`anthropic.` on Bedrock).
-    pub(crate) model_prefix: Option<&'static str>,
+    /// Who serves it, which decides its model ids (`anthropic.` on Bedrock).
+    pub(crate) provider: config::Provider,
     clients: ClientPool,
     scheme: Scheme,
     authority: Authority,
@@ -157,7 +157,7 @@ impl Upstream {
         );
         Ok(Self {
             id: config.id.as_deref().map(Arc::from),
-            model_prefix: config.provider.model_prefix(),
+            provider: config.provider,
             workspace: config
                 .workspace_id
                 .as_deref()

@@ -298,9 +298,7 @@ fn model_id_for(
     upstream: &Upstream,
     prefix_sent: Option<&'static str>,
 ) -> Option<(Option<&'static str>, Bytes)> {
-    let wanted = upstream
-        .model_prefix
-        .filter(|prefix| !at.model.starts_with(prefix));
+    let wanted = upstream.provider.prefix_for(&at.model);
     (wanted != prefix_sent).then(|| {
         let value = match wanted {
             // Exact capacity: the Vec becomes the Bytes without another allocation.
