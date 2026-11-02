@@ -222,7 +222,7 @@ Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key se
 
 Hashing a stable request prefix for SDK callers without a session id is not implemented: it would need the body before choosing. The cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
 
-Pure affinity can overload one candidate when a few keys dominate traffic, a capacity loss recent serving research reports ([related work](research.md#related-work)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one very heavy session still stays on one account. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
+Pure affinity can overload one candidate when a few keys dominate traffic, a capacity loss recent serving research reports ([related work](research.md#related-work)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one heavy session still stays on one account. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
 
 ### Model aliases and upgrade checks
 

@@ -8,13 +8,13 @@
 cost for Claude Code, Codex, and your apps live in one TOML file in Git, and
 every request passes through as it was sent.
 
-Wye is a lightweight, stateless gateway for coding agents and LLM
-applications. It sits between clients and model providers, records the usage
-and cost of every request, distributes traffic across API keys and providers
-with failover, and enforces which caller may use which model. Clients keep
-their official SDKs: Wye relays each provider's native API without
-translation. It ships as a single Rust binary with no database and, in lab
-benchmarks, adds about 0.25 ms to a request.
+Wye is a stateless gateway for coding agents and LLM applications. It sits
+between clients and model providers, records the usage and cost of every
+request, distributes traffic across API keys and providers with failover, and
+enforces which caller may use which model. Clients keep their official SDKs:
+Wye relays each provider's native API without translation. It ships as a
+single Rust binary with no database and, in lab benchmarks, adds about 0.25 ms
+to a request.
 
 > **Status:** prerelease (`0.1.0-rc.1`). Tested and benchmarked on one
 > machine, and in use with Claude Code on a claude.ai subscription. See
@@ -139,12 +139,11 @@ and the response names the model that ran.
 
 ## Performance
 
-Wye is designed never to be the bottleneck. Every commit is benchmarked
-against its parent in alternating rounds on the same machine
-(`scripts/check.sh`), and a change that makes Wye slower or heavier beyond the
-gate's tolerances is not committed. The figures below are lab results from one
-laptop (Intel i9-9880H, macOS) against a local mock provider, not production
-measurements.
+Every commit is benchmarked against its parent in alternating rounds on the
+same machine (`scripts/check.sh`), and a change that makes Wye slower or
+heavier beyond the gate's tolerances is not committed. The figures below are
+lab results from one laptop (Intel i9-9880H, macOS) against a local mock
+provider, not production measurements.
 
 | What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|

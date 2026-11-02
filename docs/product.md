@@ -19,7 +19,7 @@ A gateway can absorb the part of that churn that is not application logic, but o
 
 Spend was part of the motivating case too: a team stopped using an AI gateway once model spend became hard to justify or control. Wye is designed to bound spend without a ledger of its own: per-request output-token ceilings today, and (planned) per-request cost ceilings and cumulative limits held by the provider that bills ([policy.md](policy.md#provider-held-budgets)).
 
-Performance is a requirement: the gateway must never be the bottleneck, whether in streaming without buffering, memory per idle stream, CPU per event, or cancellation. Every commit is benchmarked on these against its parent ([development.md](development.md#commit-gate)). The results so far come from one laptop against a mock upstream; there are no production measurements yet ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
+Performance is a requirement, measured rather than claimed: streaming without buffering, memory per idle stream, CPU per event, and cancellation. Every commit is benchmarked on these against its parent ([development.md](development.md#commit-gate)). The results so far come from one laptop against a mock upstream; there are no production measurements yet ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
 
 ## Principles
 
@@ -29,7 +29,7 @@ Every feature follows these, and a feature that cannot is not built.
 - **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for: the one field it changes, the model, changes only where reviewed config says so (an alias, a provider's own model id such as Bedrock's, or, planned, a routing rule the operator turns on), and never out of sight, since the response names the model that ran and the record keeps both.
 - **Request-local and stateless.** A decision uses only the request, its token, and the immutable config; correlation across requests happens in the user's telemetry backend. Nothing authoritative carries across requests, and nothing moves between replicas ([policy.md](policy.md#state-boundary)).
 - **Fast and light.** The request path reads headers; hashing, encoding, and aggregation happen in the telemetry writer task. A streamed event costs no allocation, and every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they are cheap enough to run on every request.
-- **Easy to use.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a token for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
+- **Little to set up.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a token for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
 - **One responsibility.** Inference traffic only: no agent loop, tool execution, dashboard, or stored usage history.
 
 ## Scope
@@ -109,7 +109,7 @@ Strengths:
 Weaknesses:
 
 - Few providers so far, API keys only, with no Vertex yet, and Bedrock and Codex not yet checked live ([status](roadmap.md#status)).
-- Prerelease only: `0.1.0-rc.1` archives exist, but no container image is published. That hurts "easy to use" more than any missing feature.
+- Prerelease only: `0.1.0-rc.1` archives exist, but no container image is published. That costs "little to set up" more than any missing feature.
 - No cumulative limits, by design: budgets need the provider ([planned next after M2c](policy.md#provider-held-budgets)), rate limits need infrastructure, and revocation waits for expiry.
 - Little real-world validation ([status](roadmap.md#status)): one developer's Claude Code sessions on a subscription, no production deployment, and numbers from one laptop against a mock.
 - Ongoing upkeep: Claude Code's gateway contract changes per release, and upgrade checks need a table of each model's breaking changes.

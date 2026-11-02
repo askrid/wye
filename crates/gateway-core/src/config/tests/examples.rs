@@ -77,7 +77,7 @@ fn the_reference_sets_only_defaults() {
 fn the_reference_parses_with_every_section_enabled() {
     let enabled = every_section_enabled(REFERENCE);
     let config = Config::from_toml_str(&enabled).unwrap_or_else(|e| panic!("{e}\n{enabled}"));
-    // Every section really was enabled.
+    // Every section was enabled.
     assert!(config.auth.is_some() && config.telemetry.is_some());
     assert!(config.cache_diagnostics.is_some() && config.discovery.is_some());
     assert!(config.aliases.is_some() && config.pricing.is_some() && config.upgrade_check.is_some());
