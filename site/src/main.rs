@@ -6,6 +6,7 @@
 //! them). The build fails on an unknown directive or a missing source, then
 //! checks the output: every resource is local and every local link resolves.
 
+mod chart;
 mod check;
 mod markdown;
 mod render;

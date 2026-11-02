@@ -3,6 +3,8 @@
 //! | Directive | Becomes |
 //! | --- | --- |
 //! | `{{version}}` | the wye crate's version |
+//! | `{{release}}` | the version, with ", a prerelease" while it has a pre-release part |
+//! | `{{commit}}` | the commit the page is built from: `GITHUB_SHA` in CI, else the checkout's `HEAD` |
 //! | `{{license}}`, `{{repo}}` | the workspace's license and repository URL |
 //! | `{{machine}}` | the benchmark machine in `bench/baseline.json` |
 //! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
@@ -10,19 +12,24 @@
 //! | `{{section FILE\|HEADING}}` | the Markdown under `## HEADING` in FILE, rendered |
 //! | `{{item FILE\|HEADING\|LEAD}}` | the item of that section's list whose bold lead starts with LEAD, rendered |
 //! | `{{rest FILE\|HEADING}}` | every item of that list the page has not placed yet, so a new one is never dropped |
+//! | `{{paragraph FILE\|HEADING\|START}}` | the paragraph of that section that starts with START, rendered |
+//! | `{{ratios FILE\|HEADING\|COLUMN}}` | a bar chart of that section's table column of multiples of Wye ("7×") |
+//! | `{{versus FILE\|HEADING\|ROW}}` | a bar chart of the first figure in each gateway column of the row starting with ROW |
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
-use crate::markdown;
+use crate::{chart, markdown};
 
-/// The documents `fence` and `section` may read, relative to the repository root.
-const DOCUMENTS: [&str; 2] = ["README.md", "CHANGELOG.md"];
+/// The documents directives may read, relative to the repository root.
+const DOCUMENTS: [&str; 3] = ["README.md", "CHANGELOG.md", "docs/benchmarks.md"];
 
 /// Everything a page may draw from the repository, read once per build.
 pub struct Sources {
     version: String,
+    commit: String,
     license: String,
     repo_url: String,
     machine: String,
@@ -54,6 +61,7 @@ impl Sources {
         Ok(Self {
             version: manifest_field(&crate_manifest, "version")
                 .ok_or("crates/wye/Cargo.toml: no version")?,
+            commit: commit(repo)?,
             license: manifest_field(&workspace_manifest, "license")
                 .ok_or("Cargo.toml: no license")?,
             repo_url: manifest_field(&workspace_manifest, "repository")
@@ -73,6 +81,12 @@ impl Sources {
         };
         match (name, args.as_slice()) {
             ("version", []) => Ok(markdown::escape(&self.version)),
+            ("release", []) => Ok(markdown::escape(&if self.version.contains('-') {
+                format!("{}, a prerelease", self.version)
+            } else {
+                self.version.clone()
+            })),
+            ("commit", []) => Ok(markdown::escape(&self.commit)),
             ("license", []) => Ok(markdown::escape(&self.license)),
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("machine", []) => Ok(markdown::escape(&self.machine)),
@@ -113,14 +127,34 @@ impl Sources {
                 }
                 Ok(out)
             }
+            ("paragraph", [file, heading, start]) => {
+                let paragraph = self
+                    .section(file, heading)?
+                    .split("\n\n")
+                    .map(str::trim)
+                    .find(|paragraph| paragraph.starts_with(start))
+                    .ok_or_else(|| {
+                        format!("{file}: no paragraph under \"## {heading}\" starts with {start:?}")
+                    })?;
+                Ok(markdown::to_html(paragraph, &self.repo_url, file))
+            }
+            ("ratios", [file, heading, column]) => {
+                chart::ratios(self.section(file, heading)?, column)
+                    .map_err(|e| format!("{file}, \"## {heading}\": {e}"))
+            }
+            ("versus", [file, heading, row]) => chart::versus(self.section(file, heading)?, row)
+                .map_err(|e| format!("{file}, \"## {heading}\": {e}")),
             _ => Err(format!("unknown directive {{{{{directive}}}}}")),
         }
     }
 
     fn items(&self, file: &str, heading: &str) -> Result<Vec<String>, String> {
-        let text = markdown::section(self.document(file)?, heading)
-            .ok_or_else(|| format!("{file}: no section \"## {heading}\""))?;
-        Ok(markdown::list_items(text))
+        Ok(markdown::list_items(self.section(file, heading)?))
+    }
+
+    fn section(&self, file: &str, heading: &str) -> Result<&str, String> {
+        markdown::section(self.document(file)?, heading)
+            .ok_or_else(|| format!("{file}: no section \"## {heading}\""))
     }
 
     fn item_html(&self, item: &str, file: &str) -> String {
@@ -186,6 +220,28 @@ fn item_key(file: &str, heading: &str, item: &str) -> String {
     format!("{file}|{heading}|{}", markdown::lead(item).unwrap_or(item))
 }
 
+/// The commit a page is built from, abbreviated: `GITHUB_SHA` in a GitHub
+/// workflow, else the checkout's `HEAD`.
+fn commit(repo: &Path) -> Result<String, String> {
+    if let Some(sha) = std::env::var("GITHUB_SHA")
+        .ok()
+        .and_then(|sha| sha.get(..7).map(str::to_owned))
+    {
+        return Ok(sha);
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .output()
+        .map_err(|e| format!("git rev-parse: {e}"))?;
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if !output.status.success() || sha.is_empty() {
+        return Err("no commit: not a Git checkout, and GITHUB_SHA is not set".into());
+    }
+    Ok(sha)
+}
+
 /// The value of the first `key = "value"` line in a Cargo manifest.
 fn manifest_field(manifest: &str, key: &str) -> Option<String> {
     manifest.lines().find_map(|line| {
@@ -228,6 +284,7 @@ mod tests {
     fn sources() -> Sources {
         Sources {
             version: "0.1.0-rc.1".into(),
+            commit: "81e7951".into(),
             license: "MIT".into(),
             repo_url: "https://github.com/askrid/wye".into(),
             machine: "Intel Core i9-9880H, macOS".into(),
@@ -240,6 +297,7 @@ mod tests {
             documents: [(
                 "README.md",
                 "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n## Status\n\nBuilt.\n\n\
+                 ## Performance\n\nNumbers.\n\nWhere others lead: one, on\n[two](docs/b.md).\n\n\
                  ## What it does\n\n- **Shows usage.** Records.\n- **Gives access.** Tokens.\n\
                  - **Runs.** Anywhere.\n"
                     .to_owned(),
@@ -256,6 +314,27 @@ mod tests {
             render(page, &sources()).unwrap(),
             "v0.1.0-rc.1 0.28 ms, 120 µs"
         );
+        assert_eq!(
+            render("{{release}} at {{commit}}", &sources()).unwrap(),
+            "0.1.0-rc.1, a prerelease at 81e7951"
+        );
+        let mut stable = sources();
+        stable.version = "1.0.0".into();
+        assert_eq!(render("{{release}}", &stable).unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn renders_a_paragraph_by_how_it_starts() {
+        assert_eq!(
+            render(
+                "{{paragraph README.md|Performance|Where others lead}}",
+                &sources()
+            )
+            .unwrap(),
+            "<p>Where others lead: one, on\n\
+             <a href=\"https://github.com/askrid/wye/blob/main/docs/b.md\">two</a>.</p>\n"
+        );
+        assert!(render("{{paragraph README.md|Performance|Nobody}}", &sources()).is_err());
     }
 
     #[test]

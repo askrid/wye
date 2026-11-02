@@ -50,16 +50,16 @@
    for refusals. */
 :root {
   color-scheme: dark;
-  --paper: #050505;
+  --paper: #070707;
   --ground: #101010;
-  --rule: #232323;
-  --ink: #f5f5f5;
-  --text: #d0d0d0;
-  --graphite: #909090;
+  --rule: #2a2a2a;
+  --ink: #ededed;
+  --text: #c9c9c9;
+  --graphite: #8f8f8f;
   /* The first route and links are ink; the failover route is amber. */
   --line: var(--ink);
-  --branch: #f0b43c;
-  --signal: #ff6474;
+  --branch: #f2b544;
+  --signal: #ff6b6b;
 
   --mono: "Wye Mono", "Wye Mono fallback", Menlo, Consolas, monospace;
   --display: var(--mono);
@@ -68,9 +68,10 @@
   --small: 0.90625rem;
   --lead: 1.125rem;
   --h2: 30px;
-  /* The longest word, "infrastructure." and the cursor, is 9.6 em wide:
-     the headline is sized to its column so that word always fits. */
-  --h1: min(56px, 100cqi / 9.8);
+  /* The headline is sized to its column so its longest line always fits:
+     on two lines, "like infrastructure." and the cursor, 12.6 em; wrapped
+     on a phone, the word "infrastructure." and the cursor, 9.6 em. */
+  --h1: min(52px, 100cqi / 12.9);
   /* 64 zeros of Wye Text: about 70 characters of prose. */
   --measure: 64ch;
   --gutter: clamp(1rem, 4vw, 2.5rem);
@@ -121,7 +122,7 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 }
 .mark {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 0.6rem;
   color: var(--ink);
   font-family: var(--display);
@@ -133,53 +134,67 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
    on a tile. Same drawing as assets/icon-fork.svg, the favicon, which is
    named for its drawing: browsers keep a favicon long after it changes, so
    a new mark takes a new file name. */
-.mark svg { width: 1.875rem; height: 1.875rem; }
+.mark svg { width: 1.75rem; height: 1.75rem; align-self: center; }
+.mark .version { color: var(--graphite); font-size: 0.8125rem; font-weight: 400; }
 .mark .tile { fill: var(--ground); stroke: #3a3a3a; }
 .mark .fork { fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
 .bar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-family: var(--mono); }
 .bar nav a { color: var(--graphite); text-decoration: none; }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* First screen */
+/* First screen: one column, what Wye is and how to start it. */
+/* The headline and lede keep their own measures; the install block may use
+   the page's width, so its comments stay on their lines. */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  grid-template-areas: "copy figure" "install install";
-  align-items: center;
-  gap: 2.5rem clamp(2rem, 5vw, 4.5rem);
-  padding-block: clamp(2rem, 6vw, 5rem) clamp(2.5rem, 6vw, 4.75rem);
+  gap: 1.75rem;
+  padding-block: clamp(3rem, 8vw, 6.5rem) clamp(2.5rem, 5vw, 4rem);
+  container-type: inline-size;
 }
-.hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
-.hero .junction { grid-area: figure; }
-.hero-install { grid-area: install; display: grid; gap: 0.75rem; min-width: 0; }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
-.hero-copy, .hero-install, .junction, .part, .prose { grid-template-columns: minmax(0, 1fr); }
-h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
+.hero, .part, .prose { grid-template-columns: minmax(0, 1fr); }
+h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 /* The one cursor on the page, where a terminal would leave it. */
 .cursor { color: var(--line); animation: wye-blink 1.1s steps(1, end) infinite; }
 @keyframes wye-blink { 50% { opacity: 0; } }
-.lede { max-width: 56ch; font-size: 1.09375rem; line-height: 1.65; }
-.release { color: var(--graphite); font-size: var(--small); }
-@media (max-width: 60rem) {
-  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "figure"; }
-}
+.lede { max-width: 54ch; font-size: 1.125rem; line-height: 1.6; }
+.hero > :is(.code-wrap, pre.code) { margin-top: 0.5rem; }
+/* One line of facts, the changelog last. */
+.facts { color: var(--graphite); font-family: var(--mono); font-size: 0.84375rem; }
+.facts a { color: var(--text); }
 @media (max-width: 40rem) {
-  .hero-install pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
-  .hero-install .code .c { display: none; }
+  :root { --h1: min(52px, 100cqi / 9.8); }
+  .hero h1 br { display: none; }
+  .hero pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
+  .hero .code .c { display: none; }
 }
 
 /* The junction, drawn as a terminal would: one client, two accounts,
    failover before the first byte. The grid is 47 characters by 3 lines
    (the refusal, "x anthropic 429", ends in column 47), sized to fill its
-   container: 47 advances of 0.6 em are 28.2 em. */
-.junction { margin: 0; display: grid; gap: 1rem; min-width: 0; container-type: inline-size; }
+   container: 47 advances of 0.6 em are 28.2 em. It spans the page as a
+   band between the first screen and the route, its caption beside it. */
+.junction {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22.5rem);
+  grid-template-areas: "art caption" "play caption";
+  align-items: center;
+  gap: 1rem 3.5rem;
+  padding-block: clamp(2rem, 5vw, 3.5rem);
+  border-block: 1px solid var(--rule);
+}
+.junction-art { grid-area: art; min-width: 0; container-type: inline-size; }
+@media (max-width: 60rem) {
+  .junction { grid-template-columns: minmax(0, 1fr); grid-template-areas: "art" "play" "caption"; }
+}
 .junction pre {
   position: relative;
   margin: 0;
   width: 47ch;
   font-family: var(--display);
-  font-size: min(20px, 100cqi / 28.4);
+  font-size: min(26px, 100cqi / 28.4);
   /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
      the strokes of one line meet those of the next. */
   line-height: 1.3;
@@ -188,7 +203,7 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
 .junction .r1 { color: var(--line); }
 .junction .r2 { color: var(--branch); }
 .junction .lbl { color: var(--graphite); }
-.junction figcaption { font-size: var(--small); line-height: 1.65; max-width: 64ch; }
+.junction figcaption { grid-area: caption; font-size: var(--small); line-height: 1.6; max-width: 64ch; }
 .junction .cell {
   position: absolute;
   left: 0;
@@ -268,6 +283,7 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
 }
 /* The play button, added by assets/site.js under reduced motion only. */
 .play {
+  grid-area: play;
   justify-self: start;
   padding: 0;
   border: 0;
@@ -286,7 +302,6 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);
   column-gap: clamp(2rem, 4vw, 4rem);
-  border-top: 1px solid var(--rule);
   timeline-scope: --client, --gate, --model, --account, --stream, --record, --compare, --config, --status, --limits;
 }
 .stops { min-width: 0; }
@@ -348,8 +363,8 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
 .part { display: grid; gap: 1.375rem; padding-block: clamp(2rem, 5vw, 3.75rem); }
 /* A block of code, output, or numbers stands a little apart from the text
    around it, and further from what follows than from what leads into it. */
-.part > :is(.code-wrap, pre.code, .table-scroll, .long-lines) { margin-top: 0.125rem; }
-.part > :is(.code-wrap, pre.code, .table-scroll, .long-lines):not(:last-child) { margin-bottom: 0.5rem; }
+.part > :is(.code-wrap, pre.code, .table-scroll, .long-lines, .chart) { margin-top: 0.125rem; }
+.part > :is(.code-wrap, pre.code, .table-scroll, .long-lines, .chart):not(:last-child) { margin-bottom: 0.5rem; }
 .stops > section + section { border-top: 1px dashed var(--rule); }
 .part h2 { font-size: var(--h2); line-height: 1.2; }
 /* Prose keeps its reading measure; a table may use the section's width. */
@@ -492,13 +507,36 @@ pre.code code { font: inherit; }
   }
 }
 
-/* Footer */
+/* Footer: facts about the page, each one the build checks, and the commit
+   it was built from. */
 .foot {
   display: grid;
-  gap: 0.5rem;
-  padding-block: 2rem 3.5rem;
+  gap: 0.375rem;
+  padding-block: 2.25rem 3.5rem;
   border-top: 1px solid var(--rule);
   color: var(--graphite);
-  font-size: var(--small);
+  font-family: var(--mono);
+  font-size: 0.84375rem;
+  line-height: 1.6;
 }
-.foot p { max-width: var(--measure); }
+.foot a { color: var(--text); }
+
+/* Charts drawn in block characters (site/src/chart.rs): names and values
+   are text, the bars hidden from screen readers; Wye in ink, the others in
+   graphite. */
+.chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
+.chart figcaption { color: var(--graphite); font-family: var(--mono); font-size: 0.84375rem; }
+.bars {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.75;
+}
+.bars .fill { color: var(--graphite); }
+.bars .us, .bars .us .fill { color: var(--ink); }
+@media (max-width: 40rem) {
+  .bars { font-size: 0.8125rem; }
+}
