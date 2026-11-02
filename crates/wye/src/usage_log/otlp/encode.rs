@@ -281,41 +281,12 @@ mod tests {
 
     fn line<'a>(session: Option<&'a str>, tools: Option<&'a [u8]>) -> Line<'a> {
         Line {
-            event: "request",
             unix_ms: 10_000,
-            path: "/v1/messages",
-            system: "anthropic",
-            status: 200,
-            outcome: Outcome::Completed,
             duration_ms: 2_000.0,
-            headers_ms: None,
-            upstream: None,
-            subject: None,
             session_id: session,
-            traceparent: None,
-            request_class: None,
-            agent_type: None,
             agent_id: Some("a-1"),
-            parent_agent_id: None,
-            prompt_id: None,
-            compaction: None,
-            context_compacted: None,
             tool_durations: tools.map(crate::usage_log::agent::ToolDurations),
-            cost: None,
-            cost_status: None,
-            pricing_version: None,
-            tool_calls: None,
-            requested_model: None,
-            model: None,
-            usage_status: "not_observed",
-            input_tokens: None,
-            output_tokens: None,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-            cache_miss: None,
-            prompt: None,
-            upgrade_issues: None,
-            failovers: &[],
+            ..Line::blank()
         }
     }
 

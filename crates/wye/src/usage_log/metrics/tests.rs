@@ -2,41 +2,16 @@ use super::*;
 
 fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -> Line<'static> {
     Line {
-        event: "request",
-        unix_ms: 0,
         path,
-        system: "anthropic",
         status,
-        outcome: crate::usage_log::Outcome::Completed,
         duration_ms: ms,
-        headers_ms: None,
-        upstream: None,
-        subject: None,
-        session_id: None,
-        traceparent: None,
         request_class: Some("main"),
-        agent_type: None,
-        agent_id: None,
-        parent_agent_id: None,
-        prompt_id: None,
-        compaction: None,
-        context_compacted: None,
-        tool_durations: None,
-        requested_model: None,
         model,
         usage_status: "complete",
         input_tokens: Some(10),
         output_tokens: Some(5),
-        cache_creation_input_tokens: None,
         cache_read_input_tokens: Some(0),
-        cost: None,
-        cost_status: None,
-        pricing_version: None,
-        tool_calls: None,
-        cache_miss: None,
-        prompt: None,
-        upgrade_issues: None,
-        failovers: &[],
+        ..Line::blank()
     }
 }
 

@@ -106,6 +106,51 @@ pub(super) struct Line<'a> {
     pub(super) failovers: &'a [RefusedAttempt],
 }
 
+#[cfg(test)]
+impl Line<'_> {
+    /// A completed `/v1/messages` request with nothing observed, for tests
+    /// to set the fields they check.
+    pub(super) fn blank() -> Self {
+        Line {
+            event: "request",
+            unix_ms: 0,
+            path: "/v1/messages",
+            system: "anthropic",
+            status: 200,
+            outcome: Outcome::Completed,
+            duration_ms: 0.0,
+            headers_ms: None,
+            upstream: None,
+            subject: None,
+            session_id: None,
+            traceparent: None,
+            request_class: None,
+            agent_type: None,
+            agent_id: None,
+            parent_agent_id: None,
+            prompt_id: None,
+            compaction: None,
+            context_compacted: None,
+            tool_durations: None,
+            requested_model: None,
+            model: None,
+            usage_status: "not_observed",
+            input_tokens: None,
+            output_tokens: None,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+            cost: None,
+            cost_status: None,
+            pricing_version: None,
+            tool_calls: None,
+            cache_miss: None,
+            prompt: None,
+            upgrade_issues: None,
+            failovers: &[],
+        }
+    }
+}
+
 fn outcome<S: Serializer>(outcome: &Outcome, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(outcome.as_str())
 }
