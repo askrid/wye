@@ -20,19 +20,13 @@ fn scan_chunked(body: &[u8], sizes: &[usize]) -> Chunked {
     let mut scanner = PolicyScanner::for_api(Api::Messages);
     let mut fed = 0;
     let mut known_after = None;
-    let mut rest = body;
-    for &size in sizes.iter().cycle() {
-        if rest.is_empty() {
-            break;
-        }
-        let (chunk, tail) = rest.split_at(size.clamp(1, rest.len()));
+    crate::test_support::feed_sized(body, sizes, |chunk| {
         scanner.feed(chunk);
         fed += chunk.len();
         if known_after.is_none() && scanner.model().is_some() {
             known_after = Some(fed);
         }
-        rest = tail;
-    }
+    });
     (
         scanner.finish().map(str::to_owned),
         known_after,

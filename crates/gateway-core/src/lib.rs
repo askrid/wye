@@ -22,3 +22,6 @@ pub mod prompt;
 pub mod route;
 pub mod upgrade;
 pub mod usage;
+
+#[cfg(test)]
+mod test_support;

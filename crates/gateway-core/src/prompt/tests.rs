@@ -11,15 +11,7 @@ fn scan(body: &[u8]) -> Option<PromptHashes> {
 
 fn scan_chunked(body: &[u8], sizes: &[usize]) -> Option<PromptHashes> {
     let mut scanner = PromptScanner::new();
-    let mut rest = body;
-    for &size in sizes.iter().cycle() {
-        if rest.is_empty() {
-            break;
-        }
-        let (chunk, tail) = rest.split_at(size.clamp(1, rest.len()));
-        scanner.feed(chunk);
-        rest = tail;
-    }
+    crate::test_support::feed_sized(body, sizes, |chunk| scanner.feed(chunk));
     scanner.finish()
 }
 
