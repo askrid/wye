@@ -9,6 +9,7 @@
 //! | `{{machine}}` | the benchmark machine in `bench/baseline.json` |
 //! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
 //! | `{{fence FILE\|PREFIX}}` | the first fenced block in FILE whose first line starts with PREFIX, highlighted |
+//! | `{{field FILE\|PREFIX\|KEY}}` | KEY's value in that fenced block, read as a JSON object |
 //! | `{{section FILE\|HEADING}}` | the Markdown under `## HEADING` in FILE, rendered |
 //! | `{{item FILE\|HEADING\|LEAD}}` | the item of that section's list whose bold lead starts with LEAD, rendered |
 //! | `{{rest FILE\|HEADING}}` | every item of that list the page has not placed yet, so a new one is never dropped |
@@ -99,6 +100,20 @@ impl Sources {
                     markdown::escape(lang),
                     markdown::highlight(lang, &code)
                 ))
+            }
+            ("field", [file, prefix, key]) => {
+                let (_, code) = markdown::fence(self.document(file)?, prefix)
+                    .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))?;
+                let object: serde_json::Value = serde_json::from_str(&code).map_err(|e| {
+                    format!("{file}: the block starting with {prefix:?} is not JSON: {e}")
+                })?;
+                let value = object.get(key).ok_or_else(|| {
+                    format!("{file}: the block starting with {prefix:?} has no {key:?}")
+                })?;
+                Ok(markdown::escape(&match value {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                }))
             }
             ("section", [file, heading]) => {
                 let text = markdown::section(self.document(file)?, heading)
@@ -296,7 +311,9 @@ mod tests {
             .collect(),
             documents: [(
                 "README.md",
-                "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n## Status\n\nBuilt.\n\n\
+                "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n\
+                 ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
+                 ## Status\n\nBuilt.\n\n\
                  ## Performance\n\nNumbers.\n\nWhere others lead: one, on\n[two](docs/b.md).\n\n\
                  ## What it does\n\n- **Shows usage.** Records.\n- **Gives access.** Tokens.\n\
                  - **Runs.** Anywhere.\n"
@@ -321,6 +338,20 @@ mod tests {
         let mut stable = sources();
         stable.version = "1.0.0".into();
         assert_eq!(render("{{release}}", &stable).unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn reads_a_field_of_a_json_block() {
+        assert_eq!(
+            render(
+                "{{field README.md|{|input_tokens}} in, ${{field README.md|{|cost_usd}}",
+                &sources()
+            )
+            .unwrap(),
+            "12 in, $0.0181"
+        );
+        assert!(render("{{field README.md|{|model}}", &sources()).is_err());
+        assert!(render("{{field README.md|$ wye|model}}", &sources()).is_err());
     }
 
     #[test]

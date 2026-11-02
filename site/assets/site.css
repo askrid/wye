@@ -69,9 +69,9 @@
   --lead: 1.125rem;
   --h2: 30px;
   /* The headline is sized to its column so its longest line always fits:
-     on two lines, "like infrastructure." and the cursor, 12.6 em; wrapped
-     on a phone, the word "infrastructure." and the cursor, 9.6 em. */
-  --h1: min(52px, 100cqi / 12.9);
+     on two lines, "like infrastructure.", 12 em; wrapped on a phone, the
+     word "infrastructure.", 9 em. */
+  --h1: min(52px, 100cqi / 12.3);
   /* 64 zeros of Wye Text: about 70 characters of prose. */
   --measure: 64ch;
   --gutter: clamp(1rem, 4vw, 2.5rem);
@@ -142,158 +142,59 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a { color: var(--graphite); text-decoration: none; }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* First screen: one column, what Wye is and how to start it. */
-/* The headline and lede keep their own measures; the install block may use
-   the page's width, so its comments stay on their lines. */
+/* First screen: what Wye is beside the route a request takes through it,
+   then how to start it, across the page so the install comments stay on
+   their lines. On narrow screens the route follows the install. */
 .hero {
   display: grid;
-  gap: 1.75rem;
-  padding-block: clamp(3rem, 8vw, 6.5rem) clamp(2.5rem, 5vw, 4rem);
-  container-type: inline-size;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 29rem);
+  grid-template-areas: "copy route" "install install";
+  align-items: center;
+  gap: 2.75rem clamp(2.5rem, 5vw, 4.5rem);
+  padding-block: clamp(3rem, 7vw, 5.5rem) clamp(2.5rem, 5vw, 4rem);
+}
+.hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
+.hero .junction { grid-area: route; }
+.hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
+@media (max-width: 60rem) {
+  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "route"; }
+  .hero .junction { padding-top: 2rem; border-top: 1px solid var(--rule); }
 }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
-.hero, .part, .prose { grid-template-columns: minmax(0, 1fr); }
+.hero-copy, .hero-install, .part, .prose { grid-template-columns: minmax(0, 1fr); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
-/* The one cursor on the page, where a terminal would leave it. */
-.cursor { color: var(--line); animation: wye-blink 1.1s steps(1, end) infinite; }
-@keyframes wye-blink { 50% { opacity: 0; } }
 .lede { max-width: 54ch; font-size: 1.125rem; line-height: 1.6; }
-.hero > :is(.code-wrap, pre.code) { margin-top: 0.5rem; }
 /* One line of facts, the changelog last. */
 .facts { color: var(--graphite); font-family: var(--mono); font-size: 0.84375rem; }
 .facts a { color: var(--text); }
 @media (max-width: 40rem) {
-  :root { --h1: min(52px, 100cqi / 9.8); }
+  :root { --h1: min(52px, 100cqi / 9.2); }
   .hero h1 br { display: none; }
   .hero pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
   .hero .code .c { display: none; }
 }
 
-/* The junction, drawn as a terminal would: one client, two accounts,
-   failover before the first byte. The grid is 47 characters by 3 lines
-   (the refusal, "x anthropic 429", ends in column 47), sized to fill its
-   container: 47 advances of 0.6 em are 28.2 em. It spans the page as a
-   band between the first screen and the route, its caption beside it. */
-.junction {
-  margin: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 22.5rem);
-  grid-template-areas: "art caption" "play caption";
-  align-items: center;
-  gap: 1rem 3.5rem;
-  padding-block: clamp(2rem, 5vw, 3.5rem);
-  border-block: 1px solid var(--rule);
-}
-.junction-art { grid-area: art; min-width: 0; container-type: inline-size; }
-@media (max-width: 60rem) {
-  .junction { grid-template-columns: minmax(0, 1fr); grid-template-areas: "art" "play" "caption"; }
-}
+/* The route, drawn as a terminal would: one request through every stop,
+   each with what Wye decided there, the failover a fork at the account,
+   the record at the end. The grid is 45 characters by 13 lines, sized to
+   fill its container: 45 advances of 0.6 em are 27 em. It stays still: it
+   reads top to bottom in the order things happen. */
+.junction { margin: 0; min-width: 0; }
+.junction-art { min-width: 0; container-type: inline-size; }
 .junction pre {
-  position: relative;
   margin: 0;
-  width: 47ch;
+  width: 45ch;
   font-family: var(--display);
-  font-size: min(26px, 100cqi / 28.4);
+  font-size: min(17px, 100cqi / 27.2);
   /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
      the strokes of one line meet those of the next. */
   line-height: 1.3;
   color: var(--ink);
 }
-.junction .r1 { color: var(--line); }
+.junction .d { color: var(--graphite); }
+.junction .no { color: var(--signal); }
 .junction .r2 { color: var(--branch); }
-.junction .lbl { color: var(--graphite); }
-.junction figcaption { grid-area: caption; font-size: var(--small); line-height: 1.6; max-width: 64ch; }
-.junction .cell {
-  position: absolute;
-  left: 0;
-  top: 0;
-  min-width: 1ch;
-  height: 1lh;
-  background: var(--paper);
-  transform: translate(calc(var(--c) * 1ch), calc(var(--r) * 1lh));
-}
-.junction .request { color: var(--ink); }
-.junction .event { color: var(--branch); }
-.junction .sw-up { color: var(--line); }
-.junction .sw-down { color: var(--branch); }
-.junction .blocked b { color: var(--signal); font-weight: 400; }
-.junction .still { display: none; }
-
-/* Motion: one 7 s sequence, the order of a real failover, moving a cell
-   at a time. Only transform and opacity change. */
-.junction .anim > * { animation: 7s linear infinite both; }
-.junction .anim .request-1 { animation-name: wye-request-1; }
-.junction .anim .request-2 { animation-name: wye-request-2; }
-.junction .anim .blocked { animation-name: wye-blocked; }
-.junction .anim .sw-up { animation-name: wye-switch-up; }
-.junction .anim .sw-down { animation-name: wye-switch-down; }
-.junction .anim .event { animation-name: wye-event; }
-.junction .anim .e2 { animation-delay: 0.35s; }
-.junction .anim .e3 { animation-delay: 0.7s; }
-.junction .anim .e4 { animation-delay: 1.05s; }
-
-@keyframes wye-request-1 {
-  0% { transform: translate(12ch, 1lh); animation-timing-function: steps(8, end); }
-  14% { transform: translate(20ch, 1lh); animation-timing-function: steps(1, end); }
-  16% { transform: translate(21ch, 0lh); animation-timing-function: steps(11, end); }
-  30%, 100% { transform: translate(32ch, 0lh); }
-  0%, 37.9% { opacity: 1; }
-  38%, 100% { opacity: 0; }
-}
-@keyframes wye-blocked {
-  0%, 31.9% { opacity: 0; }
-  32%, 94.9% { opacity: 1; }
-  95%, 100% { opacity: 0; }
-}
-@keyframes wye-switch-up {
-  0%, 39.9% { opacity: 1; }
-  40%, 100% { opacity: 0; }
-}
-@keyframes wye-switch-down {
-  0%, 39.9% { opacity: 0; }
-  40%, 100% { opacity: 1; }
-}
-@keyframes wye-request-2 {
-  0%, 40% { transform: translate(20ch, 1lh); animation-timing-function: steps(1, end); }
-  42% { transform: translate(21ch, 2lh); animation-timing-function: steps(11, end); }
-  58%, 100% { transform: translate(32ch, 2lh); }
-  0%, 39.9% { opacity: 0; }
-  40%, 59.9% { opacity: 1; }
-  60%, 100% { opacity: 0; }
-}
-@keyframes wye-event {
-  0%, 60% { transform: translate(32ch, 2lh); animation-timing-function: steps(11, end); }
-  70% { transform: translate(21ch, 2lh); animation-timing-function: steps(1, end); }
-  71.5% { transform: translate(20ch, 1lh); animation-timing-function: steps(8, end); }
-  82%, 100% { transform: translate(12ch, 1lh); }
-  0%, 59.9% { opacity: 0; }
-  60%, 81.9% { opacity: 1; }
-  82%, 100% { opacity: 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .cursor { animation: none; }
-  .junction .anim { display: none; }
-  .junction .still { display: inline; }
-  /* The reader pressed play (assets/site.js): one run, then the still
-     frame again. */
-  .junction.playing .anim { display: inline; }
-  .junction.playing .still { display: none; }
-  .junction.playing .anim > * { animation-iteration-count: 1; }
-}
-/* The play button, added by assets/site.js under reduced motion only. */
-.play {
-  grid-area: play;
-  justify-self: start;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--line);
-  font: 0.8125rem var(--mono);
-  cursor: pointer;
-}
-.play:hover { color: var(--ink); }
-.play:disabled { color: var(--graphite); cursor: default; }
 
 /* The request's route: the sections are stops in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
@@ -302,6 +203,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);
   column-gap: clamp(2rem, 4vw, 4rem);
+  border-top: 1px solid var(--rule);
   timeline-scope: --client, --gate, --model, --account, --stream, --record, --compare, --config, --status, --limits;
 }
 .stops { min-width: 0; }
