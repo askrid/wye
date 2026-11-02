@@ -39,6 +39,11 @@ impl Held {
         }
     }
 
+    /// The units this guard holds.
+    pub(crate) fn units(&self) -> usize {
+        self.units
+    }
+
     /// Releases up to `units` before the guard is dropped.
     pub(crate) fn release(&mut self, units: usize) {
         let units = units.min(self.units);

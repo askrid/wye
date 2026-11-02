@@ -24,6 +24,9 @@
   without OTLP, and shutdown exports the final metrics even while the log is
   blocked.
 - `wye report` keeps each count on the line of its name when it wraps.
+- A body sent in chunks so small that it alone passes
+  `max_held_request_bytes` gets `413` instead of the retryable `529` (`503` on
+  the OpenAI APIs), which no retry could clear.
 
 ## 0.1.0-rc.1
 

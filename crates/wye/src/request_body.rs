@@ -104,7 +104,8 @@ pub(crate) enum HoldError {
     Model(PolicyError),
     /// The process-wide hold budget is used up.
     Overloaded,
-    /// The body exceeded the request size limit while being held.
+    /// The body exceeded the request size limit while being held, or would
+    /// pass the hold budget by itself.
     TooLarge,
     /// The client sent nothing for [`HOLD_IDLE_TIMEOUT`], or had not reached
     /// the model after [`HOLD_TIMEOUT`].
@@ -226,8 +227,17 @@ where
         let Ok(data) = frame.map_err(held_body_error)?.into_data() else {
             continue;
         };
-        if !hold.budget.try_grow(charge(data.len()), max_held) {
-            return Err(HoldError::Overloaded);
+        let charge = charge(data.len());
+        if !hold.budget.try_grow(charge, max_held) {
+            // A body that alone passes the budget (one sent in tiny chunks)
+            // could never be held: refused for good, not as an overload a
+            // retry would repeat.
+            let alone = hold.budget.units().saturating_add(charge) > max_held;
+            return Err(if alone {
+                HoldError::TooLarge
+            } else {
+                HoldError::Overloaded
+            });
         }
         hold.scanner.feed(&data);
         hold.chunks.push(data);

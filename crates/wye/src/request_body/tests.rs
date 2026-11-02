@@ -165,7 +165,9 @@ async fn tiny_chunks_count_at_least_the_minimum_charge() {
     .await
     .err()
     .unwrap();
-    assert!(matches!(error, HoldError::Overloaded));
+    // This body alone passes the budget, so no retry could succeed: it is
+    // refused for good (413), not as an overload.
+    assert!(matches!(error, HoldError::TooLarge), "{error:?}");
     assert_eq!(budget.current(), 0);
 
     // Ordinary chunks count their length: the same budget holds 8 KiB.
@@ -241,19 +243,21 @@ async fn a_stalled_hold_is_refused_and_released() {
 
 #[tokio::test]
 async fn refuses_beyond_the_budget_or_without_a_model() {
+    // Other requests hold most of the budget: a retry may find room.
     let budget = Gauge::default();
+    let max = 8 * MIN_CHUNK_CHARGE;
     let _other = {
         let mut other = budget.hold_none();
-        assert!(other.try_grow(90, 100));
+        assert!(other.try_grow(7 * MIN_CHUNK_CHARGE, max));
         other
     };
     let mut client = Client::of(&[r#"{"messages":[], "#, r#""model":"m"}"#]);
-    let error = hold_until_model(&mut client, Api::Messages, &budget, 100, None)
+    let error = hold_until_model(&mut client, Api::Messages, &budget, max, None)
         .await
         .err()
         .unwrap();
-    assert!(matches!(error, HoldError::Overloaded));
-    assert_eq!(budget.current(), 90);
+    assert!(matches!(error, HoldError::Overloaded), "{error:?}");
+    assert_eq!(budget.current(), 7 * MIN_CHUNK_CHARGE);
 
     let mut client = Client::of(&[r#"{"messages":[]}"#]);
     let error = hold_until_model(&mut client, Api::Messages, &Gauge::default(), 1 << 20, None)
