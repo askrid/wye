@@ -19,7 +19,11 @@ use gateway_core::{
     upgrade::{self, UpgradeScanner},
 };
 
-use super::{model_list, size};
+use super::{
+    model_list,
+    paint::{FORWARD, REFUSE},
+    size,
+};
 
 /// The gateway token a request carries.
 pub enum Credential<'a> {
@@ -106,7 +110,7 @@ impl Explanation {
 
     fn refuse(&mut self, status: u16, kind: &'static str, message: String) -> Refused {
         self.steps
-            .push(format!("decision: refuse {status} {kind}: {message}"));
+            .push(format!("{REFUSE} {status} {kind}: {message}"));
         self.refused = Some((status, kind, message));
         Refused
     }
@@ -476,7 +480,7 @@ pub fn explain(
         if api == Api::Messages {
             out.body_scans(config, session, body, targets);
         }
-        out.step("decision: forward".into());
+        out.step(FORWARD.into());
         Ok(())
     })();
     out

@@ -15,7 +15,10 @@ use gateway_core::{
     route::Route,
 };
 
-use super::model_list;
+use super::{
+    model_list,
+    paint::{NARROWS, NOT_WIDENED, WIDENED, WIDENS},
+};
 use crate::{StartupError, startup::key_set};
 
 /// The comparison, line by line.
@@ -35,17 +38,17 @@ impl PolicyDiff {
     pub fn report(&self) -> String {
         let mut out = String::new();
         for (kind, lines) in [
-            ("widens", &self.widens),
-            ("narrows", &self.narrows),
-            ("changes", &self.changes),
+            (WIDENS, &self.widens),
+            (NARROWS, &self.narrows),
+            ("changes:", &self.changes),
         ] {
             for line in lines {
-                out.push_str(&format!("{kind}: {line}\n"));
+                out.push_str(&format!("{kind} {line}\n"));
             }
         }
         out.push_str(&match self.widens.len() {
-            0 => "result: no access widened\n".to_owned(),
-            n => format!("result: access widened ({n})\n"),
+            0 => format!("{NOT_WIDENED}\n"),
+            n => format!("{WIDENED} ({n})\n"),
         });
         out
     }

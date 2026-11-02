@@ -7,6 +7,14 @@ use std::io::IsTerminal;
 /// How `doctor` and `policy-test` start a line; [`Paint::style`] colors the word.
 const OK: &str = "ok ";
 const FAIL: &str = "FAIL ";
+/// How `explain` and `policy-diff` start the lines [`Paint::style`] colors:
+/// they write these, so a reworded verdict keeps its color.
+pub(super) const FORWARD: &str = "decision: forward";
+pub(super) const REFUSE: &str = "decision: refuse";
+pub(super) const WIDENS: &str = "widens:";
+pub(super) const NARROWS: &str = "narrows:";
+pub(super) const WIDENED: &str = "result: access widened";
+pub(super) const NOT_WIDENED: &str = "result: no access widened";
 
 /// One line of a check's report: `text` under its verdict, in a fixed column.
 pub(super) fn verdict(ok: bool, text: &str) -> String {
@@ -77,12 +85,12 @@ impl Paint {
             let verdict = [
                 (OK, Self::green as fn(Self, &str) -> String),
                 (FAIL, Self::red),
-                ("widens:", Self::red),
-                ("narrows:", Self::green),
-                ("result: access widened", Self::red),
-                ("result: no access widened", Self::green),
-                ("decision: forward", Self::green),
-                ("decision: refuse", Self::red),
+                (WIDENS, Self::red),
+                (NARROWS, Self::green),
+                (WIDENED, Self::red),
+                (NOT_WIDENED, Self::green),
+                (FORWARD, Self::green),
+                (REFUSE, Self::red),
                 ("Usage:", Self::bold),
             ]
             .into_iter()
