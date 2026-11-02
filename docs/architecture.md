@@ -49,7 +49,7 @@ Implemented for all three APIs: steps 1, 2, 3 (model permissions and output-toke
 
 ## Repository and workspace
 
-One repository, four Cargo workspace members. Each module has a `//!` doc.
+One repository, four Cargo workspace members. Each library module has a `//!` doc.
 
 ```text
 wye/
@@ -148,11 +148,11 @@ Never buffer the generated response. Relay SSE bytes without parsing or rebuildi
 | `max_tokens` / `max_completion_tokens` / `max_output_tokens` | Hard cost mode (planned) | Insert the output bound used in the [cost ceiling](policy.md#provable-cost-ceiling) when absent; lower a caller value only when the route explicitly accepts truncation, otherwise reject; never raise a caller value. On Messages, never lower below `thinking.budget_tokens`; reject instead |
 | `stream_options.include_usage` | Streaming Chat Completions with usage accounting (planned, off: see open decisions) | OpenAI omits streamed usage otherwise ([usage extraction](#usage-extraction)); until the default is decided, clients that want usage set it themselves |
 
-Each rewrite is per-route configuration, covered by tests, and reported by `wye explain`. Adding a field to this list is a design change.
+Each rewrite is set in config (aliases for every route, model ids by the upstream's provider), covered by tests, and reported by `wye explain`. Adding a field to this list is a design change.
 
 ### Usage extraction
 
-A bounded, read-only observer reads the same bytes Wye relays. It never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream. `UsageScanner` picks the scanner per API as an enum; each scanner's limits are in its `//!` doc and under [Fixed limits](#fixed-limits).
+A bounded, read-only observer reads the same bytes Wye relays. It never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream. `UsageScanner` picks the scanner per API as an enum; each scanner's limits are documented on its constants and under [Fixed limits](#fixed-limits) and under [Fixed limits](#fixed-limits).
 
 A body wrapper emits one record when the body is dropped, so every outcome is recorded. A request the client leaves before its response headers is recorded as cancelled with nginx's status `499`. A body also counts as completed once its declared length is delivered: the client connection stops polling then, and an HTTP/2 upstream may send its end-of-stream frame after the data.
 
@@ -172,12 +172,13 @@ The caller never selects the upstream destination (no open proxy or SSRF surface
 
 **Errors.** Before downstream headers are sent, local failures produce a gateway error in the client-facing API's error shape. Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`). After headers are sent, an upstream failure terminates the stream; it cannot become a new JSON error response.
 
-**Timeouts.** Four, and no total request timeout, which would kill valid generations:
+**Timeouts.** Four on the upstream and client sides, two on a held body, and no total request timeout, which would kill valid generations:
 
 - Connect: short, over the TCP connect and the TLS handshake together. A peer that stalls the handshake fails as a refused connection, so failover applies.
 - Response headers: several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure).
 - Streaming inactivity: longer than the provider's `ping` interval.
 - Client write: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs.
+- Held body: while Wye reads `model`, 60 s without a byte or 5 minutes in all gets `408` (`HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT`).
 
 Shutdown: [operations.md](operations.md#health-and-shutdown).
 
@@ -346,11 +347,16 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/credential.rs`, `credential/keys.rs` | A presented token and an identity provider's key set |
 | `CLOCK_SKEW_SECS` | `gateway-core/src/credential.rs` | How far a token's `iat` or `nbf` may lie ahead of this clock |
 | `MAX_TIMER_SECS` | `gateway-core/src/config/validate.rs` | Any configured timeout or interval (one day): larger values would overflow a deadline |
-| `MAX_USAGE_LINE_BYTES`, `MAX_BLOCK_START_LINE_BYTES`, `MAX_TOOL_NAMES`, `MAX_TOOL_NAME_BYTES`, `MAX_RECORDED_MODEL_BYTES` | `gateway-core/src/usage.rs` | A usage-bearing Messages SSE line; a `content_block_start` line; tool names counted per response, and the longest counted by name; a model name kept in a usage record |
+| `MAX_USAGE_LINE_BYTES`, `MAX_BLOCK_START_LINE_BYTES`, `CLASSIFY_PREFIX_BYTES`, `MAX_TOOL_NAMES`, `MAX_TOOL_NAME_BYTES`, `MAX_RECORDED_MODEL_BYTES` | `gateway-core/src/usage.rs` | A usage-bearing Messages SSE line; a `content_block_start` line; the start of any other line, enough to recognize `event:`; tool names counted per response, and the longest counted by name; a model name kept in a usage record |
 | `MAX_ITEM_LINE_BYTES` | `gateway-core/src/usage/responses.rs` | A Responses `response.output_item.added` line |
 | `MAX_LINE_BYTES` | `gateway-core/src/usage/chat.rs` | A Chat Completions `data:` line kept across chunks |
 | `MAX_USAGE_BYTES`, `MAX_FIELD_BYTES` | `gateway-core/src/usage/fields.rs` | The `usage` object of a JSON response or a Responses terminal event; its `model` and `service_tier` |
 | `MAX_MODEL_BYTES` | `gateway-core/src/policy.rs` | A `model` value the policy scanner reads |
+| `KEY_CAP` | `gateway-core/src/policy/scanner.rs`, `gateway-core/src/prompt/scanner.rs` | A key kept for comparison (24 bytes, enough for `max_completion_tokens`; 16 for prompt sections) |
+| `KEY_DEPTHS`, `CAPTURE` | `gateway-core/src/upgrade/scanner.rs` | Nesting levels whose keys upgrade checks track; a key or watched value kept |
+| `MAX_BREAKPOINTS`, `MESSAGE_PREFIXES` | `gateway-core/src/prompt.rs` | Cache breakpoints recorded per request (Anthropic accepts four); message prefix hashes kept |
+| `EVENT_NAME_BYTES` | `gateway-core/src/usage/responses.rs` | A Responses event name kept; longer names are other events |
+| `Nesting::TRACKED` | `gateway-core/src/json.rs` | Bracket levels whose kinds are checked; deeper JSON is followed without the kind check |
 | `MAX_TOKEN_BYTES`, `MAX_TOOL_ENTRIES` | `gateway-core/src/agent.rs` | An agent id or type from a client header; tool durations read per request |
 
 ## Invariants
@@ -361,7 +367,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 4. Tool-call and event streams preserve ordering and identifiers for supported pairs.
 5. Every upstream retry follows an explicit safety and deadline policy.
 6. A configuration snapshot is consistent within a request.
-7. Authentication and hard constraints are checked before upstream work.
+7. Authentication and model permissions are checked before upstream work; output-token ceilings and the size limit are also checked as the body streams, and a violation aborts the upstream request before the provider has the whole body.
 8. No request depends on cross-request quota or history.
 9. Only allowlisted request fields are rewritten; a caller's limit is never raised.
 10. Usage observation never alters, delays, or buffers forwarded bytes.
