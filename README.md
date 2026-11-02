@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/askrid/wye/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrid/wye/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Rust 1.98+](https://img.shields.io/badge/rust-1.98%2B-orange)](rust-toolchain.toml)
+[![Rust 1.99+](https://img.shields.io/badge/rust-1.99%2B-orange)](rust-toolchain.toml)
 
 **Run your agents like infrastructure.** Keys, models, failover, limits, and
 cost for Claude Code, Codex, and your apps live in one TOML file in Git, and
@@ -35,7 +35,7 @@ By request class
 ## Quick start
 
 ```bash
-cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.98+
+cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.99+
 
 wye init              # writes ~/.wye/wye.toml; needs no key
 wye service install   # shows what it sets up and asks; runs the gateway in the background
