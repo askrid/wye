@@ -336,9 +336,9 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_held_request_bytes` and `failover_max_held_bytes` (1 KiB), so a body sent in tiny chunks cannot pin more memory than the budget says |
 | `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | How long a held body may send nothing (60 s), or take in all to reach its `model` (5 minutes), before its request gets `408` |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer task; beyond it they are dropped and counted |
-| `WRITE_BATCH` | `wye/src/usage_log.rs` | Queued records formatted into one write: bounds the write buffer while records keep arriving (while a write waits with OTLP on, up to `QUEUE_CAPACITY` records taken for export are kept for the next) |
+| `WRITE_BATCH` | `wye/src/usage_log/writer.rs` | Queued records formatted into one write: bounds the write buffer while records keep arriving (while a write waits with OTLP on, up to `QUEUE_CAPACITY` records taken for export are kept for the next) |
 | `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting for export, one export attempt |
-| `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log.rs` | How often a partial batch and the cumulative metrics are exported |
+| `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log/writer.rs` | How often a partial batch and the cumulative metrics are exported |
 | `MAX_SERIES` | `wye/src/usage_log/metrics.rs` | Attribute sets per OTLP metric |
 | `LOG_FLUSH_TIMEOUT` | `wye/src/server.rs` | How long shutdown waits for the usage log |
 | `STOP_WAIT` | `wye/src/main.rs` | How long the process waits on blocking work, such as a write to a stdout nobody reads, before it exits anyway |
