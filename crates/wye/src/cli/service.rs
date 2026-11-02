@@ -14,13 +14,14 @@ use std::{
     time::Duration,
 };
 
-use gateway_core::config::{Config, UpstreamCredential};
+use gateway_core::config::Config;
 
 use super::{
     files::{self, ERRORS_FILE, USAGE_LOG_FILE},
     paint::Paint,
     probe_blocking as probe, say,
 };
+use crate::startup::env_secrets;
 
 mod run;
 mod unit;
@@ -35,34 +36,6 @@ pub use unit::{Manager, Service};
 
 /// How long the gateway may take to answer once started.
 const START_WAIT: Duration = Duration::from_secs(5);
-
-/// Environment variables a config's secrets come from: a service does not
-/// inherit the shell's environment, so they would be missing.
-fn env_secrets(config: &Config) -> Vec<String> {
-    let mut names: Vec<String> = config
-        .routes
-        .upstreams()
-        .filter_map(|u| match &u.credential {
-            UpstreamCredential::ApiKeyEnv(name) => Some(name.clone()),
-            _ => None,
-        })
-        .collect();
-    names.extend(
-        config
-            .cache_diagnostics
-            .as_ref()
-            .map(|d| d.hash_key_env.clone()),
-    );
-    names.extend(
-        config
-            .telemetry
-            .as_ref()
-            .and_then(|t| t.otlp_headers_env.clone()),
-    );
-    names.sort();
-    names.dedup();
-    names
-}
 
 /// The config at `path`, checked as the service will start it: parsed,
 /// with no secret in the environment, and every file it names readable.

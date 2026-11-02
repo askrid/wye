@@ -175,6 +175,35 @@ pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<ProviderKeys
     ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
 
+/// The environment variables [`Resources::resolve`] reads secrets from,
+/// sorted: a service does not inherit the shell's environment, so `wye
+/// service` checks and passes on each.
+pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
+    let mut names: Vec<String> = config
+        .routes
+        .upstreams()
+        .filter_map(|u| match &u.credential {
+            UpstreamCredential::ApiKeyEnv(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect();
+    names.extend(
+        config
+            .cache_diagnostics
+            .as_ref()
+            .map(|d| d.hash_key_env.clone()),
+    );
+    names.extend(
+        config
+            .telemetry
+            .as_ref()
+            .and_then(|t| t.otlp_headers_env.clone()),
+    );
+    names.sort();
+    names.dedup();
+    names
+}
+
 // One resolver per secret, so `wye doctor` checks exactly what `serve`
 // will do with it.
 
