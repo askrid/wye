@@ -11,7 +11,12 @@ use http::{
     uri::{Authority, Scheme},
 };
 
+mod auth;
+mod upstream;
 mod validate;
+
+pub use auth::{Algorithm, Auth, Grant, Issuer, OwnIssuer, PublicKey};
+pub use upstream::{Provider, Upstream, UpstreamCredential, UpstreamHttpVersion};
 
 use crate::{
     alias::Aliases,
@@ -173,100 +178,6 @@ pub struct CacheDiagnostics {
     pub sample_percent: u8,
 }
 
-/// Signed gateway tokens (see [`crate::credential`]): Wye's own, from
-/// identity providers, or both.
-#[derive(Debug, Clone)]
-pub struct Auth {
-    /// Tokens issued with `wye token issue`; `None` when only identity
-    /// providers are trusted.
-    pub own: Option<OwnIssuer>,
-    /// Identity providers whose tokens are accepted directly.
-    pub issuers: Vec<Issuer>,
-    /// Longest accepted `exp - iat`: without a revocation list, offboarding
-    /// takes effect when the person's last token expires.
-    pub max_token_ttl: Duration,
-    /// Models any token may use; `None` allows every model. A token's
-    /// `models` claim, or an issuer's grants, narrow this, never widen it.
-    pub models: Option<Vec<ModelPattern>>,
-    /// Largest output-token maximum any request may ask for; a token's
-    /// `max_output_tokens` claim can only lower it.
-    pub max_output_tokens: Option<u64>,
-}
-
-/// Wye's own tokens: Ed25519, `alg` pinned to `EdDSA`.
-#[derive(Debug, Clone)]
-pub struct OwnIssuer {
-    /// Required `iss` claim.
-    pub issuer: String,
-    /// Required `aud` claim (one of them, if a list).
-    pub audience: String,
-    /// Verification keys, selected by the token's `kid`; several allow rotation.
-    pub keys: Vec<PublicKey>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PublicKey {
-    pub id: String,
-    pub ed25519_public_key: [u8; 32],
-}
-
-/// An identity provider (`[[auth.issuers]]`) whose JWTs Wye verifies
-/// directly, with keys pinned in config: no runtime key fetching.
-#[derive(Debug, Clone)]
-pub struct Issuer {
-    /// Required `iss` claim.
-    pub issuer: String,
-    /// Required `aud` claim (one of them, if a list).
-    pub audience: String,
-    /// The one algorithm accepted from this issuer, never read from the token.
-    pub algorithm: Algorithm,
-    /// The issuer's JSON Web Key Set, relative to the config file; read at startup.
-    pub jwks_file: PathBuf,
-    /// The claim that names the token's subject (default `sub`).
-    pub subject_claim: String,
-    /// Models granted by claim values. Empty: the `[auth] models` ceiling
-    /// applies alone. Otherwise a token gets the union of its matching
-    /// grants, and one matching none may use no model.
-    pub grants: Vec<Grant>,
-}
-
-/// Signature algorithms accepted from identity providers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Algorithm {
-    /// RSASSA-PKCS1-v1_5 with SHA-256, keys of 2048 to 8192 bits.
-    Rs256,
-    /// ECDSA on P-256 with SHA-256.
-    Es256,
-    /// Ed25519.
-    EdDsa,
-}
-
-impl Algorithm {
-    pub const ALL: [Self; 3] = [Self::Rs256, Self::Es256, Self::EdDsa];
-
-    /// The JOSE `alg` name.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Rs256 => "RS256",
-            Self::Es256 => "ES256",
-            Self::EdDsa => "EdDSA",
-        }
-    }
-
-    pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|a| a.as_str() == name)
-    }
-}
-
-/// Models a token gets when its `claim` equals `value`, or is a list
-/// containing it (for example `groups`).
-#[derive(Debug, Clone)]
-pub struct Grant {
-    pub claim: String,
-    pub value: String,
-    pub models: Vec<ModelPattern>,
-}
-
 #[derive(Debug, Clone)]
 pub struct Server {
     /// A loopback address unless `[auth]` is set.
@@ -288,114 +199,6 @@ pub struct Server {
     /// long is closed, which cancels its upstream request: a client that
     /// stops reading would otherwise hold its stream and buffers indefinitely.
     pub client_write_timeout: Duration,
-}
-
-#[derive(Debug, Clone)]
-pub struct Upstream {
-    /// Names the upstream in telemetry and `wye explain`; `None` for the
-    /// single `[upstream]`.
-    pub id: Option<Box<str>>,
-    /// Share of affinity keys, relative to the route's other upstreams.
-    pub weight: u32,
-    pub provider: Provider,
-    /// The `anthropic-workspace-id` sent with every request; set exactly
-    /// for [`Provider::ClaudePlatformAws`].
-    pub workspace_id: Option<Box<str>>,
-    pub scheme: Scheme,
-    pub authority: Authority,
-    /// Base path without a trailing slash; empty for a bare origin.
-    pub path_prefix: String,
-    pub credential: UpstreamCredential,
-    /// PEM file of extra root certificates trusted for the upstream, in addition
-    /// to the built-in roots. Relative paths are relative to the config file.
-    pub ca_file: Option<PathBuf>,
-    pub connect_timeout: Duration,
-    pub response_header_timeout: Duration,
-    pub stream_idle_timeout: Duration,
-    /// Protocols offered to a TLS upstream.
-    pub http_version: UpstreamHttpVersion,
-}
-
-/// Who serves an upstream, which decides how Wye authenticates to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Provider {
-    /// Anthropic's API: the key goes in `x-api-key`.
-    Anthropic,
-    /// Claude Platform on AWS: Anthropic's API, operated by Anthropic in
-    /// AWS; the key goes in `Authorization: Bearer`, and every request names
-    /// the workspace (`anthropic-workspace-id`).
-    ClaudePlatformAws,
-    /// Amazon Bedrock's Anthropic Messages endpoint: the Bedrock API key goes
-    /// in `x-api-key`, and model ids carry the `anthropic.` prefix.
-    Bedrock,
-    /// OpenAI's API: the key goes in `Authorization: Bearer`.
-    OpenAi,
-}
-
-impl Provider {
-    /// Whether the provider key goes as `Authorization: Bearer` rather than
-    /// `x-api-key`.
-    pub fn bearer_key(self) -> bool {
-        matches!(self, Self::OpenAi | Self::ClaudePlatformAws)
-    }
-
-    /// How the key is sent, for diagnostics.
-    pub fn key_header(self) -> &'static str {
-        if self.bearer_key() {
-            "Authorization: Bearer"
-        } else {
-            "x-api-key"
-        }
-    }
-
-    /// The prefix this provider's model ids carry: `model` is rewritten
-    /// with it for requests that go there (the allowlisted model rewrite).
-    pub fn model_prefix(self) -> Option<&'static str> {
-        match self {
-            Self::Bedrock => Some("anthropic."),
-            Self::Anthropic | Self::ClaudePlatformAws | Self::OpenAi => None,
-        }
-    }
-}
-
-/// Protocols Wye offers a TLS upstream through ALPN.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UpstreamHttpVersion {
-    /// HTTP/2 when the upstream offers it, else HTTP/1.1 (the default).
-    Auto,
-    /// HTTP/1.1 only: no HTTP/2 flow control on uploads, one connection
-    /// per concurrent request.
-    Http1,
-}
-
-/// How Wye authenticates to the upstream.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpstreamCredential {
-    /// Provider API key read from this environment variable at startup.
-    ApiKeyEnv(String),
-    /// Provider API key read from this file at startup (a mounted secret);
-    /// relative to the config file.
-    ApiKeyFile(PathBuf),
-    /// Forward the caller's own credential (loopback only).
-    ForwardCaller,
-}
-
-/// Where the key comes from: `$NAME`, a file, or the caller.
-impl fmt::Display for UpstreamCredential {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ApiKeyEnv(name) => write!(f, "${name}"),
-            Self::ApiKeyFile(path) => write!(f, "{}", path.display()),
-            Self::ForwardCaller => f.write_str("the caller's own"),
-        }
-    }
-}
-
-impl Upstream {
-    /// The base URL, without a trailing slash, as reports show it.
-    pub fn base_url(&self) -> String {
-        format!("{}://{}{}", self.scheme, self.authority, self.path_prefix)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
