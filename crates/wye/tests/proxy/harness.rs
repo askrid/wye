@@ -96,18 +96,29 @@ impl Harness {
         Self::launch(&base_url, "", upstream_extra, resources, hits).await
     }
 
+    /// API-key gateway in front of a plain mock upstream, with extra
+    /// `[server]` lines, extra lines after the upstream's key (further
+    /// sections included), and `resources`.
+    async fn keyed_with(
+        handler: Handler,
+        server_extra: &str,
+        upstream_extra: &str,
+        resources: Resources,
+    ) -> Self {
+        let (upstream, hits) = spawn_counted(handler).await;
+        let base_url = format!("http://{upstream}");
+        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
+        Self::launch(&base_url, server_extra, &extra, resources, hits).await
+    }
+
     /// API-key gateway in front of a plain mock upstream, with extra `[upstream]` lines.
     pub(crate) async fn keyed(handler: Handler, upstream_extra: &str) -> Self {
-        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
-        Self::start(handler, &extra, UpstreamAuth::api_key(API_KEY).unwrap()).await
+        Self::keyed_with(handler, "", upstream_extra, keyed_resources()).await
     }
 
     /// API-key gateway in front of a plain mock upstream, with extra `[server]` lines.
     pub(crate) async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
-        let (upstream, hits) = spawn_counted(handler).await;
-        let base_url = format!("http://{upstream}");
-        let key = "api_key_env = \"UNUSED\"";
-        Self::launch(&base_url, server_extra, key, keyed_resources(), hits).await
+        Self::keyed_with(handler, server_extra, "", keyed_resources()).await
     }
 
     /// API-key gateway with cache diagnostics on, keyed with `key`, with extra
@@ -117,16 +128,12 @@ impl Harness {
         key: &[u8],
         diagnostics_extra: &str,
     ) -> Self {
-        let (upstream, hits) = spawn_counted(handler).await;
         let resources = Resources {
             prompt_key: Some(HashKey::new(key).unwrap()),
             ..keyed_resources()
         };
-        let base_url = format!("http://{upstream}");
-        let extra = format!(
-            "api_key_env = \"UNUSED\"\n[cache_diagnostics]\nhash_key_env = \"UNUSED\"\n{diagnostics_extra}"
-        );
-        Self::launch(&base_url, "", &extra, resources, hits).await
+        let extra = format!("[cache_diagnostics]\nhash_key_env = \"UNUSED\"\n{diagnostics_extra}");
+        Self::keyed_with(handler, "", &extra, resources).await
     }
 
     /// Gateway in front of a TLS mock upstream; `trusted` adds the mock's CA to Wye's roots.
@@ -215,16 +222,13 @@ impl Harness {
         otlp_headers: HeaderMap,
     ) -> Self {
         let (collector, _) = spawn_counted(collector).await;
-        let (upstream, hits) = spawn_counted(handler).await;
         let resources = Resources {
             otlp_headers,
             ..keyed_resources()
         };
-        let telemetry = format!(
-            "api_key_env = \"UNUSED\"\n[telemetry]\notlp_endpoint = \"http://{collector}\"\n{telemetry_extra}"
-        );
-        let base_url = format!("http://{upstream}");
-        Self::launch(&base_url, "", &telemetry, resources, hits).await
+        let telemetry =
+            format!("[telemetry]\notlp_endpoint = \"http://{collector}\"\n{telemetry_extra}");
+        Self::keyed_with(handler, "", &telemetry, resources).await
     }
 
     /// Closes the usage log's reading end, as when the process reading
