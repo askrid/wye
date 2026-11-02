@@ -13,8 +13,8 @@ use bytes::Bytes;
 use gateway_core::{
     admission::Refusal,
     alias::Aliases,
-    api::{self, Api, RouteId},
-    config::{Config, DEFAULT_SAMPLE_PERCENT, UpgradeCheck},
+    api::{self, Api},
+    config::{Config, DEFAULT_SAMPLE_PERCENT, Routes, UpgradeCheck},
     credential::Verifier,
     policy::ModelPattern,
     pricing::Pricing,
@@ -51,10 +51,8 @@ const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 pub struct Gateway {
     /// Checks gateway tokens; `None` on a loopback-only gateway without `[auth]`.
     verifier: Option<Verifier>,
-    /// Anthropic Messages, when `[upstream]` or `[routes.claude]` is set.
-    claude: Option<ApiRoute>,
-    /// OpenAI Responses and Chat Completions, when `[routes.openai]` is set.
-    openai: Option<ApiRoute>,
+    /// The configured routes, ready to forward.
+    routes: Routes<ApiRoute>,
     /// Models any credential may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
     /// Largest output-token maximum any request may ask for.
@@ -109,7 +107,7 @@ impl Gateway {
         let otlp_roots = resources.all_extra_roots();
         // Resources come in `Routes::upstreams` order: Claude's, then OpenAI's.
         let mut resolved = resources.upstreams.into_iter();
-        let mut build = |route: &Route| -> Result<ApiRoute, StartupError> {
+        let build = |route: &Route| -> Result<ApiRoute, StartupError> {
             let upstreams = route
                 .upstreams()
                 .iter()
@@ -122,12 +120,10 @@ impl Gateway {
                 upstreams,
             })
         };
-        let claude = config.routes.claude.as_ref().map(&mut build).transpose()?;
-        let openai = config.routes.openai.as_ref().map(&mut build).transpose()?;
+        let routes = config.routes.try_map(build)?;
         Ok(Self {
             verifier: resources.verifier,
-            claude,
-            openai,
+            routes,
             models: config.auth.as_ref().and_then(|auth| auth.models.clone()),
             max_output_tokens: config.auth.as_ref().and_then(|auth| auth.max_output_tokens),
             catalog: config.discovery.as_ref().map(|discovery| {
@@ -174,10 +170,7 @@ impl Gateway {
     }
 
     fn route(&self, api: Api) -> Option<&ApiRoute> {
-        match api.route() {
-            RouteId::Claude => self.claude.as_ref(),
-            RouteId::OpenAi => self.openai.as_ref(),
-        }
+        self.routes.get(api)
     }
 
     /// Endpoints Wye answers itself.

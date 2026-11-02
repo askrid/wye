@@ -77,23 +77,24 @@ pub struct Config {
     pub upgrade_check: Option<UpgradeCheck>,
 }
 
-/// One route per native API.
+/// One route per native API: the config's [`Route`]s, or what a runtime
+/// builds from each.
 #[derive(Debug, Clone)]
-pub struct Routes {
+pub struct Routes<T = Route> {
     /// Anthropic Messages: `[upstream]`, or `[routes.claude]`.
-    pub claude: Option<Route>,
+    pub claude: Option<T>,
     /// OpenAI Responses and Chat Completions: `[routes.openai]`.
-    pub openai: Option<Route>,
+    pub openai: Option<T>,
 }
 
-impl Routes {
+impl<T> Routes<T> {
     /// The route serving `api`, if configured.
-    pub fn get(&self, api: Api) -> Option<&Route> {
+    pub fn get(&self, api: Api) -> Option<&T> {
         self.route(api.route())
     }
 
     /// The route `id`, if configured.
-    pub fn route(&self, id: RouteId) -> Option<&Route> {
+    pub fn route(&self, id: RouteId) -> Option<&T> {
         match id {
             RouteId::Claude => self.claude.as_ref(),
             RouteId::OpenAi => self.openai.as_ref(),
@@ -101,12 +102,22 @@ impl Routes {
     }
 
     /// Every configured route with its id, Claude's first.
-    pub fn iter(&self) -> impl Iterator<Item = (RouteId, &Route)> {
+    pub fn iter(&self) -> impl Iterator<Item = (RouteId, &T)> {
         RouteId::ALL
             .into_iter()
             .filter_map(|id| self.route(id).map(|route| (id, route)))
     }
 
+    /// Each route through `build`, Claude's first; the first error ends it.
+    pub fn try_map<U, E>(&self, mut build: impl FnMut(&T) -> Result<U, E>) -> Result<Routes<U>, E> {
+        Ok(Routes {
+            claude: self.claude.as_ref().map(&mut build).transpose()?,
+            openai: self.openai.as_ref().map(&mut build).transpose()?,
+        })
+    }
+}
+
+impl Routes {
     /// Every upstream of every route, in [`Self::iter`] order.
     pub fn upstreams(&self) -> impl Iterator<Item = &Upstream> {
         self.iter().flat_map(|(_, route)| route.upstreams())
