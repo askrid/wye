@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::Config;
+use crate::test_support::patterns;
 
 fn aliases() -> Aliases {
     Config::from_toml_str(
@@ -11,12 +12,6 @@ fn aliases() -> Aliases {
     .unwrap()
     .aliases
     .unwrap()
-}
-
-fn patterns(list: &[&str]) -> Vec<ModelPattern> {
-    list.iter()
-        .map(|p| ModelPattern::parse(p).unwrap())
-        .collect()
 }
 
 const NONE: BodyChecks<'static> = BodyChecks {

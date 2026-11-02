@@ -2,6 +2,7 @@ use proptest::prelude::*;
 
 use super::*;
 use crate::api::Api;
+use crate::test_support::patterns;
 
 fn scan(body: &[u8]) -> Result<String, PolicyError> {
     let mut scanner = PolicyScanner::for_api(Api::Messages);
@@ -32,12 +33,6 @@ fn scan_chunked(body: &[u8], sizes: &[usize]) -> Chunked {
         known_after,
         scanner.model_span(),
     )
-}
-
-fn patterns(list: &[&str]) -> Vec<ModelPattern> {
-    list.iter()
-        .map(|p| ModelPattern::parse(p).unwrap())
-        .collect()
 }
 
 #[test]

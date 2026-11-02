@@ -37,10 +37,7 @@ fn grant(claim: &str, value: &str, models: &[&str]) -> Grant {
     Grant {
         claim: claim.into(),
         value: value.into(),
-        models: models
-            .iter()
-            .map(|m| ModelPattern::parse(m).unwrap())
-            .collect(),
+        models: crate::test_support::patterns(models),
     }
 }
 
