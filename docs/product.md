@@ -1,6 +1,6 @@
 # Product
 
-**Run your agents like infrastructure.** Keys, models, failover, limits, and cost for Claude Code, Codex, and your apps live in one TOML file in Git, and every request passes through as it was sent.
+**Run your agents like infrastructure.** Keys, models, failover, limits, and cost for Claude Code, Codex, and your apps live in one TOML file in Git, and each provider's native API passes through without translation.
 
 Wye is a gateway between AI agents or AI-native apps and the model providers. Clients keep the provider's official SDK and native API, and get every new provider feature on the endpoints Wye serves the day it ships. Everything that is not application logic moves out of their code into one reviewed, Git-managed config: which model and provider serve a request, credentials, limits, failover, upgrades, telemetry, and cost. Wye does this per request and statelessly, as one binary with one TOML file and no database.
 
@@ -28,7 +28,7 @@ Every feature follows these, and a feature that cannot is not built.
 - **Native and transparent.** Each client's native API passes through to its own provider, and bodies are forwarded unchanged beyond the [allowlist](architecture.md#forwarding-contract). New provider features work through Wye without a Wye release. Telemetry carries ids, counts, and keyed hashes, never prompt text.
 - **Report, don't rewrite.** Where a client's request will break (an upgrade, a policy), Wye refuses explicitly or reports it. It never silently changes what the client asked for: the one field it changes, the model, changes only where reviewed config says so (an alias, a provider's own model id such as Bedrock's, or, planned, a routing rule the operator turns on), and never out of sight, since the response names the model that ran and the record keeps both.
 - **Request-local and stateless.** A decision uses only the request, its token, and the immutable config; correlation across requests happens in the user's telemetry backend. Nothing authoritative carries across requests, and nothing moves between replicas ([policy.md](policy.md#state-boundary)).
-- **Fast and light.** The request path reads headers; hashing, encoding, and aggregation happen in the telemetry writer task. A streamed event costs no allocation, and every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they are cheap enough to run on every request.
+- **Fast and light.** The request path reads headers, and the body only where a policy or an opt-in scan needs it; keying, encoding, and aggregation happen in the telemetry writer task. A streamed event costs no allocation, and every queue and metric series has a fixed bound. Body scans are opt-in and sampled unless they are cheap enough to run on every request.
 - **Little to set up.** Working defaults, so a local gateway needs a few config lines; `base_url` plus a token for any SDK; one command per agent (`wye claude`, `wye codex`); errors that say what to change; prebuilt binaries and images. A feature that needs a manual to set up is not done.
 - **One responsibility.** Inference traffic only: no agent loop, tool execution, dashboard, or stored usage history.
 

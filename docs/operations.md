@@ -88,7 +88,7 @@ Not checked yet: model availability per upstream.
 
 A refusal prints the status and error the server would send. The body is read as the server reads it: up to its `model`, then the rest when permissions or a ceiling apply. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the server answers a compressed or non-UTF-8 body under a policy with `415`).
 
-**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream`, `path`, `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and only the signature check is skipped. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases, and the test suite runs them.
+**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the model the request runs on, after aliases), `upstream`, `path`, `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases, and the test suite runs them.
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
@@ -194,7 +194,7 @@ Nginx and app servers in front of SSE must disable proxy buffering and use a ser
 
 ### Running as a service
 
-On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops, through the operating system's own service manager, as you. It needs no sudo and changes nothing outside your home directory.
+On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops (on Linux, if it fails), through the operating system's own service manager, as you. It needs no sudo and changes nothing outside your home directory.
 
 It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config>` with stdout appended to `usage.jsonl` and stderr to `wye.log`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
 

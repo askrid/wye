@@ -143,7 +143,7 @@ Copy the `[pricing]` block from [policy.md](policy.md#pricing-metadata) into you
 
 ## Model aliases and upgrades
 
-Clients ask for a name the config maps to a model, so moving every client to a new model is one reviewed change. Before you move, upgrade checks report which live requests the new model would reject:
+Clients ask for a name the config maps to a model, so moving every client to a new model is one reviewed change. Before you move, upgrade checks report which live Anthropic Messages requests the new model would reject:
 
 ```toml
 [[aliases]]
@@ -209,7 +209,7 @@ Run `wye doctor` first. It checks keys, files, and endpoints, lists every proble
 
 ### Does it change my requests?
 
-Only the `model` value, when config maps an alias or the provider has its own id (Bedrock). Other body bytes are forwarded as sent. Headers change as a proxy's must: a gateway holding a key replaces the caller's credential with it, hop-by-hop headers go, and `accept-encoding` becomes `identity` so usage can be read. A request Wye cannot allow is refused, never altered ([forwarding contract](architecture.md#forwarding-contract)).
+Only the `model` value, when config maps an alias or the provider has its own id (Bedrock). Other body bytes are forwarded as sent. Headers change as a proxy's must: a gateway holding a key replaces the caller's credential with it and drops `OpenAI-Organization` and `OpenAI-Project`, hop-by-hop headers go, `accept-encoding` becomes `identity` so usage can be read, and Claude Platform on AWS gets `anthropic-workspace-id`. A request Wye cannot allow is refused, never altered ([forwarding contract](architecture.md#forwarding-contract)).
 
 ### Does it see my prompts?
 

@@ -6,7 +6,7 @@
 
 **Run your agents like infrastructure.** Keys, models, failover, limits, and
 cost for Claude Code, Codex, and your apps live in one TOML file in Git, and
-every request passes through as it was sent.
+each provider's native API passes through without translation.
 
 Wye is a stateless gateway for coding agents and LLM applications. It sits
 between clients and model providers, records the usage and cost of every
@@ -61,19 +61,21 @@ applications on the official SDKs, upgrades, and troubleshooting.
 - **Gives a team scoped access.** Gateway tokens replace the provider key,
   signed by Wye or by your identity provider (GitHub Actions, or SSO through
   Claude Code's `apiKeyHelper`). Each token carries the models and output-token
-  ceiling it may use, enforced before the provider is called; with
-  `[discovery]`, Claude Code's model picker lists only those models.
+  ceiling it may use, and a request outside them is refused before the
+  provider has all of it; with `[discovery]` and
+  `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker
+  lists only those models.
   ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across keys and providers.** Several Anthropic keys, Claude
   Platform on AWS, and Bedrock behind one address (several OpenAI keys too),
   shared by weight. Each session stays on one key so its prompt cache stays
-  warm, and a request refused with `429` or `529` moves to the next key before
-  any output. Bedrock and Claude Platform on AWS are not yet verified against
-  the live services.
+  warm, and with `failover` on, a request refused with `429` or `529` moves to
+  the next key before any output. Bedrock and Claude Platform on AWS are not
+  yet verified against the live services.
   ([several keys or providers](docs/guide.md#several-keys-or-providers))
 - **Changes models in one place.** Aliases map a stable name to a model per
-  team or token, and upgrade checks report which requests a newer model would
-  reject before the switch. Requests are never altered to fit.
+  team or token, and upgrade checks report which Messages requests a newer
+  model would reject before the switch. Requests are never altered to fit.
   ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
 - **Checks decisions before they ship.** `wye explain` shows what the gateway
   would do with a request, offline. `wye policy-test` and `wye policy-diff`
@@ -105,9 +107,9 @@ applications on the official SDKs, upgrades, and troubleshooting.
   follows every Claude Code release.
 - **Applications on the official SDKs.** Model names, keys, failover, and cost
   move out of application code, and a model upgrade becomes a config change
-  once the upgrade check reports nothing that would break. Wye alone does not
-  protect a public endpoint from abuse: per-user authentication and quotas stay
-  in your backend.
+  once the upgrade check reports nothing that would break (it reads Anthropic
+  Messages requests). Wye alone does not protect a public endpoint from abuse:
+  per-user authentication and quotas stay in your backend.
 
 ## How it compares
 

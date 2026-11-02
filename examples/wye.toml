@@ -219,7 +219,8 @@ http_version = "auto"
 
 # Upgrade checks: before an alias or a client moves to a newer model, report
 # which requests that model would reject (a manual thinking budget, forced
-# tool_choice, prefill, ...). Report only; requests are never changed.
+# tool_choice, prefill, ...). Anthropic Messages requests only. Report only;
+# requests are never changed.
 # Results: upgrade_issues in usage records, wye.upgrade.issues in OTLP,
 # `wye report`, and `wye explain --config wye.toml --target-model <model> request.json`.
 # [upgrade_check]
