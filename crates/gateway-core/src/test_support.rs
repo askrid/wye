@@ -1,5 +1,7 @@
 //! Helpers the unit tests share.
 
+use proptest::prelude::*;
+
 use crate::policy::ModelPattern;
 
 /// Feeds `body` to `feed` in chunks of `sizes`, repeated until the body
@@ -21,4 +23,23 @@ pub(crate) fn patterns(list: &[&str]) -> Vec<ModelPattern> {
     list.iter()
         .map(|p| ModelPattern::parse(p).unwrap())
         .collect()
+}
+
+/// Feeds `bytes` to `feed` in pieces, cut wherever `cuts` say (any values).
+pub(crate) fn feed_cut(bytes: &[u8], cuts: Vec<usize>, mut feed: impl FnMut(&[u8])) {
+    let mut cuts: Vec<usize> = cuts.into_iter().map(|c| c % (bytes.len() + 1)).collect();
+    cuts.sort_unstable();
+    let mut at = 0;
+    for cut in cuts {
+        feed(&bytes[at..cut]);
+        at = cut;
+    }
+    feed(&bytes[at..]);
+}
+
+/// Chunks of arbitrary bytes, half of them from `vocabulary`: the bytes the
+/// scanner under test turns on.
+pub(crate) fn arbitrary_chunks(vocabulary: &'static [u8]) -> impl Strategy<Value = Vec<Vec<u8>>> {
+    let byte = prop_oneof![any::<u8>(), prop::sample::select(vocabulary.to_vec())];
+    prop::collection::vec(prop::collection::vec(byte, 0..256), 0..32)
 }

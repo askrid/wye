@@ -1,7 +1,10 @@
 use proptest::prelude::*;
 
 use super::*;
-use crate::usage::tests::{arbitrary_chunks, feed_cut};
+use crate::{
+    test_support::{arbitrary_chunks, feed_cut},
+    usage::tests::VOCABULARY,
+};
 
 const MESSAGE: &str = r#"{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"a \"usage\":{\"input_tokens\":99} lookalike"},{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls","name":"not-a-tool","usage":{"input_tokens":7}}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":5,"output_tokens":20,"service_tier":"standard"}}"#;
 
@@ -86,7 +89,7 @@ proptest! {
 
     #[test]
     fn arbitrary_bytes_never_panic(
-        chunks in arbitrary_chunks(),
+        chunks in arbitrary_chunks(VOCABULARY),
         api in prop::sample::select(vec![Api::Messages, Api::Responses, Api::ChatCompletions]),
     ) {
         let mut s = JsonUsageScanner::new(api);

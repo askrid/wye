@@ -171,16 +171,7 @@ fn every_rule_names_its_source_and_fix() {
 proptest! {
     #[test]
     fn arbitrary_bytes_never_panic(
-        chunks in prop::collection::vec(
-            prop::collection::vec(
-                prop_oneof![
-                    any::<u8>(),
-                    prop::sample::select(b"{}[],:\"\\ thinkgoolesmaryp_".to_vec()),
-                ],
-                0..256,
-            ),
-            0..32,
-        ),
+        chunks in crate::test_support::arbitrary_chunks(b"{}[],:\"\\ thinkgoolesmaryp_"),
     ) {
         let mut scanner = UpgradeScanner::new();
         for chunk in &chunks {

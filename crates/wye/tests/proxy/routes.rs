@@ -11,9 +11,7 @@ async fn named_upstream(name: &'static str, hits: &Arc<AtomicUsize>) -> SocketAd
         let key = seen.headers["x-api-key"].to_str().unwrap().to_owned();
         Box::pin(async move {
             let body = format!("{{\"upstream\":\"{name}\",\"key\":\"{key}\"}}");
-            let mut res = full(StatusCode::OK, "");
-            *res.body_mut() = Either::Left(Full::new(Bytes::from(body)));
-            res
+            full(StatusCode::OK, body)
         })
     });
     spawn_upstream(handler, Arc::clone(hits), None, None).await

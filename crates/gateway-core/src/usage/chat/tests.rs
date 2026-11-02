@@ -1,7 +1,10 @@
 use proptest::prelude::*;
 
 use super::*;
-use crate::usage::tests::{arbitrary_chunks, feed_cut};
+use crate::{
+    test_support::{arbitrary_chunks, feed_cut},
+    usage::tests::VOCABULARY,
+};
 
 /// A streamed chat completion with a tool call and, when asked for, usage.
 fn stream(with_usage: bool) -> String {
@@ -78,7 +81,7 @@ proptest! {
     }
 
     #[test]
-    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks()) {
+    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks(VOCABULARY)) {
         let mut s = ChatUsageScanner::new();
         for chunk in &chunks {
             s.feed(chunk);

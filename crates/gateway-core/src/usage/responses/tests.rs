@@ -1,7 +1,10 @@
 use proptest::prelude::*;
 
 use super::*;
-use crate::usage::tests::{arbitrary_chunks, feed_cut};
+use crate::{
+    test_support::{arbitrary_chunks, feed_cut},
+    usage::tests::VOCABULARY,
+};
 
 /// A Codex-like stream: created, a reasoning item, a function call, a hosted
 /// web search, text deltas, and the terminal event with the full output.
@@ -130,7 +133,7 @@ proptest! {
     }
 
     #[test]
-    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks()) {
+    fn arbitrary_bytes_never_panic(chunks in arbitrary_chunks(VOCABULARY)) {
         let mut scanner = ResponsesUsageScanner::new();
         for chunk in &chunks {
             scanner.feed(chunk);
