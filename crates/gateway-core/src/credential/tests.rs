@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use ring::signature::KeyPair;
+use ring::signature::{Ed25519KeyPair, KeyPair};
 
 use super::*;
 use crate::config::{OwnIssuer, PublicKey};
