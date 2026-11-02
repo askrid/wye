@@ -8,7 +8,7 @@
 
 use std::{ffi::OsString, process::Command};
 
-use gateway_core::config::is_loopback_host;
+use gateway_core::config::is_cleartext_remote;
 
 use super::args::Parsed;
 
@@ -84,8 +84,7 @@ impl Launch {
         // Plain http beyond this machine would carry the gateway token, or
         // the agent's own login, in the clear.
         if let Ok(uri) = gateway.parse::<http::Uri>()
-            && uri.scheme_str() == Some("http")
-            && uri.host().is_some_and(|host| !is_loopback_host(host))
+            && is_cleartext_remote(&uri)
         {
             return Err(format!(
                 "{gateway} is a remote gateway over plain http; use https"

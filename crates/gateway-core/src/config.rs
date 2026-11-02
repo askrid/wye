@@ -289,6 +289,12 @@ pub fn is_loopback_host(host: &str) -> bool {
             .is_ok_and(|ip| ip.is_loopback())
 }
 
+/// Whether `uri` is plain http to another machine, where whatever a request
+/// carries (a token, a key, a login) crosses the network in the clear.
+pub fn is_cleartext_remote(uri: &Uri) -> bool {
+    uri.scheme_str() == Some("http") && !uri.host().is_some_and(is_loopback_host)
+}
+
 impl Config {
     /// Parses and validates a TOML document.
     pub fn from_toml_str(source: &str) -> Result<Self, ConfigError> {

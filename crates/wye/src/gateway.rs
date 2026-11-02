@@ -15,7 +15,7 @@ use gateway_core::{
     alias::Aliases,
     api::{self, Api},
     config::{Config, DEFAULT_SAMPLE_PERCENT, Routes, UpgradeCheck},
-    credential::Verifier,
+    credential::{CredentialError, Identity, Verifier},
     policy::ModelPattern,
     pricing::Pricing,
     prompt::HashKey,
@@ -169,6 +169,19 @@ impl Gateway {
         })
     }
 
+    /// The caller's identity when gateway tokens are configured, `None`
+    /// when they are not; `Err` for a missing or invalid token.
+    fn identify(
+        &self,
+        headers: &http::HeaderMap,
+        connection: &ConnectionAuth,
+    ) -> Result<Option<Arc<Identity>>, CredentialError> {
+        self.verifier
+            .as_ref()
+            .map(|verifier| authenticate(verifier, headers, connection))
+            .transpose()
+    }
+
     fn route(&self, api: Api) -> Option<&ApiRoute> {
         self.routes.get(api)
     }
@@ -245,7 +258,7 @@ impl Gateway {
                 .cloned(),
             traceparent: req.headers().get(TRACEPARENT).cloned(),
             agent: match api {
-                Api::Messages => AgentHeaders::from_headers(req.headers()),
+                Api::Messages => AgentHeaders::from_claude_code_headers(req.headers()),
                 Api::Responses => AgentHeaders::from_codex_headers(req.headers()),
                 Api::ChatCompletions => AgentHeaders::default(),
             },
@@ -257,11 +270,9 @@ impl Gateway {
             failovers: Vec::new(),
             started: Instant::now(),
         };
-        if let Some(verifier) = &self.verifier {
-            match authenticate(verifier, req.headers(), connection) {
-                Ok(identity) => info.identity = Some(identity),
-                Err(_) => return log.gateway_error(info, unauthorized(api)),
-            }
+        match self.identify(req.headers(), connection) {
+            Ok(identity) => info.identity = identity,
+            Err(_) => return log.gateway_error(info, unauthorized(api)),
         }
         self.forward(req, info, log).await
     }
@@ -276,12 +287,8 @@ impl Gateway {
         req: &Request<Incoming>,
         connection: &ConnectionAuth,
     ) -> Response<ResBody> {
-        let identity = match &self.verifier {
-            None => None,
-            Some(verifier) => match authenticate(verifier, req.headers(), connection) {
-                Ok(identity) => Some(identity),
-                Err(_) => return unauthorized(Api::Messages),
-            },
+        let Ok(identity) = self.identify(req.headers(), connection) else {
+            return unauthorized(Api::Messages);
         };
         let body = catalog.list(
             identity.as_ref().and_then(|i| i.models.as_deref()),

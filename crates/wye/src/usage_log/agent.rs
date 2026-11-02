@@ -38,7 +38,7 @@ pub(crate) struct AgentHeaders {
 }
 
 impl AgentHeaders {
-    pub(crate) fn from_headers(headers: &HeaderMap) -> Self {
+    pub(crate) fn from_claude_code_headers(headers: &HeaderMap) -> Self {
         let bytes = |name| headers.get(name).map(HeaderValue::as_bytes);
         Self {
             request_class: RequestClass::parse(bytes(REQUEST_CLASS)),

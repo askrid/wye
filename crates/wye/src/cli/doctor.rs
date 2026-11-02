@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::config::{
-    Config, Provider, Telemetry, Upstream, UpstreamCredential, is_loopback_host,
+    Config, Provider, Telemetry, Upstream, UpstreamCredential, is_cleartext_remote,
 };
 use http::{Request, Uri};
 use http_body_util::Empty;
@@ -88,7 +88,7 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
 fn headers_in_clear(telemetry: &Telemetry) -> Option<Check> {
     let name = telemetry.otlp_headers_env.as_ref()?;
     let uri = &telemetry.otlp_logs_uri;
-    (uri.scheme_str() == Some("http") && !uri.host().is_some_and(is_loopback_host)).then(|| {
+    is_cleartext_remote(uri).then(|| {
         Err(format!(
             "telemetry: ${name} would cross the network in the clear to {}; \
              use https, or a collector on this machine",
