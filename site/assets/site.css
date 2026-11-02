@@ -352,7 +352,8 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
 .part > :is(.code-wrap, pre.code, .table-scroll, .long-lines):not(:last-child) { margin-bottom: 0.5rem; }
 .stops > section + section { border-top: 1px dashed var(--rule); }
 .part h2 { font-size: var(--h2); line-height: 1.2; }
-.part > p, .prose, .item { max-width: var(--measure); }
+/* Prose keeps its reading measure; a table may use the section's width. */
+.part > p, .item, .prose > :not(table) { max-width: var(--measure); }
 .hash { color: var(--graphite); text-decoration: none; }
 .hash:hover { color: var(--line); }
 .prose { display: grid; gap: 1rem; }
@@ -366,7 +367,28 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
   vertical-align: baseline;
 }
 .prose thead th { color: var(--graphite); font-weight: 400; border-bottom-style: solid; }
+/* The first column names a need in a few words; it gets a third of the
+   width, so it wraps once at most and the answer beside it keeps a measure. */
+.prose th:first-child, .prose td:first-child { width: 32%; }
 .prose td:first-child { color: var(--ink); }
+/* On a phone each row stacks: the need, then the answer under it. */
+@media (max-width: 40rem) {
+  .prose thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .prose tbody tr {
+    display: grid;
+    gap: 0.25rem;
+    padding-block: 0.75rem;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .prose tbody td, .prose td:first-child { width: auto; padding: 0; border: 0; }
+}
 /* An item of README's "What it does", placed at its stop: its bold lead
    reads as the stop's subheading. */
 .item p > strong:first-child {
