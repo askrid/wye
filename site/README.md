@@ -1,6 +1,6 @@
 # Site
 
-The Wye website: a landing page built from the repository's own files and published to GitHub Pages. How it looks and why: [DESIGN.md](DESIGN.md).
+The Wye website: a landing page built from the repository's own files and published to GitHub Pages.
 
 | Path | Contents |
 | --- | --- |

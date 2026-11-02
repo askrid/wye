@@ -1,4 +1,4 @@
-/* The Wye site. Tokens and rules: site/DESIGN.md (direction: terminal route). */
+/* The Wye site: the route a request takes, drawn as a terminal draws it. */
 
 /* Wye Mono: IBM Plex Mono, subset to Latin, box drawing, and block
    elements, and renamed, since "Plex" is a Reserved Font Name under its
@@ -47,7 +47,7 @@
 
 /* Dark only: the page is one terminal, whatever the system's theme.
    Monochrome: white on black, amber only for the failover route, red only
-   for refusals (site/DESIGN.md). */
+   for refusals. */
 :root {
   color-scheme: dark;
   --paper: #050505;
@@ -130,7 +130,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   text-decoration: none;
 }
 /* The mark: the junction as the diagram draws it, one line forking in two,
-   on a tile. Same drawing as assets/icon.svg. */
+   on a tile. Same drawing as assets/icon-fork.svg, the favicon, which is
+   named for its drawing: browsers keep a favicon long after it changes, so
+   a new mark takes a new file name. */
 .mark svg { width: 1.875rem; height: 1.875rem; }
 .mark .tile { fill: var(--ground); stroke: #3a3a3a; }
 .mark .fork { fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
@@ -279,7 +281,7 @@ h1 { font-size: var(--h1); line-height: 1.12; letter-spacing: -0.01em; }
 
 /* The request's route: the sections are stops in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
-   printed like `tree` (site/DESIGN.md, "Layout"). */
+   printed like `tree`. */
 .route {
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);

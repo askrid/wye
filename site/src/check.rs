@@ -1,6 +1,6 @@
 //! Checks on the built site: everything a page loads comes from the site
-//! itself (site/DESIGN.md, "Keep no state"), every local link and anchor
-//! resolves, and no directive is left unexpanded.
+//! itself (no request to another origin, so nothing tracks a reader), every
+//! local link and anchor resolves, and no directive is left unexpanded.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

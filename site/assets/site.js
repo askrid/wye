@@ -1,6 +1,6 @@
-// Conveniences the page works without (site/DESIGN.md, "Never the slow
-// part"): copy buttons on command and config blocks, and a play button for
-// the junction where the reader asked for reduced motion.
+// Conveniences the page works without, with scripts off as well: copy
+// buttons on command and config blocks, and a play button for the junction
+// where the reader asked for reduced motion.
 
 // Copy buttons: without them the text stays selectable.
 for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.code[data-lang="toml"]')) {

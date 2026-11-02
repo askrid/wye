@@ -14,8 +14,8 @@ cargo test --locked --quiet
 cargo run --locked --quiet
 
 # What a first visit downloads, compressed as a server sends it: each page
-# and every stylesheet, script, and SVG gzipped, the fonts as they are
-# (site/DESIGN.md, "Never the slow part").
+# and every stylesheet, script, and SVG gzipped, the fonts as they are. The
+# site should never be the slow part, as the gateway never is.
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }
 shared=$(cat out/assets/fonts/*.woff2 | wc -c)
