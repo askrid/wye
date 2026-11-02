@@ -19,7 +19,7 @@ A gateway can absorb the part of that churn that is not application logic, but o
 
 Spend was part of the motivating case too: a team stopped using an AI gateway once model spend became hard to justify or control. Wye is designed to bound spend without a ledger of its own: per-request output-token ceilings today, and (planned) per-request cost ceilings and cumulative limits held by the provider that bills ([policy.md](policy.md#provider-held-budgets)).
 
-Performance is a requirement, measured rather than claimed: streaming without buffering, memory per idle stream, CPU per event, and cancellation. Every commit is benchmarked on these against its parent ([development.md](development.md#commit-gate)). The results so far come from one laptop against a mock upstream; there are no production measurements yet ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
+Performance is a requirement, measured rather than claimed: streaming without buffering, memory per idle stream, CPU per event, and cancellation. Every commit that changes code is benchmarked on these against its parent ([development.md](development.md#commit-gate)). The results so far come from one laptop against a mock upstream; there are no production measurements yet ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
 
 ## Principles
 
@@ -104,7 +104,7 @@ Strengths:
 - Trivial to operate on any platform that runs N identical processes behind a load balancer ([operations.md](operations.md#without-kubernetes)).
 - CI and IdP tokens are verified directly against keys pinned in config, with no token service.
 - Policy as code, checked offline.
-- Measured, on a laptop against a mock upstream: about 0.2-0.3 ms added per request and no allocation per event, both checked on every commit, and about 1,500 token-paced streams on one core within 10 ms of added p99.
+- Measured, on a laptop against a mock upstream: about 0.2-0.3 ms added per request and no allocation per event, both checked on every commit that changes code, and about 1,500 token-paced streams on one core within 10 ms of added p99.
 
 Weaknesses:
 

@@ -1,6 +1,6 @@
 # Development
 
-How changes are made, verified, and committed. Wye must never be the bottleneck between a client and the provider, so every commit is checked for performance as well as correctness.
+How changes are made, verified, and committed. Wye must never be the bottleneck between a client and the provider, so every commit that changes code is checked for performance as well as correctness.
 
 ## Layout
 

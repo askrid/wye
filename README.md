@@ -83,8 +83,8 @@ applications on the official SDKs, upgrades, and troubleshooting.
 - **Works with existing clients.** Claude Code, Codex, and applications on the
   official Anthropic and OpenAI SDKs connect by base URL; `wye claude` and
   `wye codex` set it for you. Anthropic Messages, OpenAI Responses, and Chat
-  Completions pass through unchanged, and streams are relayed event by event,
-  never buffered.
+  Completions pass through as sent, apart from a model id that config maps,
+  and streams are relayed as the provider sends them, never buffered.
   ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs where you need it.** `wye service` installs a macOS LaunchAgent
   or a systemd user unit. A team runs any number of identical replicas behind a
@@ -139,9 +139,10 @@ and the response names the model that ran.
 
 ## Performance
 
-Every commit is benchmarked against its parent in alternating rounds on the
-same machine (`scripts/check.sh`), and a change that makes Wye slower or
-heavier beyond the gate's tolerances is not committed. The figures below are
+Every commit that changes code is benchmarked against its parent in
+alternating rounds on the same machine (`scripts/check.sh`), and a change
+that makes Wye slower or heavier beyond the gate's tolerances is not
+committed. The figures below are
 lab results from one laptop (Intel i9-9880H, macOS) against a local mock
 provider, not production measurements.
 
@@ -309,7 +310,7 @@ restart. [docs/roadmap.md](docs/roadmap.md) tracks all of it.
 ## Development
 
 Tests run against local mock upstreams and never call a paid API, and every
-commit passes a benchmark gate against its parent. See
+commit that changes code passes a benchmark gate against its parent. See
 [docs/development.md](docs/development.md).
 
 ## Documentation
