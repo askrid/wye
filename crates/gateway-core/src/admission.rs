@@ -135,10 +135,15 @@ impl TokenCeiling {
     /// The check as a body is read: a value is final once read, a missing
     /// field only once `body_read` (the whole body was read without one).
     pub fn check(self, requested: Option<u64>, body_read: bool) -> Option<TokenLimitError> {
-        if requested.is_none() && !body_read {
-            return None;
-        }
-        TokenLimitError::check(self.api, self.limit, requested)
+        let refused = match requested {
+            Some(requested) => requested > self.limit,
+            None => body_read && self.api.token_field_required(),
+        };
+        refused.then_some(TokenLimitError {
+            field: self.api.token_field(),
+            requested,
+            limit: self.limit,
+        })
     }
 }
 
@@ -224,21 +229,6 @@ pub struct TokenLimitError {
     /// `None`: the request did not set the field.
     pub requested: Option<u64>,
     pub limit: u64,
-}
-
-impl TokenLimitError {
-    /// The refusal for `requested` under `limit` on `api`, if any.
-    pub fn check(api: Api, limit: u64, requested: Option<u64>) -> Option<Self> {
-        let refused = match requested {
-            Some(requested) => requested > limit,
-            None => api.token_field_required(),
-        };
-        refused.then_some(Self {
-            field: api.token_field(),
-            requested,
-            limit,
-        })
-    }
 }
 
 impl fmt::Display for TokenLimitError {

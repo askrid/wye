@@ -54,7 +54,7 @@ pub struct PolicyScanner {
 }
 
 impl PolicyScanner {
-    pub fn for_api(api: Api) -> Self {
+    pub(crate) fn for_api(api: Api) -> Self {
         Self {
             error: None,
             started: false,
@@ -81,7 +81,7 @@ impl PolicyScanner {
 
     /// Leaves the output-token field alone: without a ceiling, what it holds
     /// is between the client and the provider.
-    pub fn without_token_field(mut self) -> Self {
+    pub(crate) fn without_token_field(mut self) -> Self {
         self.token_keys = &[];
         self
     }

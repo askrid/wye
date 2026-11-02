@@ -87,7 +87,7 @@ impl fmt::Display for ModelPattern {
 
 /// The output-token ceiling of a request: the stricter of the configured
 /// and the credential's limit, if either is set.
-pub fn token_limit(configured: Option<u64>, credential: Option<u64>) -> Option<u64> {
+pub(crate) fn token_limit(configured: Option<u64>, credential: Option<u64>) -> Option<u64> {
     configured.into_iter().chain(credential).min()
 }
 
