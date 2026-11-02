@@ -34,28 +34,28 @@
       <p class="lede">A stateless gateway between Claude Code, Codex, or your apps and the model providers. Keys, models, failover, limits, and cost live in one TOML file in Git; requests pass through as sent, and each leaves a record of its tokens and cost.</p>
     </div>
 
-    <figure class="junction">
-      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; the account stop holds the session on anthropic, which answers 429 before any output, so the same request goes to {{field README.md|{|upstream}}; the stream comes back event by event; the record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
-<pre>claude code
-│
-o  <b>gate</b>      <span class="d">token checked</span>
-│
-o  <b>model</b>     <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
-│
-o  <b>account</b>   <span class="d">session held on anthropic</span>
-├──<span class="no">x</span>         <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
-<span class="r2">╰──</span>o         <span class="d">{{field README.md|{|upstream}}, same request</span>
-<span class="r2">   │</span>
-   o  <b>stream</b> <span class="d">event by event</span>
-<span class="r2">   │</span>
-   o  <b>record</b> {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
-      </div>
-    </figure>
-
     <div class="hero-install">
       {{fence README.md|cargo install}}
       <p class="facts">{{release}} · {{license}} · one Rust binary, no database · <a href="{{repo}}/blob/main/CHANGELOG.md">what is verified</a></p>
     </div>
+
+    <figure class="junction">
+      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; the account stop holds the session on anthropic, which refuses it with 429 before any output, so the same request is retried on {{field README.md|{|upstream}}; the stream is relayed as the provider sends it, never buffered; the record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
+<pre>claude code
+│
+o     <b>gate</b>      <span class="d">token checked</span>
+│
+o     <b>model</b>     <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
+│
+o     <b>account</b>   <span class="d">session held on anthropic</span>
+├──<span class="no">x</span>  refused   <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+<span class="r2">╰──</span>o  retried   <span class="d">{{field README.md|{|upstream}}, same request</span>
+<span class="r2">   │</span>
+   o  <b>stream</b>    <span class="d">as sent, never buffered</span>
+<span class="r2">   │</span>
+   o  <b>record</b>    {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+      </div>
+    </figure>
   </section>
 
   <div class="route">
@@ -99,7 +99,7 @@ o  <b>account</b>   <span class="d">session held on anthropic</span>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
         <h2 id="stream-h"><a class="hash" href="#stream" aria-label="Link to stream">#</a> stream</h2>
-        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit is benchmarked against its parent, and one that makes Wye slower or heavier is not committed.</p></div>
+        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit that changes code is benchmarked against its parent, and one that makes Wye slower or heavier is not committed.</p></div>
         <div class="table-scroll">
           <table class="numbers">
             <thead>

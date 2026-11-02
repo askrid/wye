@@ -142,23 +142,23 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a { color: var(--graphite); text-decoration: none; }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* First screen: what Wye is beside the route a request takes through it,
-   then how to start it, across the page so the install comments stay on
-   their lines. On narrow screens the route follows the install. */
+/* First screen, in source order: what Wye is, how to start it, and the
+   route a request takes through it. On wide screens the route stands
+   beside the copy as a figure, both on one top edge, and the install
+   block spans the page below so its comments stay on their lines. */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 29rem);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 30rem);
   grid-template-areas: "copy route" "install install";
-  align-items: center;
-  gap: 2.75rem clamp(2.5rem, 5vw, 4.5rem);
+  align-items: start;
+  gap: 3.5rem clamp(2.5rem, 5vw, 4.5rem);
   padding-block: clamp(3rem, 7vw, 5.5rem) clamp(2.5rem, 5vw, 4rem);
 }
 .hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
 .hero .junction { grid-area: route; }
 .hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
 @media (max-width: 60rem) {
-  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "route"; }
-  .hero .junction { padding-top: 2rem; border-top: 1px solid var(--rule); }
+  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "route"; gap: 2.5rem; }
 }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
@@ -177,16 +177,18 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 
 /* The route, drawn as a terminal would: one request through every stop,
    each with what Wye decided there, the failover a fork at the account,
-   the record at the end. The grid is 45 characters by 13 lines, sized to
-   fill its container: 45 advances of 0.6 em are 27 em. It stays still: it
-   reads top to bottom in the order things happen. */
+   the record at the end. Every row keeps three columns: the line from 0,
+   names from 6, what happened from 16, so a name never runs into its
+   decision. The grid is 48 characters by 13 lines, sized to fill its
+   container: 48 advances of 0.6 em are 28.8 em. It stays still: it reads
+   top to bottom in the order things happen. */
 .junction { margin: 0; min-width: 0; }
 .junction-art { min-width: 0; container-type: inline-size; }
 .junction pre {
   margin: 0;
-  width: 45ch;
+  width: 48ch;
   font-family: var(--display);
-  font-size: min(17px, 100cqi / 27.2);
+  font-size: min(16px, 100cqi / 29.2);
   /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
      the strokes of one line meet those of the next. */
   line-height: 1.3;
