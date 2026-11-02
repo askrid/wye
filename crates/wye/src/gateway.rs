@@ -182,10 +182,6 @@ impl Gateway {
             .transpose()
     }
 
-    fn route(&self, api: Api) -> Option<&ApiRoute> {
-        self.routes.get(api)
-    }
-
     /// Endpoints Wye answers itself.
     fn local(&self, method: &Method, path: &str) -> Response<ResBody> {
         match (method, path) {
@@ -237,7 +233,7 @@ impl Gateway {
                 return self.list_models(catalog, &req, connection);
             }
             (&Method::POST, path, _) => match api::endpoint(path) {
-                Some(endpoint) if self.route(endpoint.api).is_some() => endpoint,
+                Some(endpoint) if self.routes.get(endpoint.api).is_some() => endpoint,
                 Some(endpoint) => {
                     let refusal = Refusal::NoRoute {
                         api: endpoint.api,

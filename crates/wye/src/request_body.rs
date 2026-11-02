@@ -59,11 +59,11 @@ pub(crate) const MIN_CHUNK_CHARGE: usize = 1024;
 /// connection, would otherwise keep its permit and its share of the hold
 /// budget for good: nothing else reads a request body against a clock, and
 /// a connection to a peer that is gone stays open while Wye only reads.
-pub(crate) const HOLD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const HOLD_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long a body may take to reach its `model`, however it trickles: a drip
 /// would otherwise keep its charge against the hold budget for good. Allows
 /// the largest body at about 1 Mbit/s with `model` last.
-pub(crate) const HOLD_TIMEOUT: Duration = Duration::from_secs(300);
+const HOLD_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// What a held chunk of `len` bytes counts against a budget.
 pub(crate) fn charge(len: usize) -> usize {

@@ -38,7 +38,7 @@ pub(super) use encode::{Value, write_attributes};
 use encode::{write_log_record, write_span};
 
 /// Records per batch before it is sent without waiting for the timer.
-pub(super) const MAX_BATCH_RECORDS: usize = 512;
+const MAX_BATCH_RECORDS: usize = 512;
 /// Batches waiting for the exporter before new ones are dropped.
 const EXPORT_QUEUE: usize = 8;
 /// One export attempt; a slower collector loses the batch.

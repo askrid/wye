@@ -59,23 +59,13 @@ impl ClientPool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
 
     fn pool() -> ClientPool {
         ClientPool::new(|| {
             let http = hyper_util::client::legacy::connect::HttpConnector::new();
             let https = hyper_rustls::HttpsConnectorBuilder::new()
-                .with_tls_config(
-                    rustls::ClientConfig::builder_with_provider(Arc::new(
-                        rustls::crypto::ring::default_provider(),
-                    ))
-                    .with_safe_default_protocol_versions()
-                    .unwrap()
-                    .with_root_certificates(rustls::RootCertStore::empty())
-                    .with_no_client_auth(),
-                )
+                .with_tls_config(crate::tls::client_config(&[]).unwrap())
                 .https_or_http()
                 .enable_http1()
                 .wrap_connector(http);

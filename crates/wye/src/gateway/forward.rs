@@ -68,7 +68,7 @@ impl Gateway {
             Err(res) => return log.gateway_error(pending.answered(), *res),
         };
         self.sample(pending.info());
-        let Some(route) = self.route(api) else {
+        let Some(route) = self.routes.get(api) else {
             unreachable!("handle only forwards endpoints with a route")
         };
         let result = self
@@ -184,6 +184,28 @@ impl Gateway {
             return result;
         }
     }
+
+    /// Whether this request's body is hashed for cache diagnostics and
+    /// scanned by upgrade checks: both read Anthropic request bodies, sampled
+    /// by session (upgrade checks: by client for SDK callers without one).
+    fn sample(&self, info: &mut RequestInfo) {
+        if info.endpoint.api != Api::Messages {
+            return;
+        }
+        let session = info.session_id.as_ref().map(HeaderValue::as_bytes);
+        if self.prompt_key.is_some() && prompt::session_sampled(session, self.prompt_sample_percent)
+        {
+            info.prompt = Some(PromptSlot::default());
+        }
+        if let Some(check) = &self.upgrade_check
+            && prompt::session_sampled(
+                affinity_key(session, info.identity.as_ref().map(|i| &*i.subject)),
+                check.sample_percent,
+            )
+        {
+            info.upgrade = Some(UpgradeSlot::default());
+        }
+    }
 }
 
 /// The failover reason `result` gives, if the route acts on it. A lost connection
@@ -244,30 +266,6 @@ fn with_model_id(
                 *prefix_sent = prefix;
                 resend
             })
-        }
-    }
-}
-
-impl Gateway {
-    /// Whether this request's body is hashed for cache diagnostics and
-    /// scanned by upgrade checks: both read Anthropic request bodies, sampled
-    /// by session (upgrade checks: by client for SDK callers without one).
-    fn sample(&self, info: &mut RequestInfo) {
-        if info.endpoint.api != Api::Messages {
-            return;
-        }
-        let session = info.session_id.as_ref().map(HeaderValue::as_bytes);
-        if self.prompt_key.is_some() && prompt::session_sampled(session, self.prompt_sample_percent)
-        {
-            info.prompt = Some(PromptSlot::default());
-        }
-        if let Some(check) = &self.upgrade_check
-            && prompt::session_sampled(
-                affinity_key(session, info.identity.as_ref().map(|i| &*i.subject)),
-                check.sample_percent,
-            )
-        {
-            info.upgrade = Some(UpgradeSlot::default());
         }
     }
 }

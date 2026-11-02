@@ -297,12 +297,4 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(headers["anthropic-beta"], "a,b");
     }
-
-    #[test]
-    fn api_key_debug_is_redacted() {
-        let auth = UpstreamAuth::api_key("sk-secret").unwrap();
-        assert_eq!(format!("{auth:?}"), "ApiKey(<redacted>)");
-        let auth = UpstreamAuth::bearer("sk-secret").unwrap();
-        assert_eq!(format!("{auth:?}"), "Bearer(<redacted>)");
-    }
 }

@@ -37,7 +37,8 @@ impl Gateway {
     /// without an upstream that has its own model ids, the body passes
     /// untouched; otherwise it is held until its `model` is read,
     /// then replayed (with an alias replaced by its model, and `headers`'
-    /// `content-length` adjusted) and checked as it streams.
+    /// `content-length` adjusted) and, for permissions and ceilings, checked
+    /// as it streams.
     pub(super) async fn admit_body(
         &self,
         body: Incoming,
@@ -46,7 +47,7 @@ impl Gateway {
     ) -> Result<(RequestBody<ClientBody>, Option<ModelSpan>), Box<Response<ResBody>>> {
         let api = info.endpoint.api;
         let mut body = Limited::new(body, self.max_request_body_bytes);
-        let route = self.route(api);
+        let route = self.routes.get(api);
         let checks = BodyChecks::new(
             self.models.as_deref(),
             self.max_output_tokens,

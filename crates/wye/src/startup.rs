@@ -328,4 +328,12 @@ mod tests {
         assert!(parse_headers("no-equals-sign").is_none());
         assert!(parse_headers("").unwrap().is_empty());
     }
+
+    #[test]
+    fn api_key_debug_is_redacted() {
+        let auth = UpstreamAuth::api_key("sk-secret").unwrap();
+        assert_eq!(format!("{auth:?}"), "ApiKey(<redacted>)");
+        let auth = UpstreamAuth::bearer("sk-secret").unwrap();
+        assert_eq!(format!("{auth:?}"), "Bearer(<redacted>)");
+    }
 }
