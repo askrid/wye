@@ -259,9 +259,9 @@ fn an_overlong_model_name_is_not_kept() {
         "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"model\":\"{long}\",\"usage\":{{\"input_tokens\":1,\"output_tokens\":1}}}}}}\n\n"
     );
     assert_eq!(scan(&[start.as_bytes()]).model(), None);
-    let fits = start.replace(&long, &"m".repeat(MAX_MODEL_BYTES));
+    let fits = start.replace(&long, &"m".repeat(MAX_RECORDED_MODEL_BYTES));
     assert_eq!(
         scan(&[fits.as_bytes()]).model().map(str::len),
-        Some(MAX_MODEL_BYTES)
+        Some(MAX_RECORDED_MODEL_BYTES)
     );
 }

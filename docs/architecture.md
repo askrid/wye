@@ -346,7 +346,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/credential.rs`, `credential/keys.rs` | A presented token and an identity provider's key set |
 | `CLOCK_SKEW_SECS` | `gateway-core/src/credential.rs` | How far a token's `iat` or `nbf` may lie ahead of this clock |
 | `MAX_TIMER_SECS` | `gateway-core/src/config/validate.rs` | Any configured timeout or interval (one day): larger values would overflow a deadline |
-| `MAX_USAGE_LINE_BYTES`, `MAX_BLOCK_START_LINE_BYTES`, `MAX_TOOL_NAMES` | `gateway-core/src/usage.rs` | A usage-bearing Messages SSE line; a `content_block_start` line; tool names counted per response |
+| `MAX_USAGE_LINE_BYTES`, `MAX_BLOCK_START_LINE_BYTES`, `MAX_TOOL_NAMES`, `MAX_TOOL_NAME_BYTES`, `MAX_RECORDED_MODEL_BYTES` | `gateway-core/src/usage.rs` | A usage-bearing Messages SSE line; a `content_block_start` line; tool names counted per response, and the longest counted by name; a model name kept in a usage record |
 | `MAX_ITEM_LINE_BYTES` | `gateway-core/src/usage/responses.rs` | A Responses `response.output_item.added` line |
 | `MAX_LINE_BYTES` | `gateway-core/src/usage/chat.rs` | A Chat Completions `data:` line kept across chunks |
 | `MAX_USAGE_BYTES`, `MAX_FIELD_BYTES` | `gateway-core/src/usage/fields.rs` | The `usage` object of a JSON response or a Responses terminal event; its `model` and `service_tier` |

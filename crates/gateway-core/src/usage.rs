@@ -33,11 +33,11 @@ pub const MAX_TOOL_NAMES: usize = 8;
 pub const MAX_TOOL_NAME_BYTES: usize = 64;
 /// Longest model name kept from a response. Every record, OTLP batch, and
 /// metric series carries it, so a longer one is dropped.
-pub const MAX_MODEL_BYTES: usize = 128;
+pub const MAX_RECORDED_MODEL_BYTES: usize = 128;
 
-/// `model` when it fits [`MAX_MODEL_BYTES`].
+/// `model` when it fits [`MAX_RECORDED_MODEL_BYTES`].
 fn kept_model<M: AsRef<str>>(model: Option<M>) -> Option<M> {
-    model.filter(|m| m.as_ref().len() <= MAX_MODEL_BYTES)
+    model.filter(|m| m.as_ref().len() <= MAX_RECORDED_MODEL_BYTES)
 }
 
 /// Whether an OpenAI `service_tier` is billed outside the token prices:
