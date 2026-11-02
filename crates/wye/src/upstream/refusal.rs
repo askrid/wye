@@ -18,7 +18,7 @@ use gateway_core::{admission::TokenLimitError, policy::PolicyError};
 use http_body_util::LengthLimitError;
 use hyper::body::{Body, Frame, SizeHint};
 
-use crate::{BoxError, scanned_body::Slot};
+use crate::{BoxError, Slot};
 
 /// A refusal raised after forwarding began; the upstream request was aborted.
 #[derive(Debug, Clone, Copy)]

@@ -5,17 +5,13 @@
 
 use std::{
     pin::Pin,
-    sync::{Arc, OnceLock},
     task::{Context, Poll},
 };
 
 use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 
-/// A scan result, set once the whole body was read. Shared between the
-/// request body (in hyper's client) and the usage record; an error or a
-/// dropped body leaves it empty.
-pub(crate) type Slot<T> = Arc<OnceLock<T>>;
+use crate::Slot;
 
 /// What [`ScannedBody`] feeds.
 pub(crate) trait BodyScanner: Default {

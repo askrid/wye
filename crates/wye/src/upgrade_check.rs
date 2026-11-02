@@ -9,7 +9,7 @@
 use gateway_core::upgrade::{self, Findings, UpgradeScanner};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use crate::scanned_body::{BodyScanner, Slot};
+use crate::{Slot, scanned_body::BodyScanner};
 
 /// Upgrade-check findings of one request body ([`Slot`]).
 pub(crate) type UpgradeSlot = Slot<Findings>;

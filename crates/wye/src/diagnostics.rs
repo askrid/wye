@@ -12,7 +12,7 @@ use gateway_core::prompt::{
 };
 use serde::{Serialize, Serializer};
 
-use crate::scanned_body::{BodyScanner, Slot};
+use crate::{Slot, scanned_body::BodyScanner};
 
 /// Prompt hashes of one request body ([`Slot`]).
 pub(crate) type PromptSlot = Slot<PromptHashes>;
