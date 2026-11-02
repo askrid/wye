@@ -14,6 +14,7 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
+      - docs/benchmarks.md
       - bench/baseline.json
       - Cargo.toml
       - crates/wye/Cargo.toml
@@ -25,6 +26,7 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
+      - docs/benchmarks.md
       - bench/baseline.json
       - Cargo.toml
       - crates/wye/Cargo.toml
