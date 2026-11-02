@@ -22,7 +22,7 @@ Check: every claim links to the doc section that backs it, and nothing contradic
 
 ### Never the slow part
 
-*From fast and light.* HTML and CSS; a script may add conveniences, such as copy buttons and a play button for a reader who asked for reduced motion, but every page reads and works without it. At most two self-hosted, subset font files, with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
+*From fast and light.* HTML and CSS; a script may add conveniences, such as copy buttons and a play button for a reader who asked for reduced motion, but every page reads and works without it. At most three self-hosted, subset font files (a reading face, and two weights of one face for everything else), with metric-matched fallbacks so nothing moves when they load. Starting budget: the landing page under 150 KB over the wire, fonts included.
 
 Check: `site/check.sh` fails a page over budget, the way the benchmark gate fails a slower gateway.
 
@@ -60,27 +60,28 @@ Check: the review of each page names its job and its one bold element.
 
 ## Direction: terminal route
 
-The route map, drawn as a terminal draws it. Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output), then moved to a terminal ("hacker") style the same day at the user's request. Wye's config already names routes and upstreams, and Wye is a command-line tool whose output is the evidence on the page; so the page is set in monospace throughout, its diagram is box-drawing characters on a character grid, its table of contents prints like `tree`, and the junction on the first screen is the wye. Not green on black: the colours are the route's, on a deep blue-black ground. The page is dark only, whatever the system's theme: a v2 decision of the user's on 2026-11-01, from the "Wye site v2" design canvas, which also chose the type and the mark below.
+The route map, drawn as a terminal draws it. Chosen on 2026-11-01 from three proposals (route map, piping schematic, annotated output), then moved to a terminal ("hacker") style the same day at the user's request. Wye's config already names routes and upstreams, and Wye is a command-line tool whose output is the evidence on the page; so the page's structure is set in monospace (headings, code, output, numbers, the diagram, the table of contents), its diagram is box-drawing characters on a character grid, its table of contents prints like `tree`, and the junction on the first screen is the wye. Running text is set in a typewriter face made for reading. The page is dark only and monochrome, white on black, whatever the system's theme; colour is kept for meaning: amber is the failover route and red a refusal, and neither appears anywhere else. Near-black with one accent is on the list below; amber here is not an accent but the second route's colour. The user chose dark only on 2026-11-01 (the "Wye site v2" design canvas) and the monochrome palette, the reading face, the spacing, and the mark on 2026-11-02 (the "Wye site v3" canvas).
 
 | Token | Value | Use (WCAG contrast against `paper`) |
 | --- | --- | --- |
-| `paper` | `#070B0F` | Page ground |
-| `ground` | `#0E151B` | Code and output |
-| `rule` | `#1A242C` | Dividers |
-| `ink` | `#DDE6EC` | Headings, emphasis, request marks (15.6:1) |
-| `text` | `#C4CED5` | Running text |
-| `graphite` | `#8D9BA6` | Secondary text (6.9:1) |
-| `line` | `#58A6E6` | First route, links (7.5:1) |
-| `branch` | `#E8AA2E` | Second route (9.6:1) |
-| `signal` | `#FF6474` | Refusals (429, 529), nothing else (6.9:1) |
+| `paper` | `#050505` | Page ground |
+| `ground` | `#101010` | Code and output |
+| `rule` | `#232323` | Dividers |
+| `ink` | `#F5F5F5` | Headings, emphasis, the first route, links, the mark (18.7:1) |
+| `text` | `#D0D0D0` | Running text (13.2:1) |
+| `graphite` | `#909090` | Secondary text (6.4:1) |
+| `branch` | `#F0B43C` | The failover route, nothing else (11.0:1) |
+| `signal` | `#FF6474` | Refusals (429, 529), nothing else (7.1:1) |
 
-Blue and amber are the only route colours, chosen to stay apart under red-green colour blindness.
+White and amber are the only route colours; they differ in lightness as well as hue, so they stay apart under any colour blindness. A refusal is also spelled out (`x`, `429`), never shown by colour alone.
 
-Type: Wye Mono for everything, Regular for text and SemiBold for headings. It is IBM Plex Mono, subset to Latin, box drawing, and block elements, and renamed, since "Plex" is a Reserved Font Name under its SIL Open Font License (`assets/fonts/OFL-Plex.txt`). Plex Mono was chosen for reading comfort over the pixel face it replaced, and because it carries the box-drawing characters the diagram and the rail need. Its box-drawing glyphs are 1.3 em tall, so the diagram and the rail use that line height and their strokes join from line to line.
+Type: Wye Text for running text (paragraphs, lists, captions, the compare table), Wye Mono for everything else: SemiBold for headings, leads, and bold; Regular for code, output, numbers, the diagram, the table of contents, navigation, and buttons. Wye Text is iA Writer Quattro S, a Plex Mono derivative whose wide and narrow letters read like prose and still look typed; on a phone it fits about 40 characters a line where Plex Mono fits 33. It is subset to Latin and punctuation and renamed, since "iA Writer" and "Plex" are Reserved Font Names under its SIL Open Font License (`assets/fonts/OFL-iA-Writer.txt`). Wye Mono is IBM Plex Mono, subset to Latin, box drawing, and block elements, and renamed the same way (`assets/fonts/OFL-Plex.txt`); it carries the box-drawing characters the diagram and the rail need. Its box-drawing glyphs are 1.3 em tall, so the diagram and the rail use that line height and their strokes join from line to line. Text is 17 px (16 px on a phone), with a measure of 64 zeros of Wye Text, about 70 characters.
 
-Diagrams: box-drawing characters on a grid of whole character cells, the route in `line`, the branch in `branch`, stations as `o`, the request as `█`, labels in `graphite`. Moving parts jump a cell at a time (`steps()` in `ch` and `lh` units) on a `paper` background, so a moving glyph replaces the character under it. Only real upstream ids are drawn.
+Spacing groups what belongs together: a stop's lead sits close above its text, a block of code, output, or numbers stands a little apart from the text around it and further from what follows than from what leads into it, and a dashed rule separates stops.
 
-Mark: the junction drawn as the letter Y, a stem and arm in `line` and an arm in `branch`, square-capped on a `ground` tile, so it reads at 16 px in a browser tab on light and dark bars alike.
+Diagrams: box-drawing characters on a grid of whole character cells, the route in `ink`, the failover branch in `branch`, stations as `o`, the request as `█`, labels in `graphite`. Moving parts jump a cell at a time (`steps()` in `ch` and `lh` units) on a `paper` background, so a moving glyph replaces the character under it. Only real upstream ids are drawn.
+
+Mark: the junction as the diagram draws it, one line forking in two, in `ink` on a `ground` tile with a lighter edge, so it reads at 16 px in a browser tab on light and dark bars alike.
 
 Layout: the page follows one request through Wye. Its sections are stops in the order a request meets them (client, gate, model, account, stream, record), then the sections off the route (how it compares, the config, status, what Wye will not do), each headed by a lowercase name after a `#` that links to it. On wide screens a rail beside them is the table of contents, printed like `tree`, and the stop being read is selected in inverse video through scroll-driven animations; on narrow screens the route runs down the stops' left edge as a line. Each stop shows its item of README's "What it does", placed by the item's bold lead; an item the page does not place appears at the end of the config section, so a new one is never dropped.
 

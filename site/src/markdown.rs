@@ -173,7 +173,18 @@ fn shell_line(out: &mut String, line: &str) {
         line.find(" #").map(|i| i + 1)
     };
     let (code, comment) = line.split_at(at.unwrap_or(line.len()));
-    out.push_str(&escape(code));
+    for (i, word) in code.split(' ').enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        // A browser may wrap a narrow block after a hyphen, as in "-" then
+        // "-locked"; a word with one is kept whole, so lines break at spaces.
+        if word.contains('-') {
+            span(out, "w", word);
+        } else {
+            out.push_str(&escape(word));
+        }
+    }
     span(out, "c", comment);
 }
 
@@ -322,6 +333,10 @@ mod tests {
         assert_eq!(
             highlight("bash", "wye init   # writes it"),
             "wye init   <span class=\"c\"># writes it</span>"
+        );
+        assert_eq!(
+            highlight("bash", "cargo install a --locked  # b-c"),
+            "cargo install a <span class=\"w\">--locked</span>  <span class=\"c\"># b-c</span>"
         );
         assert_eq!(
             highlight("console", "$ a < b\nout"),
