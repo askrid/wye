@@ -50,8 +50,8 @@ const EXPECTED: Usage = Usage {
     unpriced: false,
 };
 
-fn scan(chunks: &[&[u8]]) -> SseUsageScanner {
-    let mut scanner = SseUsageScanner::new();
+fn scan(chunks: &[&[u8]]) -> MessagesUsageScanner {
+    let mut scanner = MessagesUsageScanner::new();
     for chunk in chunks {
         scanner.feed(chunk);
     }
@@ -81,7 +81,7 @@ proptest! {
     #[test]
     fn arbitrary_chunking_gives_the_same_result(sizes in proptest::collection::vec(1usize..64, 1..400)) {
         let bytes = STREAM.as_bytes();
-        let mut scanner = SseUsageScanner::new();
+        let mut scanner = MessagesUsageScanner::new();
         let mut pos = 0;
         for size in sizes.iter().cycle() {
             if pos >= bytes.len() {
@@ -97,7 +97,7 @@ proptest! {
 
     #[test]
     fn arbitrary_bytes_never_panic(chunks in proptest::collection::vec(proptest::collection::vec(any::<u8>(), 0..256), 0..32)) {
-        let mut scanner = SseUsageScanner::new();
+        let mut scanner = MessagesUsageScanner::new();
         for chunk in &chunks {
             scanner.feed(chunk);
         }
@@ -135,7 +135,7 @@ fn malformed_usage_event_is_unknown() {
 
 #[test]
 fn oversized_usage_event_is_unknown_and_bounded() {
-    let mut s = SseUsageScanner::new();
+    let mut s = MessagesUsageScanner::new();
     s.feed(b"event: message_start\ndata: {\"message\":{\"pad\":\"");
     let filler = vec![b'x'; 8 * 1024];
     for _ in 0..32 {
@@ -148,7 +148,7 @@ fn oversized_usage_event_is_unknown_and_bounded() {
 
 #[test]
 fn long_lines_of_other_events_are_not_kept() {
-    let mut s = SseUsageScanner::new();
+    let mut s = MessagesUsageScanner::new();
     s.feed(b"event: content_block_delta\ndata: ");
     s.feed(&vec![b'x'; 100_000]);
     assert!(s.lines.line.len() <= CLASSIFY_PREFIX_BYTES);

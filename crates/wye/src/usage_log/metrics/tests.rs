@@ -159,7 +159,7 @@ fn cache_misses_are_counted_by_reason() {
 
 #[test]
 fn tool_calls_are_summed_by_name() {
-    let mut scanner = gateway_core::usage::SseUsageScanner::new();
+    let mut scanner = gateway_core::usage::MessagesUsageScanner::new();
     for name in ["Bash", "Read", "Bash"] {
         scanner.feed(
             format!(

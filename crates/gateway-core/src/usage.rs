@@ -1,25 +1,20 @@
-//! Token usage extraction from responses: Anthropic Messages streams here,
-//! OpenAI Responses streams in `responses`, Chat Completions streams in
-//! `chat`, and non-streaming JSON bodies of all three in `json`;
-//! [`UsageScanner`] picks one per API and content type.
-//!
-//! [`SseUsageScanner`] reads the forwarded bytes without changing, delaying, or
-//! copying them. It keeps at most one partial line, parses JSON only for the two
-//! events that carry usage (`message_start` and `message_delta`) and for
-//! `content_block_start` (once per content block, to count `tool_use` blocks by
-//! tool name), and skips every other event after reading its line prefix.
-//! HTTP chunk boundaries are not SSE boundaries: lines may be split anywhere,
+//! Token usage extraction from responses: Anthropic Messages streams in
+//! `messages`, OpenAI Responses streams in `responses`, Chat Completions
+//! streams in `chat`, and non-streaming JSON bodies of all three in `json`;
+//! [`UsageScanner`] picks one per API and content type. HTTP chunk boundaries
+//! are not SSE boundaries: the stream scanners take lines split anywhere,
 //! including inside UTF-8.
 
 mod chat;
 mod fields;
 mod json;
+mod messages;
 mod raw;
 mod responses;
 
 pub use chat::ChatUsageScanner;
 pub use json::JsonUsageScanner;
-use raw::{BlockStartData, DeltaData, StartData};
+pub use messages::MessagesUsageScanner;
 pub use responses::ResponsesUsageScanner;
 
 use crate::api::Api;
@@ -87,15 +82,6 @@ impl UsageStatus {
             Self::Unknown => "unknown",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum Event {
-    #[default]
-    Other,
-    MessageStart,
-    MessageDelta,
-    ContentBlockStart,
 }
 
 /// `tool_use` blocks of one response, by tool name. Fixed size, so counting
@@ -173,7 +159,7 @@ fn count_tool(tools: &mut Option<Box<ToolCalls>>, name: &str) {
 /// keep their size.
 #[derive(Debug)]
 pub enum UsageScanner {
-    Messages(SseUsageScanner),
+    Messages(MessagesUsageScanner),
     Responses(Box<ResponsesUsageScanner>),
     Chat(Box<ChatUsageScanner>),
     Json(Box<JsonUsageScanner>),
@@ -183,7 +169,7 @@ impl UsageScanner {
     /// For an SSE stream of `api`.
     pub fn new(api: Api) -> Self {
         match api {
-            Api::Messages => Self::Messages(SseUsageScanner::new()),
+            Api::Messages => Self::Messages(MessagesUsageScanner::new()),
             Api::Responses => Self::Responses(Box::default()),
             Api::ChatCompletions => Self::Chat(Box::default()),
         }
@@ -290,125 +276,6 @@ impl Lines {
         }
         self.line
             .extend_from_slice(bytes.get(..room.min(bytes.len())).unwrap_or_default());
-    }
-}
-
-/// Incremental usage scanner for one Anthropic Messages stream.
-#[derive(Debug, Default)]
-pub struct SseUsageScanner {
-    lines: Lines,
-    event: Event,
-    usage: Usage,
-    model: Option<Box<str>>,
-    /// Boxed on the first `tool_use` block: responses without tool calls
-    /// stay small.
-    tools: Option<Box<ToolCalls>>,
-    saw_start: bool,
-    saw_delta: bool,
-    /// A usage event could not be read; the counts are not trustworthy.
-    corrupt: bool,
-}
-
-impl SseUsageScanner {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn feed(&mut self, chunk: &[u8]) {
-        let mut lines = std::mem::take(&mut self.lines);
-        lines.feed(chunk, self, Self::line_limit, Self::process_line);
-        self.lines = lines;
-    }
-
-    /// Bytes kept of a partial line: as much as the current event needs.
-    fn line_limit(&self) -> usize {
-        match self.event {
-            Event::Other => CLASSIFY_PREFIX_BYTES,
-            Event::MessageStart | Event::MessageDelta => MAX_USAGE_LINE_BYTES,
-            Event::ContentBlockStart => MAX_BLOCK_START_LINE_BYTES,
-        }
-    }
-
-    fn process_line(&mut self, line: &[u8], truncated: bool) {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        if line.is_empty() {
-            self.event = Event::Other;
-        } else if let Some(name) = line.strip_prefix(b"event:") {
-            self.event = match name.trim_ascii() {
-                b"message_start" => Event::MessageStart,
-                b"message_delta" => Event::MessageDelta,
-                b"content_block_start" => Event::ContentBlockStart,
-                _ => Event::Other,
-            };
-        } else if let Some(data) = line.strip_prefix(b"data:") {
-            if self.event == Event::Other {
-                return;
-            }
-            if truncated {
-                // An oversized block start is not a tool call; usage is not affected.
-                self.corrupt |= self.event != Event::ContentBlockStart;
-                return;
-            }
-            self.read_data(data.trim_ascii());
-        }
-    }
-
-    fn read_data(&mut self, data: &[u8]) {
-        match self.event {
-            Event::MessageStart => match serde_json::from_slice::<StartData>(data) {
-                Ok(start) => {
-                    self.saw_start = true;
-                    self.model = kept_model(start.message.model).map(String::into_boxed_str);
-                    if let Some(raw) = start.message.usage {
-                        raw.merge_into(&mut self.usage);
-                    }
-                }
-                Err(_) => self.corrupt = true,
-            },
-            Event::MessageDelta => match serde_json::from_slice::<DeltaData>(data) {
-                Ok(delta) => {
-                    if let Some(raw) = delta.usage {
-                        self.saw_delta = true;
-                        raw.merge_into(&mut self.usage);
-                    }
-                }
-                Err(_) => self.corrupt = true,
-            },
-            // Borrowed parse: no allocation. A name with escapes fails to
-            // borrow and is skipped, like any malformed block start.
-            Event::ContentBlockStart => {
-                if let Ok(start) = serde_json::from_slice::<BlockStartData<'_>>(data)
-                    && start.content_block.kind == "tool_use"
-                {
-                    count_tool(
-                        &mut self.tools,
-                        start.content_block.name.unwrap_or_default(),
-                    );
-                }
-            }
-            Event::Other => {}
-        }
-    }
-
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        self.tools.take()
-    }
-
-    pub fn usage(&self) -> Usage {
-        self.usage
-    }
-
-    /// Model the provider reported in `message_start`.
-    pub fn model(&self) -> Option<&str> {
-        self.model.as_deref()
-    }
-
-    pub fn status(&self) -> UsageStatus {
-        match (self.corrupt, self.saw_start, self.saw_delta) {
-            (true, _, _) | (false, false, false) => UsageStatus::Unknown,
-            (false, _, true) => UsageStatus::Complete,
-            (false, true, false) => UsageStatus::Partial,
-        }
     }
 }
 
