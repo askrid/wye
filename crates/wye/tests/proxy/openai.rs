@@ -8,16 +8,8 @@ const EVENTS: &str = "event: response.created\ndata: {\"type\":\"response.create
 
 /// A gateway with only `[routes.openai]` (plus `extra` config) in front of `handler`.
 async fn gateway(handler: Handler, extra: &str) -> Harness {
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{extra}\n\
-         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::bearer(OPENAI_KEY).unwrap(),
-    )]);
-    Harness::launch_config(&config, resources, hits).await
+    let auth = UpstreamAuth::bearer(OPENAI_KEY).unwrap();
+    Harness::single_route(handler, "openai", extra, "id = \"openai\"", auth).await
 }
 
 /// [`gateway`] whose upstream reports what it received and answers with an SSE stream.

@@ -67,17 +67,14 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
 #[tokio::test]
 async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
     let (handler, mut rx) = recording(|seen| seen.headers);
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"aws\"\n\
-         provider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCd\"\n\
-         base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
+    let h = Harness::single_route(
+        handler,
+        "claude",
+        "",
+        "id = \"aws\"\nprovider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCd\"",
         UpstreamAuth::bearer("aws-short-term-key").unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    )
+    .await;
     let res = h
         .send(messages().header("x-api-key", "client-key"), "{}")
         .await;
@@ -92,16 +89,14 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
 #[tokio::test]
 async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
     let (handler, mut rx) = recording(|seen| (seen.headers, seen.body));
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\n\
-         provider = \"bedrock\"\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
-    );
-    let resources = with_upstreams(vec![UpstreamResources::new(
+    let h = Harness::single_route(
+        handler,
+        "claude",
+        "",
+        "id = \"bedrock\"\nprovider = \"bedrock\"",
         UpstreamAuth::api_key("bedrock-key").unwrap(),
-    )]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    )
+    .await;
     for (sent, received) in [
         (
             r#"{"model":"claude-opus-5-5","max_tokens":1}"#,
