@@ -71,7 +71,7 @@ pub async fn serve(
     http.max_buf_size(MAX_CONNECTION_BUFFER);
     // Owns every connection task; aborted after the grace period.
     let mut connections = JoinSet::new();
-    // `connections` is an argument, not a capture, so the select loops can also
+    // `connections` is an argument, not a capture, so `accept_until` can also
     // reap from it. Returns whether to pause.
     let accept = |connections: &mut JoinSet<_>,
                   accepted: std::io::Result<(TcpStream, SocketAddr)>| {
@@ -100,33 +100,10 @@ pub async fn serve(
         false
     };
 
-    // Cancel safety: `accept` and `join_next` lose nothing when another
-    // branch wins; a pause delays the other branches by at most
-    // ACCEPT_ERROR_PAUSE.
-    tokio::pin!(shutdown);
-    loop {
-        tokio::select! {
-            accepted = listener.accept() => if accept(&mut connections, accepted) {
-                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
-            },
-            // Reap finished connections so the set stays as large as the live ones.
-            Some(_) = connections.join_next() => {}
-            () = &mut shutdown => break,
-        }
-    }
-
+    accept_until(&listener, &mut connections, &accept, shutdown).await;
     gateway.start_draining();
     let drain = tokio::time::sleep(gateway.drain_delay);
-    tokio::pin!(drain);
-    loop {
-        tokio::select! {
-            accepted = listener.accept() => if accept(&mut connections, accepted) {
-                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
-            },
-            Some(_) = connections.join_next() => {}
-            () = &mut drain => break,
-        }
-    }
+    accept_until(&listener, &mut connections, &accept, drain).await;
 
     drop(listener);
     let _ = tokio::time::timeout(gateway.shutdown_grace, graceful.shutdown()).await;
@@ -138,6 +115,29 @@ pub async fn serve(
     tokio::time::timeout(LOG_FLUSH_TIMEOUT, writer)
         .await
         .is_ok()
+}
+
+/// Serves `listener` with `accept` until `stop` resolves, reaping finished
+/// connections so the set stays as large as the live ones.
+async fn accept_until<T: 'static>(
+    listener: &TcpListener,
+    connections: &mut JoinSet<T>,
+    accept: &impl Fn(&mut JoinSet<T>, std::io::Result<(TcpStream, SocketAddr)>) -> bool,
+    stop: impl Future<Output = ()>,
+) {
+    tokio::pin!(stop);
+    // Cancel safety: `accept` and `join_next` lose nothing when another
+    // branch wins; a pause delays the other branches by at most
+    // ACCEPT_ERROR_PAUSE.
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => if accept(connections, accepted) {
+                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
+            },
+            Some(_) = connections.join_next() => {}
+            () = &mut stop => break,
+        }
+    }
 }
 
 /// Whether an accept error calls for a pause: not when one connection failed
