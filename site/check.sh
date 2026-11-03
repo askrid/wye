@@ -8,6 +8,12 @@ cd "$(dirname "$0")"
 
 if (( $# )); then echo "usage: site/check.sh (no arguments; see the header)" >&2; exit 2; fi
 
+# The build shares this machine with the gateway's commit gate: run under the
+# machine lock, so it never lands in the middle of a benchmark.
+if [[ -z ${SITE_CHECK_LOCKED:-} ]]; then
+  SITE_CHECK_LOCKED=1 exec ../scripts/machine-lock.sh ./check.sh
+fi
+
 cargo fmt --check
 cargo clippy --locked --all-targets --quiet -- -D warnings
 cargo test --locked --quiet
