@@ -1,4 +1,4 @@
-use gateway_core::credential;
+use gateway_core::token;
 
 use super::*;
 
@@ -18,7 +18,7 @@ fn own(models: &str, extra: &str) -> String {
     format!(
         "issuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n{extra}\n\
          [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n",
-        credential::encode_public_key(&[7; 32])
+        token::encode_public_key(&[7; 32])
     )
 }
 
@@ -82,7 +82,7 @@ fn ceilings_signers_and_exposure_widen() {
         Some(&format!(
             "{}[[auth.keys]]\nid = \"k2\"\ned25519_public_key = \"{}\"\n",
             own("", "max_output_tokens = 64000\nmax_token_ttl_secs = 604800"),
-            credential::encode_public_key(&[8; 32])
+            token::encode_public_key(&[8; 32])
         )),
         "",
     );

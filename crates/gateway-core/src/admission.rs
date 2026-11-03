@@ -1,4 +1,4 @@
-//! Body admission: what config and a credential decide about one request
+//! Body admission: what config and a gateway token decide about one request
 //! body, before and once its `model` is read.
 //!
 //! `serve` (`crates/wye/src/gateway/admit.rs`) and `wye explain` both decide
@@ -11,8 +11,8 @@ use std::{fmt, sync::Arc};
 use crate::{
     alias::Aliases,
     api::Api,
-    credential::Identity,
     policy::{self, ModelPattern, PolicyError, PolicyScanner},
+    token::Identity,
 };
 
 /// The scanner for a request body under `token_limit`: the field is read only
@@ -29,12 +29,12 @@ pub fn scanner(api: Api, token_limit: Option<u64>) -> PolicyScanner {
 /// The checks that apply to one request's body.
 #[derive(Debug, Clone, Copy)]
 pub struct BodyChecks<'a> {
-    /// `[auth] models`: models any credential may use.
+    /// `[auth] models`: models any gateway token may use.
     pub configured: Option<&'a [ModelPattern]>,
-    /// The credential's own list, which can only narrow `configured`.
+    /// The token's own list, which can only narrow `configured`.
     pub granted: Option<&'a [ModelPattern]>,
     /// The output-token ceiling, the stricter of config's and the
-    /// credential's; `None` for an endpoint that generates nothing.
+    /// token's; `None` for an endpoint that generates nothing.
     pub token_limit: Option<u64>,
     pub aliases: Option<&'a Aliases>,
     /// An upstream of the route has its own model ids (Bedrock), so the
@@ -97,7 +97,7 @@ impl<'a> BodyChecks<'a> {
         Some((alias.name(), alias.model_for(subject)))
     }
 
-    /// Whether the credential may use `model`, the model that runs (an
+    /// Whether the token may use `model`, the model that runs (an
     /// alias already resolved). The refusal names the model as the client
     /// sent it (`sent`): what an alias maps to is config's business.
     pub fn permit(&self, model: &str, sent: &str) -> Result<(), Refusal> {
@@ -154,7 +154,7 @@ pub enum Refusal {
     /// The body's `model` or a top-level key cannot be checked, or the
     /// output-token field is malformed.
     Invalid(PolicyError),
-    /// The credential may not use this model, as the client named it.
+    /// The token may not use this model, as the client named it.
     Model(Box<str>),
     /// The output-token maximum is above the ceiling, or missing where the
     /// ceiling requires it.

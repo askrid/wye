@@ -17,7 +17,7 @@ pub mod token;
 mod wrapper;
 
 pub use doctor::doctor;
-pub use explain::{Credential, Explanation, explain, run as run_explain};
+pub use explain::{CallerToken, Explanation, explain, run as run_explain};
 pub use init::run as run_init;
 pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;

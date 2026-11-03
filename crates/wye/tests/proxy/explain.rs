@@ -1,7 +1,7 @@
 //! `wye explain` against the server: for the same config, credential, and
 //! body, both give the same answer, word for word.
 
-use wye::{Credential, explain};
+use wye::{CallerToken, explain};
 
 use super::harness::*;
 
@@ -68,7 +68,7 @@ async fn explain_and_the_server_answer_alike() {
         let explained = explain(
             &parsed,
             "/v1/messages",
-            Credential::Token(token, &verifier),
+            CallerToken::Token(token, &verifier),
             None,
             body.as_bytes(),
             now(),
@@ -146,7 +146,7 @@ async fn explain_and_the_server_answer_alike_on_responses() {
         let explained = explain(
             &parsed,
             path,
-            Credential::Token(&open, &verifier),
+            CallerToken::Token(&open, &verifier),
             None,
             body.as_bytes(),
             now(),

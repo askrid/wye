@@ -1,15 +1,15 @@
-//! Gateway credential checks, with the last verified credential cached per connection.
+//! Gateway token checks, with the last verified token cached per connection.
 //!
 //! Clients such as Claude Code keep a connection open and send the same
-//! credential on every request, so a full signature verification (about
+//! token on every request, so a full signature verification (about
 //! 88 µs of CPU per request for Ed25519) repeats identical work. Each
-//! connection remembers the last credential it verified; a request carrying
+//! connection remembers the last token it verified; a request carrying
 //! the same bytes skips signature verification and only rechecks expiry.
 //! Answers equal a fresh verification: keys, issuers, and audiences are fixed
 //! for the process lifetime.
 //!
 //! The cache belongs to one connection and dies with it: nothing is shared
-//! between connections or replicas. It holds one credential, and only one that
+//! between connections or replicas. It holds one token, and only one that
 //! verified, so its size is bounded by the token size limit.
 
 use std::{
@@ -17,12 +17,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use gateway_core::credential::{CredentialError, Identity, Verifier};
+use gateway_core::token::{Identity, TokenError, Verifier};
 use http::{HeaderMap, header::AUTHORIZATION};
 
 use crate::X_API_KEY;
 
-/// The last credential verified on one connection.
+/// The last token verified on one connection.
 #[derive(Default)]
 pub(crate) struct ConnectionAuth {
     /// Uncontended: an HTTP/1.1 connection handles one request at a time.
@@ -36,22 +36,22 @@ struct Verified {
     identity: Arc<Identity>,
 }
 
-/// Checks the credential in `Authorization: Bearer` (Claude Code's
+/// Checks the token in `Authorization: Bearer` (Claude Code's
 /// `ANTHROPIC_AUTH_TOKEN`) or else `x-api-key` (`ANTHROPIC_API_KEY`).
 pub(crate) fn authenticate(
     verifier: &Verifier,
     headers: &HeaderMap,
     connection: &ConnectionAuth,
-) -> Result<Arc<Identity>, CredentialError> {
-    let token = credential_from(headers).ok_or(CredentialError::Malformed)?;
-    // A clock before 1970 makes every credential look expired: fail closed.
+) -> Result<Arc<Identity>, TokenError> {
+    let token = token_from(headers).ok_or(TokenError::Malformed)?;
+    // A clock before 1970 makes every token look expired: fail closed.
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(u64::MAX, |d| d.as_secs());
     authenticate_at(verifier, token, now, connection)
 }
 
-fn credential_from(headers: &HeaderMap) -> Option<&str> {
+fn token_from(headers: &HeaderMap) -> Option<&str> {
     let bearer = headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -66,9 +66,9 @@ fn authenticate_at(
     token: &str,
     now: u64,
     connection: &ConnectionAuth,
-) -> Result<Arc<Identity>, CredentialError> {
+) -> Result<Arc<Identity>, TokenError> {
     // A poisoned lock only means another request on this connection panicked;
-    // the cached value is still a fully verified credential.
+    // the cached value is still a fully verified token.
     let mut last = connection
         .last
         .lock()
@@ -78,7 +78,7 @@ fn authenticate_at(
     {
         if verified.identity.expired(now) {
             *last = None;
-            return Err(CredentialError::Expired);
+            return Err(TokenError::Expired);
         }
         return Ok(Arc::clone(&verified.identity));
     }
@@ -108,7 +108,7 @@ mod tests {
 
     use gateway_core::{
         config::{Auth, OwnIssuer, PublicKey},
-        credential::{self, NewCredential},
+        token::{self, NewToken},
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
 
@@ -137,10 +137,10 @@ mod tests {
     }
 
     fn token(key: &Ed25519KeyPair, sub: &str, exp: u64) -> String {
-        credential::issue(
+        token::issue(
             key,
             "k1",
-            &NewCredential {
+            &NewToken {
                 iss: "wye",
                 sub,
                 aud: "wye-prod",
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_credential_skips_signature_verification() {
+    fn repeated_token_skips_signature_verification() {
         let key = keypair();
         let t = token(&key, "alice", NOW + 600);
         let connection = ConnectionAuth::default();
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn a_different_credential_is_fully_verified() {
+    fn a_different_token_is_fully_verified() {
         let key = keypair();
         let connection = ConnectionAuth::default();
         authenticate_at(
@@ -179,7 +179,7 @@ mod tests {
         let forged = token(&keypair(), "mallory", NOW + 600);
         assert_eq!(
             authenticate_at(&verifier(&key), &forged, NOW, &connection),
-            Err(CredentialError::BadSignature)
+            Err(TokenError::BadSignature)
         );
         // A token differing from the cached one in its last byte is not a hit.
         let mut near = token(&key, "alice", NOW + 600);
@@ -189,21 +189,21 @@ mod tests {
     }
 
     #[test]
-    fn cached_credential_still_expires() {
+    fn cached_token_still_expires() {
         let key = keypair();
         let t = token(&key, "alice", NOW + 60);
         let connection = ConnectionAuth::default();
         authenticate_at(&verifier(&key), &t, NOW, &connection).unwrap();
         assert_eq!(
             authenticate_at(&verifier(&key), &t, NOW + 60, &connection),
-            Err(CredentialError::Expired)
+            Err(TokenError::Expired)
         );
         // The expired entry is gone; a fresh check rejects it too.
         assert!(connection.last.lock().unwrap().is_none());
     }
 
     #[test]
-    fn rejected_credentials_are_not_cached() {
+    fn rejected_tokens_are_not_cached() {
         let key = keypair();
         let connection = ConnectionAuth::default();
         let foreign = token(&keypair(), "mallory", NOW + 600);

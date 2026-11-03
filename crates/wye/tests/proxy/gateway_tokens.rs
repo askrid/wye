@@ -1,4 +1,4 @@
-//! Gateway credentials end to end.
+//! Gateway tokens end to end.
 
 use super::harness::*;
 
@@ -14,7 +14,7 @@ async fn harness(key: &Ed25519KeyPair) -> (Harness, mpsc::Receiver<HeaderMap>) {
 }
 
 #[tokio::test]
-async fn valid_credential_is_replaced_by_the_provider_key() {
+async fn valid_token_is_replaced_by_the_provider_key() {
     let key = keypair();
     let (h, mut seen) = harness(&key).await;
     let t = alice(&key);
@@ -27,19 +27,19 @@ async fn valid_credential_is_replaced_by_the_provider_key() {
     let record = h.usage_record().await;
     assert_eq!(record["subject"], "alice");
 
-    // Claude Code's ANTHROPIC_API_KEY sends the credential as x-api-key.
+    // Claude Code's ANTHROPIC_API_KEY sends the token as x-api-key.
     let res = h.send(messages().header("x-api-key", &t), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(seen.recv().await.unwrap()["x-api-key"], API_KEY);
 }
 
 #[tokio::test]
-async fn missing_expired_or_foreign_credentials_never_reach_upstream() {
+async fn missing_expired_or_foreign_tokens_never_reach_upstream() {
     let key = keypair();
     let (h, _seen) = harness(&key).await;
     let expired = issue(
         &key,
-        &NewCredential {
+        &NewToken {
             iat: now() - 600,
             exp: now() - 1,
             ..claims("alice")
@@ -66,7 +66,7 @@ async fn missing_expired_or_foreign_credentials_never_reach_upstream() {
         );
     }
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
-    // Probes stay open without a credential.
+    // Probes stay open without a token.
     assert_eq!(
         h.send(Request::head("/api/hello"), "").await.status(),
         StatusCode::OK
@@ -144,7 +144,7 @@ async fn a_body_wye_cannot_read_as_utf8_json_is_refused_under_a_policy() {
 }
 
 #[tokio::test]
-async fn credential_models_allow_or_refuse_before_upstream() {
+async fn token_models_allow_or_refuse_before_upstream() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;
     let t = token_with_models(&key, &["claude-haiku-*"]);
@@ -181,7 +181,7 @@ async fn credential_models_allow_or_refuse_before_upstream() {
 }
 
 #[tokio::test]
-async fn configured_models_are_a_ceiling_credentials_cannot_widen() {
+async fn configured_models_are_a_ceiling_tokens_cannot_widen() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "models = [\"claude-haiku-*\"]").await;
     for t in [alice(&key), token_with_models(&key, &["*"])] {
@@ -193,7 +193,7 @@ async fn configured_models_are_a_ceiling_credentials_cannot_widen() {
 }
 
 #[tokio::test]
-async fn credentials_without_any_model_list_skip_the_check() {
+async fn tokens_without_any_model_list_skip_the_check() {
     let key = keypair();
     let (h, mut bodies) = body_harness(&key, "").await;
     let t = alice(&key);
@@ -214,7 +214,7 @@ async fn max_tokens_above_the_stricter_limit_is_refused() {
     assert_eq!(bodies.recv().await.unwrap(), within);
     h.usage_record().await;
 
-    // The credential's 4000 is stricter than the configured 8000.
+    // The token's 4000 is stricter than the configured 8000.
     let res = h
         .send(
             req(),

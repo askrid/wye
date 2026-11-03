@@ -15,7 +15,7 @@ pub(crate) use std::{
 };
 
 pub(crate) use bytes::Bytes;
-pub(crate) use gateway_core::credential::{self, NewCredential};
+pub(crate) use gateway_core::token::{self, NewToken};
 pub(crate) use gateway_core::{config::Config, prompt::HashKey};
 pub(crate) use http::{HeaderMap, Method, Request, Response, StatusCode, Uri, Version};
 pub(crate) use http_body_util::{BodyExt, Either, Full};
@@ -513,8 +513,8 @@ pub(crate) fn now() -> u64 {
 
 /// Claims the tests' gateway tokens share: issuer `wye`, audience
 /// `wye-prod`, valid for ten minutes, no model list or ceiling.
-pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
-    NewCredential {
+pub(crate) fn claims(sub: &str) -> NewToken<'_> {
+    NewToken {
         iss: "wye",
         sub,
         aud: "wye-prod",
@@ -526,8 +526,8 @@ pub(crate) fn claims(sub: &str) -> NewCredential<'_> {
 }
 
 /// A gateway token signed with `key` as key `k1`.
-pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewCredential<'_>) -> String {
-    credential::issue(key, "k1", claims)
+pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewToken<'_>) -> String {
+    token::issue(key, "k1", claims)
 }
 
 /// A gateway token for `sub` with its own model list and output ceiling, if any.
@@ -539,7 +539,7 @@ pub(crate) fn token(
 ) -> String {
     issue(
         key,
-        &NewCredential {
+        &NewToken {
             models,
             max_output_tokens,
             ..claims(sub)
@@ -552,6 +552,6 @@ pub(crate) fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
     format!(
         "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
          [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
-        credential::encode_public_key(key.public_key().as_ref())
+        token::encode_public_key(key.public_key().as_ref())
     )
 }

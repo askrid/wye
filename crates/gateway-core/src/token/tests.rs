@@ -30,8 +30,8 @@ fn verifier(key: &Ed25519KeyPair) -> Verifier {
     .unwrap()
 }
 
-fn claims<'a>() -> NewCredential<'a> {
-    NewCredential {
+fn claims<'a>() -> NewToken<'a> {
+    NewToken {
         iss: "wye",
         sub: "alice",
         aud: "wye-prod",
@@ -43,7 +43,7 @@ fn claims<'a>() -> NewCredential<'a> {
 }
 
 #[test]
-fn issued_credential_verifies() {
+fn issued_token_verifies() {
     let key = keypair();
     let token = issue(&key, "k1", &claims());
     let identity = verifier(&key).verify(&token, NOW + 10).unwrap();
@@ -66,8 +66,8 @@ fn models_claim_becomes_patterns_and_bad_lists_fail_closed() {
     let models = identity.models.unwrap();
     assert!(models[0].matches("claude-haiku-4-5"));
     assert!(!models[1].matches("claude-sonnet-4-5-20250929"));
-    assert_eq!(with_models(&[]), Err(CredentialError::Malformed));
-    assert_eq!(with_models(&["a*b"]), Err(CredentialError::Malformed));
+    assert_eq!(with_models(&[]), Err(TokenError::Malformed));
+    assert_eq!(with_models(&["a*b"]), Err(TokenError::Malformed));
 
     let with_limit = |limit: u64| {
         let mut c = claims();
@@ -75,37 +75,37 @@ fn models_claim_becomes_patterns_and_bad_lists_fail_closed() {
         v.verify(&issue(&key, "k1", &c), NOW + 10)
     };
     assert_eq!(with_limit(4000).unwrap().max_output_tokens, Some(4000));
-    assert_eq!(with_limit(0), Err(CredentialError::Malformed));
+    assert_eq!(with_limit(0), Err(TokenError::Malformed));
 }
 
 #[test]
 fn rejects_by_time_issuer_audience_and_lifetime() {
     let key = keypair();
     let v = verifier(&key);
-    let with = |f: fn(&mut NewCredential<'_>)| {
+    let with = |f: fn(&mut NewToken<'_>)| {
         let mut c = claims();
         f(&mut c);
         issue(&key, "k1", &c)
     };
     assert_eq!(
         v.verify(&issue(&key, "k1", &claims()), NOW + 3_600),
-        Err(CredentialError::Expired)
+        Err(TokenError::Expired)
     );
     assert_eq!(
         v.verify(&with(|c| c.iss = "other"), NOW),
-        Err(CredentialError::WrongIssuer)
+        Err(TokenError::WrongIssuer)
     );
     assert_eq!(
         v.verify(&with(|c| c.aud = "wye-dev"), NOW),
-        Err(CredentialError::WrongAudience)
+        Err(TokenError::WrongAudience)
     );
     assert_eq!(
         v.verify(&with(|c| c.exp = NOW + 2 * 86_400), NOW),
-        Err(CredentialError::LifetimeTooLong)
+        Err(TokenError::LifetimeTooLong)
     );
     assert_eq!(
         v.verify(&with(|c| c.iat = NOW + 3_000), NOW),
-        Err(CredentialError::NotYetValid)
+        Err(TokenError::NotYetValid)
     );
     // Within the clock-skew allowance.
     assert!(v.verify(&with(|c| c.iat = NOW + 30), NOW).is_ok());
@@ -117,11 +117,11 @@ fn rejects_other_keys_and_tampering() {
     let v = verifier(&key);
     assert_eq!(
         v.verify(&issue(&keypair(), "k1", &claims()), NOW),
-        Err(CredentialError::BadSignature)
+        Err(TokenError::BadSignature)
     );
     assert_eq!(
         v.verify(&issue(&key, "k2", &claims()), NOW),
-        Err(CredentialError::UnknownKey)
+        Err(TokenError::UnknownKey)
     );
     // Swap in claims with another subject, keeping the original signature.
     let token = issue(&key, "k1", &claims());
@@ -129,7 +129,7 @@ fn rejects_other_keys_and_tampering() {
     let mallory = issue(
         &key,
         "k1",
-        &NewCredential {
+        &NewToken {
             sub: "mallory",
             ..claims()
         },
@@ -138,7 +138,7 @@ fn rejects_other_keys_and_tampering() {
     parts[1] = &forged_claims;
     assert_eq!(
         v.verify(&parts.join("."), NOW),
-        Err(CredentialError::BadSignature)
+        Err(TokenError::BadSignature)
     );
 }
 
@@ -158,7 +158,7 @@ fn rejects_unsupported_algorithms_and_headers() {
         assert!(
             matches!(
                 err,
-                CredentialError::UnsupportedAlgorithm | CredentialError::Malformed
+                TokenError::UnsupportedAlgorithm | TokenError::Malformed
             ),
             "{header}: {err:?}"
         );
@@ -173,7 +173,7 @@ fn rejects_malformed_and_oversized_tokens() {
     }
     assert_eq!(
         v.verify(&"a".repeat(MAX_TOKEN_BYTES + 1), NOW),
-        Err(CredentialError::TooLarge)
+        Err(TokenError::TooLarge)
     );
 }
 
@@ -201,4 +201,4 @@ fn public_key_round_trips() {
     assert!(decode_public_key("short").is_none());
 }
 
-mod provider;
+mod identity_provider;

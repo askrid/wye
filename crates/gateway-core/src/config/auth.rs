@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Signed gateway tokens (see [`crate::credential`]): Wye's own, from
+/// Signed gateway tokens (see [`crate::token`]): Wye's own, from
 /// identity providers, or both.
 #[derive(Debug, Clone)]
 pub struct Auth {

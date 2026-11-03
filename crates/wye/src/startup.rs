@@ -8,8 +8,8 @@ use std::{
 
 use gateway_core::{
     config::{Config, Issuer, Upstream, UpstreamCredential},
-    credential::{KeySetError, ProviderKeys, Verifier},
     prompt::HashKey,
+    token::{IssuerKeys, KeySetError, Verifier},
 };
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 
@@ -168,11 +168,11 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
 
 /// An identity provider's key set, read from its `jwks_file` (relative to
 /// `config_dir`).
-pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<ProviderKeys, StartupError> {
+pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<IssuerKeys, StartupError> {
     let path = config_dir.join(&issuer.jwks_file);
     let error = file_error("auth.issuers jwks_file", &path);
     let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
-    ProviderKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
+    IssuerKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
 
 /// The environment variables [`Resources::resolve`] reads secrets from,

@@ -1,9 +1,9 @@
 //! Verification keys: Wye's own Ed25519 keys and identity providers' keys
 //! from a JSON Web Key Set (RFC 7517), parsed once at startup.
 //!
-//! A provider's key set is read for the one algorithm its issuer is pinned
+//! An identity provider's key set is read for the one algorithm its issuer is pinned
 //! to. Keys of another type, curve, or `alg`, and keys marked for encryption,
-//! are skipped, so a provider's full published set can be committed as is.
+//! are skipped, so an identity provider's full published set can be committed as is.
 
 use std::fmt;
 
@@ -57,11 +57,11 @@ impl VerifyKey {
 }
 
 /// An identity provider's keys, by key id, for its pinned algorithm.
-pub struct ProviderKeys {
+pub struct IssuerKeys {
     pub(super) keys: Vec<(Box<str>, VerifyKey)>,
 }
 
-impl fmt::Debug for ProviderKeys {
+impl fmt::Debug for IssuerKeys {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
             .entries(self.keys.iter().map(|(kid, _)| kid))
@@ -122,7 +122,7 @@ struct Jwk {
     y: Option<String>,
 }
 
-impl ProviderKeys {
+impl IssuerKeys {
     /// Parses a JWKS document and keeps the signing keys for `algorithm`.
     pub fn parse(jwks: &[u8], algorithm: Algorithm) -> Result<Self, KeySetError> {
         if jwks.len() > MAX_JWKS_BYTES {

@@ -17,9 +17,9 @@ const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
 /// The environment variable Codex reads its bearer token from (the Codex
 /// provider's `env_key`).
 const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";
-/// Sent by Codex when the gateway takes no credential: Codex needs a token,
+/// Sent by Codex when the gateway takes no gateway token: Codex needs a token,
 /// and a gateway without `[auth]` replaces it with the provider key.
-const CODEX_NO_CREDENTIAL: &str = "wye-loopback";
+const CODEX_NO_TOKEN: &str = "wye-loopback";
 /// Makes Claude Code send its request class, prompt id, and tool times,
 /// which it sends a custom base URL only when asked.
 const HINT_HEADERS_ENV: &str = "CLAUDE_CODE_GATEWAY_HINT_HEADERS";
@@ -51,14 +51,14 @@ impl Agent {
     }
 }
 
-/// Where the wrapper sends the agent, and with which credential.
+/// Where the wrapper sends the agent, and with which gateway token.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Launch {
     pub gateway: String,
     /// A gateway token, sent as `Authorization: Bearer`; `None` keeps
     /// Claude Code's own login (subscription passthrough), or lets Codex
     /// reach a gateway without `[auth]`.
-    pub credential: Option<String>,
+    pub token: Option<String>,
     /// Claude Code's `CLAUDE_CODE_GATEWAY_HINT_HEADERS`: the caller's, or
     /// `1`, since the gateway is the caller's choice and the usage log
     /// needs the hints.
@@ -76,7 +76,7 @@ impl Launch {
         args: &[&str],
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let credential = match token_file {
+        let token = match token_file {
             Some(path) => Some(super::files::read_token(path)?),
             None => env("WYE_TOKEN"),
         };
@@ -90,12 +90,12 @@ impl Launch {
                 "{gateway} is a remote gateway over plain http; use https"
             ));
         }
-        if credential.as_deref() == Some("") {
+        if token.as_deref() == Some("") {
             return Err("the gateway token is empty".into());
         }
         Ok(Self {
             gateway,
-            credential,
+            token,
             hint_headers: env(HINT_HEADERS_ENV).unwrap_or_else(|| "1".to_owned()),
             args: args.iter().map(|a| (*a).to_owned()).collect(),
         })
@@ -111,7 +111,7 @@ impl Launch {
             Agent::Claude => {
                 // Background sessions (`--bg`) are started by Claude Code's
                 // daemon, which does not inherit this environment but reads
-                // `--settings`. The credential stays out of it: other local
+                // `--settings`. The token stays out of it: other local
                 // users can read a command line.
                 let env = serde_json::json!({
                     "ANTHROPIC_BASE_URL": self.gateway,
@@ -122,8 +122,8 @@ impl Launch {
                     .arg(serde_json::json!({ "env": env }).to_string());
                 command.env("ANTHROPIC_BASE_URL", &self.gateway);
                 command.env(HINT_HEADERS_ENV, &self.hint_headers);
-                if let Some(credential) = &self.credential {
-                    command.env("ANTHROPIC_AUTH_TOKEN", credential);
+                if let Some(token) = &self.token {
+                    command.env("ANTHROPIC_AUTH_TOKEN", token);
                     // An API key would be sent too and take precedence in Claude Code.
                     command.env_remove("ANTHROPIC_API_KEY");
                 }
@@ -147,7 +147,7 @@ impl Launch {
                 }
                 command.env(
                     CODEX_TOKEN_ENV,
-                    self.credential.as_deref().unwrap_or(CODEX_NO_CREDENTIAL),
+                    self.token.as_deref().unwrap_or(CODEX_NO_TOKEN),
                 );
             }
         }
@@ -233,7 +233,7 @@ mod tests {
         };
         let launch = Launch::resolve(None, None, &["-p", "fix tests"], env).unwrap();
         assert_eq!(launch.gateway, "http://localhost:9000");
-        assert_eq!(launch.credential.as_deref(), Some("from-env"));
+        assert_eq!(launch.token.as_deref(), Some("from-env"));
         assert_eq!(launch.args, ["-p", "fix tests"]);
 
         let launch = Launch::resolve(Some("https://other"), None, &[], env).unwrap();
@@ -250,7 +250,7 @@ mod tests {
 
         let defaults = Launch::resolve(None, None, &[], |_| None).unwrap();
         assert_eq!(defaults.gateway, DEFAULT_GATEWAY);
-        assert_eq!(defaults.credential, None);
+        assert_eq!(defaults.token, None);
         assert_eq!(defaults.hint_headers, "1");
         let caller = |name: &str| (name == HINT_HEADERS_ENV).then(|| "0".to_owned());
         assert_eq!(
@@ -265,7 +265,7 @@ mod tests {
     fn claude_gets_the_gateway_environment() {
         let launch = Launch {
             gateway: "http://gw".into(),
-            credential: Some("tok".into()),
+            token: Some("tok".into()),
             hint_headers: "1".into(),
             args: vec!["-p".into()],
         };
@@ -276,7 +276,7 @@ mod tests {
         assert!(envs.contains(&("ANTHROPIC_API_KEY".as_ref(), None)));
         assert!(envs.contains(&("WYE_TOKEN".as_ref(), None)));
         assert!(envs.contains(&(HINT_HEADERS_ENV.as_ref(), Some("1".as_ref()))));
-        // Background sessions get the URL and hint headers, never the credential.
+        // Background sessions get the URL and hint headers, never the token.
         assert_eq!(
             command.get_args().collect::<Vec<_>>(),
             [
@@ -291,7 +291,7 @@ mod tests {
     fn codex_gets_a_wye_provider_and_its_token() {
         let launch = Launch {
             gateway: "http://gw:9000".into(),
-            credential: None,
+            token: None,
             hint_headers: "1".into(),
             args: vec!["exec".into(), "fix tests".into()],
         };

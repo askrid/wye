@@ -118,7 +118,7 @@ fn validate_own(
         if keys.iter().any(|k: &PublicKey| k.id == key.id) {
             return Err(err(format!("duplicate key id {:?}", key.id)));
         }
-        let Some(public) = crate::credential::decode_public_key(&key.ed25519_public_key) else {
+        let Some(public) = crate::token::decode_public_key(&key.ed25519_public_key) else {
             return Err(err(format!(
                 "key {:?}: ed25519_public_key must be 32 bytes in unpadded base64url",
                 key.id

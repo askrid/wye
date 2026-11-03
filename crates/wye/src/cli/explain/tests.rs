@@ -1,4 +1,4 @@
-use gateway_core::credential::{self, NewCredential};
+use gateway_core::token::{self, NewToken};
 use ring::signature::KeyPair;
 
 use super::*;
@@ -6,8 +6,8 @@ use super::*;
 const NOW: u64 = 1_800_000_000;
 
 /// `explain` for a `/v1/messages` request without a session, at `NOW`.
-fn explain_messages(config: &Config, credential: Credential<'_>, body: &[u8]) -> Explanation {
-    explain(config, "/v1/messages", credential, None, body, NOW, &[])
+fn explain_messages(config: &Config, caller: CallerToken<'_>, body: &[u8]) -> Explanation {
+    explain(config, "/v1/messages", caller, None, body, NOW, &[])
 }
 
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
@@ -17,7 +17,7 @@ fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
          [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra_auth}\n\
          [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n\
          [cache_diagnostics]\nhash_key_env = \"K\"",
-        credential::encode_public_key(key.public_key().as_ref())
+        token::encode_public_key(key.public_key().as_ref())
     ))
     .unwrap()
 }
@@ -27,10 +27,10 @@ fn verifier(config: &Config) -> Verifier {
 }
 
 fn token(key: &ring::signature::Ed25519KeyPair, models: Option<&[&str]>) -> String {
-    credential::issue(
+    token::issue(
         key,
         "k1",
-        &NewCredential {
+        &NewToken {
             iss: "wye",
             sub: "alice",
             aud: "wye-prod",
@@ -52,7 +52,7 @@ fn explains_forwarding_and_each_refusal() {
     let ok = explain(
         &config,
         "/v1/messages",
-        Credential::Token(&t, &verifier(&config)),
+        CallerToken::Token(&t, &verifier(&config)),
         Some("s-1"),
         haiku,
         NOW,
@@ -70,7 +70,7 @@ fn explains_forwarding_and_each_refusal() {
 
     let sonnet = br#"{"model":"claude-sonnet-4-5"}"#;
     let refused = |e: Explanation| e.refused.map(|(status, kind, _)| (status, kind));
-    let forbidden = explain_messages(&config, Credential::Token(&t, &verifier(&config)), sonnet);
+    let forbidden = explain_messages(&config, CallerToken::Token(&t, &verifier(&config)), sonnet);
     // The server's message: the model as the client sent it.
     assert_eq!(
         forbidden.refused.as_ref().map(|r| r.2.as_str()),
@@ -78,14 +78,14 @@ fn explains_forwarding_and_each_refusal() {
     );
     assert_eq!(refused(forbidden), Some((403, "permission_error")));
     assert_eq!(
-        refused(explain_messages(&config, Credential::None, haiku)),
+        refused(explain_messages(&config, CallerToken::None, haiku)),
         Some((401, "authentication_error"))
     );
     assert_eq!(
         refused(explain(
             &config,
             "/v1/messages",
-            Credential::Token(&t, &verifier(&config)),
+            CallerToken::Token(&t, &verifier(&config)),
             None,
             haiku,
             NOW + 601,
@@ -96,7 +96,7 @@ fn explains_forwarding_and_each_refusal() {
     assert_eq!(
         refused(explain_messages(
             &config,
-            Credential::Token(&t, &verifier(&config)),
+            CallerToken::Token(&t, &verifier(&config)),
             &[b' '; 201]
         )),
         Some((413, "request_too_large"))
@@ -104,7 +104,7 @@ fn explains_forwarding_and_each_refusal() {
     assert_eq!(
         refused(explain_messages(
             &config,
-            Credential::Token(&t, &verifier(&config)),
+            CallerToken::Token(&t, &verifier(&config)),
             b"{}"
         )),
         Some((400, "invalid_request_error"))
@@ -113,7 +113,7 @@ fn explains_forwarding_and_each_refusal() {
         refused(explain(
             &config,
             "/v1/other",
-            Credential::Token(&t, &verifier(&config)),
+            CallerToken::Token(&t, &verifier(&config)),
             None,
             haiku,
             NOW,
@@ -127,14 +127,14 @@ fn explains_forwarding_and_each_refusal() {
     assert_eq!(
         refused(explain_messages(
             &limited,
-            Credential::Token(&t, &verifier(&config)),
+            CallerToken::Token(&t, &verifier(&config)),
             over
         )),
         Some((403, "permission_error"))
     );
     let report = explain_messages(
         &limited,
-        Credential::Token(&t, &verifier(&config)),
+        CallerToken::Token(&t, &verifier(&config)),
         br#"{"model":"claude-haiku-4-5","max_tokens":100}"#,
     )
     .report();
@@ -148,7 +148,7 @@ fn explains_forwarding_and_each_refusal() {
     assert_eq!(
         refused(explain_messages(
             &only_ceiling,
-            Credential::Token(&t, &verifier(&only_ceiling)),
+            CallerToken::Token(&t, &verifier(&only_ceiling)),
             br#"{"max_tokens":10}"#
         )),
         Some((400, "invalid_request_error"))
@@ -163,7 +163,7 @@ fn explains_alias_resolution_before_permissions() {
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
-    let report = explain_messages(&config, Credential::None, br#"{"model":"coding"}"#).report();
+    let report = explain_messages(&config, CallerToken::None, br#"{"model":"coding"}"#).report();
     assert!(
         report.contains("alias: coding resolves to claude-opus-5-5;"),
         "{report}"
@@ -181,7 +181,7 @@ fn explains_upgrade_issues_per_target_without_refusing() {
     )
     .unwrap();
     let body = br#"{"model":"claude-opus-4-6","thinking":{"type":"enabled","budget_tokens":9},"messages":[{"role":"system","content":"x"}]}"#;
-    let configured = explain_messages(&config, Credential::None, body);
+    let configured = explain_messages(&config, CallerToken::None, body);
     assert!(configured.refused.is_none(), "report only");
     let report = configured.report();
     for rule in ["budget_tokens", "system_role"] {
@@ -196,7 +196,7 @@ fn explains_upgrade_issues_per_target_without_refusing() {
     let named = explain(
         &config,
         "/v1/messages",
-        Credential::None,
+        CallerToken::None,
         None,
         body,
         NOW,
@@ -225,7 +225,7 @@ fn shows_the_upstream_a_session_goes_to() {
         let out = explain(
             &config,
             "/v1/messages",
-            Credential::None,
+            CallerToken::None,
             Some(session),
             b"{}",
             NOW,
@@ -267,7 +267,7 @@ fn shows_the_providers_own_model_id() {
         ),
         (&br#"{"model":"anthropic.claude-opus-5-5"}"#[..], None),
     ] {
-        let report = explain_messages(&config, Credential::None, body).report();
+        let report = explain_messages(&config, CallerToken::None, body).report();
         assert!(
             report.contains(
                 "upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages"
@@ -294,7 +294,7 @@ fn explains_responses_on_the_openai_route() {
     )
     .unwrap();
     let dev = || {
-        Credential::Trusted(Identity {
+        CallerToken::Trusted(Identity {
             subject: "dev".into(),
             key_id: "k1".into(),
             expires_at: NOW + 60,
@@ -352,7 +352,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
          cache_read = \"0.50\"\n",
     )
     .unwrap();
-    let report = |body: &[u8]| explain_messages(&config, Credential::None, body).report();
+    let report = |body: &[u8]| explain_messages(&config, CallerToken::None, body).report();
     let priced = report(br#"{"model":"claude-opus-5-5"}"#);
     assert!(
         priced.contains(
@@ -377,7 +377,7 @@ fn reads_the_body_in_the_servers_order() {
     )
     .unwrap();
     let anonymous = |path: &str, body: &[u8]| {
-        explain(&aliased, path, Credential::None, None, body, NOW, &[]).refused
+        explain(&aliased, path, CallerToken::None, None, body, NOW, &[]).refused
     };
     // With an alias alone the server reads only to the model: the provider
     // answers the rest.
@@ -395,7 +395,7 @@ fn reads_the_body_in_the_servers_order() {
     let verifier = verifier(&config);
     let t = token(&key, Some(&["claude-haiku-*"]));
     let status = |body: &[u8]| {
-        let credential = Credential::Token(&t, &verifier);
+        let credential = CallerToken::Token(&t, &verifier);
         explain(&config, "/v1/messages", credential, None, body, NOW, &[])
             .refused
             .map(|(status, ..)| status)
@@ -412,7 +412,7 @@ fn reads_the_body_in_the_servers_order() {
     // Under a ceiling, a value it cannot read is refused.
     let capped = self::config(&key, "max_output_tokens = 1000");
     let verifier = self::verifier(&capped);
-    let credential = Credential::Token(&t, &verifier);
+    let credential = CallerToken::Token(&t, &verifier);
     let body = br#"{"model":"claude-haiku-4-5","max_tokens":4096.0}"#;
     let refused = explain(&capped, "/v1/messages", credential, None, body, NOW, &[]).refused;
     assert_eq!(refused.map(|(status, ..)| status), Some(400));
@@ -429,7 +429,7 @@ fn chat_completions_carries_no_session_to_route_by() {
     let report = explain(
         &config,
         "/v1/chat/completions",
-        Credential::None,
+        CallerToken::None,
         Some("s-1"),
         br#"{"model":"gpt-5"}"#,
         NOW,

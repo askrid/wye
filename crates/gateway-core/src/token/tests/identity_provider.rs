@@ -43,7 +43,7 @@ fn grant(claim: &str, value: &str, models: &[&str]) -> Grant {
 
 /// A verifier trusting `key` (kid `idp-1`) for `issuer`.
 fn verifier_for(key: &IdpKey, issuer: Issuer) -> Verifier {
-    let set = ProviderKeys::parse(jwks(&[(key, "idp-1")]).as_bytes(), issuer.algorithm).unwrap();
+    let set = IssuerKeys::parse(jwks(&[(key, "idp-1")]).as_bytes(), issuer.algorithm).unwrap();
     Verifier::new(&auth(vec![issuer]), vec![set]).unwrap()
 }
 
@@ -82,7 +82,7 @@ fn the_algorithm_is_pinned_per_issuer() {
         let token = key.sign(&format!(r#"{{"alg":"{alg}","kid":"idp-1"}}"#), &claims(""));
         assert_eq!(
             v.verify(&token, NOW),
-            Err(CredentialError::UnsupportedAlgorithm),
+            Err(TokenError::UnsupportedAlgorithm),
             "{alg}"
         );
     }
@@ -101,9 +101,9 @@ fn provider_headers_may_carry_extra_fields_but_not_crit() {
         r#"{"alg":"RS256","kid":"idp-1","crit":["exp"]}"#,
         &claims(""),
     );
-    assert_eq!(v.verify(&crit, NOW), Err(CredentialError::Malformed));
+    assert_eq!(v.verify(&crit, NOW), Err(TokenError::Malformed));
     let no_kid = key.sign(r#"{"alg":"RS256"}"#, &claims(""));
-    assert_eq!(v.verify(&no_kid, NOW), Err(CredentialError::UnknownKey));
+    assert_eq!(v.verify(&no_kid, NOW), Err(TokenError::UnknownKey));
 }
 
 #[test]
@@ -115,45 +115,45 @@ fn registered_claims_are_checked_like_wyes_own() {
     let cases = [
         (
             format!(r#"{{"iss":"wye","aud":"wye-prod","sub":"u","iat":{NOW},"exp":{exp}}}"#),
-            CredentialError::WrongIssuer,
+            TokenError::WrongIssuer,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":["other"],"sub":"u","iat":{NOW},"exp":{exp}}}"#),
-            CredentialError::WrongAudience,
+            TokenError::WrongAudience,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"u","iat":{NOW},"exp":{NOW}}}"#),
-            CredentialError::Expired,
+            TokenError::Expired,
         ),
         (
             format!(
                 r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"u","iat":{NOW},"nbf":{},"exp":{exp}}}"#,
                 NOW + 120
             ),
-            CredentialError::NotYetValid,
+            TokenError::NotYetValid,
         ),
         (
             format!(
                 r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"u","iat":{NOW},"exp":{}}}"#,
                 NOW + 86_401
             ),
-            CredentialError::LifetimeTooLong,
+            TokenError::LifetimeTooLong,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"u","exp":{exp}}}"#),
-            CredentialError::Malformed,
+            TokenError::Malformed,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"u","iat":"{NOW}","exp":{exp}}}"#),
-            CredentialError::Malformed,
+            TokenError::Malformed,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":"wye-prod","iat":{NOW},"exp":{exp}}}"#),
-            CredentialError::MissingSubject,
+            TokenError::MissingSubject,
         ),
         (
             format!(r#"{{"iss":"{ISS}","aud":"wye-prod","sub":"","iat":{NOW},"exp":{exp}}}"#),
-            CredentialError::MissingSubject,
+            TokenError::MissingSubject,
         ),
     ];
     for (claims, expected) in cases {
@@ -161,7 +161,7 @@ fn registered_claims_are_checked_like_wyes_own() {
     }
     // A key with the right kid but not the configured one.
     let forged = IdpKey::es256().token("idp-1", &self::claims(""));
-    assert_eq!(v.verify(&forged, NOW), Err(CredentialError::BadSignature));
+    assert_eq!(v.verify(&forged, NOW), Err(TokenError::BadSignature));
 }
 
 #[test]
@@ -176,10 +176,7 @@ fn subject_comes_from_the_configured_claim() {
         "dev@example.com"
     );
     let without = key.token("idp-1", &claims(""));
-    assert_eq!(
-        v.verify(&without, NOW),
-        Err(CredentialError::MissingSubject)
-    );
+    assert_eq!(v.verify(&without, NOW), Err(TokenError::MissingSubject));
 }
 
 #[test]
@@ -241,13 +238,12 @@ fn own_and_provider_keys_coexist_by_kid() {
             ed25519_public_key: own.public_key().as_ref().try_into().unwrap(),
         }],
     });
-    let set =
-        || ProviderKeys::parse(jwks(&[(&idp, "idp-1")]).as_bytes(), Algorithm::EdDsa).unwrap();
+    let set = || IssuerKeys::parse(jwks(&[(&idp, "idp-1")]).as_bytes(), Algorithm::EdDsa).unwrap();
     let v = Verifier::new(&both, vec![set()]).unwrap();
     let own_token = issue(
         &own,
         "k1",
-        &NewCredential {
+        &NewToken {
             iss: "wye",
             sub: "alice",
             aud: "wye-prod",
@@ -272,12 +268,12 @@ fn own_and_provider_keys_coexist_by_kid() {
             NOW + 60
         ),
     );
-    assert_eq!(v.verify(&posing, NOW), Err(CredentialError::WrongIssuer));
+    assert_eq!(v.verify(&posing, NOW), Err(TokenError::WrongIssuer));
     // Wye's own header stays strict.
     let extra = idp.sign(r#"{"alg":"EdDSA","kid":"k1","x5t":"a"}"#, &claims(""));
-    assert_eq!(v.verify(&extra, NOW), Err(CredentialError::Malformed));
+    assert_eq!(v.verify(&extra, NOW), Err(TokenError::Malformed));
 
-    let clash = ProviderKeys::parse(jwks(&[(&idp, "k1")]).as_bytes(), Algorithm::EdDsa).unwrap();
+    let clash = IssuerKeys::parse(jwks(&[(&idp, "k1")]).as_bytes(), Algorithm::EdDsa).unwrap();
     assert_eq!(
         Verifier::new(&both, vec![clash]).err(),
         Some(KeySetError::DuplicateKid("k1".into()))
@@ -294,7 +290,7 @@ fn issuers_without_key_sets_accept_nothing() {
     .unwrap();
     assert_eq!(
         v.verify(&key.token("idp-1", &claims("")), NOW),
-        Err(CredentialError::UnknownKey)
+        Err(TokenError::UnknownKey)
     );
 }
 
@@ -314,7 +310,7 @@ fn key_sets_keep_only_signing_keys_for_the_algorithm() {
         ed.jwk("ed-1"),
     );
     let ids = |alg| {
-        ProviderKeys::parse(doc.as_bytes(), alg)
+        IssuerKeys::parse(doc.as_bytes(), alg)
             .unwrap()
             .keys
             .iter()
@@ -329,7 +325,7 @@ fn key_sets_keep_only_signing_keys_for_the_algorithm() {
 #[test]
 fn unusable_key_sets_are_rejected() {
     let ec = IdpKey::es256();
-    let parse = |doc: &str| ProviderKeys::parse(doc.as_bytes(), Algorithm::Es256).err();
+    let parse = |doc: &str| IssuerKeys::parse(doc.as_bytes(), Algorithm::Es256).err();
     assert!(matches!(parse("{}"), Some(KeySetError::Json(_))));
     assert!(matches!(parse("not json"), Some(KeySetError::Json(_))));
     assert_eq!(
@@ -349,7 +345,7 @@ fn unusable_key_sets_are_rejected() {
     assert!(matches!(parse(short), Some(KeySetError::InvalidKey { .. })));
     let small_rsa = r#"{"keys":[{"kty":"RSA","kid":"r","n":"AQAB","e":"AQAB"}]}"#;
     assert!(matches!(
-        ProviderKeys::parse(small_rsa.as_bytes(), Algorithm::Rs256),
+        IssuerKeys::parse(small_rsa.as_bytes(), Algorithm::Rs256),
         Err(KeySetError::InvalidKey { .. })
     ));
     let huge = format!(r#"{{"keys":[],"pad":"{}"}}"#, "a".repeat(1024 * 1024));

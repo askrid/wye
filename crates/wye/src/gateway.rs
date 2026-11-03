@@ -15,11 +15,11 @@ use gateway_core::{
     alias::Aliases,
     api::{self, Api},
     config::{Config, DEFAULT_SAMPLE_PERCENT, Routes, UpgradeCheck},
-    credential::{CredentialError, Identity, Verifier},
     policy::ModelPattern,
     pricing::Pricing,
     prompt::HashKey,
     route::Route,
+    token::{Identity, TokenError, Verifier},
 };
 use http::{HeaderName, Method, Request, Response, StatusCode};
 use http_body_util::{Either, Full};
@@ -175,7 +175,7 @@ impl Gateway {
         &self,
         headers: &http::HeaderMap,
         connection: &ConnectionAuth,
-    ) -> Result<Option<Arc<Identity>>, CredentialError> {
+    ) -> Result<Option<Arc<Identity>>, TokenError> {
         self.verifier
             .as_ref()
             .map(|verifier| authenticate(verifier, headers, connection))

@@ -23,11 +23,11 @@
 
 use std::{fmt::Write as _, path::Path};
 
-use gateway_core::{config::Config, credential::Identity, policy::ModelPattern};
+use gateway_core::{config::Config, policy::ModelPattern, token::Identity};
 use serde::Deserialize;
 
 use super::{
-    explain::{Credential, explain},
+    explain::{CallerToken, explain},
     paint::verdict,
 };
 
@@ -100,8 +100,8 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
     .map_err(|e| format!("{}: {e}", expect_path.display()))?;
     let body = std::fs::read(request).map_err(|e| e.to_string())?;
     let credential = match expect.token {
-        None => Credential::None,
-        Some(claims) => Credential::Trusted(Identity {
+        None => CallerToken::None,
+        Some(claims) => CallerToken::Trusted(Identity {
             subject: claims.subject.into(),
             key_id: "policy-test".into(),
             expires_at: u64::MAX,

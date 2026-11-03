@@ -21,7 +21,7 @@ mod upgrade_check;
 mod upstream;
 mod usage_log;
 
-pub use cli::{Credential, doctor, explain, policy_diff, policy_test, probe};
+pub use cli::{CallerToken, doctor, explain, policy_diff, policy_test, probe};
 pub use gateway::Gateway;
 pub use server::serve;
 pub(crate) use startup::StartupError;

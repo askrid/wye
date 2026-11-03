@@ -1,9 +1,9 @@
 //! `wye explain`: what `wye serve` would decide for one request, offline.
 //!
-//! The checks call the same functions the server uses (credential
+//! The checks call the same functions the gateway uses (token
 //! verification, the policy scanner, body admission's [`BodyChecks`], session
 //! sampling) in the server's order, and make no network calls. Routing is a
-//! pure function of request, credential, and config, so the answer is what
+//! pure function of request, gateway token, and config, so the answer is what
 //! every replica would do.
 
 use super::{args::Parsed, files};
@@ -11,11 +11,11 @@ use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
     config::{Config, Upstream, UpstreamCredential},
-    credential::{Identity, Verifier},
     policy,
     pricing::{Pico, PricedModels, Usd},
     prompt,
     route::{self, FailoverReason, Route, Select},
+    token::{Identity, Verifier},
     upgrade::{self, UpgradeScanner},
 };
 
@@ -26,7 +26,7 @@ use super::{
 };
 
 /// The gateway token a request carries.
-pub enum Credential<'a> {
+pub enum CallerToken<'a> {
     None,
     /// A bearer token, verified as the server would, with the server's verifier.
     Token(&'a str, &'a Verifier),
@@ -60,14 +60,14 @@ pub fn run(
         Some(file) => std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?,
         None => Vec::new(),
     };
-    let credential = match (token.as_deref(), &verifier) {
-        (Some(token), Some(verifier)) => Credential::Token(token, verifier),
-        _ => Credential::None,
+    let caller = match (token.as_deref(), &verifier) {
+        (Some(token), Some(verifier)) => CallerToken::Token(token, verifier),
+        _ => CallerToken::None,
     };
     let explanation = explain(
         &config,
         parsed.value("path").unwrap_or("/v1/messages"),
-        credential,
+        caller,
         parsed.value("session"),
         &body,
         super::unix_secs()?,
@@ -149,18 +149,18 @@ impl Explanation {
     fn token(
         &mut self,
         config: &Config,
-        credential: Credential<'_>,
+        caller: CallerToken<'_>,
         now: u64,
     ) -> Stage<Option<Identity>> {
         if config.auth.is_none() {
             self.step("token: not required (no [auth])".into());
             return Ok(None);
         }
-        match credential {
-            Credential::None => {
+        match caller {
+            CallerToken::None => {
                 Err(self.refuse_as(&Refusal::Unauthenticated, "no gateway token".into()))
             }
-            Credential::Token(token, verifier) => match verifier.verify(token, now) {
+            CallerToken::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
                     self.step(format!(
                         "token: valid; subject {}, key {}, expires at {}",
@@ -170,7 +170,7 @@ impl Explanation {
                 }
                 Err(e) => Err(self.refuse_as(&Refusal::Unauthenticated, e.to_string())),
             },
-            Credential::Trusted(claims) => {
+            CallerToken::Trusted(claims) => {
                 self.step(format!(
                     "token: taken as verified (signature not checked); subject {}",
                     claims.subject
@@ -435,14 +435,14 @@ impl Explanation {
     }
 }
 
-/// Explains `POST path` with `body`, `credential`, and the client's
+/// Explains `POST path` with `body`, the `caller`'s gateway token, and the client's
 /// `session` id (Claude Code's or Codex's), at Unix time `now`. Upgrade
 /// checks run against `targets`, or, when empty, against
 /// `[upgrade_check] targets`.
 pub fn explain(
     config: &Config,
     path: &str,
-    credential: Credential<'_>,
+    caller: CallerToken<'_>,
     session: Option<&str>,
     body: &[u8],
     now: u64,
@@ -463,7 +463,7 @@ pub fn explain(
         let api = endpoint.api;
         // Chat Completions carries no session header: the server never sees one.
         let session = session.filter(|_| api.session_header().is_some());
-        let identity = out.token(config, credential, now)?;
+        let identity = out.token(config, caller, now)?;
         out.body_size(config, body)?;
         let checks = BodyChecks::new(
             config.auth.as_ref().and_then(|a| a.models.as_deref()),

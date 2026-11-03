@@ -8,9 +8,9 @@ use serde::Serialize;
 use super::Header;
 use crate::config::Algorithm;
 
-/// Claims of a credential to issue.
+/// Claims of a token to issue.
 #[derive(Serialize)]
-pub struct NewCredential<'a> {
+pub struct NewToken<'a> {
     pub iss: &'a str,
     pub sub: &'a str,
     pub aud: &'a str,
@@ -25,7 +25,7 @@ pub struct NewCredential<'a> {
 }
 
 /// Signs `claims` with `key` under key id `kid`.
-pub fn issue(key: &Ed25519KeyPair, kid: &str, claims: &NewCredential<'_>) -> String {
+pub fn issue(key: &Ed25519KeyPair, kid: &str, claims: &NewToken<'_>) -> String {
     let header = Header {
         alg: Algorithm::EdDsa.as_str(),
         kid,

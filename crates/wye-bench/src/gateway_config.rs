@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use gateway_core::credential::{self, NewCredential};
+use gateway_core::token::{self, NewToken};
 use ring::signature::KeyPair;
 
 /// LiteLLM refuses to start without a master key and then authenticates every route.
@@ -37,10 +37,10 @@ impl BenchCredentials {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let token = credential::issue(
+        let token = token::issue(
             &key,
             "bench",
-            &NewCredential {
+            &NewToken {
                 iss: "wye-bench",
                 sub: "bench",
                 aud: "wye-bench",
@@ -51,7 +51,7 @@ impl BenchCredentials {
             },
         );
         Self {
-            public_key: credential::encode_public_key(key.public_key().as_ref()),
+            public_key: token::encode_public_key(key.public_key().as_ref()),
             token,
         }
     }

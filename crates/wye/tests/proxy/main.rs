@@ -9,10 +9,10 @@
 mod aliases;
 mod cli;
 mod config_lookup;
-mod credentials;
 mod explain;
 mod failover;
 mod forwarding;
+mod gateway_tokens;
 mod harness;
 mod identity_providers;
 mod lifecycle;

@@ -14,12 +14,12 @@ pub mod agent;
 pub mod alias;
 pub mod api;
 pub mod config;
-pub mod credential;
 mod json;
 pub mod policy;
 pub mod pricing;
 pub mod prompt;
 pub mod route;
+pub mod token;
 pub mod upgrade;
 pub mod usage;
 

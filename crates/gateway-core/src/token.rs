@@ -1,4 +1,4 @@
-//! Gateway credentials: compact JWTs, from Wye's own issuer (Ed25519) or from
+//! Gateway tokens: compact JWTs, from Wye's own issuer (Ed25519) or from
 //! configured identity providers (RS256, ES256, or EdDSA).
 //!
 //! A token's `kid` selects its key, and the key belongs to one issuer, whose
@@ -8,7 +8,7 @@
 //! after the signature verifies, and then must name that key's issuer.
 //!
 //! Wye's own tokens reject unknown header fields (including `crit`). Identity
-//! provider tokens carry extra header fields (`typ`, `x5t`), which are
+//! identity-provider tokens carry extra header fields (`typ`, `x5t`), which are
 //! ignored, except `crit`, which is rejected (RFC 7515 §4.1.11). Unknown
 //! claims are ignored.
 //!
@@ -24,50 +24,50 @@ use crate::{
     policy::ModelPattern,
 };
 
+mod identity_provider;
 mod issue;
 mod keys;
-mod provider;
 
-pub use issue::{NewCredential, encode_public_key, issue};
+pub use issue::{NewToken, encode_public_key, issue};
 use keys::VerifyKey;
-pub use keys::{KeySetError, ProviderKeys};
+pub use keys::{IssuerKeys, KeySetError};
 
 /// Longer tokens are rejected before any decoding.
 const MAX_TOKEN_BYTES: usize = 8 * 1024;
 /// Tolerated clock skew for `iat` and `nbf`. Expiry is strict.
 const CLOCK_SKEW_SECS: u64 = 60;
 
-/// Who a verified credential belongs to.
+/// Who a verified token belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
     pub subject: Box<str>,
     pub key_id: Box<str>,
     pub expires_at: u64,
-    /// Models this credential may use (the `models` claim, or an identity
+    /// Models this token may use (the `models` claim, or an identity
     /// provider's matching grants); `None` leaves the configured list in
     /// charge. An empty list allows no model.
     pub models: Option<Box<[ModelPattern]>>,
-    /// Largest output-token maximum this credential may request (the
+    /// Largest output-token maximum this token may request (the
     /// `max_output_tokens` claim).
     pub max_output_tokens: Option<u64>,
 }
 
 impl Identity {
-    /// Whether the credential has expired at Unix time `now`.
+    /// Whether the token has expired at Unix time `now`.
     pub fn expired(&self, now: u64) -> bool {
         is_expired(self.expires_at, now)
     }
 }
 
-/// A credential expiring at `exp` is valid strictly before it.
+/// A token expiring at `exp` is valid strictly before it.
 fn is_expired(exp: u64, now: u64) -> bool {
     now >= exp
 }
 
-/// Why a credential was rejected. Deliberately coarse in client responses;
+/// Why a gateway token was refused. Deliberately coarse in client responses;
 /// the variants exist for logs and tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CredentialError {
+pub enum TokenError {
     TooLarge,
     Malformed,
     UnsupportedAlgorithm,
@@ -81,7 +81,7 @@ pub enum CredentialError {
     MissingSubject,
 }
 
-impl fmt::Display for CredentialError {
+impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::TooLarge => "token too large",
@@ -99,7 +99,7 @@ impl fmt::Display for CredentialError {
     }
 }
 
-impl std::error::Error for CredentialError {}
+impl std::error::Error for TokenError {}
 
 /// The header of Wye's own tokens: exactly these fields.
 #[derive(Deserialize, Serialize)]
@@ -169,17 +169,17 @@ enum SourceKind {
     /// `max_output_tokens` claims.
     Own,
     /// An identity provider: its pinned algorithm, subject claim, and grants.
-    Provider {
+    IdentityProvider {
         algorithm: Algorithm,
         subject_claim: Box<str>,
         grants: Box<[Grant]>,
     },
 }
 
-/// Checks credentials against the configured issuers and keys.
+/// Checks tokens against the configured issuers and keys.
 pub struct Verifier {
     max_ttl_secs: u64,
-    /// Every key, Wye's own and the providers', with the index of its source.
+    /// Every key, Wye's own and the identity providers', with the index of its source.
     keys: HashMap<Box<str>, (VerifyKey, usize)>,
     sources: Vec<Source>,
 }
@@ -197,10 +197,10 @@ impl fmt::Debug for Verifier {
 }
 
 impl Verifier {
-    /// `provider_keys` holds each `auth.issuers` entry's parsed key set, in
+    /// `issuer_keys` holds each `auth.issuers` entry's parsed key set, in
     /// order; an issuer without one accepts no token. A key id used twice,
     /// in any two sets, is an error: a token's `kid` must name one key.
-    pub fn new(auth: &Auth, provider_keys: Vec<ProviderKeys>) -> Result<Self, KeySetError> {
+    pub fn new(auth: &Auth, issuer_keys: Vec<IssuerKeys>) -> Result<Self, KeySetError> {
         let mut verifier = Self {
             max_ttl_secs: auth.max_token_ttl.as_secs(),
             keys: HashMap::new(),
@@ -212,8 +212,8 @@ impl Verifier {
                 verifier.add_key(&key.id, VerifyKey::ed25519(key.ed25519_public_key), index)?;
             }
         }
-        for (issuer, set) in auth.issuers.iter().zip(provider_keys) {
-            let kind = SourceKind::Provider {
+        for (issuer, set) in auth.issuers.iter().zip(issuer_keys) {
+            let kind = SourceKind::IdentityProvider {
                 algorithm: issuer.algorithm,
                 subject_claim: issuer.subject_claim.as_str().into(),
                 grants: issuer.grants.clone().into(),
@@ -243,58 +243,55 @@ impl Verifier {
     }
 
     /// Verifies `token` at Unix time `now`, in seconds.
-    pub fn verify(&self, token: &str, now: u64) -> Result<Identity, CredentialError> {
+    pub fn verify(&self, token: &str, now: u64) -> Result<Identity, TokenError> {
         if token.len() > MAX_TOKEN_BYTES {
-            return Err(CredentialError::TooLarge);
+            return Err(TokenError::TooLarge);
         }
         let mut parts = token.split('.');
         let (Some(header_b64), Some(claims_b64), Some(signature_b64), None) =
             (parts.next(), parts.next(), parts.next(), parts.next())
         else {
-            return Err(CredentialError::Malformed);
+            return Err(TokenError::Malformed);
         };
 
         let header_json = decode(header_b64)?;
         let header: AnyHeader<'_> =
-            serde_json::from_slice(&header_json).map_err(|_| CredentialError::Malformed)?;
-        let kid = header.kid.ok_or(CredentialError::UnknownKey)?;
-        let (key, source) = self.keys.get(kid).ok_or(CredentialError::UnknownKey)?;
-        let source = self
-            .sources
-            .get(*source)
-            .ok_or(CredentialError::UnknownKey)?;
+            serde_json::from_slice(&header_json).map_err(|_| TokenError::Malformed)?;
+        let kid = header.kid.ok_or(TokenError::UnknownKey)?;
+        let (key, source) = self.keys.get(kid).ok_or(TokenError::UnknownKey)?;
+        let source = self.sources.get(*source).ok_or(TokenError::UnknownKey)?;
         let algorithm = match &source.kind {
             SourceKind::Own => {
                 serde_json::from_slice::<Header<'_>>(&header_json)
-                    .map_err(|_| CredentialError::Malformed)?;
+                    .map_err(|_| TokenError::Malformed)?;
                 Algorithm::EdDsa.as_str()
             }
-            SourceKind::Provider { algorithm, .. } => {
+            SourceKind::IdentityProvider { algorithm, .. } => {
                 if header.crit.is_some() {
-                    return Err(CredentialError::Malformed);
+                    return Err(TokenError::Malformed);
                 }
                 algorithm.as_str()
             }
         };
         if header.alg != algorithm {
-            return Err(CredentialError::UnsupportedAlgorithm);
+            return Err(TokenError::UnsupportedAlgorithm);
         }
         // The signature covers the encoded header and claims exactly as sent.
         let signed_len = header_b64.len() + 1 + claims_b64.len();
-        let signed = token.get(..signed_len).ok_or(CredentialError::Malformed)?;
+        let signed = token.get(..signed_len).ok_or(TokenError::Malformed)?;
         if !key.verify(signed.as_bytes(), &decode(signature_b64)?) {
-            return Err(CredentialError::BadSignature);
+            return Err(TokenError::BadSignature);
         }
 
         // Claims are parsed only after the signature holds.
         let claims_json = decode(claims_b64)?;
         match &source.kind {
             SourceKind::Own => self.own_identity(source, &claims_json, kid, now),
-            SourceKind::Provider {
+            SourceKind::IdentityProvider {
                 subject_claim,
                 grants,
                 ..
-            } => self.provider_identity(source, &claims_json, subject_claim, grants, kid, now),
+            } => self.idp_identity(source, &claims_json, subject_claim, grants, kid, now),
         }
     }
 
@@ -304,9 +301,9 @@ impl Verifier {
         claims_json: &[u8],
         kid: &str,
         now: u64,
-    ) -> Result<Identity, CredentialError> {
+    ) -> Result<Identity, TokenError> {
         let claims: Claims =
-            serde_json::from_slice(claims_json).map_err(|_| CredentialError::Malformed)?;
+            serde_json::from_slice(claims_json).map_err(|_| TokenError::Malformed)?;
         self.check(
             source,
             &Registered {
@@ -320,16 +317,16 @@ impl Verifier {
         )?;
         // An empty or invalid list is an issuer mistake: fail closed.
         let models = match claims.models {
-            Some(list) if list.is_empty() => return Err(CredentialError::Malformed),
+            Some(list) if list.is_empty() => return Err(TokenError::Malformed),
             Some(list) => Some(
                 list.iter()
-                    .map(|p| ModelPattern::parse(p).ok_or(CredentialError::Malformed))
+                    .map(|p| ModelPattern::parse(p).ok_or(TokenError::Malformed))
                     .collect::<Result<Box<[_]>, _>>()?,
             ),
             None => None,
         };
         if claims.max_output_tokens == Some(0) {
-            return Err(CredentialError::Malformed);
+            return Err(TokenError::Malformed);
         }
         Ok(Identity {
             models,
@@ -340,29 +337,29 @@ impl Verifier {
         })
     }
 
-    fn check(&self, source: &Source, r: &Registered<'_>, now: u64) -> Result<(), CredentialError> {
+    fn check(&self, source: &Source, r: &Registered<'_>, now: u64) -> Result<(), TokenError> {
         if r.iss != &*source.issuer {
-            return Err(CredentialError::WrongIssuer);
+            return Err(TokenError::WrongIssuer);
         }
         if !r.aud.contains(&source.audience) {
-            return Err(CredentialError::WrongAudience);
+            return Err(TokenError::WrongAudience);
         }
         if is_expired(r.exp, now) {
-            return Err(CredentialError::Expired);
+            return Err(TokenError::Expired);
         }
         let earliest = r.nbf.unwrap_or(r.iat).max(r.iat);
         if earliest > now.saturating_add(CLOCK_SKEW_SECS) {
-            return Err(CredentialError::NotYetValid);
+            return Err(TokenError::NotYetValid);
         }
         if r.exp.saturating_sub(r.iat) > self.max_ttl_secs {
-            return Err(CredentialError::LifetimeTooLong);
+            return Err(TokenError::LifetimeTooLong);
         }
         Ok(())
     }
 }
 
-fn decode(part: &str) -> Result<Vec<u8>, CredentialError> {
-    B64.decode(part).map_err(|_| CredentialError::Malformed)
+fn decode(part: &str) -> Result<Vec<u8>, TokenError> {
+    B64.decode(part).map_err(|_| TokenError::Malformed)
 }
 
 /// Decodes `ed25519_public_key` from the config.

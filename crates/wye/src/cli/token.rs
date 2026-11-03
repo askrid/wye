@@ -8,8 +8,8 @@ use std::path::Path;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use gateway_core::{
     config::Config,
-    credential::{self, NewCredential},
     policy::ModelPattern,
+    token::{self, NewToken},
 };
 use ring::{
     rand::SystemRandom,
@@ -54,7 +54,7 @@ pub fn read_key(path: &Path) -> Result<Ed25519KeyPair, String> {
 
 /// The key's public half as `[[auth.keys]]` takes it.
 pub fn public_key(key: &Ed25519KeyPair) -> String {
-    credential::encode_public_key(key.public_key().as_ref())
+    token::encode_public_key(key.public_key().as_ref())
 }
 
 /// `wye token keygen`: a new key, and what to add to the config.
@@ -171,10 +171,10 @@ pub fn issue(
             show_duration(longest)
         ));
     }
-    Ok(credential::issue(
+    Ok(token::issue(
         key,
         kid,
-        &NewCredential {
+        &NewToken {
             iss: &own.issuer,
             sub: issue.subject,
             aud: &own.audience,

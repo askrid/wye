@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 
-use super::{Audience, CredentialError, Identity, Registered, Source, Verifier};
+use super::{Audience, Identity, Registered, Source, TokenError, Verifier};
 use crate::{config::Grant, policy::ModelPattern};
 
 impl Audience {
@@ -23,7 +23,7 @@ impl Audience {
 }
 
 impl Verifier {
-    pub(super) fn provider_identity(
+    pub(super) fn idp_identity(
         &self,
         source: &Source,
         claims_json: &[u8],
@@ -31,26 +31,26 @@ impl Verifier {
         grants: &[Grant],
         kid: &str,
         now: u64,
-    ) -> Result<Identity, CredentialError> {
+    ) -> Result<Identity, TokenError> {
         let claims: Map<String, Value> =
-            serde_json::from_slice(claims_json).map_err(|_| CredentialError::Malformed)?;
+            serde_json::from_slice(claims_json).map_err(|_| TokenError::Malformed)?;
         let number = |name: &str| claims.get(name).map(Value::as_u64);
         let (Some(Some(exp)), Some(Some(iat))) = (number("exp"), number("iat")) else {
-            return Err(CredentialError::Malformed);
+            return Err(TokenError::Malformed);
         };
         let nbf = match number("nbf") {
             None => None,
             Some(Some(nbf)) => Some(nbf),
-            Some(None) => return Err(CredentialError::Malformed),
+            Some(None) => return Err(TokenError::Malformed),
         };
         let iss = claims
             .get("iss")
             .and_then(Value::as_str)
-            .ok_or(CredentialError::Malformed)?;
+            .ok_or(TokenError::Malformed)?;
         let aud = claims
             .get("aud")
             .and_then(Audience::from_value)
-            .ok_or(CredentialError::Malformed)?;
+            .ok_or(TokenError::Malformed)?;
         self.check(
             source,
             &Registered {
@@ -66,7 +66,7 @@ impl Verifier {
             .get(subject_claim)
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
-            .ok_or(CredentialError::MissingSubject)?;
+            .ok_or(TokenError::MissingSubject)?;
         Ok(Identity {
             subject: subject.into(),
             key_id: kid.into(),

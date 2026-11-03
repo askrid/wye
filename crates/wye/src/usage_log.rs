@@ -26,10 +26,10 @@ use std::{
 
 use gateway_core::{
     api::Endpoint,
-    credential::Identity,
     pricing::Pricing,
     prompt::HashKey,
     route::FailoverReason,
+    token::Identity,
     usage::{ToolCalls, Usage, UsageStatus},
 };
 use http::{HeaderValue, Response, StatusCode};
