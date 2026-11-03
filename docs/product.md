@@ -1,6 +1,6 @@
 # Product
 
-**Run your agents like infrastructure.** Keys, models, failover, limits, and cost for Claude Code, Codex, and your apps live in one TOML file in Git, and each provider's native API passes through without translation.
+Keys, models, failover, limits, and cost for Claude Code, Codex, and your apps live in one TOML file in Git, and each provider's native API passes through without translation.
 
 Wye is a gateway between AI agents or AI-native apps and the model providers. Clients keep the provider's official SDK and native API, and get every new provider feature on the endpoints Wye serves the day it ships. Everything that is not application logic moves out of their code into one reviewed, Git-managed config: which model and provider serve a request, credentials, limits, failover, upgrades, telemetry, and cost. Wye does this per request and statelessly, as one binary with one TOML file and no database.
 

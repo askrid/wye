@@ -1,38 +1,62 @@
+<img src="site/assets/icon-fork.svg" alt="" width="64">
+
 # Wye
 
 [![CI](https://github.com/askrid/wye/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrid/wye/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Rust 1.99+](https://img.shields.io/badge/rust-1.99%2B-orange)](rust-toolchain.toml)
 
-**Run your agents like infrastructure.** Keys, models, failover, limits, and
-cost for Claude Code, Codex, and your apps live in one TOML file in Git, and
-each provider's native API passes through without translation.
+**Gateways got fat.** Wye is a gateway for Claude Code, Codex, and apps on the
+provider SDKs: one binary and one TOML file, no database, no dashboard, and
+each provider's own API passed through without translation.
 
-Wye is a stateless gateway for coding agents and LLM applications. It sits
-between clients and model providers, records the usage and cost of every
-request, distributes traffic across API keys and providers with failover, and
-enforces which caller may use which model. Clients keep their official SDKs:
-Wye relays each provider's native API without translation. It ships as a
-single Rust binary with no database and, in lab benchmarks, adds about 0.25 ms
-to a request.
+## Performance
+
+Lab results from one laptop (Intel i9-9880H, macOS) against a local mock
+provider, not production measurements. Other gateways ran in the same run as
+Wye, each at its best configuration; each cell is the other gateway's figure
+divided by Wye's (TLS; streamed events measured with 2,000 token-paced
+streams):
+
+| Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
+|---|---|---|---|---|
+| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 7× | 3.1× | 1.1× | 2.9× |
+| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 11× | 6.6× | 4.4× | 21× |
+| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
+| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
+
+Where others lead: agentgateway on paced-stream latency (1.0 vs 1.2 ms p50 in
+that run), event latency during uploads, cold connections, and memory beside
+stalled clients; KrakenD on bulk transfer and TLS uploads.
+[docs/benchmarks.md](docs/benchmarks.md) has the method, the full tables, and
+each configuration.
+
+What Wye itself adds:
+
+| What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
+|---|---|---|
+| Latency per request (p50) | 0.28 ms | 0.22 ms |
+| CPU per request | 120 µs | 161 µs |
+| CPU per streamed token event | 18.5 µs | |
+| Heap allocations per streamed event | 0 | |
+| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
+| Memory per open stream at that load | | 9.3 KB |
+
+A heavy Claude Code user, about five concurrent streams, costs about 1% of a
+core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an
+estimate). The added delay per event does not accumulate over a stream, so
+tokens per second are unchanged.
+
+Every commit that changes code is benchmarked against its parent in
+alternating rounds on the same machine (`scripts/check.sh`), and a change
+that makes Wye slower or heavier beyond the gate's tolerances is not
+committed.
+
+## Quick start
 
 > **Status:** prerelease (`0.1.0-rc.1`). Tested and benchmarked on one
 > machine, and in use with Claude Code on a claude.ai subscription. See
 > [Status](#status) for what is not yet verified against live providers.
-
-```console
-$ wye report
-3 requests in 1 session (0 other lines skipped); outcomes: completed 3
-
-By request class
-                                      cache  cache
-  class           reqs  input output   read  write    hit      cost  time tools
-  all                3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
-  main               3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
-...
-```
-
-## Quick start
 
 ```bash
 cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.99+
@@ -48,6 +72,20 @@ on this machine only, and holds no secret. Prebuilt archives for Linux and
 macOS are on the [releases page](https://github.com/askrid/wye/releases). The
 [guide](docs/guide.md) covers the other setups: a team gateway behind HTTPS,
 applications on the official SDKs, upgrades, and troubleshooting.
+
+After a short Claude Code session:
+
+```console
+$ wye report
+3 requests in 1 session (0 other lines skipped); outcomes: completed 3
+
+By request class
+                                      cache  cache
+  class           reqs  input output   read  write    hit      cost  time tools
+  all                3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
+  main               3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
+...
+```
 
 ## What it does
 
@@ -85,8 +123,9 @@ applications on the official SDKs, upgrades, and troubleshooting.
 - **Works with existing clients.** Claude Code, Codex, and applications on the
   official Anthropic and OpenAI SDKs connect by base URL; `wye claude` and
   `wye codex` set it for you. Anthropic Messages, OpenAI Responses, and Chat
-  Completions pass through as sent, apart from a model id that config maps,
-  and streams are relayed as the provider sends them, never buffered.
+  Completions pass through without translation, changing only a model id
+  that config maps, and streams are relayed as the provider sends them,
+  never buffered.
   ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs where you need it.** `wye service` installs a macOS LaunchAgent
   or a systemd user unit. A team runs any number of identical replicas behind a
@@ -119,65 +158,25 @@ and Wye keeps no state between requests.
 
 | Teams usually want | Wye |
 |---|---|
-| Spend by team, user, and app | Yes, down to the agent session, subagent, and tool, with prompt-cache misses explained |
-| Scoped keys instead of the provider key | Yes: a signed token per developer, CI job, or app, from Wye or your identity provider |
-| Spend caps and rate limits | Per-request output ceilings today, and the provider's own rate limits. Spend caps per team come after the waste report, enforced by the provider on each team's own key (planned); Wye keeps no counters |
-| Failover and load across keys | Yes, before any output, each session kept on one key so its prompt cache stays warm |
-| Logs, metrics, and traces | Yes, in your OpenTelemetry backend, one trace per Claude Code session |
-| Switching models centrally | Yes, and upgrade checks report what a newer model would reject before the switch |
-| Policy you can review and test | Yes: one TOML file in Git, checked in CI by `wye policy-test` and `wye policy-diff` |
-| One API for every provider | No: each client keeps its provider's API. For many providers behind one API, LiteLLM or OpenRouter fit better |
-| Guardrails, redaction, response caching | No ([why](#what-wye-will-not-do)) |
-| Little to operate | One binary, no database ([performance](#performance)) |
+| Spend by team, user, and app | Yes. Down to the agent session, subagent, and tool, with prompt-cache misses explained |
+| Scoped keys instead of the provider key | Yes. A signed token per developer, CI job, or app, from Wye or your identity provider |
+| Spend caps and rate limits | Partly. Per-request output ceilings today, and the provider's own rate limits. Spend caps per team come after the waste report, enforced by the provider on each team's own key (planned); Wye keeps no counters |
+| Failover and load across keys | Yes. With `failover` on, before any output; each session stays on one key so its prompt cache stays warm |
+| Logs, metrics, and traces | Yes. In your OpenTelemetry backend, one trace per Claude Code session |
+| Switching models centrally | Yes. Aliases, and upgrade checks report which Messages requests a newer model would reject before the switch |
+| Policy you can review and test | Yes. One TOML file in Git, checked in CI by `wye policy-test` and `wye policy-diff` |
+| One API for every provider | No. Each client keeps its provider's API. For many providers behind one API, LiteLLM or OpenRouter fit better |
+| Guardrails, redaction, response caching | No. [What Wye will not do](#what-wye-will-not-do) says why |
+| Little to operate | Yes. One binary, no database ([performance](#performance)) |
 
 Why native APIs: a provider integration keeps needing work after it ships. On
 Anthropic's API, within one year, `thinking.budget_tokens`, sampling
 parameters, assistant prefill, forced `tool_choice`, and `output_format` all
 broke on newer models. A gateway that translates every request into one format
-lags each such change. Wye forwards requests as sent, so new provider features
-on the endpoints it serves work on the day they ship. The only body field it
+lags each such change. Wye passes each native API through untranslated, so
+new provider features on the endpoints it serves work on the day they ship. The only body field it
 changes is `model` (an alias, or Bedrock's `anthropic.` ids), spliced in place,
 and the response names the model that ran.
-
-## Performance
-
-Every commit that changes code is benchmarked against its parent in
-alternating rounds on the same machine (`scripts/check.sh`), and a change
-that makes Wye slower or heavier beyond the gate's tolerances is not
-committed. The figures below are
-lab results from one laptop (Intel i9-9880H, macOS) against a local mock
-provider, not production measurements.
-
-| What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
-|---|---|---|
-| Latency per request (p50) | 0.28 ms | 0.22 ms |
-| CPU per request | 120 µs | 161 µs |
-| CPU per streamed token event | 18.5 µs | |
-| Heap allocations per streamed event | 0 | |
-| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
-| Memory per open stream at that load | | 9.3 KB |
-
-A heavy Claude Code user, about five concurrent streams, costs about 1% of a
-core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an
-estimate). The added delay per event does not accumulate over a stream, so
-tokens per second are unchanged.
-
-Other gateways ran on the same laptop, each at its best configuration and in
-the same run as Wye. Each cell is the other gateway's figure divided by Wye's
-(TLS; streamed events measured with 2,000 token-paced streams):
-
-| Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
-|---|---|---|---|---|
-| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 7× | 3.1× | 1.1× | 2.9× |
-| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 11× | 6.6× | 4.4× | 21× |
-| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
-| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
-
-Where others lead: agentgateway on paced-stream latency (1.0 vs 1.2 ms p50 in
-that run), event latency during uploads, cold connections, and memory beside
-stalled clients; KrakenD on bulk transfer and TLS uploads.
-[docs/benchmarks.md](docs/benchmarks.md) has the method, the full tables, and
-each configuration.
 
 ## Configuration
 
