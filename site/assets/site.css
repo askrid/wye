@@ -262,10 +262,13 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   /* The box-drawing height, so the tree's vertical strokes join. */
   line-height: 1.3;
 }
-.tree li { white-space: pre; }
-.tree .root { color: var(--graphite); }
-.tree .root + li { margin-top: 0; }
-.tree .root:not(:first-child) { margin-top: 1.1rem; }
+/* Two groups, each a list of its own, so a screen reader announces the
+   stops as one list of six. Only link rows keep their spaces: the
+   markup's line breaks between a group's name and its list are not drawn. */
+.tree ol, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree li li { white-space: pre; }
+.tree .root { display: block; color: var(--graphite); }
+.tree > li + li { margin-top: 1.1rem; }
 .tree a { display: block; color: var(--ink); text-decoration: none; }
 .tree .branch { color: var(--graphite); }
 .tree a:hover .name { text-decoration: underline; }
