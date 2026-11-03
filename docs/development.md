@@ -10,6 +10,7 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
 | `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
 | `scripts/ab.sh` | A/B comparison of two binaries |
+| `scripts/machine-lock.sh` | Runs a heavy job under one lock that every worktree shares, so the gate, A/B runs, and site builds take turns on one machine; `check.sh` and `ab.sh` take it themselves, CI skips it |
 | `scripts/ci-bench.sh` | The pull-request benchmark: a commit against its base on one machine |
 | `scripts/upload-latency.sh` | Upload latency over HTTP/1.1 and HTTP/2 against the real API (needs an API key; not part of the gate) |
 | `Dockerfile`, `scripts/image-smoke.sh` | OCI image and its build-and-run smoke test (needs Docker; not part of the gate) |

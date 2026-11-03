@@ -13,6 +13,8 @@ a=$(realpath "${1:?usage: scripts/ab.sh <wye-a> <wye-b> [rounds]}")
 b=$(realpath "${2:?usage: scripts/ab.sh <wye-a> <wye-b> [rounds]}")
 rounds=${3:-3}
 cd "$(dirname "$0")/.."
+# One heavy job at a time on this machine (scripts/machine-lock.sh).
+[[ -n ${WYE_MACHINE_LOCKED:-} ]] || exec scripts/machine-lock.sh scripts/ab.sh "$a" "$b" "$rounds"
 out=target/bench/ab; rm -rf "$out"; mkdir -p "$out"
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi
 cargo build --locked --release --quiet -p wye-bench

@@ -16,6 +16,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if (( $# )); then echo "usage: scripts/check.sh (no arguments; see the header)" >&2; exit 2; fi
+# One heavy job at a time on this machine: builds and benchmarks hold the lock.
+[[ -n ${WYE_MACHINE_LOCKED:-} ]] || exec scripts/machine-lock.sh scripts/check.sh
 against=${WYE_GATE_AGAINST:-HEAD}
 accept=${WYE_GATE_ACCEPT:-}
 
