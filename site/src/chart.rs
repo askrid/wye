@@ -22,7 +22,7 @@ struct Bar {
 /// as multiples of Wye's ("7×"), with Wye added as 1×. A cell that is not a
 /// multiple ("cannot stream") is left out.
 pub fn ratios(text: &str, column: &str) -> Result<String, String> {
-    let (rows, index) = tables(text)
+    let (rows, index) = markdown::tables(text)
         .into_iter()
         .find_map(|rows| {
             let index = rows.first()?.iter().position(|cell| cell == column)?;
@@ -60,7 +60,7 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
 /// each cell's first figure ("1.2" of "1.2 / 3.1 ms", the p50 of a p50 / p99
 /// pair) with the cell's unit.
 pub fn versus(text: &str, row_start: &str) -> Result<String, String> {
-    let (header, row) = tables(text)
+    let (header, row) = markdown::tables(text)
         .into_iter()
         .find_map(|rows| {
             let header = rows.first()?.clone();
@@ -146,35 +146,6 @@ fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
         "<pre class=\"bars\" tabindex=\"0\">{}</pre>",
         lines.join("\n")
     )
-}
-
-/// Every Markdown table in `text`, each as rows of trimmed cells, header
-/// first, the separator row left out.
-fn tables(text: &str) -> Vec<Vec<Vec<String>>> {
-    let mut tables = Vec::new();
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    for line in text.lines().map(str::trim) {
-        if let Some(inner) = line.strip_prefix('|') {
-            let cells: Vec<String> = inner
-                .strip_suffix('|')
-                .unwrap_or(inner)
-                .split('|')
-                .map(|cell| cell.trim().to_owned())
-                .collect();
-            let separator = cells
-                .iter()
-                .all(|cell| !cell.is_empty() && cell.chars().all(|c| matches!(c, '-' | ':')));
-            if !separator {
-                rows.push(cells);
-            }
-        } else if !rows.is_empty() {
-            tables.push(std::mem::take(&mut rows));
-        }
-    }
-    if !rows.is_empty() {
-        tables.push(rows);
-    }
-    tables
 }
 
 /// A gateway's name from its table cell: a link's text, or the cell up to

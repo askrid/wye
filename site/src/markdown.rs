@@ -95,6 +95,35 @@ pub fn paragraph<'a>(text: &'a str, start: &str) -> Option<&'a str> {
         .find(|paragraph| paragraph.starts_with(start))
 }
 
+/// Every Markdown table in `text`, each as rows of trimmed cells, header
+/// first, the separator row left out.
+pub fn tables(text: &str) -> Vec<Vec<Vec<String>>> {
+    let mut tables = Vec::new();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if let Some(inner) = line.strip_prefix('|') {
+            let cells: Vec<String> = inner
+                .strip_suffix('|')
+                .unwrap_or(inner)
+                .split('|')
+                .map(|cell| cell.trim().to_owned())
+                .collect();
+            let separator = cells
+                .iter()
+                .all(|cell| !cell.is_empty() && cell.chars().all(|c| matches!(c, '-' | ':')));
+            if !separator {
+                rows.push(cells);
+            }
+        } else if !rows.is_empty() {
+            tables.push(std::mem::take(&mut rows));
+        }
+    }
+    if !rows.is_empty() {
+        tables.push(rows);
+    }
+    tables
+}
+
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?
