@@ -133,7 +133,7 @@ fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
                         .unwrap_or(DEFAULT_FAILOVER_MAX_BODY_BYTES),
                     "failover_max_body_bytes",
                 )?,
-                max_held_bytes: nonzero(
+                max_kept_bytes: nonzero(
                     raw.failover_max_held_bytes
                         .unwrap_or(DEFAULT_FAILOVER_MAX_HELD_BYTES),
                     "failover_max_held_bytes",

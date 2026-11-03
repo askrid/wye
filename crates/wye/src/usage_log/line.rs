@@ -11,7 +11,7 @@ use gateway_core::{
 use http::HeaderValue;
 use serde::{Serialize, Serializer};
 
-use super::{Outcome, Record, RefusedAttempt, agent::ToolDurations};
+use super::{Outcome, Record, RejectedAttempt, agent::ToolDurations};
 use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
 
 /// What the writer adds to every record: keys, prices, upgrade targets.
@@ -103,7 +103,7 @@ pub(super) struct Line<'a> {
     pub(super) upgrade_issues: Option<UpgradeIssues<'a>>,
     /// Upstreams that refused the request before `upstream` answered.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
-    pub(super) failovers: &'a [RefusedAttempt],
+    pub(super) failovers: &'a [RejectedAttempt],
 }
 
 #[cfg(test)]
@@ -200,13 +200,13 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         headers_ms: r.seen.headers_after.map(ms),
         upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
-        session_id: token(r.info.session_id.as_ref()),
+        session_id: label(r.info.session_id.as_ref()),
         traceparent: r.info.traceparent.as_ref().and_then(|v| v.to_str().ok()),
         request_class: headers.request_class.map(|c| c.as_str()),
-        agent_type: token(headers.agent_type.as_ref()),
-        agent_id: token(headers.agent_id.as_ref()),
-        parent_agent_id: token(headers.parent_agent_id.as_ref()),
-        prompt_id: token(headers.prompt_id.as_ref()),
+        agent_type: label(headers.agent_type.as_ref()),
+        agent_id: label(headers.agent_id.as_ref()),
+        parent_agent_id: label(headers.parent_agent_id.as_ref()),
+        prompt_id: label(headers.prompt_id.as_ref()),
         compaction: headers.compaction.map(|c| c.as_str()),
         context_compacted: headers.context_compacted.map(|c| c.as_str()),
         tool_durations: headers
@@ -251,9 +251,9 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     }
 }
 
-/// A client-supplied value, kept only as a bounded token.
-fn token(value: Option<&HeaderValue>) -> Option<&str> {
-    value.and_then(|v| agent::token(v.as_bytes()))
+/// A client-supplied value, kept only as a bounded label.
+fn label(value: Option<&HeaderValue>) -> Option<&str> {
+    value.and_then(|v| agent::label(v.as_bytes()))
 }
 
 /// Name of the count of tool calls not recorded by name; parentheses are
@@ -288,7 +288,7 @@ fn ms(d: Duration) -> f64 {
     (d.as_secs_f64() * 1000.0 * 100.0).round() / 100.0
 }
 
-impl Serialize for RefusedAttempt {
+impl Serialize for RejectedAttempt {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;

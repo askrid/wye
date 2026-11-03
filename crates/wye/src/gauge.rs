@@ -9,23 +9,23 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-/// Sum of the units of live [`Held`] guards.
+/// Sum of the units of live [`Reserved`] guards.
 #[derive(Clone, Default)]
 pub(crate) struct Gauge(Arc<AtomicUsize>);
 
 /// Counts units on a [`Gauge`] until dropped, however the work ends.
-pub(crate) struct Held {
+pub(crate) struct Reserved {
     gauge: Arc<AtomicUsize>,
     units: usize,
 }
 
-impl Drop for Held {
+impl Drop for Reserved {
     fn drop(&mut self) {
         self.gauge.fetch_sub(self.units, Ordering::Relaxed);
     }
 }
 
-impl Held {
+impl Reserved {
     /// Adds `units` unless the gauge would exceed `max`; the add itself
     /// decides between concurrent callers.
     pub(crate) fn try_grow(&mut self, units: usize, max: usize) -> bool {
@@ -57,18 +57,18 @@ impl Gauge {
         self.0.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn hold(&self) -> Held {
+    pub(crate) fn hold(&self) -> Reserved {
         self.0.fetch_add(1, Ordering::Relaxed);
         self.held(1)
     }
 
-    /// A guard holding nothing yet, to grow with [`Held::try_grow`].
-    pub(crate) fn hold_none(&self) -> Held {
+    /// A guard holding nothing yet, to grow with [`Reserved::try_grow`].
+    pub(crate) fn hold_none(&self) -> Reserved {
         self.held(0)
     }
 
-    fn held(&self, units: usize) -> Held {
-        Held {
+    fn held(&self, units: usize) -> Reserved {
+        Reserved {
             gauge: Arc::clone(&self.0),
             units,
         }
@@ -76,7 +76,7 @@ impl Gauge {
 
     /// Holds one unit unless `max` are already held. Concurrent callers cannot
     /// both take the last unit: the increment itself decides.
-    pub(crate) fn try_hold(&self, max: usize) -> Option<Held> {
+    pub(crate) fn try_reserve(&self, max: usize) -> Option<Reserved> {
         if self.0.fetch_add(1, Ordering::Relaxed) < max {
             Some(self.held(1))
         } else {
@@ -102,13 +102,13 @@ mod tests {
     }
 
     #[test]
-    fn try_hold_stops_at_max_and_reopens_after_release() {
+    fn try_reserve_stops_at_max_and_reopens_after_release() {
         let gauge = Gauge::default();
-        let first = gauge.try_hold(1).unwrap();
-        assert!(gauge.try_hold(1).is_none());
+        let first = gauge.try_reserve(1).unwrap();
+        assert!(gauge.try_reserve(1).is_none());
         assert_eq!(gauge.current(), 1);
         drop(first);
-        assert!(gauge.try_hold(1).is_some());
+        assert!(gauge.try_reserve(1).is_some());
     }
 
     #[test]

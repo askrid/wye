@@ -367,7 +367,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MAX_BREAKPOINTS`, `MESSAGE_PREFIXES` | `gateway-core/src/prompt.rs` | Cache breakpoints recorded per request (Anthropic accepts four); message prefix hashes kept |
 | `EVENT_NAME_BYTES` | `gateway-core/src/usage/responses.rs` | A Responses event name kept; longer names are other events |
 | `Nesting::TRACKED` | `gateway-core/src/json.rs` | Bracket levels whose kinds are checked; deeper JSON is followed without the kind check |
-| `MAX_TOKEN_BYTES`, `MAX_TOOL_ENTRIES` | `gateway-core/src/agent.rs` | An agent id or type from a client header; tool durations read per request |
+| `MAX_LABEL_BYTES`, `MAX_TOOL_ENTRIES` | `gateway-core/src/agent.rs` | An agent id or type from a client header; tool durations read per request |
 
 Details for the shortened rows:
 

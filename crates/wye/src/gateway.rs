@@ -67,7 +67,7 @@ pub struct Gateway {
     held_bytes: Gauge,
     /// Request bytes kept for failover, across all requests; bounded per
     /// route by its `failover_max_held_bytes`.
-    failover_held: Gauge,
+    failover_kept: Gauge,
     max_held_request_bytes: usize,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
     prompt_key: Option<Arc<HashKey>>,
@@ -142,7 +142,7 @@ impl Gateway {
                 .map(|model| (Arc::clone(model), Bytes::copy_from_slice(model.as_bytes())))
                 .collect(),
             held_bytes: Gauge::default(),
-            failover_held: Gauge::default(),
+            failover_kept: Gauge::default(),
             max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
                 .unwrap_or(usize::MAX),
             otlp: config

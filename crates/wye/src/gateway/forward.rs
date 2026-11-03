@@ -30,10 +30,10 @@ use crate::{
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{Observed, RefusedAttempt, RequestInfo, Unanswered, UsageLog},
+    usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UsageLog},
 };
 
-/// How long a refused attempt may take to hand its body back: hyper drops a
+/// How long a rejected attempt may take to hand its body back: hyper drops a
 /// fully sent body as the response arrives, so this is a race, not a wait.
 const HANDBACK_WAIT: Duration = Duration::from_millis(100);
 
@@ -45,7 +45,7 @@ impl Gateway {
         log: &UsageLog,
     ) -> Response<ResBody> {
         let api = info.endpoint.api;
-        let Some(permit) = self.in_flight.try_hold(self.max_concurrent_requests) else {
+        let Some(permit) = self.in_flight.try_reserve(self.max_concurrent_requests) else {
             return log.gateway_error(
                 info,
                 overloaded(api, "gateway is at its concurrent request limit"),
@@ -88,7 +88,7 @@ impl Gateway {
     }
 
     /// Sends the request to the upstream its affinity key picks and, after a
-    /// refusal that proves it was not processed, to the next upstream in its
+    /// rejection that proves it was not processed, to the next upstream in its
     /// ranking, as long as failover can resend the body.
     async fn attempts(
         &self,
@@ -126,7 +126,7 @@ impl Gateway {
         }
         let (mut body, mut handback) = match &failover {
             Some(f) => {
-                let (body, handback) = FailoverBody::kept(body, &self.failover_held, bounds(f));
+                let (body, handback) = FailoverBody::kept(body, &self.failover_kept, bounds(f));
                 (body, Some(handback))
             }
             None => (FailoverBody::once(body), None),
@@ -163,7 +163,7 @@ impl Gateway {
                 .await;
             let next = order.peek().and_then(|&i| route.upstreams.get(i));
             if let (Some(reason), Some(f), Some(handback), Some(next)) = (
-                refusal(&result, failover.as_ref()),
+                rejection(&result, failover.as_ref()),
                 &failover,
                 handback.as_mut(),
                 next,
@@ -173,7 +173,7 @@ impl Gateway {
                     with_model_id(resend, model_span.as_ref(), next, &mut prefix_sent)
                 }) {
                     drop(result);
-                    info.failovers.push(RefusedAttempt {
+                    info.failovers.push(RejectedAttempt {
                         upstream: upstream.id.clone(),
                         reason,
                     });
@@ -210,9 +210,9 @@ impl Gateway {
 
 /// The failover reason `result` gives, if the route acts on it. A lost connection
 /// qualifies only if the attempt did not deliver the whole body (checked by
-/// [`handed_back`]): a provider can refuse early and close while the upload
+/// [`handed_back`]): a provider can reject early and close while the upload
 /// runs, and an incomplete request cannot have been processed.
-fn refusal(
+fn rejection(
     result: &Result<Response<UpstreamBody<Incoming>>, ForwardError>,
     failover: Option<&route::Failover>,
 ) -> Option<FailoverReason> {
@@ -224,10 +224,10 @@ fn refusal(
     failover?.retries(reason).then_some(reason)
 }
 
-/// The body a refused attempt hands back: the bytes it sent plus the unread
-/// rest, so a refusal during the upload moves on once hyper drops the body.
+/// The body a rejected attempt hands back: the bytes it sent plus the unread
+/// rest, so a rejection during the upload moves on once hyper drops the body.
 /// If the attempt still holds it after [`HANDBACK_WAIT`] (hyper still
-/// writing), `None`: the refusal is answered as it is, because dropping the
+/// writing), `None`: the rejection is answered as it is, because dropping the
 /// answer first could lose both it and the body. Also `None` when the
 /// connection was `cut` after the whole body was delivered.
 async fn handed_back(
@@ -249,7 +249,7 @@ async fn handed_back(
 
 /// `resend` with the model id `next`'s provider needs, or `None` when the
 /// value is split between the sent bytes and the unread rest and cannot be
-/// rewritten: the refusal is then answered as it is.
+/// rewritten: the rejection is then answered as it is.
 fn with_model_id(
     mut resend: Resend<RequestBody<ClientBody>>,
     at: Option<&ModelSpan>,
@@ -273,7 +273,7 @@ fn with_model_id(
 fn bounds(failover: &route::Failover) -> Bounds {
     Bounds {
         max_body: usize::try_from(failover.max_body_bytes).unwrap_or(usize::MAX),
-        max_held: usize::try_from(failover.max_held_bytes).unwrap_or(usize::MAX),
+        max_kept: usize::try_from(failover.max_kept_bytes).unwrap_or(usize::MAX),
     }
 }
 

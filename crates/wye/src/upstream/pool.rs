@@ -13,7 +13,7 @@
 //! and 12.3 ms CPU per MB packed, against 0.3 ms and 4.1 ms spread).
 
 use super::UpstreamClient;
-use crate::gauge::{Gauge, Held};
+use crate::gauge::{Gauge, Reserved};
 
 /// Upper bound on connections per upstream.
 const LANES: usize = 64;
@@ -47,7 +47,7 @@ impl ClientPool {
     ///
     /// Two requests may pick the same lane concurrently; that only shifts load.
     /// The returned guard holds the lane until the response body is dropped.
-    pub(crate) fn acquire(&self) -> (&UpstreamClient, Held) {
+    pub(crate) fn acquire(&self) -> (&UpstreamClient, Reserved) {
         let lane = self
             .lanes
             .iter()
@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn spreads_concurrent_requests_and_releases_on_drop() {
         let pool = pool();
-        let slots: Vec<Held> = (0..3).map(|_| pool.acquire().1).collect();
+        let slots: Vec<Reserved> = (0..3).map(|_| pool.acquire().1).collect();
         assert_eq!(loads(&pool), [1, 1, 1]);
         drop(slots);
         assert_eq!(loads(&pool), [0, 0, 0]);
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn beyond_one_per_lane_load_stays_even() {
         let pool = pool();
-        let _all: Vec<Held> = (0..LANES * 2 + 1).map(|_| pool.acquire().1).collect();
+        let _all: Vec<Reserved> = (0..LANES * 2 + 1).map(|_| pool.acquire().1).collect();
         assert_eq!(loads(&pool), [3, 2, 2]);
     }
 }

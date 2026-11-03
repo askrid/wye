@@ -5,7 +5,7 @@ use crate::test_body::Client;
 
 const ROOMY: Bounds = Bounds {
     max_body: 1 << 20,
-    max_held: 1 << 20,
+    max_kept: 1 << 20,
 };
 
 async fn collect<B: Body<Data = Bytes> + Unpin>(body: FailoverBody<B>) -> Bytes
@@ -47,7 +47,7 @@ async fn a_body_beyond_either_bound_is_not_kept() {
     let held = Gauge::default();
     let small = Bounds {
         max_body: 3,
-        max_held: 1 << 20,
+        max_kept: 1 << 20,
     };
     let (body, handback) = FailoverBody::kept(Client::of(&["ab", "cd"]), &held, small);
     assert_eq!(collect(body).await, "abcd", "forwarded all the same");
@@ -62,7 +62,7 @@ async fn a_body_beyond_either_bound_is_not_kept() {
     };
     let process = Bounds {
         max_body: 1 << 20,
-        max_held: 10,
+        max_kept: 10,
     };
     let (body, handback) = FailoverBody::kept(Client::of(&["ab"]), &busy, process);
     assert_eq!(collect(body).await, "ab");
@@ -76,7 +76,7 @@ async fn tiny_chunks_stop_being_kept_early() {
     let held = Gauge::default();
     let bounds = Bounds {
         max_body: 1 << 20,
-        max_held: 4 * crate::request_body::MIN_CHUNK_CHARGE,
+        max_kept: 4 * crate::request_body::MIN_CHUNK_CHARGE,
     };
     let (body, handback) = FailoverBody::kept(Client::of(&["a"; 10]), &held, bounds);
     assert_eq!(

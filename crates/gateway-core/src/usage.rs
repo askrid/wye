@@ -105,7 +105,7 @@ impl ToolCalls {
     }
 
     fn count(&mut self, name: &str) {
-        if crate::agent::token(name.as_bytes()).is_none() || name.len() > MAX_TOOL_NAME_BYTES {
+        if crate::agent::label(name.as_bytes()).is_none() || name.len() > MAX_TOOL_NAME_BYTES {
             self.other = self.other.saturating_add(1);
             return;
         }

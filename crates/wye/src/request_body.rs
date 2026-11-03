@@ -37,7 +37,7 @@ use self::chunks::Chunks;
 pub(crate) use self::chunks::splice_chunks;
 use crate::{
     BoxError,
-    gauge::{Gauge, Held},
+    gauge::{Gauge, Reserved},
 };
 
 mod chunks;
@@ -78,7 +78,7 @@ pub(crate) fn charged<'c>(chunks: impl IntoIterator<Item = &'c Bytes>) -> usize 
 /// Moves `budget` from `before` to `after` charged bytes once a splice
 /// changed the held chunks. At most a model name's length and two new chunks
 /// per request, so the limit is not re-checked.
-pub(crate) fn recharge(budget: &mut Held, before: usize, after: usize) {
+pub(crate) fn recharge(budget: &mut Reserved, before: usize, after: usize) {
     if after > before {
         budget.try_grow(after - before, usize::MAX);
     } else {
@@ -124,7 +124,7 @@ pub(crate) enum HoldError {
 pub(crate) struct Hold {
     chunks: Chunks,
     /// The [`charge`] of each of `chunks`, counted against the hold budget.
-    budget: Held,
+    budget: Reserved,
     scanner: PolicyScanner,
     /// The whole body is in `chunks`.
     ended: bool,

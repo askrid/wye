@@ -11,7 +11,7 @@ use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 use tokio::time::{Instant, Sleep};
 
-use crate::{BoxError, gauge::Held};
+use crate::{BoxError, gauge::Reserved};
 
 /// Fails the stream when the upstream sends nothing for `timeout`. The timer
 /// runs only while this body waits on the upstream: time the downstream is not
@@ -21,11 +21,11 @@ pub(crate) struct UpstreamBody<B> {
     timeout: Duration,
     sleep: Pin<Box<Sleep>>,
     waiting: bool,
-    _slot: Held,
+    _slot: Reserved,
 }
 
 impl<B> UpstreamBody<B> {
-    pub(super) fn new(inner: B, timeout: Duration, slot: Held) -> Self {
+    pub(super) fn new(inner: B, timeout: Duration, slot: Reserved) -> Self {
         Self {
             inner,
             timeout,

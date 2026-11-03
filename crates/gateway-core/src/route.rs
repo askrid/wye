@@ -87,7 +87,7 @@ pub struct Failover {
     pub max_body_bytes: u64,
     /// Request bytes kept for resending across the process; beyond it,
     /// requests are forwarded without failover, never refused.
-    pub max_held_bytes: u64,
+    pub max_kept_bytes: u64,
 }
 
 impl Failover {

@@ -1,4 +1,4 @@
-//! Resending a request to the route's next upstream after a refusal that
+//! Resending a request to the route's next upstream after a rejection that
 //! proves the request was not processed: `429`, `529`, a connection refused,
 //! or one cut before the body was delivered whole ([`Resend::sent_whole`]).
 //!
@@ -8,7 +8,7 @@
 //! dropped hands back what it sent plus the part of the client's body not
 //! read yet ([`Resend`]), through a oneshot channel: no lock, no shared
 //! state. The next attempt replays the sent chunks and then reads on, so a
-//! refusal that arrives before the upload finished can still move on.
+//! rejection that arrives before the upload finished can still move on.
 //! Beyond either bound the body stops keeping, hands nothing back, and the
 //! request is forwarded without failover, never refused.
 
@@ -24,7 +24,7 @@ use hyper::body::{Body, Frame, SizeHint};
 use tokio::sync::oneshot;
 
 use crate::{
-    gauge::{Gauge, Held},
+    gauge::{Gauge, Reserved},
     request_body::{RequestBody, charge, charged, hint_after, recharge, splice_chunks},
 };
 
@@ -35,7 +35,7 @@ pub(crate) struct Resend<B> {
     rest: Option<B>,
     /// The [`charge`] of the kept chunks, counted against the process-wide
     /// bound.
-    budget: Held,
+    budget: Reserved,
     bytes: usize,
     /// The attempt delivered every byte: nothing was left to replay and the
     /// client's body was read to its end.
@@ -84,7 +84,7 @@ pub(crate) struct Bounds {
     /// Request bytes kept for one request.
     pub(crate) max_body: usize,
     /// Request bytes kept across the process ([`Gauge`]).
-    pub(crate) max_held: usize,
+    pub(crate) max_kept: usize,
 }
 
 /// Boxed, and only on routes with failover: hyper keeps request bodies
@@ -93,7 +93,7 @@ struct Keep<B> {
     /// Chunks an earlier attempt sent, sent again first.
     replay: VecDeque<Bytes>,
     sent: Vec<Bytes>,
-    budget: Held,
+    budget: Reserved,
     bytes: usize,
     /// The client's body was read to its end in this attempt.
     ended: bool,
@@ -188,7 +188,7 @@ where
                     let fits = keep.bytes + data.len() <= keep.bounds.max_body
                         && keep
                             .budget
-                            .try_grow(charge(data.len()), keep.bounds.max_held);
+                            .try_grow(charge(data.len()), keep.bounds.max_kept);
                     if fits {
                         keep.bytes += data.len();
                         keep.sent.push(data.clone());

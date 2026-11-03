@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 
 /// Longest identifier or agent type kept; longer values are dropped.
-pub const MAX_TOKEN_BYTES: usize = 128;
+pub const MAX_LABEL_BYTES: usize = 128;
 
 /// What kind of request this is (`x-claude-code-request-class`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,12 +107,12 @@ impl Compaction {
 }
 
 /// An identifier or agent type usable as a telemetry attribute: 1 to
-/// [`MAX_TOKEN_BYTES`] bytes of letters, digits, `-`, `_`, `.`, or `:`.
+/// [`MAX_LABEL_BYTES`] bytes of letters, digits, `-`, `_`, `.`, or `:`.
 /// Claude Code sends UUIDs, built-in agent type names, and name-based
 /// teammate ids, which all fit; anything else is dropped rather than escaped.
-pub fn token(value: &[u8]) -> Option<&str> {
+pub fn label(value: &[u8]) -> Option<&str> {
     let valid = !value.is_empty()
-        && value.len() <= MAX_TOKEN_BYTES
+        && value.len() <= MAX_LABEL_BYTES
         && value
             .iter()
             .all(|&b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
@@ -126,7 +126,7 @@ pub const MAX_TOOL_ENTRIES: usize = 32;
 /// The tool calls whose results a request carries, from
 /// `x-claude-code-prev-tool-durations` (`Bash=742;Read=9`): tool name and run
 /// time in milliseconds, in the order Claude Code collected the results.
-/// Names are percent-decoded and kept only when they are a [`token`];
+/// Names are percent-decoded and kept only when they are a [`label`];
 /// malformed entries are skipped, and at most [`MAX_TOOL_ENTRIES`] are read.
 pub fn tool_durations(value: &[u8]) -> impl Iterator<Item = (Cow<'_, str>, u64)> {
     value
@@ -137,7 +137,7 @@ pub fn tool_durations(value: &[u8]) -> impl Iterator<Item = (Cow<'_, str>, u64)>
             let (name, ms) = (entry.get(..eq)?, entry.get(eq + 1..)?);
             let ms = std::str::from_utf8(ms).ok()?.parse::<u64>().ok()?;
             let name = percent_decode(name)?;
-            token(name.as_bytes())?;
+            label(name.as_bytes())?;
             Some((name, ms))
         })
 }
@@ -261,13 +261,13 @@ mod tests {
     #[test]
     fn tokens_are_bounded_and_plain() {
         assert_eq!(
-            token(b"5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a"),
+            label(b"5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a"),
             Some("5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a")
         );
-        assert_eq!(token(b"general-purpose"), Some("general-purpose"));
-        assert_eq!(token(b"team:reviewer"), Some("team:reviewer"));
+        assert_eq!(label(b"general-purpose"), Some("general-purpose"));
+        assert_eq!(label(b"team:reviewer"), Some("team:reviewer"));
         for bad in [&b""[..], b"a b", b"a\"b", b"\xc3\xa9", &[b'a'; 129]] {
-            assert_eq!(token(bad), None, "{bad:?}");
+            assert_eq!(label(bad), None, "{bad:?}");
         }
     }
 
@@ -299,7 +299,7 @@ mod tests {
             let parsed: Vec<_> = tool_durations(&raw).collect();
             proptest::prop_assert!(parsed.len() <= MAX_TOOL_ENTRIES);
             for (name, _) in parsed {
-                proptest::prop_assert!(token(name.as_bytes()).is_some());
+                proptest::prop_assert!(label(name.as_bytes()).is_some());
             }
         }
     }

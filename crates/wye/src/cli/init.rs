@@ -23,7 +23,7 @@ pub enum Mode {
     /// One developer: each caller's own credential goes through, whether
     /// Claude Code's login or an API key, so the gateway holds no secret for
     /// Claude.
-    Forward,
+    Passthrough,
     /// One developer whose gateway holds an Anthropic API key, read from a
     /// file next to the config, so a background service finds it too.
     ApiKey,
@@ -48,7 +48,7 @@ impl InitOptions {
     /// half, for `Mode::Team`.
     pub fn config(&self, public_key: &str) -> Result<String, String> {
         let (listen, credential, openai_key) = match self.mode {
-            Mode::Forward => (
+            Mode::Passthrough => (
                 "127.0.0.1:8080",
                 "# Each caller's own credential goes through, whether Claude Code's\n\
                  # login or an API key: this machine only, no [auth].\n\
@@ -165,11 +165,11 @@ impl InitOptions {
                 format!("wye service install{c}"),
             ));
             let agents = match (self.mode, self.openai) {
-                (Mode::Forward, false) => {
+                (Mode::Passthrough, false) => {
                     "Start Claude Code through it, signed in as usual (an exported \
                      ANTHROPIC_API_KEY takes over from your login, and bills the API):"
                 }
-                (Mode::Forward, true) => {
+                (Mode::Passthrough, true) => {
                     "Start Claude Code, or Codex, through it (an exported \
                      ANTHROPIC_API_KEY takes over from your login, and bills the API):"
                 }
@@ -203,7 +203,7 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result
         }
         (true, false) => Mode::ApiKey,
         (false, true) => Mode::Team,
-        (false, false) => Mode::Forward,
+        (false, false) => Mode::Passthrough,
     };
     // A team's config belongs in the repository it is reviewed in.
     let out = match (parsed.value("out"), mode) {
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn writes_a_valid_config_for_each_mode_and_never_overwrites() {
         let key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        for mode in [Mode::Forward, Mode::ApiKey, Mode::Team] {
+        for mode in [Mode::Passthrough, Mode::ApiKey, Mode::Team] {
             for openai in [false, true] {
                 let text = options(mode, openai, Path::new("/h/wye.toml"))
                     .config(key)
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn the_default_needs_no_key_and_says_what_an_exported_one_does() {
-        let options = options(Mode::Forward, false, Path::new("/h/wye.toml"));
+        let options = options(Mode::Passthrough, false, Path::new("/h/wye.toml"));
         let config = Config::from_toml_str(&options.config("").unwrap()).unwrap();
         assert!(config.auth.is_none());
         assert_eq!(config.server.listen.ip().to_string(), "127.0.0.1");

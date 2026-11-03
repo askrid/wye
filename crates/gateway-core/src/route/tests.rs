@@ -156,7 +156,7 @@ fn failover_settings_are_validated() {
     assert!(f.retries(FailoverReason::Connect));
     assert_eq!(FailoverReason::of_status(500), None);
     assert_eq!(f.max_body_bytes, DEFAULT_FAILOVER_MAX_BODY_BYTES);
-    assert_eq!(f.max_held_bytes, DEFAULT_FAILOVER_MAX_HELD_BYTES);
+    assert_eq!(f.max_kept_bytes, DEFAULT_FAILOVER_MAX_HELD_BYTES);
     let parse = |extra: &str, ids: &[&str]| {
         let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
         for id in ids {

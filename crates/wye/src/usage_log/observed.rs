@@ -12,7 +12,7 @@ use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
 
 use super::{Outcome, RequestInfo, Seen, UsageLog};
-use crate::gauge::Held;
+use crate::gauge::Reserved;
 
 /// Sent when a successful Messages event stream fails at an event boundary
 /// (an idle timeout or a broken upstream body), so the client sees a
@@ -38,7 +38,7 @@ pub(crate) struct Observed<B> {
     outcome: Outcome,
     log: UsageLog,
     /// The request's concurrency permit, released when the response body is dropped.
-    _permit: Held,
+    _permit: Reserved,
 }
 
 impl<B: Body> Observed<B> {
@@ -48,7 +48,7 @@ impl<B: Body> Observed<B> {
         status: StatusCode,
         content_type: Option<&HeaderValue>,
         log: UsageLog,
-        permit: Held,
+        permit: Reserved,
     ) -> Self {
         let headers_after = info.started.elapsed();
         let api = info.endpoint.api;
