@@ -325,8 +325,8 @@ commit that changes code passes a benchmark gate against its parent. See
 ## Documentation
 
 [docs/README.md](docs/README.md) maps each question to the document that
-answers it, and [examples/wye.toml](examples/wye.toml) lists every
-configuration option.
+answers it, [docs/glossary.md](docs/glossary.md) defines the terms, and
+[examples/wye.toml](examples/wye.toml) lists every configuration option.
 
 ## License
 

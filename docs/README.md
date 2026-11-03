@@ -1,6 +1,6 @@
 # Wye docs
 
-New here: the [README](../README.md#what-it-does) says what Wye does, [how it compares](../README.md#how-it-compares) with what teams expect of a gateway, and how fast it is, and the [guide](guide.md) shows how to use each part. What Wye is for and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
+New here: the [README](../README.md#what-it-does) says what Wye does, the [glossary](glossary.md) defines its terms, [how it compares](../README.md#how-it-compares) with what teams expect of a gateway, and how fast it is, and the [guide](guide.md) shows how to use each part. What Wye is for and why: [product.md](product.md). Each document owns one concern; others link to it instead of restating it.
 
 ## Use it
 
@@ -35,17 +35,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does, [how it co
 
 ## Terms
 
-| Term | Meaning |
-| --- | --- |
-| Route | The upstreams that serve one native API: `[routes.claude]` (or its one-account short form, `[upstream]`) for Anthropic Messages, `[routes.openai]` for OpenAI Responses and Chat Completions |
-| Upstream | One provider account a route sends requests to: an `id`, a `provider`, a base URL, and its key |
-| Provider | Who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai` |
-| Affinity | The choice of upstream from the session id (`cache_affine`), so a session keeps one account and its prompt cache |
-| Failover | Resending a request to the route's next upstream after a refusal that proves it was not processed, before any output |
-| Alias | A model name clients send that config maps to a real model, per token subject |
-| Gateway token | What a caller presents to Wye (a JWT from Wye or an identity provider); Wye replaces it with the provider key |
-| Hold | Reading the start of a request body until its `model` is known, for permissions, output-token ceilings, aliases, and provider model ids |
-| Usage record | One JSON line per proxied request: tokens, cost, session, request class, outcome; also an OTLP log record and span |
+[glossary.md](glossary.md) defines each term the docs, the CLI, and the code use, and the names retired for it.
 
 ## Conventions
 
