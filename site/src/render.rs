@@ -377,7 +377,11 @@ mod tests {
             render(page, &sources()).unwrap(),
             "Nothing stops at a wye.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary."
         );
-        assert!(render("{{opening README.md|title}}", &sources()).is_err());
+        assert!(
+            render("{{opening README.md|title}}", &sources())
+                .unwrap_err()
+                .contains("\"title\" is not tagline, rest, or text")
+        );
     }
 
     #[test]
@@ -390,8 +394,16 @@ mod tests {
             .unwrap(),
             "12 in, $0.0181"
         );
-        assert!(render("{{field README.md|{|model}}", &sources()).is_err());
-        assert!(render("{{field README.md|$ wye|model}}", &sources()).is_err());
+        assert!(
+            render("{{field README.md|{|model}}", &sources())
+                .unwrap_err()
+                .contains("has no \"model\"")
+        );
+        assert!(
+            render("{{field README.md|$ wye|model}}", &sources())
+                .unwrap_err()
+                .contains("is not JSON")
+        );
     }
 
     #[test]
@@ -405,7 +417,11 @@ mod tests {
             "<p>Where others lead: one, on\n\
              <a href=\"https://github.com/askrid/wye/blob/main/docs/b.md\">two</a>.</p>\n"
         );
-        assert!(render("{{paragraph README.md|Performance|Nobody}}", &sources()).is_err());
+        assert!(
+            render("{{paragraph README.md|Performance|Nobody}}", &sources())
+                .unwrap_err()
+                .contains("starts with \"Nobody\"")
+        );
     }
 
     #[test]
@@ -461,7 +477,11 @@ mod tests {
                 .contains("no metric missing")
         );
         assert!(render("{{metric cpu/0|1}}", &s).is_err());
-        assert!(render("{{fence README.md|nothing}}", &s).is_err());
+        assert!(
+            render("{{fence README.md|nothing}}", &s)
+                .unwrap_err()
+                .contains("no fenced block starts with \"nothing\"")
+        );
         assert!(
             render("{{section docs/guide.md|Status}}", &s)
                 .unwrap_err()
@@ -472,7 +492,7 @@ mod tests {
                 .unwrap_err()
                 .contains("unknown directive")
         );
-        assert!(render("{{version", &s).is_err());
+        assert_eq!(render("{{version", &s).unwrap_err(), "a {{ without its }}");
     }
 
     #[test]

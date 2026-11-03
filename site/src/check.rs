@@ -245,8 +245,17 @@ mod tests {
             ],
             &[],
         );
-        let found = problems(&files);
-        assert_eq!(found.len(), 6, "{found:#?}");
+        assert_eq!(
+            problems(&files),
+            [
+                "assets/site.css: loads //cdn.example/x.png from another origin",
+                "index.html: an unexpanded directive",
+                "index.html: loads https://fonts.googleapis.com/css2 from another origin",
+                "index.html: a.png is not in the site",
+                "index.html: the link #nowhere names a missing anchor",
+                "index.html: the link guide.html leads nowhere",
+            ]
+        );
     }
 
     #[test]
@@ -255,6 +264,10 @@ mod tests {
             attribute_values("<a data-href=\"x\" href=\"y\">", "href"),
             ["y"]
         );
+    }
+
+    #[test]
+    fn paths_resolve_inside_the_site_only() {
         assert_eq!(resolve("index.html", "../x.css"), None);
         assert_eq!(
             resolve("docs/guide.html", "../assets/s.css").as_deref(),
