@@ -3,8 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Wye: run your agents like infrastructure</title>
+<title>Wye: a stateless gateway for Claude Code, Codex, and model APIs</title>
 <meta name="description" content="Wye is a stateless gateway between coding agents (Claude Code, Codex) or your apps and the model providers. Keys, models, failover, limits, and cost live in one TOML file in Git; each provider's native API passes through without translation.">
+<link rel="canonical" href="{{homepage}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Wye">
+<meta property="og:url" content="{{homepage}}">
+<meta property="og:title" content="Wye: a stateless gateway for Claude Code, Codex, and model APIs">
+<meta property="og:description" content="Keys, models, failover, limits, and cost in one TOML file in Git; each provider's native API passes through without translation, and every request leaves a record of its tokens and cost.">
+<meta name="twitter:card" content="summary">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#070707">
 <link rel="preload" href="assets/fonts/wye-text-regular.woff2" as="font" type="font/woff2" crossorigin>
@@ -15,6 +22,7 @@
 <script src="assets/site.js" defer></script>
 </head>
 <body>
+<a class="skip" href="#content">Skip to content</a>
 <header class="wrap bar">
   <a class="mark" href="./">
     <svg viewBox="0 0 32 32" aria-hidden="true"><rect class="tile" x="0.5" y="0.5" width="31" height="31" rx="7"/><path class="fork" d="M4.5 16 H11 L16 9 H27.5 M11 16 L16 23 H27.5"/></svg>
@@ -27,7 +35,7 @@
   </nav>
 </header>
 
-<main class="wrap">
+<main class="wrap" id="content">
   <section class="hero" aria-labelledby="top">
     <div class="hero-copy">
       <h1 id="top">Run your agents <br>like infrastructure.</h1>
@@ -41,7 +49,7 @@
 
     <figure class="junction">
       <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; the account stop holds the session on anthropic, which refuses it with 429 before any output, so with failover on the request is retried on {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
-<pre>claude code
+<pre class="trace-wide">claude code
 │
 o     <b>gate</b>      <span class="d">token checked</span>
 │
@@ -54,6 +62,26 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
    o  <b>stream</b>    <span class="d">as it arrives, unbuffered</span>
 <span class="r2">   │</span>
    o  <b>record</b>    {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+<pre class="trace-narrow">claude code
+│
+o  <b>gate</b>
+│  <span class="d">token checked</span>
+│
+o  <b>model</b>
+│  <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
+│
+o  <b>account</b>
+│  <span class="d">session held on anthropic</span>
+├──<span class="no">x</span>  refused
+│     <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+<span class="r2">╰──</span>o  retried
+<span class="r2">   │</span>  <span class="d">{{field README.md|{|upstream}}</span>
+<span class="r2">   │</span>
+   o  <b>stream</b>
+<span class="r2">   │</span>  <span class="d">as it arrives, unbuffered</span>
+<span class="r2">   │</span>
+   o  <b>record</b>
+      {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
       </div>
     </figure>
   </section>
@@ -78,27 +106,27 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
 
     <div class="stops">
       <section class="part stop" id="client" aria-labelledby="client-h">
-        <h2 id="client-h"><a class="hash" href="#client" aria-label="Link to client">#</a> client</h2>
+        <h2 id="client-h"><a href="#client"><span class="hash" aria-hidden="true">#</span> client</a></h2>
         {{item README.md|What it does|Works with}}
       </section>
 
       <section class="part stop" id="gate" aria-labelledby="gate-h">
-        <h2 id="gate-h"><a class="hash" href="#gate" aria-label="Link to gate">#</a> gate</h2>
+        <h2 id="gate-h"><a href="#gate"><span class="hash" aria-hidden="true">#</span> gate</a></h2>
         {{item README.md|What it does|Gives a team}}
       </section>
 
       <section class="part stop" id="model" aria-labelledby="model-h">
-        <h2 id="model-h"><a class="hash" href="#model" aria-label="Link to model">#</a> model</h2>
+        <h2 id="model-h"><a href="#model"><span class="hash" aria-hidden="true">#</span> model</a></h2>
         {{item README.md|What it does|Changes models}}
       </section>
 
       <section class="part stop" id="account" aria-labelledby="account-h">
-        <h2 id="account-h"><a class="hash" href="#account" aria-label="Link to account">#</a> account</h2>
+        <h2 id="account-h"><a href="#account"><span class="hash" aria-hidden="true">#</span> account</a></h2>
         {{item README.md|What it does|Spreads load}}
       </section>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
-        <h2 id="stream-h"><a class="hash" href="#stream" aria-label="Link to stream">#</a> stream</h2>
+        <h2 id="stream-h"><a href="#stream"><span class="hash" aria-hidden="true">#</span> stream</a></h2>
         <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit that changes code is benchmarked against its parent, and one that makes Wye slower or heavier is not committed.</p></div>
         <div class="table-scroll">
           <table class="numbers">
@@ -108,10 +136,10 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
             <tbody>
               <tr><th scope="row">Latency per request (p50)</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_added_p50_us/1000|2}} ms</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_added_p50_us/1000|2}} ms</td></tr>
               <tr><th scope="row">CPU per request</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_cpu_us_per_request|0}} µs</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_cpu_us_per_request|0}} µs</td></tr>
-              <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n"></td></tr>
-              <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n"></td></tr>
-              <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
-              <tr><th scope="row">Memory per open stream at that load</th><td class="n"></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
+              <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td></tr>
+              <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td></tr>
+              <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
+              <tr><th scope="row">Memory per open stream at that load</th><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
             </tbody>
           </table>
         </div>
@@ -127,7 +155,7 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
       </section>
 
       <section class="part stop" id="record" aria-labelledby="record-h">
-        <h2 id="record-h"><a class="hash" href="#record" aria-label="Link to record">#</a> record</h2>
+        <h2 id="record-h"><a href="#record"><span class="hash" aria-hidden="true">#</span> record</a></h2>
         {{item README.md|What it does|Shows usage}}
         {{fence README.md|$ wye report}}
         {{fence README.md|{}}
@@ -135,12 +163,12 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
       </section>
 
       <section class="part" id="compare" aria-labelledby="compare-h">
-        <h2 id="compare-h"><a class="hash" href="#compare" aria-label="Link to compare">#</a> compare</h2>
+        <h2 id="compare-h"><a href="#compare"><span class="hash" aria-hidden="true">#</span> compare</a></h2>
         <div class="prose">{{section README.md|How it compares}}</div>
       </section>
 
       <section class="part" id="config" aria-labelledby="config-h">
-        <h2 id="config-h"><a class="hash" href="#config" aria-label="Link to config">#</a> config</h2>
+        <h2 id="config-h"><a href="#config"><span class="hash" aria-hidden="true">#</span> config</a></h2>
         <p>One file, kept in Git: a route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
         {{fence README.md|[server]}}
         {{item README.md|What it does|Checks decisions}}
@@ -151,12 +179,12 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
       </section>
 
       <section class="part" id="status" aria-labelledby="status-h">
-        <h2 id="status-h"><a class="hash" href="#status" aria-label="Link to status">#</a> status</h2>
+        <h2 id="status-h"><a href="#status"><span class="hash" aria-hidden="true">#</span> status</a></h2>
         <div class="prose">{{section README.md|Status}}</div>
       </section>
 
       <section class="part" id="limits" aria-labelledby="limits-h">
-        <h2 id="limits-h"><a class="hash" href="#limits" aria-label="Link to will not do">#</a> will not do</h2>
+        <h2 id="limits-h"><a href="#limits"><span class="hash" aria-hidden="true">#</span> will not do</a></h2>
         <div class="prose">{{section README.md|What Wye will not do}}</div>
       </section>
     </div>

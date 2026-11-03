@@ -25,10 +25,11 @@
   font-display: swap;
 }
 /* Menlo scaled to Plex Mono's metrics (measured from the font files), so
-   text keeps its place when the web font arrives. */
+   text keeps its place when the web font arrives. The other systems'
+   monospace faces share Menlo's 0.6 em advance, so the same scaling fits. */
 @font-face {
   font-family: "Wye Mono fallback";
-  src: local("Menlo");
+  src: local("Menlo"), local("Menlo-Regular"), local("DejaVu Sans Mono"), local("Liberation Mono"), local("Droid Sans Mono"), local("Courier New");
   size-adjust: 99.65%;
   ascent-override: 102.86%;
   descent-override: 27.6%;
@@ -38,7 +39,7 @@
    character against Menlo's 0.6021), with Wye Text's vertical metrics. */
 @font-face {
   font-family: "Wye Text fallback";
-  src: local("Menlo");
+  src: local("Menlo"), local("Menlo-Regular"), local("DejaVu Sans Mono"), local("Liberation Mono"), local("Droid Sans Mono"), local("Courier New");
   size-adjust: 91.11%;
   ascent-override: 112.5%;
   descent-override: 30.18%;
@@ -51,8 +52,11 @@
 :root {
   color-scheme: dark;
   --paper: #070707;
-  --ground: #101010;
+  /* Code and output: a step off the page, so the install block reads as a
+     block of its own. */
+  --ground: #151515;
   --rule: #2a2a2a;
+  --edge: #3a3a3a;
   --ink: #ededed;
   --text: #c9c9c9;
   --graphite: #8f8f8f;
@@ -64,14 +68,20 @@
   --mono: "Wye Mono", "Wye Mono fallback", Menlo, Consolas, monospace;
   --display: var(--mono);
   --text-face: "Wye Text", "Wye Text fallback", Menlo, Consolas, monospace;
+  /* Type roles, in rem so a reader's text size scales them all: body text;
+     the lede and each stop's lead; section headings; output (code, charts,
+     tables, the trace's cap); captions (facts, footer, chart captions, the
+     version, buttons); the rail, large enough for a 24 px target a row. */
   --body: 1.0625rem;
-  --small: 0.90625rem;
   --lead: 1.125rem;
-  --h2: 30px;
+  --h2: 1.875rem;
+  --output: 0.9375rem;
+  --caption: 0.8125rem;
+  --rail: 1.15625rem;
   /* The headline is sized to its column so its longest line always fits:
      on two lines, "like infrastructure.", 12 em; wrapped on a phone, the
      word "infrastructure.", 9 em. */
-  --h1: min(52px, 100cqi / 12.3);
+  --h1: min(3.25rem, 100cqi / 12.3);
   /* 64 zeros of Wye Text: about 70 characters of prose. */
   --measure: 64ch;
   --gutter: clamp(1rem, 4vw, 2.5rem);
@@ -88,6 +98,9 @@ html {
   font-family: var(--text-face);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  /* Light text on a dark ground renders heavy with subpixel smoothing. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 body { margin: 0; color: var(--text); font-size: var(--body); line-height: 1.68; }
 h1, h2, h3 { margin: 0; color: var(--ink); font-family: var(--display); font-weight: 600; text-wrap: balance; }
@@ -100,8 +113,30 @@ a {
   text-underline-offset: 0.2em;
 }
 a:hover { text-decoration-thickness: 2px; }
-:focus-visible { outline: 2px solid var(--line); outline-offset: 3px; }
-::selection { background: var(--line); color: var(--paper); }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+::selection { background: var(--ink); color: var(--paper); }
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* The first stop for the keyboard: hidden until focused. */
+.skip {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 1;
+  padding: 0.25rem 0.5rem;
+  background: var(--ink);
+  color: var(--paper);
+  font: var(--caption) var(--mono);
+  transform: translateY(-200%);
+}
+.skip:focus { transform: none; }
 /* Wye Mono beside Wye Text: a touch smaller, so the two share an x-height. */
 code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .wrap {
@@ -126,7 +161,7 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   gap: 0.6rem;
   color: var(--ink);
   font-family: var(--display);
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
   text-decoration: none;
 }
@@ -135,41 +170,42 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
    named for its drawing: browsers keep a favicon long after it changes, so
    a new mark takes a new file name. */
 .mark svg { width: 1.75rem; height: 1.75rem; align-self: center; }
-.mark .version { color: var(--graphite); font-size: 0.8125rem; font-weight: 400; }
-.mark .tile { fill: var(--ground); stroke: #3a3a3a; }
+.mark .version { color: var(--graphite); font-size: var(--caption); font-weight: 400; }
+.mark .tile { fill: var(--ground); stroke: var(--edge); }
 .mark .fork { fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
 .bar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-family: var(--mono); }
 .bar nav a { color: var(--graphite); text-decoration: none; }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* First screen, in source order: what Wye is, how to start it, and the
-   route a request takes through it. On wide screens the route stands
-   beside the copy as a figure, both on one top edge, and the install
-   block spans the page below so its comments stay on their lines. */
+   route a request takes through it. Once the page is wide enough for both
+   to keep their size, the route stands beside the copy as a figure, both
+   on one top edge, and the install block spans the page below so its
+   comments stay on their lines. */
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 30rem);
-  grid-template-areas: "copy route" "install install";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "copy" "install" "route";
   align-items: start;
-  gap: 3.5rem clamp(2.5rem, 5vw, 4.5rem);
-  padding-block: clamp(3rem, 7vw, 5.5rem) clamp(2.5rem, 5vw, 4rem);
+  gap: 2.5rem clamp(2.5rem, 5vw, 4.5rem);
+  padding-block: clamp(2rem, 4vw, 3.5rem) clamp(2.5rem, 5vw, 4rem);
+}
+@media (min-width: 80rem) {
+  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); grid-template-areas: "copy route" "install install"; }
 }
 .hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
 .hero .junction { grid-area: route; }
 .hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
-@media (max-width: 60rem) {
-  .hero { grid-template-columns: minmax(0, 1fr); grid-template-areas: "copy" "install" "route"; gap: 2.5rem; }
-}
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
 .hero-copy, .hero-install, .part, .prose { grid-template-columns: minmax(0, 1fr); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
-.lede { max-width: 54ch; font-size: 1.125rem; line-height: 1.6; }
+.lede { max-width: 54ch; font-size: var(--lead); line-height: 1.6; }
 /* One line of facts, the changelog last. */
-.facts { color: var(--graphite); font-family: var(--mono); font-size: 0.84375rem; }
+.facts { color: var(--graphite); font-family: var(--mono); font-size: var(--caption); }
 .facts a { color: var(--text); }
 @media (max-width: 40rem) {
-  :root { --h1: min(52px, 100cqi / 9.2); }
+  :root { --h1: min(3.25rem, 100cqi / 9.2); }
   .hero h1 br { display: none; }
   .hero pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
   .hero .code .c { display: none; }
@@ -180,19 +216,26 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
    the record at the end. Every row keeps three columns: the line from 0,
    names from 6, what happened from 16, so a name never runs into its
    decision. The grid is 48 characters by 13 lines, sized to fill its
-   container: 48 advances of 0.6 em are 28.8 em. It stays still: it reads
-   top to bottom in the order things happen. */
+   container: 48 advances of 0.6 em are 28.8 em. In a narrow container the
+   same trace is drawn 35 characters wide, each decision under its name, so
+   it never shrinks below about 13 px. It stays still: it reads top to
+   bottom in the order things happen. */
 .junction { margin: 0; min-width: 0; }
-.junction-art { min-width: 0; container-type: inline-size; }
+.junction-art { min-width: 0; overflow-x: auto; container-type: inline-size; }
 .junction pre {
   margin: 0;
   width: 48ch;
   font-family: var(--display);
-  font-size: min(16px, 100cqi / 29.2);
+  font-size: min(1.125rem, 100cqi / 29.2);
   /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
      the strokes of one line meet those of the next. */
   line-height: 1.3;
   color: var(--ink);
+}
+.junction .trace-narrow { display: none; width: 35ch; font-size: min(1.125rem, 100cqi / 21.3); }
+@container (max-width: 28rem) {
+  .junction .trace-wide { display: none; }
+  .junction .trace-narrow { display: block; }
 }
 .junction .d { color: var(--graphite); }
 .junction .no { color: var(--signal); }
@@ -215,7 +258,8 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   margin: 0;
   padding: 0;
   font-family: var(--display);
-  font-size: 15px;
+  /* At this size a row is 24 px, the smallest comfortable target. */
+  font-size: var(--rail);
   /* The box-drawing height, so the tree's vertical strokes join. */
   line-height: 1.3;
 }
@@ -223,18 +267,19 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .tree .root { color: var(--graphite); }
 .tree .root + li { margin-top: 0; }
 .tree .root:not(:first-child) { margin-top: 1.1rem; }
-.tree a { color: var(--ink); text-decoration: none; }
-.tree .branch { color: var(--line); }
+.tree a { display: block; color: var(--ink); text-decoration: none; }
+.tree .branch { color: var(--graphite); }
 .tree a:hover .name { text-decoration: underline; }
 .tree .name { padding-inline: 0.15em; }
 
 /* The stop being read is selected, as in a terminal list: inverse video.
-   Each section is a view timeline narrowed to a band a third of the way
-   down the screen, so one stop at a time is current. Browsers without
+   Each section is a view timeline narrowed to a band a fifth of the way
+   down the screen, so one stop at a time is current, and a stop the rail
+   jumped to, now at the top, is the one marked. Browsers without
    scroll-driven animations keep a plain table of contents. It follows the
-   reader's scrolling, so it is not the page's motion sequence. */
+   reader's scrolling and moves nothing by itself. */
 @supports (animation-timeline: view()) {
-  .stops > section { view-timeline-axis: block; view-timeline-inset: 33% 66%; }
+  .stops > section { view-timeline-axis: block; view-timeline-inset: 20% 79%; }
   #client { view-timeline-name: --client; }
   #gate { view-timeline-name: --gate; }
   #model { view-timeline-name: --model; }
@@ -271,14 +316,16 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .part > :is(.code-wrap, pre.code, .table-scroll, .long-lines, .chart):not(:last-child) { margin-bottom: 0.5rem; }
 .stops > section + section { border-top: 1px dashed var(--rule); }
 .part h2 { font-size: var(--h2); line-height: 1.2; }
+/* The heading is the link to itself; its "#" is shown, not read. */
+.part h2 a { color: inherit; text-decoration: none; }
+.hash { color: var(--graphite); }
+.part h2 a:is(:hover, :focus-visible) .hash { color: var(--ink); }
 /* Prose keeps its reading measure; a table may use the section's width. */
 .part > p, .item, .prose > :not(table) { max-width: var(--measure); }
-.hash { color: var(--graphite); text-decoration: none; }
-.hash:hover { color: var(--line); }
 .prose { display: grid; gap: 1rem; }
 .prose ul { padding-left: 2ch; display: grid; gap: 0.4rem; list-style: "- "; }
 /* A README table, such as "How it compares": rules, no boxes. */
-.prose table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+.prose table { width: 100%; border-collapse: collapse; font-size: var(--output); }
 .prose th, .prose td {
   padding: 0.6rem 1.5rem 0.6rem 0;
   border-bottom: 1px dashed var(--rule);
@@ -334,24 +381,30 @@ pre.code {
   background: var(--ground);
   border-left: 2px solid var(--rule);
   font-family: var(--mono);
-  font-size: 0.90625rem;
+  font-size: var(--output);
   line-height: 1.65;
   tab-size: 4;
 }
 pre.code code { font: inherit; }
-.code .prompt { color: var(--line); }
+.code .prompt { color: var(--ink); }
 .code .c { color: var(--graphite); }
-.code .t { color: var(--line); font-weight: 600; }
-.code .k { font-weight: 600; }
+.code .t { color: var(--ink); font-weight: 600; }
+/* Config keys recede, so the values lead. */
+.code .k { color: var(--graphite); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
 .code .w { white-space: nowrap; }
 /* Log-style output whose long lines carry content: wrap instead of hiding it. */
 .long-lines { min-width: 0; }
 .long-lines pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
-/* Copy buttons, added by assets/site.js; without it the text stays selectable. */
+/* Copy buttons, added by assets/site.js; without it the text stays
+   selectable. The button takes a line of its own above the first line at
+   every width, so it never covers a command, and the room for it is kept
+   before the script runs, so nothing moves when it arrives. */
 .code-wrap { position: relative; width: fit-content; max-width: 100%; }
-.code-wrap pre.code { padding-right: 6rem; }
+@media (scripting: enabled) {
+  pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
+}
 .copy {
   position: absolute;
   top: 0.45rem;
@@ -359,20 +412,17 @@ pre.code code { font: inherit; }
   padding: 0.25rem 0.5rem;
   border: 0;
   background: none;
-  color: var(--line);
-  font: 0.8125rem var(--mono);
+  color: var(--ink);
+  font: var(--caption) var(--mono);
   cursor: pointer;
 }
-.copy:hover { color: var(--ink); }
-/* On a phone the button takes a line of its own above the text, so a long
-   command keeps the width. */
-@media (max-width: 40rem) {
-  .code-wrap pre.code { padding-right: 1.25rem; padding-top: 2.5rem; }
-}
+.copy:hover { text-decoration: underline; }
 
 /* Numbers */
 .table-scroll { overflow-x: auto; }
-.numbers { width: 100%; border-collapse: collapse; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 0.9375rem; }
+.numbers { width: 100%; border-collapse: collapse; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--output); }
+/* A cell with no measurement: a dash, read as "not measured". */
+.numbers .na { color: var(--graphite); }
 .numbers th, .numbers td {
   padding: 0.55rem 0.75rem 0.55rem 0;
   border-bottom: 1px dashed var(--rule);
@@ -401,12 +451,12 @@ pre.code code { font: inherit; }
   }
   .numbers tbody th { grid-column: 1 / -1; padding: 0; border: 0; }
   .numbers td, .numbers .n { padding: 0; border: 0; text-align: left; font-weight: 600; }
-  .numbers td:empty { display: none; }
+  .numbers td.na { display: none; }
   .numbers td::before {
     content: attr(data-path);
     display: block;
     color: var(--graphite);
-    font-size: var(--small);
+    font-size: var(--caption);
     font-weight: 400;
   }
 }
@@ -420,7 +470,7 @@ pre.code code { font: inherit; }
   border-top: 1px solid var(--rule);
   color: var(--graphite);
   font-family: var(--mono);
-  font-size: 0.84375rem;
+  font-size: var(--caption);
   line-height: 1.6;
 }
 .foot a { color: var(--text); }
@@ -429,13 +479,13 @@ pre.code code { font: inherit; }
    are text, the bars hidden from screen readers; Wye in ink, the others in
    graphite. */
 .chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
-.chart figcaption { color: var(--graphite); font-family: var(--mono); font-size: 0.84375rem; }
+.chart figcaption { color: var(--graphite); font-size: var(--caption); }
 .bars {
   margin: 0;
   overflow-x: auto;
   color: var(--text);
   font-family: var(--mono);
-  font-size: 0.9375rem;
+  font-size: var(--output);
   font-variant-numeric: tabular-nums;
   line-height: 1.75;
 }

@@ -6,6 +6,7 @@
 //! | `{{release}}` | the version, with ", a prerelease" while it has a pre-release part |
 //! | `{{commit}}` | the commit the page is built from: `GITHUB_SHA` in CI, else the checkout's `HEAD` |
 //! | `{{license}}`, `{{repo}}` | the workspace's license and repository URL |
+//! | `{{homepage}}` | the site's own address, `homepage` in site/Cargo.toml: one place to change when it moves |
 //! | `{{machine}}` | the benchmark machine in `bench/baseline.json` |
 //! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
 //! | `{{fence FILE\|PREFIX}}` | the first fenced block in FILE whose first line starts with PREFIX, highlighted |
@@ -33,6 +34,7 @@ pub struct Sources {
     commit: String,
     license: String,
     repo_url: String,
+    homepage: String,
     machine: String,
     metrics: HashMap<String, f64>,
     documents: HashMap<&'static str, String>,
@@ -46,6 +48,7 @@ impl Sources {
         };
         let crate_manifest = read("crates/wye/Cargo.toml")?;
         let workspace_manifest = read("Cargo.toml")?;
+        let site_manifest = read("site/Cargo.toml")?;
         let baseline: serde_json::Value = serde_json::from_str(&read("bench/baseline.json")?)
             .map_err(|e| format!("bench/baseline.json: {e}"))?;
         let metrics = baseline
@@ -67,6 +70,8 @@ impl Sources {
                 .ok_or("Cargo.toml: no license")?,
             repo_url: manifest_field(&workspace_manifest, "repository")
                 .ok_or("Cargo.toml: no repository")?,
+            homepage: manifest_field(&site_manifest, "homepage")
+                .ok_or("site/Cargo.toml: no homepage")?,
             machine: machine(&baseline).ok_or("bench/baseline.json: no machine cpu and os")?,
             metrics,
             documents,
@@ -90,13 +95,16 @@ impl Sources {
             ("commit", []) => Ok(markdown::escape(&self.commit)),
             ("license", []) => Ok(markdown::escape(&self.license)),
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
+            ("homepage", []) => Ok(markdown::escape(&self.homepage)),
             ("machine", []) => Ok(markdown::escape(&self.machine)),
             ("metric", [metric, decimals]) => self.metric(metric, decimals),
             ("fence", [file, prefix]) => {
                 let (lang, code) = markdown::fence(self.document(file)?, prefix)
                     .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))?;
                 Ok(format!(
-                    "<pre class=\"code\" data-lang=\"{}\"><code>{}</code></pre>",
+                    // Focusable, so a keyboard can scroll a block wider
+                    // than the page.
+                    "<pre class=\"code\" data-lang=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
                     markdown::escape(lang),
                     markdown::highlight(lang, &code)
                 ))
@@ -302,6 +310,7 @@ mod tests {
             commit: "81e7951".into(),
             license: "MIT".into(),
             repo_url: "https://github.com/askrid/wye".into(),
+            homepage: "https://askrid.github.io/wye/".into(),
             machine: "Intel Core i9-9880H, macOS".into(),
             metrics: [
                 ("unary_added_p50_us".to_owned(), 281.0),
@@ -375,7 +384,7 @@ mod tests {
             &sources(),
         )
         .unwrap();
-        assert!(page.starts_with("<pre class=\"code\" data-lang=\"console\"><code><span class=\"prompt\">$</span> wye report\n3 requests</code></pre>"));
+        assert!(page.starts_with("<pre class=\"code\" data-lang=\"console\" tabindex=\"0\"><code><span class=\"prompt\">$</span> wye report\n3 requests</code></pre>"));
         assert!(page.ends_with("<p>Built.</p>\n"));
     }
 

@@ -145,7 +145,11 @@ fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
             line
         })
         .collect();
-    format!("<pre class=\"bars\">{}</pre>", lines.join("\n"))
+    // Focusable, so a keyboard can scroll a chart wider than the page.
+    format!(
+        "<pre class=\"bars\" tabindex=\"0\">{}</pre>",
+        lines.join("\n")
+    )
 }
 
 /// Every Markdown table in `text`, each as rows of trimmed cells, header
@@ -205,7 +209,7 @@ mod tests {
     fn draws_multiples_with_wye_as_one() {
         assert_eq!(
             ratios(RATIOS, "Added latency (p50)").unwrap(),
-            "<pre class=\"bars\">\
+            "<pre class=\"bars\" tabindex=\"0\">\
              <span class=\"us\">Wye             1×  <span class=\"fill\" aria-hidden=\"true\">█</span></span>\n\
              KrakenD       1.4×  <span class=\"fill\" aria-hidden=\"true\">█▍</span>\n\
              agentgateway    7×  <span class=\"fill\" aria-hidden=\"true\">███████</span>\n\
@@ -227,7 +231,7 @@ mod tests {
                     | Paced: event delay p50 / p99 | 1.2 / 3.1 ms | 1.0 / 3.6 ms |\n";
         assert_eq!(
             versus(text, "Paced: event delay").unwrap(),
-            "<pre class=\"bars\">\
+            "<pre class=\"bars\" tabindex=\"0\">\
              agentgateway  1.0 ms  <span class=\"fill\" aria-hidden=\"true\">██████████</span>\n\
              <span class=\"us\">Wye           1.2 ms  <span class=\"fill\" aria-hidden=\"true\">████████████</span></span>\
              </pre>"

@@ -152,7 +152,12 @@ fn references(html: &str) -> Vec<(String, &str)> {
             continue; // a closing tag, a comment, or the doctype
         }
         for attribute in ["href", "src"] {
-            let tag_name = name.to_ascii_lowercase();
+            let mut tag_name = name.to_ascii_lowercase();
+            // A canonical link names the page's address; nothing loads it,
+            // so it is checked as a link, which may point anywhere.
+            if tag_name == "link" && attribute_values(tag, "rel").contains(&"canonical") {
+                tag_name = "a".to_owned();
+            }
             found.extend(
                 attribute_values(tag, attribute)
                     .into_iter()
@@ -213,7 +218,7 @@ mod tests {
             &[
                 (
                     "index.html",
-                    "<link rel=\"stylesheet\" href=\"assets/site.css\">\n<h2 id=\"costs\">Costs</h2>\n<a href=\"#costs\">x</a> <a href=\"./\">home</a> <a href=\"https://github.com/askrid/wye\">GitHub</a>",
+                    "<link rel=\"canonical\" href=\"https://askrid.github.io/wye/\">\n<link rel=\"stylesheet\" href=\"assets/site.css\">\n<h2 id=\"costs\">Costs</h2>\n<a href=\"#costs\">x</a> <a href=\"./\">home</a> <a href=\"https://github.com/askrid/wye\">GitHub</a>",
                 ),
                 (
                     "assets/site.css",
