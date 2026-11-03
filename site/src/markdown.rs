@@ -124,6 +124,48 @@ pub fn tables(text: &str) -> Vec<Vec<Vec<String>>> {
     tables
 }
 
+/// The table in `text` whose first column is headed `first`, as a table of
+/// figures: rows headed by their first cell, each value labelled with its
+/// column for narrow screens, and an empty cell a dash that reads "not
+/// measured". Cells are plain text.
+pub fn numbers(text: &str, first: &str) -> Option<String> {
+    let rows = tables(text).into_iter().find(|rows| {
+        rows.first()
+            .and_then(|header| header.first())
+            .is_some_and(|cell| cell == first)
+    })?;
+    let (header, body) = rows.split_first()?;
+    let mut out = String::from("<div class=\"table-scroll\"><table class=\"numbers\"><thead><tr>");
+    for (i, cell) in header.iter().enumerate() {
+        let class = if i == 0 { "" } else { " class=\"n\"" };
+        out.push_str(&format!("<th scope=\"col\"{class}>{}</th>", escape(cell)));
+    }
+    out.push_str("</tr></thead><tbody>");
+    for row in body {
+        let Some((name, values)) = row.split_first() else {
+            continue;
+        };
+        out.push_str(&format!("<tr><th scope=\"row\">{}</th>", escape(name)));
+        for (column, value) in header.iter().skip(1).zip(values) {
+            if value.is_empty() {
+                out.push_str(
+                    "<td class=\"n na\"><span aria-hidden=\"true\">–</span>\
+                     <span class=\"visually-hidden\">not measured</span></td>",
+                );
+            } else {
+                out.push_str(&format!(
+                    "<td class=\"n\" data-path=\"{}\">{}</td>",
+                    escape(column),
+                    escape(value)
+                ));
+            }
+        }
+        out.push_str("</tr>");
+    }
+    out.push_str("</tbody></table></div>");
+    Some(out)
+}
+
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?

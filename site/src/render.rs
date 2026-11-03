@@ -10,9 +10,6 @@
 //! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
 //! - `{{homepage}}`: the site's own address, `homepage` in site/Cargo.toml, so
 //!   a move changes one line.
-//! - `{{machine}}`: the benchmark machine in `bench/baseline.json`.
-//! - `{{metric NAME|DECIMALS}}`: a metric from `bench/baseline.json`;
-//!   `NAME/1000` divides it first.
 //! - `{{fence FILE|PREFIX}}`: the first fenced block in FILE whose first line
 //!   starts with PREFIX, highlighted.
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
@@ -26,6 +23,8 @@
 //!   yet, so a new one is never dropped.
 //! - `{{paragraph FILE|HEADING|START}}`: the paragraph of that section that
 //!   starts with START, rendered.
+//! - `{{numbers FILE|HEADING|FIRST}}`: that section's table whose first column
+//!   is headed FIRST, as a table of figures.
 //! - `{{ratios FILE|HEADING|COLUMN}}`: a bar chart of that section's table
 //!   column of multiples of Wye ("7×").
 //! - `{{versus FILE|HEADING|ROW}}`: a bar chart of the first figure in each
@@ -47,8 +46,6 @@ pub struct Sources {
     license: String,
     repo_url: String,
     homepage: String,
-    machine: String,
-    metrics: HashMap<String, f64>,
     documents: HashMap<&'static str, String>,
 }
 
@@ -71,8 +68,6 @@ impl Sources {
             ("license", []) => Ok(markdown::escape(&self.license)),
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("homepage", []) => Ok(markdown::escape(&self.homepage)),
-            ("machine", []) => Ok(markdown::escape(&self.machine)),
-            ("metric", [metric, decimals]) => self.metric(metric, decimals),
             ("fence", [file, prefix]) => {
                 let (lang, code) = self.fence(file, prefix)?;
                 Ok(format!(
@@ -149,6 +144,11 @@ impl Sources {
                     })?;
                 Ok(markdown::to_html(paragraph, &self.repo_url, file))
             }
+            ("numbers", [file, heading, first]) => {
+                markdown::numbers(self.section(file, heading)?, first).ok_or_else(|| {
+                    format!("{file}: no table under \"## {heading}\" has a first column {first:?}")
+                })
+            }
             ("ratios", [file, heading, column]) => {
                 chart::ratios(self.section(file, heading)?, column)
             }
@@ -176,24 +176,6 @@ impl Sources {
             "<div class=\"item\">{}</div>",
             markdown::to_html(item, &self.repo_url, file)
         )
-    }
-
-    fn metric(&self, expression: &str, decimals: &str) -> Result<String, String> {
-        let (name, divisor) = match expression.split_once('/') {
-            Some((name, divisor)) => match divisor.parse::<f64>() {
-                Ok(divisor) if divisor > 0.0 => (name, divisor),
-                _ => return Err("the divisor is not a positive number".to_owned()),
-            },
-            None => (expression, 1.0),
-        };
-        let value = self
-            .metrics
-            .get(name)
-            .ok_or_else(|| format!("bench/baseline.json: no metric {name}"))?;
-        let decimals: usize = decimals
-            .parse()
-            .map_err(|_| format!("{decimals:?} is not a number of decimals"))?;
-        Ok(format!("{:.*}", decimals, value / divisor))
     }
 
     fn document(&self, file: &str) -> Result<&str, String> {
@@ -243,20 +225,15 @@ mod tests {
             license: "MIT".into(),
             repo_url: "https://github.com/askrid/wye".into(),
             homepage: "https://askrid.github.io/wye/".into(),
-            machine: "Intel Core i9-9880H, macOS".into(),
-            metrics: [
-                ("unary_added_p50_us".to_owned(), 281.0),
-                ("cpu".to_owned(), 120.5),
-            ]
-            .into_iter()
-            .collect(),
             documents: [(
                 "README.md",
                 "# Wye\n\n**An LLM gateway without bloat.** Wye is one\n`binary`.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
-                 ## Performance\n\nNumbers.\n\nWhere others lead: one, on\n[two](docs/b.md).\n\n\
+                 ## Performance\n\nNumbers.\n\n\
+                 | What Wye adds | Plain | TLS & h2 |\n|---|---|---|\n| Latency | 0.28 ms | |\n\n\
+                 Where others lead: one, on\n[two](docs/b.md).\n\n\
                  ## What it does\n\n- **Shows usage.** Records.\n- **Gives access.** Tokens.\n\
                  - **Runs.** Anywhere.\n"
                     .to_owned(),
@@ -267,12 +244,8 @@ mod tests {
     }
 
     #[test]
-    fn expands_values_and_metrics() {
-        let page = "v{{version}} {{ metric unary_added_p50_us/1000|2 }} ms, {{metric cpu|0}} µs";
-        assert_eq!(
-            render(page, &sources()).unwrap(),
-            "v0.1.0-rc.1 0.28 ms, 120 µs"
-        );
+    fn expands_values() {
+        assert_eq!(render("v{{ version }}", &sources()).unwrap(), "v0.1.0-rc.1");
         assert_eq!(
             render("{{release}} at {{commit}}", &sources()).unwrap(),
             "0.1.0-rc.1, a prerelease at 81e7951"
@@ -338,6 +311,23 @@ mod tests {
     }
 
     #[test]
+    fn renders_a_table_of_figures() {
+        assert_eq!(
+            render(
+                "{{numbers README.md|Performance|What Wye adds}}",
+                &sources()
+            )
+            .unwrap(),
+            "<div class=\"table-scroll\"><table class=\"numbers\"><thead><tr>\
+             <th scope=\"col\">What Wye adds</th><th scope=\"col\" class=\"n\">Plain</th>\
+             <th scope=\"col\" class=\"n\">TLS &amp; h2</th></tr></thead><tbody><tr>\
+             <th scope=\"row\">Latency</th><td class=\"n\" data-path=\"Plain\">0.28 ms</td>\
+             <td class=\"n na\"><span aria-hidden=\"true\">–</span>\
+             <span class=\"visually-hidden\">not measured</span></td></tr></tbody></table></div>"
+        );
+    }
+
+    #[test]
     fn expands_fences_and_sections() {
         let page = render(
             "{{fence README.md|$ wye report}}{{section README.md|Status}}",
@@ -385,11 +375,10 @@ mod tests {
     fn refuses_what_it_cannot_fill() {
         let s = sources();
         assert!(
-            render("{{metric missing|1}}", &s)
+            render("{{numbers README.md|Performance|Speed}}", &s)
                 .unwrap_err()
-                .contains("no metric missing")
+                .contains("has a first column \"Speed\"")
         );
-        assert!(render("{{metric cpu/0|1}}", &s).is_err());
         assert!(
             render("{{fence README.md|nothing}}", &s)
                 .unwrap_err()
@@ -412,8 +401,8 @@ mod tests {
     fn errors_name_their_directive() {
         let s = sources();
         assert_eq!(
-            render("x {{ metric cpu/0|1 }}", &s).unwrap_err(),
-            "{{metric cpu/0|1}}: the divisor is not a positive number"
+            render("x {{ opening README.md|title }}", &s).unwrap_err(),
+            "{{opening README.md|title}}: \"title\" is not tagline, rest, or text"
         );
         assert_eq!(
             render("{{ratios README.md|Status|Speed}}", &s).unwrap_err(),

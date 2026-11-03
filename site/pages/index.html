@@ -127,22 +127,7 @@ o  <b>upstream</b>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
         <h2 id="stream-h"><a href="#stream"><span class="hash" aria-hidden="true">#</span> stream</a></h2>
-        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements.</p>{{paragraph README.md|Performance|Every commit}}</div>
-        <div class="table-scroll">
-          <table class="numbers">
-            <thead>
-              <tr><th scope="col">What Wye adds</th><th scope="col" class="n">Plain HTTP/1.1</th><th scope="col" class="n">TLS + HTTP/2</th></tr>
-            </thead>
-            <tbody>
-              <tr><th scope="row">Latency per request (p50)</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_added_p50_us/1000|2}} ms</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_added_p50_us/1000|2}} ms</td></tr>
-              <tr><th scope="row">CPU per request</th><td class="n" data-path="Plain HTTP/1.1">{{metric unary_cpu_us_per_request|0}} µs</td><td class="n" data-path="TLS + HTTP/2">{{metric tls_unary_cpu_us_per_request|0}} µs</td></tr>
-              <tr><th scope="row">CPU per streamed token event</th><td class="n" data-path="Plain HTTP/1.1">{{metric sse_cpu_us_per_event|1}} µs</td><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td></tr>
-              <tr><th scope="row">Heap allocations per streamed event</th><td class="n" data-path="Plain HTTP/1.1">{{metric alloc_sse_per_event|0}}</td><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td></tr>
-              <tr><th scope="row">2,000 concurrent token-paced streams, delay per event (p50 / p99)</th><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_event_added_p50_us/1000|1}} / {{metric tls_paced_event_added_p99_us/1000|1}} ms</td></tr>
-              <tr><th scope="row">Memory per open stream at that load</th><td class="n na"><span aria-hidden="true">–</span><span class="visually-hidden">not measured</span></td><td class="n" data-path="TLS + HTTP/2">{{metric tls_paced_rss_kb_per_stream|1}} KB</td></tr>
-            </tbody>
-          </table>
-        </div>
+        {{paragraph README.md|Performance|Lab results}}
         <figure class="chart">
           <figcaption>Added latency per request, p50, TLS, as a multiple of Wye's in the same run. Shorter is better.</figcaption>
           {{ratios README.md|Performance|Added latency (p50)}}
@@ -152,6 +137,9 @@ o  <b>upstream</b>
           {{versus docs/benchmarks.md|Against agentgateway|2,000 paced streams: event delay}}
         </figure>
         {{paragraph README.md|Performance|Where others lead}}
+        {{paragraph README.md|Performance|What Wye itself adds}}
+        {{numbers README.md|Performance|What Wye adds}}
+        {{paragraph README.md|Performance|Every commit}}
       </section>
 
       <section class="part stop" id="record" aria-labelledby="record-h">
