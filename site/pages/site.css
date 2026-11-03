@@ -5,13 +5,13 @@
    license (fonts/OFL-Plex.txt). */
 @font-face {
   font-family: "Wye Mono";
-  src: url("fonts/wye-mono-regular.woff2") format("woff2");
+  src: url("assets/fonts/wye-mono-regular.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "Wye Mono";
-  src: url("fonts/wye-mono-semibold.woff2") format("woff2");
+  src: url("assets/fonts/wye-mono-semibold.woff2") format("woff2");
   font-weight: 600;
   font-display: swap;
 }
@@ -20,7 +20,7 @@
    license (fonts/OFL-iA-Writer.txt). Running text only; bold is Wye Mono. */
 @font-face {
   font-family: "Wye Text";
-  src: url("fonts/wye-text-regular.woff2") format("woff2");
+  src: url("assets/fonts/wye-text-regular.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }

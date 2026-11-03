@@ -2,8 +2,8 @@
 
 The Wye website: a landing page built from the repository's own files and published to GitHub Pages.
 
-- `pages/`: HTML pages whose directives pull from the repository; `src/render.rs` lists the directives.
-- `assets/`: the stylesheet, the copy-button script, the icon, and the fonts: Wye Text (iA Writer Quattro S) and Wye Mono (IBM Plex Mono), each subset and renamed, under the SIL Open Font License in `assets/fonts/`.
+- `pages/`: HTML pages whose directives pull from the repository (`src/render.rs` lists the directives), and `site.css`, which the build writes into each page.
+- `assets/`: files served as they are: the copy-button script, the icon, and the fonts: Wye Text (iA Writer Quattro S) and Wye Mono (IBM Plex Mono), each subset and renamed, under the SIL Open Font License in `assets/fonts/`.
 - `src/`: the generator: renders `pages/` into `out/`, copies `assets/`, and checks the result.
 - `check.sh`: `cargo fmt --check`, clippy, tests, the build, and the page budget.
 

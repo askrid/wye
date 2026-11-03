@@ -64,6 +64,9 @@ fn problems(files: &Files) -> Vec<String> {
         if text.contains("{{") {
             found.push(format!("{path}: an unexpanded directive"));
         }
+        for target in styles(text).flat_map(css_urls) {
+            check_resource(files, path, target, &mut found);
+        }
         for (reference, target) in references(text) {
             match reference {
                 Reference::Link => check_link(files, path, target, &mut found),
@@ -201,6 +204,13 @@ fn ids(html: &str) -> BTreeSet<&str> {
     attribute_values(html, "id").into_iter().collect()
 }
 
+/// The text of each `<style>` element in a page.
+fn styles(html: &str) -> impl Iterator<Item = &str> {
+    html.split("<style>")
+        .skip(1)
+        .filter_map(|rest| rest.split_once("</style>").map(|(css, _)| css))
+}
+
 fn css_urls(css: &str) -> Vec<&str> {
     css.split("url(")
         .skip(1)
@@ -267,6 +277,16 @@ mod tests {
                 "index.html: the link #nowhere names a missing anchor",
                 "index.html: the link guide.html leads nowhere",
             ]
+        );
+    }
+
+    #[test]
+    fn a_pages_own_styles_load_from_the_site_too() {
+        let page = "<style>@font-face { src: url(\"assets/fonts/o.woff2\") }\
+                    body { background: url(//cdn.example/x.png) }</style>";
+        assert_eq!(
+            problems(&site(&[("index.html", page)], &["assets/fonts/o.woff2"])),
+            ["index.html: loads //cdn.example/x.png from another origin"]
         );
     }
 

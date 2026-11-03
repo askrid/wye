@@ -10,6 +10,8 @@
 //! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
 //! - `{{homepage}}`: the site's own address, `homepage` in site/Cargo.toml, so
 //!   a move changes one line.
+//! - `{{stylesheet}}`: site/pages/site.css as it is, for a `<style>`
+//!   element, so the page draws without waiting for a second file.
 //! - `{{fence FILE|PREFIX}}`: the first fenced block in FILE whose first line
 //!   starts with PREFIX, highlighted.
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
@@ -58,6 +60,7 @@ pub struct Sources {
     license: String,
     repo_url: String,
     homepage: String,
+    stylesheet: String,
     documents: HashMap<&'static str, String>,
 }
 
@@ -86,6 +89,7 @@ impl Sources {
             ("license", []) => Ok(markdown::escape(&self.license)),
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("homepage", []) => Ok(markdown::escape(&self.homepage)),
+            ("stylesheet", []) => Ok(self.stylesheet.clone()),
             ("fence", [file, prefix]) => {
                 let (lang, code) = self.fence(file, prefix)?;
                 Ok(format!(
@@ -291,6 +295,7 @@ mod tests {
             license: "MIT".into(),
             repo_url: "https://github.com/askrid/wye".into(),
             homepage: "https://askrid.github.io/wye/".into(),
+            stylesheet: "nav > a { color: #ededed }".into(),
             documents: [(
                 "README.md",
                 "# Wye\n\n**An LLM gateway without bloat.** Wye is one\n`binary`.\n\n\
@@ -312,6 +317,11 @@ mod tests {
     #[test]
     fn expands_values() {
         assert_eq!(render("v{{ version }}", &sources()).unwrap(), "v0.1.0-rc.1");
+        // The stylesheet goes in as written: escaping would break `>`.
+        assert_eq!(
+            render("<style>{{stylesheet}}</style>", &sources()).unwrap(),
+            "<style>nav > a { color: #ededed }</style>"
+        );
         assert_eq!(
             render("{{release}} at {{commit}}", &sources()).unwrap(),
             "0.1.0-rc.1, a prerelease at 81e7951"

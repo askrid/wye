@@ -31,6 +31,7 @@ impl Sources {
                 .ok_or("Cargo.toml: no repository")?,
             homepage: manifest_field(&site_manifest, "homepage")
                 .ok_or("site/Cargo.toml: no homepage")?,
+            stylesheet: read("site/pages/site.css")?,
             documents,
         })
     }

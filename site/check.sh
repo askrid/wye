@@ -20,8 +20,10 @@ cargo test --locked --quiet
 cargo run --locked --quiet
 
 # What a first visit to one page downloads, compressed as a server sends it:
-# the page and every stylesheet, script, and SVG gzipped, the fonts as they
-# are. The footer of pages/index.html states this budget.
+# the page with its stylesheet inline, and every other stylesheet, script, and
+# SVG, gzipped, the fonts as they are. The footer of pages/index.html states
+# this budget.
+shopt -s nullglob
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }
 shared=$(cat out/assets/fonts/*.woff2 | wc -c)
