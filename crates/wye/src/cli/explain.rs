@@ -10,7 +10,7 @@ use super::{args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
-    config::{Config, Upstream, UpstreamCredential},
+    config::{Config, ProviderKey, Upstream},
     policy,
     pricing::{Pico, PricedModels, Usd},
     prompt,
@@ -335,8 +335,8 @@ impl Explanation {
             ));
         }
         let header = upstream.provider.key_header();
-        self.step(match &upstream.credential {
-            UpstreamCredential::ForwardCaller => "provider key: the caller's own".into(),
+        self.step(match &upstream.provider_key {
+            ProviderKey::ForwardCaller => "provider key: the caller's own".into(),
             source => format!("provider key: {header} from {source}"),
         });
     }

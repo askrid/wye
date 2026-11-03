@@ -16,7 +16,7 @@ mod upstream;
 mod validate;
 
 pub use auth::{Algorithm, Auth, Grant, Issuer, OwnIssuer, PublicKey};
-pub use upstream::{Provider, Upstream, UpstreamCredential, UpstreamHttpVersion};
+pub use upstream::{Provider, ProviderKey, Upstream, UpstreamHttpVersion};
 
 use crate::{
     alias::Aliases,
@@ -223,7 +223,7 @@ pub enum ConfigError {
         url: String,
         reason: &'static str,
     },
-    Credential(&'static str),
+    ProviderKey(&'static str),
     InvalidEnvName {
         field: &'static str,
         name: String,
@@ -258,7 +258,7 @@ impl fmt::Display for ConfigError {
             ),
             Self::Auth(msg) => write!(f, "auth: {msg}"),
             Self::InvalidUrl { field, url, reason } => write!(f, "{field} {url:?}: {reason}"),
-            Self::Credential(msg) => write!(f, "upstream: {msg}"),
+            Self::ProviderKey(msg) => write!(f, "upstream: {msg}"),
             Self::InvalidEnvName { field, name } => {
                 write!(
                     f,
@@ -305,11 +305,11 @@ impl Config {
         if auth.is_some()
             && routes
                 .upstreams()
-                .any(|u| u.credential == UpstreamCredential::ForwardCaller)
+                .any(|u| u.provider_key == ProviderKey::ForwardCaller)
         {
             return Err(ConfigError::Auth(
                 "cannot be combined with upstream.forward_caller_credential: the caller's \
-                 credential would be the gateway token, not a provider credential"
+                 credential would be the gateway token, not a provider key"
                     .into(),
             ));
         }

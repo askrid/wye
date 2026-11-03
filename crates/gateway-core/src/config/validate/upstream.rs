@@ -248,9 +248,9 @@ fn validate_route_upstreams(
             }
         };
         if entry.forward_caller_credential {
-            return Err(in_entry(ConfigError::Credential(
+            return Err(in_entry(ConfigError::ProviderKey(
                 "forward_caller_credential needs a single [upstream]: a route's upstreams use \
-                 their own provider credentials",
+                 their own provider keys",
             )));
         }
         let mut upstream = validate_upstream(entry, provider).map_err(in_entry)?;
@@ -278,28 +278,28 @@ fn is_upstream_id(id: &str) -> bool {
 }
 
 fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, ConfigError> {
-    let credential = match (
+    let provider_key = match (
         raw.api_key_env,
         raw.api_key_file,
         raw.forward_caller_credential,
     ) {
         (Some(name), None, false) => {
-            UpstreamCredential::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
+            ProviderKey::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
         }
         (None, Some(path), false) => {
             if path.as_os_str().is_empty() {
                 return Err(ConfigError::EmptyPath("upstream.api_key_file"));
             }
-            UpstreamCredential::ApiKeyFile(path)
+            ProviderKey::ApiKeyFile(path)
         }
-        (None, None, true) => UpstreamCredential::ForwardCaller,
+        (None, None, true) => ProviderKey::ForwardCaller,
         (None, None, false) => {
-            return Err(ConfigError::Credential(
+            return Err(ConfigError::ProviderKey(
                 "set api_key_env, api_key_file, or forward_caller_credential = true",
             ));
         }
         _ => {
-            return Err(ConfigError::Credential(
+            return Err(ConfigError::ProviderKey(
                 "set only one of api_key_env, api_key_file, and forward_caller_credential",
             ));
         }
@@ -313,7 +313,7 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
         scheme,
         authority,
         path_prefix,
-        credential,
+        provider_key,
         ca_file: match raw.ca_file {
             Some(path) if path.as_os_str().is_empty() => {
                 return Err(ConfigError::EmptyPath("upstream.ca_file"));

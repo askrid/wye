@@ -37,8 +37,8 @@ fn minimal_config_gets_defaults() {
     assert_eq!(upstream.authority.as_str(), "api.anthropic.com");
     assert_eq!(upstream.path_prefix, "");
     assert_eq!(
-        upstream.credential,
-        UpstreamCredential::ApiKeyEnv("ANTHROPIC_API_KEY".into())
+        upstream.provider_key,
+        ProviderKey::ApiKeyEnv("ANTHROPIC_API_KEY".into())
     );
     assert_eq!(upstream.response_header_timeout, Duration::from_secs(600));
 }
@@ -50,7 +50,7 @@ fn base_path_keeps_prefix_without_trailing_slash() {
             .unwrap();
     let upstream = &claude(&config).upstreams()[0];
     assert_eq!(upstream.path_prefix, "/anthropic");
-    assert_eq!(upstream.credential, UpstreamCredential::ForwardCaller);
+    assert_eq!(upstream.provider_key, ProviderKey::ForwardCaller);
 }
 
 #[test]
@@ -146,13 +146,13 @@ fn rejects_unknown_fields() {
 fn credential_must_be_exactly_one() {
     assert!(matches!(
         parse("base_url = \"https://api.anthropic.com\""),
-        Err(ConfigError::Credential(_))
+        Err(ConfigError::ProviderKey(_))
     ));
     assert!(matches!(
         parse(
             "base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\nforward_caller_credential = true"
         ),
-        Err(ConfigError::Credential(_))
+        Err(ConfigError::ProviderKey(_))
     ));
     assert!(matches!(
         parse("base_url = \"https://api.anthropic.com\"\napi_key_env = \"1BAD\""),
@@ -347,8 +347,8 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
     let config =
         parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"secrets/key\"").unwrap();
     assert_eq!(
-        claude(&config).upstreams()[0].credential,
-        UpstreamCredential::ApiKeyFile(PathBuf::from("secrets/key"))
+        claude(&config).upstreams()[0].provider_key,
+        ProviderKey::ApiKeyFile(PathBuf::from("secrets/key"))
     );
     for both in [
         "api_key_file = \"k\"\napi_key_env = \"K\"",
@@ -356,7 +356,7 @@ fn api_key_file_is_a_third_exclusive_credential_mode() {
     ] {
         assert!(matches!(
             parse(&format!("base_url = \"https://api.anthropic.com\"\n{both}")),
-            Err(ConfigError::Credential(_))
+            Err(ConfigError::ProviderKey(_))
         ));
     }
     assert_eq!(

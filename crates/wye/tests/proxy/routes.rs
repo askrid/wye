@@ -1,5 +1,5 @@
 //! A route with several upstreams: the choice per session, each upstream's
-//! own provider credential, and the upstream in usage records.
+//! own provider key, and the upstream in usage records.
 
 use gateway_core::config::Config;
 

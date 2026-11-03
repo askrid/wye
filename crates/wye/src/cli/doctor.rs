@@ -15,7 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::config::{
-    Config, Provider, Telemetry, Upstream, UpstreamCredential, is_cleartext_remote,
+    Config, Provider, ProviderKey, Telemetry, Upstream, is_cleartext_remote,
 };
 use http::{Request, Uri};
 use http_body_util::Empty;
@@ -40,7 +40,7 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
                 .id
                 .as_deref()
                 .map_or_else(|| "[upstream]".to_owned(), |id| format!("upstream {id}"));
-            checks.push(credential(&name, upstream, config_dir));
+            checks.push(provider_key(&name, upstream, config_dir));
             checks.extend(endpoint_path(&name, upstream));
             checks.push(reachable(&name, upstream, config_dir).await);
         }
@@ -113,16 +113,16 @@ fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
     })
 }
 
-/// The provider credential is present, without printing it.
-fn credential(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
+/// The provider key is present, without printing it.
+fn provider_key(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
     let header = upstream.provider.key_header();
     upstream_auth(upstream, config_dir).map_err(|e| format!("{name}: {e}"))?;
-    Ok(match &upstream.credential {
-        UpstreamCredential::ApiKeyEnv(var) => format!("{name}: ${var} set (sent as {header})"),
-        UpstreamCredential::ApiKeyFile(path) => {
+    Ok(match &upstream.provider_key {
+        ProviderKey::ApiKeyEnv(var) => format!("{name}: ${var} set (sent as {header})"),
+        ProviderKey::ApiKeyFile(path) => {
             format!("{name}: {} read (sent as {header})", path.display())
         }
-        UpstreamCredential::ForwardCaller => {
+        ProviderKey::ForwardCaller => {
             format!("{name}: forwards the caller's own credential (loopback only)")
         }
     })

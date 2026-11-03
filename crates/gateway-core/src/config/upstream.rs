@@ -1,5 +1,5 @@
-//! The upstreams a route sends requests to: their providers, addresses,
-//! and credentials.
+//! The upstreams a route sends requests to: their providers, base URLs,
+//! and provider keys.
 
 use super::*;
 
@@ -18,7 +18,7 @@ pub struct Upstream {
     pub authority: Authority,
     /// Base path without a trailing slash; empty for a bare origin.
     pub path_prefix: String,
-    pub credential: UpstreamCredential,
+    pub provider_key: ProviderKey,
     /// PEM file of extra root certificates trusted for the upstream, in addition
     /// to the built-in roots. Relative paths are relative to the config file.
     pub ca_file: Option<PathBuf>,
@@ -88,9 +88,10 @@ pub enum UpstreamHttpVersion {
     Http1,
 }
 
-/// How Wye authenticates to the upstream.
+/// The provider key Wye presents to an upstream: from an environment
+/// variable, a file, or, with caller-credential passthrough, the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpstreamCredential {
+pub enum ProviderKey {
     /// Provider API key read from this environment variable at startup.
     ApiKeyEnv(String),
     /// Provider API key read from this file at startup (a mounted secret);
@@ -101,7 +102,7 @@ pub enum UpstreamCredential {
 }
 
 /// Where the key comes from: `$NAME`, a file, or the caller.
-impl fmt::Display for UpstreamCredential {
+impl fmt::Display for ProviderKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ApiKeyEnv(name) => write!(f, "${name}"),

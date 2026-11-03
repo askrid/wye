@@ -7,7 +7,7 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, Issuer, Upstream, UpstreamCredential},
+    config::{Config, Issuer, ProviderKey, Upstream},
     prompt::HashKey,
     token::{IssuerKeys, KeySetError, Verifier},
 };
@@ -182,8 +182,8 @@ pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
     let mut names: Vec<String> = config
         .routes
         .upstreams()
-        .filter_map(|u| match &u.credential {
-            UpstreamCredential::ApiKeyEnv(name) => Some(name.clone()),
+        .filter_map(|u| match &u.provider_key {
+            ProviderKey::ApiKeyEnv(name) => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -213,10 +213,10 @@ pub(crate) fn upstream_auth(
     upstream: &Upstream,
     config_dir: &Path,
 ) -> Result<UpstreamAuth, StartupError> {
-    let key = match &upstream.credential {
-        UpstreamCredential::ApiKeyEnv(name) => Some(env_secret(name)?),
-        UpstreamCredential::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
-        UpstreamCredential::ForwardCaller => None,
+    let key = match &upstream.provider_key {
+        ProviderKey::ApiKeyEnv(name) => Some(env_secret(name)?),
+        ProviderKey::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
+        ProviderKey::ForwardCaller => None,
     };
     match key {
         Some(key) if upstream.provider.bearer_key() => UpstreamAuth::bearer(&key),

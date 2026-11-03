@@ -26,8 +26,8 @@ fn route_upstreams_parse_with_ids_and_weights() {
     assert_eq!(upstreams[1].id.as_deref(), Some("team-b"));
     assert_eq!(upstreams[1].weight, 1);
     assert_eq!(
-        upstreams[1].credential,
-        UpstreamCredential::ApiKeyFile("b.key".into())
+        upstreams[1].provider_key,
+        ProviderKey::ApiKeyFile("b.key".into())
     );
     // The single [upstream] has no id.
     let single = parse(ACCOUNT).unwrap();

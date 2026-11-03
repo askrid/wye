@@ -10,7 +10,7 @@ use std::path::Path;
 
 use gateway_core::{
     api::RouteId,
-    config::{Auth, Config, Issuer, UpstreamCredential},
+    config::{Auth, Config, Issuer, ProviderKey},
     policy::ModelPattern,
     route::Route,
 };
@@ -302,7 +302,7 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
         _ => {}
     }
     // Where each upstream is, for the report: `[upstream]` has no id.
-    let upstreams = |route: Option<&Route>| -> Vec<(String, String, UpstreamCredential)> {
+    let upstreams = |route: Option<&Route>| -> Vec<(String, String, ProviderKey)> {
         route
             .map(|r| {
                 r.upstreams()
@@ -314,7 +314,7 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
                                 |id| format!("routes.{name}: upstream {id}"),
                             ),
                             u.base_url(),
-                            u.credential.clone(),
+                            u.provider_key.clone(),
                         )
                     })
                     .collect()
@@ -331,11 +331,11 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
             diff.changes.push(format!("{at}: {was} -> {url}"));
         }
         match (was_credential, credential) {
-            (UpstreamCredential::ForwardCaller, UpstreamCredential::ForwardCaller) => {}
-            (UpstreamCredential::ForwardCaller, _) => diff.widens.push(format!(
+            (ProviderKey::ForwardCaller, ProviderKey::ForwardCaller) => {}
+            (ProviderKey::ForwardCaller, _) => diff.widens.push(format!(
                 "{at} sends the operator's key, where callers brought their own"
             )),
-            (_, UpstreamCredential::ForwardCaller) => diff
+            (_, ProviderKey::ForwardCaller) => diff
                 .narrows
                 .push(format!("{at} forwards each caller's own credential")),
             (a, b) if a != b => diff.changes.push(format!("{at} key: {a} -> {b}")),
