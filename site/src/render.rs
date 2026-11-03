@@ -140,9 +140,7 @@ impl Sources {
                             .collect::<Vec<_>>()
                             .join(" "),
                     )),
-                    other => Err(format!(
-                        "opening {file}: {other:?} is not tagline, rest, or text"
-                    )),
+                    other => Err(format!("{other:?} is not tagline, rest, or text")),
                 }
             }
             ("section", [file, heading]) => {
@@ -185,11 +183,9 @@ impl Sources {
             }
             ("ratios", [file, heading, column]) => {
                 chart::ratios(self.section(file, heading)?, column)
-                    .map_err(|e| format!("{file}, \"## {heading}\": {e}"))
             }
-            ("versus", [file, heading, row]) => chart::versus(self.section(file, heading)?, row)
-                .map_err(|e| format!("{file}, \"## {heading}\": {e}")),
-            _ => Err(format!("unknown directive {{{{{directive}}}}}")),
+            ("versus", [file, heading, row]) => chart::versus(self.section(file, heading)?, row),
+            _ => Err("unknown directive".to_owned()),
         }
     }
 
@@ -213,11 +209,7 @@ impl Sources {
         let (name, divisor) = match expression.split_once('/') {
             Some((name, divisor)) => match divisor.parse::<f64>() {
                 Ok(divisor) if divisor > 0.0 => (name, divisor),
-                _ => {
-                    return Err(format!(
-                        "metric {expression}: the divisor is not a positive number"
-                    ));
-                }
+                _ => return Err("the divisor is not a positive number".to_owned()),
             },
             None => (expression, 1.0),
         };
@@ -225,9 +217,9 @@ impl Sources {
             .metrics
             .get(name)
             .ok_or_else(|| format!("bench/baseline.json: no metric {name}"))?;
-        let decimals: usize = decimals.parse().map_err(|_| {
-            format!("metric {expression}: {decimals:?} is not a number of decimals")
-        })?;
+        let decimals: usize = decimals
+            .parse()
+            .map_err(|_| format!("{decimals:?} is not a number of decimals"))?;
         Ok(format!("{:.*}", decimals, value / divisor))
     }
 
@@ -252,7 +244,12 @@ pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
         let directive = directive.strip_prefix("{{").unwrap_or(directive);
         let end = directive.find("}}").ok_or("a {{ without its }}")?;
         let (directive, after) = directive.split_at(end);
-        out.push_str(&sources.expand(directive.trim(), &mut placed)?);
+        let directive = directive.trim();
+        out.push_str(
+            &sources
+                .expand(directive, &mut placed)
+                .map_err(|e| format!("{{{{{directive}}}}}: {e}"))?,
+        );
         rest = after.strip_prefix("}}").unwrap_or(after);
     }
     out.push_str(rest);
@@ -476,6 +473,19 @@ mod tests {
                 .contains("unknown directive")
         );
         assert!(render("{{version", &s).is_err());
+    }
+
+    #[test]
+    fn errors_name_their_directive() {
+        let s = sources();
+        assert_eq!(
+            render("x {{ metric cpu/0|1 }}", &s).unwrap_err(),
+            "{{metric cpu/0|1}}: the divisor is not a positive number"
+        );
+        assert_eq!(
+            render("{{ratios README.md|Status|Speed}}", &s).unwrap_err(),
+            "{{ratios README.md|Status|Speed}}: no table with a column \"Speed\""
+        );
     }
 
     #[test]
