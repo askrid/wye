@@ -1,14 +1,22 @@
-<img src="site/assets/icon-fork.svg" alt="" width="64">
+<div align="center">
+
+<img src="site/assets/icon-fork.svg" alt="" width="80">
 
 # Wye
+
+**Nothing stops at a wye.** Wye is a gateway for Claude Code, Codex, and apps
+on the provider SDKs: one binary and one TOML file, no database, no dashboard,
+and each provider's own API passed through without translation.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases)
 [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
-**Nothing stops at a wye.** Wye is a gateway for Claude Code, Codex, and apps
-on the provider SDKs: one binary and one TOML file, no database, no dashboard,
-and each provider's own API passed through without translation.
+[Quick start](#quick-start) · [Guide](docs/guide.md) ·
+[Configuration](examples/wye.toml) · [Benchmarks](docs/benchmarks.md) ·
+[Website](https://askrid.github.io/wye/)
+
+</div>
 
 ## Performance
 
