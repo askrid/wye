@@ -154,8 +154,10 @@ Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP l
   "duration_ms": 4100.42,
   "headers_ms": 651.8,
   "upstream": "bedrock-us",
+  "subject": "alice",
   "session_id": "7f2c4a10-8e1b-4d3a-9c55-2b6e0d1f9a33",
   "request_class": "main",
+  "requested_model": "claude-coding",
   "model": "claude-opus-5-5",
   "usage_status": "complete",
   "input_tokens": 12,
@@ -165,7 +167,8 @@ Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP l
   "cost_usd": "0.0181",
   "cost_status": "complete",
   "pricing_version": "anthropic-2026-11-01",
-  "tool_calls": { "Bash": 1 }
+  "tool_calls": { "Bash": 1 },
+  "failovers": [{ "upstream": "anthropic", "status": 429 }]
 }
 ```
 
