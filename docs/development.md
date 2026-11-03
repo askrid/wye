@@ -109,6 +109,34 @@ The variables `wye` itself reads are in [operations.md](operations.md#environmen
 - Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
 - `unwrap`, `expect`, panics, and indexing are denied outside tests (`wye-bench` and `wye-testkit` allow some); `unsafe` is forbidden in `gateway-core` and denied elsewhere.
 
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `<type>(<scope>): <summary>`, then a body that says why and keeps the evidence (before/after numbers, the trade-off, what was rejected).
+
+- **Type**, one per commit: `feat`, `fix`, `perf` (measured), `refactor` (no behavior change), `test`, `docs`, `build`, `ci`, `chore`, `revert`.
+- **Summary**: imperative, lowercase, no period, about 50 characters; the subject line is never over 72.
+- **Scope**, from this list; omitted only when a change spans the repository:
+
+| Scope | Covers |
+|---|---|
+| `gateway` | The request path in `crates/wye`: server, connections, forwarding, streaming, request bodies, TLS, timeouts, shutdown |
+| `routing` | Routes, upstream selection, cache affinity, failover, providers, several keys |
+| `policy` | Gateway tokens, identity providers, model permissions, output-token ceilings, aliases, model discovery |
+| `usage` | Usage scanners and records, cost and pricing, cache diagnostics |
+| `telemetry` | OTLP logs, metrics, and traces |
+| `upgrade` | Upgrade checks |
+| `config` | The config schema, its validation, `examples/wye.toml`, secret resolution |
+| `cli` | Commands and the agent wrappers |
+| `bench` | `wye-bench`, scenarios, competitors, `bench/baseline.json` |
+| `gate` | `scripts/check.sh`, `scripts/ab.sh`, the hooks, tolerances |
+| `testkit` | Shared test harnesses |
+| `site` | The website |
+| `release` | The release pipeline and the container image |
+| `deps` | Dependency updates (`build(deps)`) |
+| `readme`, `changelog` | Documentation commits to `README.md` or `CHANGELOG.md` alone |
+
+A documentation commit about one area takes that area's scope (`docs(policy)`).
+
 ## Design principles
 
 How the code is structured, beyond the rules in [Code changes](#code-changes). Each principle names where the code follows it, so a review can check new code against an example.
