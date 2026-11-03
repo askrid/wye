@@ -342,7 +342,7 @@ mod tests {
             .collect(),
             documents: [(
                 "README.md",
-                "# Wye\n\n**Gateways got fat.** Wye is one\n`binary`.\n\n\
+                "# Wye\n\n**Nothing stops at a wye.** Wye is one\n`binary`.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
@@ -378,7 +378,7 @@ mod tests {
             "{{opening README.md|tagline}}|{{opening README.md|rest}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "Gateways got fat.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary."
+            "Nothing stops at a wye.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary."
         );
         assert!(render("{{opening README.md|title}}", &sources()).is_err());
     }

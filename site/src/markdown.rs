@@ -79,7 +79,7 @@ pub fn list_items(section: &str) -> Vec<String> {
 }
 
 /// The paragraph that opens a document, before its first section, split at
-/// its bold tagline: `**Gateways got fat.** Wye is…` gives the tagline and
+/// its bold tagline: `**Nothing stops at a wye.** Wye is…` gives the tagline and
 /// the rest.
 pub fn opening(doc: &str) -> Option<(&str, &str)> {
     let intro = doc.split("\n## ").next()?;
