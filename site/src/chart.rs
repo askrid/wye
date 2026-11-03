@@ -22,16 +22,12 @@ struct Bar {
 /// as multiples of Wye's ("7×"), with Wye added as 1×. A cell that is not a
 /// multiple ("cannot stream") is left out.
 pub fn ratios(text: &str, column: &str) -> Result<String, String> {
-    let rows = tables(text)
+    let (rows, index) = tables(text)
         .into_iter()
-        .find(|rows| {
-            rows.first()
-                .is_some_and(|header| header.iter().any(|cell| cell == column))
+        .find_map(|rows| {
+            let index = rows.first()?.iter().position(|cell| cell == column)?;
+            Some((rows, index))
         })
-        .ok_or_else(|| format!("no table with a column {column:?}"))?;
-    let index = rows
-        .first()
-        .and_then(|header| header.iter().position(|cell| cell == column))
         .ok_or_else(|| format!("no table with a column {column:?}"))?;
     let mut bars = vec![Bar {
         name: "Wye".into(),
@@ -79,10 +75,10 @@ pub fn versus(text: &str, row_start: &str) -> Result<String, String> {
     let mut bars = Vec::new();
     for (name, cell) in header.iter().zip(&row).skip(1) {
         let first = cell.split(" / ").next().unwrap_or(cell).trim();
-        let unit = cell.rsplit(' ').next().unwrap_or_default();
-        let value = number(first.split(' ').next().unwrap_or(first))
-            .ok_or_else(|| format!("{row_start:?}: {cell:?} does not start with a figure"))?;
         let figure = first.split(' ').next().unwrap_or(first);
+        let unit = cell.rsplit(' ').next().unwrap_or_default();
+        let value = number(figure)
+            .ok_or_else(|| format!("{row_start:?}: {cell:?} does not start with a figure"))?;
         bars.push(Bar {
             name: name.clone(),
             label: format!("{figure} {unit}"),

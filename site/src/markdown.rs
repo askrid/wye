@@ -82,13 +82,16 @@ pub fn list_items(section: &str) -> Vec<String> {
 /// its bold tagline: `**Nothing stops at a wye.** Wye is…` gives the tagline and
 /// the rest.
 pub fn opening(doc: &str) -> Option<(&str, &str)> {
-    let intro = doc.split("\n## ").next()?;
-    let paragraph = intro
-        .split("\n\n")
-        .map(str::trim)
-        .find(|paragraph| paragraph.starts_with("**"))?;
-    let (tagline, rest) = paragraph.strip_prefix("**")?.split_once("**")?;
+    let first = paragraph(doc.split("\n## ").next()?, "**")?;
+    let (tagline, rest) = first.strip_prefix("**")?.split_once("**")?;
     Some((tagline, rest.trim()))
+}
+
+/// The first paragraph of `text` that starts with `start`, trimmed.
+pub fn paragraph<'a>(text: &'a str, start: &str) -> Option<&'a str> {
+    text.split("\n\n")
+        .map(str::trim)
+        .find(|paragraph| paragraph.starts_with(start))
 }
 
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.

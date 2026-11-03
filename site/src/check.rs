@@ -24,9 +24,9 @@ pub fn check(out: &Path) -> Result<(), String> {
 }
 
 fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let entries = fs::read_dir(dir).map_err(|e| crate::io_error(dir, e))?;
     for entry in entries {
-        let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+        let path = entry.map_err(|e| crate::io_error(dir, e))?.path();
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -40,7 +40,7 @@ fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
             collect(&path, &relative, files)?;
         } else {
             let text = if relative.ends_with(".html") || relative.ends_with(".css") {
-                Some(fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?)
+                Some(fs::read_to_string(&path).map_err(|e| crate::io_error(&path, e))?)
             } else {
                 None
             };

@@ -45,7 +45,7 @@ impl Sources {
     pub fn load(repo: &Path) -> Result<Self, String> {
         let read = |relative: &str| {
             let path = repo.join(relative);
-            fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
+            fs::read_to_string(&path).map_err(|e| crate::io_error(&path, e))
         };
         let crate_manifest = read("crates/wye/Cargo.toml")?;
         let workspace_manifest = read("Cargo.toml")?;
@@ -100,8 +100,7 @@ impl Sources {
             ("machine", []) => Ok(markdown::escape(&self.machine)),
             ("metric", [metric, decimals]) => self.metric(metric, decimals),
             ("fence", [file, prefix]) => {
-                let (lang, code) = markdown::fence(self.document(file)?, prefix)
-                    .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))?;
+                let (lang, code) = self.fence(file, prefix)?;
                 Ok(format!(
                     // Focusable, so a keyboard can scroll a block wider
                     // than the page.
@@ -111,8 +110,7 @@ impl Sources {
                 ))
             }
             ("field", [file, prefix, key]) => {
-                let (_, code) = markdown::fence(self.document(file)?, prefix)
-                    .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))?;
+                let (_, code) = self.fence(file, prefix)?;
                 let object: serde_json::Value = serde_json::from_str(&code).map_err(|e| {
                     format!("{file}: the block starting with {prefix:?} is not JSON: {e}")
                 })?;
@@ -143,11 +141,11 @@ impl Sources {
                     other => Err(format!("{other:?} is not tagline, rest, or text")),
                 }
             }
-            ("section", [file, heading]) => {
-                let text = markdown::section(self.document(file)?, heading)
-                    .ok_or_else(|| format!("{file}: no section \"## {heading}\""))?;
-                Ok(markdown::to_html(text, &self.repo_url, file))
-            }
+            ("section", [file, heading]) => Ok(markdown::to_html(
+                self.section(file, heading)?,
+                &self.repo_url,
+                file,
+            )),
             ("item", [file, heading, prefix]) => {
                 let items = self.items(file, heading)?;
                 let item = items
@@ -171,11 +169,7 @@ impl Sources {
                 Ok(out)
             }
             ("paragraph", [file, heading, start]) => {
-                let paragraph = self
-                    .section(file, heading)?
-                    .split("\n\n")
-                    .map(str::trim)
-                    .find(|paragraph| paragraph.starts_with(start))
+                let paragraph = markdown::paragraph(self.section(file, heading)?, start)
                     .ok_or_else(|| {
                         format!("{file}: no paragraph under \"## {heading}\" starts with {start:?}")
                     })?;
@@ -191,6 +185,11 @@ impl Sources {
 
     fn items(&self, file: &str, heading: &str) -> Result<Vec<String>, String> {
         Ok(markdown::list_items(self.section(file, heading)?))
+    }
+
+    fn fence(&self, file: &str, prefix: &str) -> Result<(&str, String), String> {
+        markdown::fence(self.document(file)?, prefix)
+            .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))
     }
 
     fn section(&self, file: &str, heading: &str) -> Result<&str, String> {
@@ -238,19 +237,16 @@ pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
     let mut out = String::with_capacity(template.len() * 2);
     let mut placed = BTreeSet::new();
     let mut rest = template;
-    while let Some(start) = rest.find("{{") {
-        let (before, directive) = rest.split_at(start);
+    while let Some((before, open)) = rest.split_once("{{") {
         out.push_str(before);
-        let directive = directive.strip_prefix("{{").unwrap_or(directive);
-        let end = directive.find("}}").ok_or("a {{ without its }}")?;
-        let (directive, after) = directive.split_at(end);
+        let (directive, after) = open.split_once("}}").ok_or("a {{ without its }}")?;
         let directive = directive.trim();
         out.push_str(
             &sources
                 .expand(directive, &mut placed)
                 .map_err(|e| format!("{{{{{directive}}}}}: {e}"))?,
         );
-        rest = after.strip_prefix("}}").unwrap_or(after);
+        rest = after;
     }
     out.push_str(rest);
     Ok(out)
