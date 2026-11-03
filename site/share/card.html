@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- The share image, assets/share.png: a screenshot of this file at
+     1200x630 (see site/README.md). It carries no facts, only the mark and
+     the name, so it never goes stale; the title and description beside it
+     in a link preview come from README.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+@font-face {
+  font-family: "Wye Mono";
+  src: url("../assets/fonts/wye-mono-semibold.woff2") format("woff2");
+  font-weight: 600;
+}
+html, body { margin: 0; }
+body {
+  width: 1200px;
+  height: 630px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 56px;
+  background: #070707;
+}
+svg { width: 196px; height: 196px; flex: none; }
+.tile { fill: #151515; stroke: #3a3a3a; }
+.fork { fill: none; stroke: #ededed; stroke-width: 3.5; stroke-linejoin: round; }
+span {
+  color: #ededed;
+  font: 600 208px/1 "Wye Mono", monospace;
+  letter-spacing: -0.02em;
+  /* The letters' x-height band, not the line box, centred on the tile. */
+  position: relative;
+  top: -24px;
+}
+</style>
+</head>
+<body>
+<svg viewBox="0 0 32 32" aria-hidden="true"><rect class="tile" x="0.5" y="0.5" width="31" height="31" rx="7"/><path class="fork" d="M4.5 16 H11 L16 9 H27.5 M11 16 L16 23 H27.5"/></svg>
+<span>wye</span>
+</body>
+</html>
