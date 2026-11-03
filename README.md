@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="site/assets/icon-fork.svg" alt="" width="80">
-
-# Wye
+<h1><img src="site/assets/icon-fork.svg" alt="" width="44" align="absmiddle"> Wye</h1>
 
 **An LLM gateway without bloat.** Wye sits between Claude Code, Codex, or apps on the provider SDKs and the model APIs they call: one binary and one TOML file, no database, no dashboard, and each provider's own API passed through without translation.
 
