@@ -1,8 +1,7 @@
-target
-.git
-WORKLOG.md
-AGENTS.md
-*.jsonl
-.claude
-/wye.toml
-site
+# An allowlist: the image build reads the workspace manifests, the toolchain
+# pin, and the crates. Everything else stays out of the build context.
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!crates/
