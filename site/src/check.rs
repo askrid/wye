@@ -63,11 +63,10 @@ fn problems(files: &Files) -> Vec<String> {
         if text.contains("{{") {
             found.push(format!("{path}: an unexpanded directive"));
         }
-        for (tag, target) in references(text) {
-            if tag == "a" {
-                check_link(files, path, target, &mut found);
-            } else {
-                check_resource(files, path, target, &mut found);
+        for (reference, target) in references(text) {
+            match reference {
+                Reference::Link => check_link(files, path, target, &mut found),
+                Reference::Resource => check_resource(files, path, target, &mut found),
             }
         }
     }
@@ -136,8 +135,16 @@ fn resolve(from: &str, target: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-/// Every `href` and `src` in the page, with the name of its tag.
-fn references(html: &str) -> Vec<(String, &str)> {
+#[derive(Clone, Copy)]
+enum Reference {
+    /// Followed by the reader: `<a>`, and a canonical `<link>`.
+    Link,
+    /// Fetched by the browser on its own: everything else.
+    Resource,
+}
+
+/// Every `href` and `src` in the page, with what the browser does with it.
+fn references(html: &str) -> Vec<(Reference, &str)> {
     let mut found = Vec::new();
     let mut rest = html;
     while let Some(start) = rest.find('<') {
@@ -151,17 +158,21 @@ fn references(html: &str) -> Vec<(String, &str)> {
         if name.is_empty() {
             continue; // a closing tag, a comment, or the doctype
         }
+        let name = name.to_ascii_lowercase();
+        // A canonical link names the page's address; nothing loads it, so it
+        // is checked as a link, which may point anywhere.
+        let reference = if name == "a"
+            || (name == "link" && attribute_values(tag, "rel").contains(&"canonical"))
+        {
+            Reference::Link
+        } else {
+            Reference::Resource
+        };
         for attribute in ["href", "src"] {
-            let mut tag_name = name.to_ascii_lowercase();
-            // A canonical link names the page's address; nothing loads it,
-            // so it is checked as a link, which may point anywhere.
-            if tag_name == "link" && attribute_values(tag, "rel").contains(&"canonical") {
-                tag_name = "a".to_owned();
-            }
             found.extend(
                 attribute_values(tag, attribute)
                     .into_iter()
-                    .map(|value| (tag_name.clone(), value)),
+                    .map(|value| (reference, value)),
             );
         }
     }
