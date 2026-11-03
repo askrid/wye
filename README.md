@@ -2,9 +2,9 @@
 
 # Wye
 
-[![CI](https://github.com/askrid/wye/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/askrid/wye/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Rust 1.99+](https://img.shields.io/badge/rust-1.99%2B-orange)](rust-toolchain.toml)
+[![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases)
+[![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
 **Nothing stops at a wye.** Wye is a gateway for Claude Code, Codex, and apps
 on the provider SDKs: one binary and one TOML file, no database, no dashboard,
