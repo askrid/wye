@@ -28,7 +28,7 @@ Install with `cargo install --git https://github.com/askrid/wye wye --locked` (R
 Where the credentials come from:
 
 - **Passthrough** (`wye init`): each caller's own credential goes through: Claude Code's claude.ai login, or an API key. The gateway holds no secret.
-- **Gateway key** (`wye init --api-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends.
+- **API key** (`wye init --api-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends.
 - **Team** (`wye init --team`): callers present [gateway tokens](glossary.md). The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/issuer.key` (mode 600) unless one is there to reuse.
 
 The first two listen on loopback only; `--team` listens on every interface. `--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--team`, in `OPENAI_API_KEY`).
