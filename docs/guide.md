@@ -182,8 +182,7 @@ Each request becomes a log record and a span carrying its subject, session, toke
 ## Changing or upgrading
 
 - **The config:** edit it, run `wye doctor`, then `wye service restart`. A config that would not start is refused, and the running service stays as it was. In a terminal, restart `wye serve`.
-- **A new `wye` at the same path:** `wye service restart`.
-- **Another config, or a `wye` at another path:** `wye service install` again (`-c <path>`). It replaces the definition.
+- **`drain_delay_secs` or `shutdown_grace_secs`, a new `wye`, another config, or a `wye` at another path:** `wye service install` again (`-c <path>` for another config). It writes this version's definition and replaces the running gateway. A restart keeps the old definition, whose stop timeout was computed from the old drain and grace settings, so the service manager could stop the gateway before it finishes its requests and writes their usage records.
 
 Either way the old gateway finishes its requests first, for up to the [stop timeout](operations.md#running-as-a-service) (35 s by default), and new connections are refused until then. Claude Code retries streams cut off after that.
 

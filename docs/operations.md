@@ -210,7 +210,8 @@ Before installing, the config is checked as the service will start it: it parses
 
 ```bash
 wye service status      # installed? what it runs, the log's size, whether it answers
-wye service restart     # after a config edit or a new wye; checks the config first
+wye service restart     # after a config edit; checks the config first
+wye service install     # again after a new wye or a new drain or grace setting
 wye service uninstall   # stops it and removes the file; the config and the log stay
 ```
 
