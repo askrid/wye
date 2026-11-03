@@ -41,7 +41,9 @@ New here: the [README](../README.md#what-it-does) says what Wye does, the [gloss
 
 - **Proposal / illustrative:** not yet implemented; shape may change.
 - **Research:** idea to investigate, not a product promise.
-- Do not claim performance improvements without published, reproducible benchmarks.
+- These docs and the README are the source of truth for design, status, and results. A change updates the docs it affects in the same commit: status in [roadmap.md](roadmap.md), the config reference in [examples/wye.toml](../examples/wye.toml), structure in [architecture.md](architecture.md), numbers in [benchmarks.md](benchmarks.md), experiments in [research.md](research.md).
+- Do not claim performance improvements without published, reproducible benchmarks, and never present an estimate or a lab result as a production measurement.
+- After editing docs, check that every relative link and anchor resolves.
 - Support is declared per **endpoint × provider × feature**. Do not imply more.
 - **Terms:** one name per concept, as [glossary.md](glossary.md) defines it; a new concept gets its entry there first.
 - **Layout:** one line per paragraph and per list item (editors and GitHub wrap them). Tables hold short values; prose goes in lists, so GitHub does not squeeze it into narrow columns. Code lines stay under 90 characters.

@@ -124,8 +124,51 @@ The variables `wye` itself reads are in [operations.md](operations.md#environmen
 - Correctness and protocol compatibility first; then no unnecessary allocation, buffering, locks, or blocking on the request path.
 - Every change ends with a review pass over the files it touched: names, duplication, dead code, stale comments, module boundaries. Refactor instead of patching when logic repeats, a module does two jobs, or a name no longer fits.
 - A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
+- Structure is kept up continuously, not in cleanup projects: search for leftovers after a rename, split a file that grows past about 400 lines without a clear reason, and refactor toward the code that exists, never toward a feature that does not.
 - Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
 - `unwrap`, `expect`, panics, and indexing are denied outside tests (`wye-bench` and `wye-testkit` allow some); `unsafe` is forbidden in `gateway-core` and denied elsewhere.
+
+## Rust conventions
+
+The rules [Design principles](#design-principles) does not already state. Correctness comes first; every optimization needs a measurement.
+
+**Toolchain and style**
+- Stable Rust, edition 2024, pinned in `rust-toolchain.toml`; lints and dependency versions are set once in the workspace's `Cargo.toml`.
+- Names follow the Rust API Guidelines; a module with children is `foo.rs` plus `foo/`, never `mod.rs`.
+- Every module has a `//!` doc and every public item a `///` doc (rustdoc runs with `-D warnings`); comments say why, not what.
+- One way to do each thing: extend the existing pattern (one HTTPS client setup, one config snapshot, one refusal function) before adding a second.
+
+**Types and errors**
+- Errors are typed enums per concern (`ConfigError`, `TokenError`, `PolicyError`, ...); the CLI turns them into messages. No `anyhow`.
+- Identifiers and units get their own types. Money is an integer, pico-USD (`pricing::Pico`), never floating point; arithmetic that would overflow makes a cost `unknown`, never wrong.
+- A secret's type redacts it in `Debug` and never implements `Serialize` (`UpstreamAuth`, `HashKey`).
+- No panic on the request path: `unwrap`, `expect`, and indexing are denied by lint, and each connection runs in its own task, so a panic cannot reach another stream.
+
+**The data path**
+- Bodies are `bytes::Bytes` frames on streaming bodies: relayed without copying, a streaming response never collected.
+- What can be resolved at startup is: upstream URIs, header values, price tables. No `format!` or `String` building per request where a precomputed value works.
+- Request bodies are read by hand-written scanners over `memchr`, for the few fields policy needs; small JSON objects (gateway-token claims, a usage object) are parsed with borrowing serde types (`RawValue`, `IgnoredAny`). A forwarded body is never re-serialized: a rewrite splices the new value in place.
+- Every buffer and queue has a fixed bound: a `DEFAULT_*` in `config.rs` where operators tune it, otherwise a constant listed under [Fixed limits](architecture.md#fixed-limits).
+
+**Concurrency**
+- Tokio's multi-thread runtime. A worker never blocks: no blocking I/O, and CPU work longer than about 100 µs goes to `spawn_blocking`.
+- No locks on the request path; shared state is immutable behind `Arc`. Where a lock is unavoidable, a synchronous `Mutex`, never held across `.await` (denied by lint).
+- Every spawned task has an owner that awaits or aborts it: a `JoinSet`, or a `JoinHandle` its starter keeps. No detached tasks.
+- Backpressure comes from polling the body; a channel, where one is needed, is bounded. Telemetry never slows the data path: a full queue drops and counts.
+- Every `select!` documents its branches' cancel safety. `Relaxed` atomics are for statistics counters only; any other ordering says why.
+
+**Unsafe and dependencies**
+- `unsafe` is forbidden in `gateway-core` and denied elsewhere. The one exception, `wye/src/alloc_stats.rs` (a `GlobalAlloc`, built only with `--features alloc-stats`), carries a `// SAFETY:` proof per block.
+- Each dependency is justified in its commit, maintained, and added with `default-features = false`; prefer what Tokio and Hyper already pull in. `cargo deny` runs in CI.
+
+**Performance work**
+- Measure first: `wye-bench` for the system, `scripts/ab.sh` for effects below the gate's sensitivity, the `alloc_` metrics for heap allocations, and sampled stacks (`sample`, `perf`) for where CPU and waits go.
+- A streamed event allocates nothing (`alloc_sse_per_event` is gated at zero).
+- Low-level optimization (`#[inline]`, SIMD, `unsafe`, custom allocators, release-profile settings) lands only with a recorded before and after ([research.md](research.md)). Hot-path work the gate does not measure states its own measurement in the commit message.
+
+**Tests**
+- Deterministic: local mock upstreams, `tokio::time::pause` for timeouts, no paid provider calls.
+- Property tests (proptest) for SSE chunk splits, UTF-8 boundaries, and cost arithmetic; `loom` for any custom synchronization (there is none today). Fuzz targets for the parsers of untrusted input are an [open finding](roadmap.md#open-findings).
 
 ## Commit messages
 
@@ -164,7 +207,7 @@ How the code is structured, beyond the rules in [Code changes](#code-changes). E
   - vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP);
   - refusals: one function, `responses::refuse`, turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
 - **Parse, don't validate.** Config, tokens, model patterns, and prices become types at the boundary, so later code cannot meet an invalid value; fields that only make sense together live in one type ([King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)).
-- **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Held`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
+- **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Reserved`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
 - **A bound bounds what it names.** A memory budget counts memory, not payload: a held chunk counts at least `MIN_CHUNK_CHARGE`, since a body sent a byte at a time pins far more than its bytes. A deadline covers every wait it names: the connect timeout covers the TLS handshake too.
 - **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never the request path's internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
 - **Closed sets are enums, dispatch is static.** `Api`, `Provider`, and `UsageScanner` are enums matched per chunk; a trait needs two implementations; the data path is generic, and `dyn` stays at cold boundaries such as startup.

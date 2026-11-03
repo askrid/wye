@@ -147,7 +147,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
-**Request rewrites.** Wye rewrites only an explicit allowlist of request fields; everything else passes through byte-equivalent in meaning. Each field, when it is rewritten, and why:
+**Request rewrites.** Wye rewrites only an explicit allowlist of request fields; everything else passes through byte for byte, and a rewrite splices the new value in place. Each field, when it is rewritten, and why:
 
 - **`model`**, for a [model alias](#model-aliases-and-upgrade-checks) (implemented), a Claude provider's model id (Bedrock, implemented), or size-aware routing (planned, [roadmap](roadmap.md#m2c-fewer-expensive-tokens)): replace an alias with the model config maps it to, a model policy selects for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family.
 - **`model` → URL, `anthropic_version`**, for Vertex AI (planned): Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged.
