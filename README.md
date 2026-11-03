@@ -6,9 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Rust 1.99+](https://img.shields.io/badge/rust-1.99%2B-orange)](rust-toolchain.toml)
 
-**Gateways got fat.** Wye is a gateway for Claude Code, Codex, and apps on the
-provider SDKs: one binary and one TOML file, no database, no dashboard, and
-each provider's own API passed through without translation.
+**Nothing stops at a wye.** Wye is a gateway for Claude Code, Codex, and apps
+on the provider SDKs: one binary and one TOML file, no database, no dashboard,
+and each provider's own API passed through without translation.
 
 ## Performance
 
