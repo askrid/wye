@@ -48,16 +48,16 @@
     </div>
 
     <figure class="junction">
-      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; the account stop holds the session on anthropic, which refuses it with 429 before any output, so with failover on the request is retried on {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
+      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its gateway token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; at the upstream stop the session stays on anthropic, which rejects the request with 429 before any output, so with failover on, Wye resends it to {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
 <pre class="trace-wide">claude code
 │
-o     <b>gate</b>      <span class="d">token checked</span>
+o     <b>gate</b>      <span class="d">gateway token checked</span>
 │
 o     <b>model</b>     <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
 │
-o     <b>account</b>   <span class="d">session held on anthropic</span>
-├──<span class="no">x</span>  refused   <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
-<span class="r2">╰──</span>o  retried   <span class="d">{{field README.md|{|upstream}}</span>
+o     <b>upstream</b>  <span class="d">session stays on anthropic</span>
+├──<span class="no">x</span>  rejected  <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+<span class="r2">╰──</span>o  failover  <span class="d">to {{field README.md|{|upstream}}</span>
 <span class="r2">   │</span>
    o  <b>stream</b>    <span class="d">as it arrives, unbuffered</span>
 <span class="r2">   │</span>
@@ -65,17 +65,17 @@ o     <b>account</b>   <span class="d">session held on anthropic</span>
 <pre class="trace-narrow">claude code
 │
 o  <b>gate</b>
-│  <span class="d">token checked</span>
+│  <span class="d">gateway token checked</span>
 │
 o  <b>model</b>
 │  <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
 │
-o  <b>account</b>
-│  <span class="d">session held on anthropic</span>
-├──<span class="no">x</span>  refused
+o  <b>upstream</b>
+│  <span class="d">session stays on anthropic</span>
+├──<span class="no">x</span>  rejected
 │     <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
-<span class="r2">╰──</span>o  retried
-<span class="r2">   │</span>  <span class="d">{{field README.md|{|upstream}}</span>
+<span class="r2">╰──</span>o  failover
+<span class="r2">   │</span>  <span class="d">to {{field README.md|{|upstream}}</span>
 <span class="r2">   │</span>
    o  <b>stream</b>
 <span class="r2">   │</span>  <span class="d">as it arrives, unbuffered</span>
@@ -93,7 +93,7 @@ o  <b>account</b>
         <li class="to-client"><a href="#client"><span class="branch" aria-hidden="true">├── </span><span class="name">client</span></a></li>
         <li class="to-gate"><a href="#gate"><span class="branch" aria-hidden="true">├── </span><span class="name">gate</span></a></li>
         <li class="to-model"><a href="#model"><span class="branch" aria-hidden="true">├── </span><span class="name">model</span></a></li>
-        <li class="to-account"><a href="#account"><span class="branch" aria-hidden="true">├── </span><span class="name">account</span></a></li>
+        <li class="to-upstream"><a href="#upstream"><span class="branch" aria-hidden="true">├── </span><span class="name">upstream</span></a></li>
         <li class="to-stream"><a href="#stream"><span class="branch" aria-hidden="true">├── </span><span class="name">stream</span></a></li>
         <li class="to-record"><a href="#record"><span class="branch" aria-hidden="true">└── </span><span class="name">record</span></a></li>
         <li class="root">also/</li>
@@ -120,8 +120,8 @@ o  <b>account</b>
         {{item README.md|What it does|Changes models}}
       </section>
 
-      <section class="part stop" id="account" aria-labelledby="account-h">
-        <h2 id="account-h"><a href="#account"><span class="hash" aria-hidden="true">#</span> account</a></h2>
+      <section class="part stop" id="upstream" aria-labelledby="upstream-h">
+        <h2 id="upstream-h"><a href="#upstream"><span class="hash" aria-hidden="true">#</span> upstream</a></h2>
         {{item README.md|What it does|Spreads load}}
       </section>
 
@@ -169,7 +169,7 @@ o  <b>account</b>
 
       <section class="part" id="config" aria-labelledby="config-h">
         <h2 id="config-h"><a href="#config"><span class="hash" aria-hidden="true">#</span> config</a></h2>
-        <p>One file, kept in Git: a route with two accounts, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+        <p>One file, kept in Git: a route with two upstreams, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
         {{fence README.md|[server]}}
         {{item README.md|What it does|Checks decisions}}
         <div class="long-lines">{{fence README.md|$ wye explain}}</div>

@@ -48,7 +48,7 @@
 
 /* Dark only: the page is one terminal, whatever the system's theme.
    Monochrome: white on black, amber only for the failover route, red only
-   for refusals. */
+   for rejections. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -211,7 +211,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 }
 
 /* The route, drawn as a terminal would: one request through every stop,
-   each with what Wye decided there, the failover a fork at the account,
+   each with what Wye decided there, the failover a fork at the upstream,
    the record at the end. Every row keeps three columns: the line from 0,
    names from 6, what happened from 16, so a name never runs into its
    decision. The grid is 48 characters by 13 lines, sized to fill its
@@ -248,7 +248,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   grid-template-columns: 13rem minmax(0, 1fr);
   column-gap: clamp(2rem, 4vw, 4rem);
   border-top: 1px solid var(--rule);
-  timeline-scope: --client, --gate, --model, --account, --stream, --record, --compare, --config, --status, --limits;
+  timeline-scope: --client, --gate, --model, --upstream, --stream, --record, --compare, --config, --status, --limits;
 }
 .stops { min-width: 0; }
 .rail { position: sticky; top: 0; align-self: start; padding-block: clamp(2rem, 5vw, 3.5rem); }
@@ -282,7 +282,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   #client { view-timeline-name: --client; }
   #gate { view-timeline-name: --gate; }
   #model { view-timeline-name: --model; }
-  #account { view-timeline-name: --account; }
+  #upstream { view-timeline-name: --upstream; }
   #stream { view-timeline-name: --stream; }
   #record { view-timeline-name: --record; }
   #compare { view-timeline-name: --compare; }
@@ -292,7 +292,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .to-client { --stop: --client; }
   .to-gate { --stop: --gate; }
   .to-model { --stop: --model; }
-  .to-account { --stop: --account; }
+  .to-upstream { --stop: --upstream; }
   .to-stream { --stop: --stream; }
   .to-record { --stop: --record; }
   .to-compare { --stop: --compare; }
