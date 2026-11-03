@@ -8,20 +8,21 @@
 #   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 #
-# Only `listen`, `base_url`, and one credential are required. Unknown fields
-# are rejected at startup, and so are timers over 86400 seconds (a day).
+# Only `listen`, `base_url`, and a provider key (or forward_caller_credential)
+# are required. Unknown fields are an error at startup, and so are timers over
+# 86400 seconds (a day).
 # Paths are relative to this file. Secrets are never written here: they come
 # from environment variables or files.
 
 [server]
 listen = "127.0.0.1:8080"              # beyond loopback only with [auth]
 max_request_body_bytes = 33554432      # Anthropic's request size limit
-# Request bytes held while reading `model` (for permissions, aliases, and a
-# provider's model id), all requests together; beyond it, an overload error.
-# A chunk counts at least 1 KiB, for the memory it pins. A client that sends
-# nothing for 60 s while held, or has not reached its model after 5 minutes,
-# gets 408. At least max_request_body_bytes,
-# since one body may be held whole:
+# Request bytes held while reading `model` (the hold, for model permissions,
+# aliases, and a provider's model id), all requests together; beyond it, an
+# overload error. A chunk counts at least 1 KiB, for the memory it pins. A
+# client that sends nothing for 60 s while held, or has not reached its model
+# after 5 minutes, gets 408. At least max_request_body_bytes, since one body
+# may be held whole:
 max_held_request_bytes = 67108864
 # Requests in flight before new ones get an overload error (529 on the
 # Messages API, 503 on the OpenAI APIs):
@@ -34,14 +35,15 @@ shutdown_grace_secs = 30               # then remaining requests are cancelled
 # cancels its upstream request and frees its buffers:
 client_write_timeout_secs = 60
 
-# One Anthropic account: the short form of a [routes.claude] with one
-# upstream, and the only form that can forward each caller's credential.
-# For several accounts or providers, use [routes.claude] below instead.
+# A single upstream (one Anthropic account): the short form of a
+# [routes.claude] with one upstream, and the only form that can forward each
+# caller's credential. For several upstreams or providers, use
+# [routes.claude] below instead.
 [upstream]
 base_url = "https://api.anthropic.com" # without /v1; http only for loopback hosts
 api_key_env = "ANTHROPIC_API_KEY"
-# Or read the key from a mounted secret file (Docker or Kubernetes secrets,
-# systemd credentials):
+# Or read the provider key from a mounted secret file (Docker or Kubernetes
+# secrets, systemd credentials):
 # api_key_file = "/run/secrets/anthropic_api_key"
 # Or forward each caller's own credential: a claude.ai login, or an API key,
 # which bills the API (loopback only, no [auth]; `wye init` writes this, and
@@ -58,16 +60,16 @@ http_version = "auto"
 # PEM file of extra trusted root certificates (a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
-# Several accounts or providers, instead of [upstream]. Each Claude Code
-# session stays on one account (its prompt cache stays warm), chosen from the
-# session id the same way on every replica.
+# Several accounts or providers, one upstream each, instead of [upstream].
+# Each Claude Code session stays on one upstream, chosen from the session id
+# the same way on every replica, so its prompt cache stays warm.
 # [routes.claude]
 # "cache_affine" spreads sessions by weight; "ordered" uses the first
 # upstream and the others only on failover:
 # select = "cache_affine"
-# A request refused before it was processed (rate limit, overload, a
-# connection refused or cut before the body was sent whole) goes to the
-# session's next upstream in the same turn; never after a response byte:
+# A request the upstream rejects (rate limit, overload, or a connection
+# refused or cut before the body was sent whole) goes to the session's next
+# upstream in the same turn; never after a response byte:
 # failover = ["429", "529", "connect"]
 # failover_max_body_bytes = 8388608    # larger bodies go without failover
 # failover_max_held_bytes = 268435456  # bodies kept for resending, across the process (a chunk counts at least 1 KiB)
@@ -83,7 +85,7 @@ http_version = "auto"
 #
 # [[routes.claude.upstreams]]
 # id = "aws-us-west-2"
-# provider = "claude-platform-aws"     # the key goes as a bearer token
+# provider = "claude-platform-aws"     # the provider key goes as a bearer token
 # workspace_id = "wrkspc_01AbCdEf23GhIj"   # required for this provider
 # base_url = "https://aws-external-anthropic.us-west-2.api.aws"
 # api_key_env = "CLAUDE_PLATFORM_AWS_KEY"
@@ -96,8 +98,9 @@ http_version = "auto"
 
 # OpenAI Responses and Chat Completions, for Codex (`wye codex`) and the
 # OpenAI SDKs, beside or instead of the Claude route. Clients use base URL
-# http://<gateway>/v1; the key goes upstream as Authorization: Bearer.
-# Several accounts, `select`, `weight`, and `failover` work as above.
+# http://<gateway>/v1; the provider key goes upstream as
+# Authorization: Bearer. Several upstreams, `select`, `weight`, and
+# `failover` work as above.
 # [routes.openai]
 # [[routes.openai.upstreams]]
 # id = "openai"
@@ -107,19 +110,21 @@ http_version = "auto"
 
 # Gateway tokens. Required to listen beyond loopback; incompatible with
 # forward_caller_credential. `wye init --team` writes this section and a
-# signing key; tokens are issued offline with the key:
+# signing key; gateway tokens are issued offline with the signing key:
 #   wye token issue alice --ttl 1d
-# Claude Code sends the token with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
+# Claude Code sends the gateway token with ANTHROPIC_AUTH_TOKEN (or
+# ANTHROPIC_API_KEY).
 # [auth]
 # issuer = "wye"
 # audience = "wye-prod"
 # max_token_ttl_secs = 604800     # longest accepted exp - iat: one week
-# Models any token may use (exact names, or prefixes ending in *); a
-# token issued with --models narrows this further. Omit to allow all:
+# Model permissions: the models any gateway token may use (exact names, or
+# prefixes ending in *); a gateway token issued with --models narrows this
+# further. Omit to allow all:
 # models = ["claude-sonnet-*", "claude-haiku-*"]
 # Output-token ceiling: the largest output-token value a request may ask for
 # (max_tokens, max_output_tokens, or max_completion_tokens per API)
-# (tokens issued with --max-output-tokens can only lower it):
+# (gateway tokens issued with --max-output-tokens can only lower it):
 # max_output_tokens = 32000
 # Below the [auth] fields: in TOML, every key after a table header belongs
 # to that table.
@@ -128,11 +133,11 @@ http_version = "auto"
 # ed25519_public_key = "<printed by wye token keygen>"
 #
 # Identity-provider tokens, verified directly: CI workload identity or the
-# team's IdP (through Claude Code's apiKeyHelper). Commit the provider's JWKS
-# next to this file (for GitHub Actions:
+# team's IdP (through Claude Code's apiKeyHelper). Commit the identity
+# provider's JWKS next to this file (for GitHub Actions:
 # https://token.actions.githubusercontent.com/.well-known/jwks) and update it
-# when the provider rotates keys; Wye never fetches it. With issuers, the
-# issuer, audience, and [[auth.keys]] above are optional.
+# when the identity provider rotates keys; Wye never fetches it. With issuers,
+# the issuer, audience, and [[auth.keys]] above are optional.
 # [[auth.issuers]]
 # issuer = "https://token.actions.githubusercontent.com"
 # audience = "wye-prod"
@@ -140,27 +145,27 @@ http_version = "auto"
 # jwks_file = "github.jwks"            # read at startup
 # subject_claim = "repository"         # names the subject; default "sub"
 # Models by claim value (a string claim equal to value, or a list containing
-# it). A token matching no grant may use no model; omit grants to leave the
-# [auth] models ceiling in charge.
+# it). An identity-provider token matching no grant may use no model; omit
+# grants to leave [auth] models in charge.
 # [[auth.issuers.grants]]
 # claim = "repository_owner"
 # value = "acme"
 # models = ["claude-haiku-*"]
 
 # Cache-miss diagnostics: keyed hashes of the prompt sections in each usage
-# record, so a telemetry backend can tell why a prompt-cache read missed
+# record, so an OpenTelemetry backend can tell why a prompt-cache read missed
 # (docs/research.md, "Cache-miss diagnostics"). The key is required, at least
 # 32 bytes, and the same on every replica: `openssl rand -hex 32`. Scanning
-# costs CPU per uploaded MB; sample_percent diagnoses that share of Claude
+# adds CPU time per uploaded MB; sample_percent diagnoses that share of Claude
 # Code sessions, each one completely, chosen alike on every replica.
 # [cache_diagnostics]
 # hash_key_env = "WYE_CACHE_HASH_KEY"
 # sample_percent = 100
 
 # Usage records as OTLP logs, metrics, and per-session traces (OTLP/HTTP,
-# JSON) to a collector or a backend that accepts OTLP directly, at
+# JSON) to a collector or an OTel backend that accepts OTLP directly, at
 # {otlp_endpoint}/v1/logs, /v1/metrics, and /v1/traces. Records also stay in
-# the stdout log.
+# the usage log.
 # [telemetry]
 # otlp_endpoint = "http://localhost:4318"  # no credentials in the URL
 # otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2": the API key goes here
@@ -169,28 +174,27 @@ http_version = "auto"
 # Model catalog for GET /v1/models (absent without this section): Claude
 # Code's /model picker lists these when developers set
 # CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1. Up to 1000 models; each
-# caller sees only those its token may use. Claude Code keeps ids that
-# contain "claude" or "anthropic".
+# caller sees only those its gateway token may use. Claude Code keeps ids
+# that contain "claude" or "anthropic".
 # [discovery]
 # models = [
 #   { id = "claude-sonnet-5-5", display_name = "Claude Sonnet 5.5", description = "Everyday coding" },
 #   { id = "claude-haiku-5-5" },       # display_name and description are optional
 # ]
 
-# Model aliases (up to 256): clients ask for a stable name, config decides
-# the model, and a model upgrade is one reviewed change here. Permissions
-# apply to the model that runs; usage records show both (requested_model,
+# Model aliases (up to 256): clients send an alias name, config decides the
+# model, and a model upgrade is one reviewed change here. Model permissions
+# apply to the served model; usage records show both (requested_model,
 # model). `when` rules (up to 32, first match by subject) move matching
-# token subjects first. Claude Code's /model picker lists only ids
-# containing "claude" or "anthropic", so name aliases it should show
-# accordingly.
+# subjects first. Claude Code's /model picker lists only ids containing
+# "claude" or "anthropic", so name aliases it should show accordingly.
 # [[aliases]]
 # name = "claude-coding"
 # model = "claude-opus-5-5"
 # when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 
-# Prices, so every usage record carries its cost. Copy them from the
-# provider's pricing page; a price change is a reviewed commit. USD per
+# The price table, so every usage record carries its cost. Copy prices from
+# the provider's pricing page; a price change is a reviewed commit. USD per
 # million tokens as decimal strings, at most 6 decimals. Up to 256 entries,
 # matched by the model the provider reported: entries scoped to the serving
 # upstream first, then the first unscoped match. Unknown prices are

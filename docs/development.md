@@ -7,7 +7,7 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 | Path | Contents |
 |---|---|
 | `crates/`, `examples/` | [architecture.md](architecture.md#repository-and-workspace) |
-| `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The gate does not read it |
+| `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
 | `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
 | `scripts/ab.sh` | A/B comparison of two binaries |
 | `scripts/ci-bench.sh` | The pull-request benchmark: a commit against its base on one machine |
@@ -18,7 +18,16 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 
 ## Commit gate
 
-`scripts/check.sh` runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo doc` with `-D warnings` over private items too, all tests, a release build plus an allocation-counting build (`--features alloc-stats`, in `target/alloc`), and the benchmark of this checkout against its parent commit. The pre-commit hook runs it for every commit that touches more than docs and the website (or `docs/policy.md`, which a test reads), and refuses one with unstaged changes or untracked source files, since the check builds the working tree: what is benchmarked must be what is committed. A commit that changes `site/`, or a file the site reads (`README.md`, `CHANGELOG.md`, `docs/benchmarks.md`, `bench/baseline.json`, the manifests), runs `site/check.sh` instead or as well; it takes seconds once the site is built. Cargo runs with `--locked`, and clippy also checks the `alloc-stats` build, the only one with `unsafe` code. Enable it once per clone:
+`scripts/check.sh` runs these steps in order, with Cargo's `--locked`:
+
+1. `cargo fmt --check`.
+2. `cargo clippy --all-targets -- -D warnings`, which also checks the `alloc-stats` build, the only one with `unsafe` code.
+3. `cargo doc` with `-D warnings`, over private items too.
+4. All tests.
+5. A release build plus an allocation-counting build (`--features alloc-stats`, in `target/alloc`).
+6. The benchmark of this checkout against its parent commit.
+
+The pre-commit hook runs it for every commit that touches more than docs and the website (or `docs/policy.md`, which a test reads), and refuses one with unstaged changes or untracked source files, since the check builds the working tree: what is benchmarked must be what is committed. A commit that changes `site/`, or a file the site reads (`README.md`, `CHANGELOG.md`, `docs/benchmarks.md`, `bench/baseline.json`, the manifests), runs `site/check.sh` instead or as well; it takes seconds once the site is built. Enable the hook once per clone:
 
 ```bash
 git config core.hooksPath .githooks
@@ -31,7 +40,7 @@ git config core.hooksPath .githooks
 - A metric the parent does not measure yet reads `new`, unless it is a failure count or a release time past its fixed limit; it is gated from the next commit on.
 - Each commit is compared only with its parent, so regressions that each stay under a tolerance can add up. `WYE_GATE_AGAINST=<ref> scripts/check.sh` compares with any commit; run it against the last release before tagging the next. An amend is compared with the commit it replaces unless run with `WYE_GATE_AGAINST=HEAD~1`.
 - Refresh `bench/baseline.json` by hand on an idle machine, together with the numbers in the docs: `target/release/wye-bench run --wye target/release/wye --out bench/baseline.json --wye-alloc target/alloc/release/wye --repeat 7`.
-- The proxy tests and the benchmark open thousands of sockets. `check.sh` and CI raise the open-file limit to 8192; on macOS, whose default is 256, run `ulimit -n 8192` before a bare `cargo test`. The stalled-client test keeps 256 loopback connections full, and their client ends autotune receive buffers larger than the 96 MB network pool of a 7 GB macOS CI runner, so CI caps that autotuning (`net.inet.tcp.autorcvbufmax`).
+- The `proxy` tests and the benchmark open thousands of sockets. `check.sh` and CI raise the open-file limit to 8192; on macOS, whose default is 256, run `ulimit -n 8192` before a bare `cargo test`. The stalled-client test keeps 256 loopback connections full, and their client ends autotune receive buffers larger than the 96 MB network pool of a 7 GB macOS CI runner, so CI caps that autotuning (`net.inet.tcp.autorcvbufmax`).
 
 A check takes about 8 minutes after an ordinary code change: tests about 15 s, incremental builds of both commits about a minute, and six benchmark runs of about 67 s each (`wye-bench` prints each phase's duration to stderr). The first check in a checkout takes about 90 s more; a dependency change rebuilds both commits.
 
@@ -43,13 +52,13 @@ The gate blocks about 100 µs of added latency per request, about 400 µs on SSE
 
 GitHub Actions run on every pull request and push to `main` (`.github/workflows/`). They add to the commit gate without replacing it: shared runners are too noisy to gate latency or CPU.
 
-| Workflow | Runs | Gates |
-|---|---|---|
-| `ci.yml` | pushes to `main` and pull requests that touch more than the website | `cargo fmt --check`, clippy and rustdoc with `-D warnings`, tests on Linux and macOS, release and `alloc-stats` builds, `cargo deny check` |
-| `bench.yml` | pull requests that touch more than docs and the website | `scripts/ci-bench.sh`: the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule (`scripts/bench-gate.sh`); latency and CPU are reported in the job summary only |
-| `docker.yml` | pushes to `main`, and pull requests that touch the image | `scripts/image-smoke.sh` |
-| `site.yml` | pushes to `main` and pull requests that touch the website or a file it reads | `site/check.sh` and `cargo deny check` for the site's workspace; from `main`, a deploy of `site/out` to GitHub Pages |
-| `release.yml` | a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request | generated by dist ([operations.md](operations.md#distribution)); never edited by hand |
+The workflows, each with when it runs and what it gates:
+
+- **`ci.yml`**, on pushes to `main` and pull requests that touch more than the website: `cargo fmt --check`, clippy and rustdoc with `-D warnings`, tests on Linux and macOS, release and `alloc-stats` builds, `cargo deny check`.
+- **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/ci-bench.sh`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule (`scripts/bench-gate.sh`). Latency and CPU are reported in the job summary only.
+- **`docker.yml`**, on pushes to `main`, and pull requests that touch the image: `scripts/image-smoke.sh`.
+- **`site.yml`**, on pushes to `main` and pull requests that touch the website or a file it reads: `site/check.sh` and `cargo deny check` for the site's workspace; from `main`, a deploy of `site/out` to GitHub Pages.
+- **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by dist ([operations.md](operations.md#distribution)); never edited by hand.
 
 Allocation counts vary under 1% between runs and do not depend on the machine, so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update for the gateway, one for the website, and one for the Dockerfile's base images a week; actions are pinned by commit and updated by hand (`release.yml`'s by upgrading dist and rerunning `dist init`). CI makes no provider calls and needs no secrets.
 
@@ -57,19 +66,27 @@ A release: bump `version` in `crates/wye/Cargo.toml`, commit through the gate, t
 
 ## Benchmark
 
-`wye-bench run --wye <path> --out <results.json>` runs each scenario directly against a mock Anthropic upstream and through Wye, and reports what Wye adds:
+`wye-bench run --wye <path> --out <results.json>` runs each scenario directly against a mock Anthropic upstream and through Wye, and reports what Wye adds. The two upstream paths:
 
-| Path or variant | Scenarios |
-|---|---|
-| Plain HTTP/1.1 (no prefix) | unary latency and CPU, SSE time to first byte and per-event delay, CPU per token-sized event (128,000 unpaced 64-byte events), bulk CPU per MB, 1,000 idle streams, cancel release, 1 MiB uploads, the Claude Code-shaped `agent_upload` |
-| TLS + HTTP/2 (`tls_`, the production shape) | the same except the Claude Code-shaped `agent_upload`, plus 2,000 token-paced streams and the stress scenarios: 32 requests on cold connections, paced streams during back-to-back 1 MiB uploads (`mixed_`), paced streams beside 200 stalled clients (`stalled_`) |
-| `auth_`, `models_`, `diag_`, `otlp_` (plain path) | per-request scenarios; `models_` and `diag_` also uploads |
-| `bedrock_` (plain path) | Wye with a Claude route to one Bedrock upstream: every request held until its `model` and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations |
-| `failover_` (plain path) | Wye with a Claude route of two accounts (both the mock) and `failover`: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload |
-| `refused_` (plain path) | `failover_` whose first account, tried first (`select = "ordered"`), refuses every fourth request with `429` before reading it: per-request scenarios and uploads; failed requests gated (uploads allow 3: one refused after its body was delivered whole is answered as it is) |
-| `openai_` (plain path) | Wye on `[routes.openai]`; the mock answers `/v1/responses` with OpenAI Responses JSON and streams (created, text deltas, completed with usage): per-request scenarios and CPU per event, so the Responses scanners are gated |
+- **Plain HTTP/1.1** (no prefix): unary latency and CPU, SSE time to first byte and per-event delay, CPU per token-sized event (128,000 unpaced 64-byte events), bulk CPU per MB, 1,000 idle streams, cancel release, 1 MiB uploads, the Claude Code-shaped `agent_upload`.
+- **TLS + HTTP/2** (`tls_`, the production shape): the same except the Claude Code-shaped `agent_upload`, plus 2,000 token-paced streams and the stress scenarios: 32 requests on cold connections, paced streams during back-to-back 1 MiB uploads (`mixed_`), paced streams beside 200 stalled clients (`stalled_`).
 
-Failed requests and streams are gated at zero: a failure count takes the worst of the rounds, not the median, and its limit is absolute, never the parent's count (the `refused_` uploads allow 3). A stream counts as failed when it errors, ends before all its events, or has not ended after 30 s, in every SSE scenario of every variant (`*_sse_failed_streams`), throughput included; a request that takes longer than 30 s fails too, so a hung gateway fails the check instead of hanging it. The CPU phases' failures count too, and the allocation phases refuse to report counts from a run in which anything failed. The cancellation release times have a ceiling of one second whatever the parent reads. `--agentgateway <path>`, `--bifrost <path>`, `--litellm <path>`, and `--krakend <path>` run the same scenarios through those gateways ([comparison runs](benchmarks.md#comparison-runs)).
+The variants, all on the plain path:
+
+- **`auth_`, `models_`, `diag_`, `otlp_`**: per-request scenarios; `models_` and `diag_` also uploads.
+- **`bedrock_`**: Wye with a Claude route to one Bedrock upstream: every request held until its `model` is read ([the hold](glossary.md)) and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations.
+- **`failover_`**: Wye with a Claude route of two upstreams (both the mock) and `failover`: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload.
+- **`refused_`**: `failover_` whose first upstream, tried first (`select = "ordered"`), rejects every fourth request with `429` before reading it: per-request scenarios and uploads; failed requests gated (uploads allow 3: one rejected after its body was delivered whole is answered as it is).
+- **`openai_`**: Wye on `[routes.openai]`; the mock answers `/v1/responses` with OpenAI Responses JSON and streams (created, text deltas, completed with usage): per-request scenarios and CPU per event, so the Responses scanners are gated.
+
+Failed requests and streams are gated at zero:
+
+- A failure count takes the worst of the rounds, not the median, and its limit is absolute, never the parent's count (the `refused_` uploads allow 3).
+- A stream counts as failed when it errors, ends before all its events, or has not ended after 30 s, in every SSE scenario of every variant (`*_sse_failed_streams`), throughput included.
+- A request that takes longer than 30 s fails too, so a hung gateway fails the check instead of hanging it.
+- The CPU phases' failures count too, and the allocation phases refuse to report counts from a run in which anything failed.
+
+The cancellation release times have a ceiling of one second whatever the parent reads. `--agentgateway <path>`, `--bifrost <path>`, `--litellm <path>`, and `--krakend <path>` run the same scenarios through those gateways ([comparison runs](benchmarks.md#comparison-runs)).
 
 CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `ps` rounds to whole seconds), in 10 ms steps either way; each CPU scenario runs long enough to make the step negligible.
 
@@ -82,7 +99,7 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 - `capacity`: Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more), stepping paced streams up until streams fail, the worker saturates, or the added p99 passes 100 ms, and reporting the largest step within 10 ms; `--seconds` is ignored.
 - `events`: the gated CPU-per-event scenario (unpaced 64-byte events; `WYE_BENCH_EVENT_BYTES` changes the payload), printing CPU per event; with `--wye-openai` the events are OpenAI Responses.
 
-`--wye-refused` runs the `refused_` variant (uploads to an account that refuses one in four) and prints failed requests.
+`--wye-refused` runs the `refused_` variant (uploads to an upstream that rejects one in four) and prints failed requests.
 
 ## Scripts and benchmark variables
 
@@ -119,10 +136,10 @@ The variables `wye` itself reads are in [operations.md](operations.md#environmen
 
 | Scope | Covers |
 |---|---|
-| `gateway` | The request path in `crates/wye`: server, connections, forwarding, streaming, request bodies, TLS, timeouts, shutdown |
-| `routing` | Routes, upstream selection, cache affinity, failover, providers, several keys |
+| `gateway` | The request path in `crates/wye`: the listener, connections, forwarding, streaming, request bodies, TLS, timeouts, shutdown |
+| `routing` | Routes and their upstreams, upstream selection, cache affinity, failover, providers |
 | `policy` | Gateway tokens, identity providers, model permissions, output-token ceilings, aliases, model discovery |
-| `usage` | Usage scanners and records, cost and pricing, cache diagnostics |
+| `usage` | Usage scanners and records, cost and the price table, cache diagnostics |
 | `telemetry` | OTLP logs, metrics, and traces |
 | `upgrade` | Upgrade checks |
 | `config` | The config schema, its validation, `examples/wye.toml`, secret resolution |
@@ -141,12 +158,14 @@ A documentation commit about one area takes that area's scope (`docs(policy)`).
 
 How the code is structured, beyond the rules in [Code changes](#code-changes). Each principle names where the code follows it, so a review can check new code against an example.
 
-- **Functional core, imperative shell.** Decisions are pure functions in `gateway-core`, with no I/O, clock, or Tokio: policy and the output-token ceiling, the route choice, pricing, cache-miss classification, upgrade rules, token checks. `crates/wye` reads sockets, feeds the core bytes and headers, and acts on the answer. Like a sans-I/O protocol library, the core is tested without a socket, and property tests cover its parsers ([Bernhardt](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell), [sans-I/O in Rust](https://www.firezone.dev/blog/sans-io)).
-- **One implementation of each decision.** `wye explain` and `wye policy-test` decide through `gateway-core`'s `admission::BodyChecks`, as `serve` does, and `wye doctor` resolves secrets with `startup`'s functions, instead of restating them: an offline answer that can drift from the server's is worse than none. A proxy test sends the same requests to a gateway and to `explain` and requires the same answers. The same holds for vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP); and one function, `responses::refuse`, that turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
+- **Functional core, imperative shell.** Decisions are pure functions in `gateway-core`, with no I/O, clock, or Tokio: policy and the output-token ceiling, upstream selection, pricing, cache-miss classification, upgrade rules, gateway-token checks. `crates/wye` reads sockets, feeds the core bytes and headers, and acts on the answer. Like a sans-I/O protocol library, the core is tested without a socket, and property tests cover its parsers ([Bernhardt](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell), [sans-I/O in Rust](https://www.firezone.dev/blog/sans-io)).
+- **One implementation of each decision.** `wye explain` and `wye policy-test` decide through `gateway-core`'s `admission::BodyChecks`, as `serve` does, and `wye doctor` resolves secrets with `startup`'s functions, instead of restating them: an offline answer that can drift from the gateway's is worse than none. A `proxy` test sends the same requests to a gateway and to `explain` and requires the same answers. The same holds for:
+  - vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP);
+  - refusals: one function, `responses::refuse`, turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
 - **Parse, don't validate.** Config, tokens, model patterns, and prices become types at the boundary, so later code cannot meet an invalid value; fields that only make sense together live in one type ([King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)).
 - **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Held`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
 - **A bound bounds what it names.** A memory budget counts memory, not payload: a held chunk counts at least `MIN_CHUNK_CHARGE`, since a body sent a byte at a time pins far more than its bytes. A deadline covers every wait it names: the connect timeout covers the TLS handshake too.
-- **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never server internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
+- **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never the request path's internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
 - **Closed sets are enums, dispatch is static.** `Api`, `Provider`, and `UsageScanner` are enums matched per chunk; a trait needs two implementations; the data path is generic, and `dyn` stays at cold boundaries such as startup.
 
 ## Review rounds

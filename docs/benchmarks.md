@@ -1,6 +1,6 @@
 # Benchmarks
 
-What Wye costs, how it is measured, and how it compares. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS) over loopback against a mock upstream, release build, median of 3 runs. They are lab results, not production measurements.
+Wye's [overhead](glossary.md), how it is measured, and how it compares. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS) over loopback against a mock upstream, release build, median of 3 runs. They are lab results, not production measurements.
 
 ## Method
 
@@ -41,20 +41,20 @@ Heap allocations (`alloc_`, plain path; spread under 1%, uploads ~5%):
 | Live heap per idle stream after a 512 KB request | 79 KB plain, 49 KB TLS (150 KB before the 32 KiB buffer cap) |
 | Per 1 MiB upload | 45 allocations, 0.45 MB (1.27 MB before the cap) |
 | Per Claude Code-shaped upload | 40.5 allocations, 0.38 MB |
-| Live heap per stalled stream, TLS | 0.56 MB with a 256 KiB upstream window, 2.2 MB with 1 MiB: about twice the window, independent of streams per connection |
+| Live heap per stalled stream, TLS | 0.56 MB with a 256 KiB upstream window, 2.2 MB with 1 MiB |
 
-Variants (plain path):
+A stalled stream's live heap is about twice the upstream window, independent of streams per connection.
 
-| Variant | Cost against plain Wye |
-|---|---|
-| `auth_`: Ed25519 tokens | +88 µs CPU per full verification (the check itself 55-62 µs); on a reused connection the per-connection cache makes it free |
-| `models_`: model permissions | +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies |
-| `diag_`: cache diagnostics | +2 allocations per request; +75% upload CPU on Claude Code-shaped bodies (2.6 vs 1.49 ms/MB), hence per-session sampling |
-| `otlp_`: OTLP export | within noise (121.5 vs 120.5 µs CPU per request) |
-| `openai_`: OpenAI Responses | 25 µs CPU per event against 18.5 on Messages, from larger events ([below](#openai-stream-scanners-micro-benchmark)) |
-| `bedrock_`: a Claude route to Bedrock | +5 allocations per request (the hold, the model's copy, the prefixed id, the new `content-length`, one unattributed); CPU within noise (130.5 vs 120.5 µs, `models_` 124) |
-| `failover_`: a route with failover | +7 allocations per request; +25% CPU per MB on Claude Code-shaped uploads (1.86 vs 1.49 ms/MB) and 99.5 vs 40.5 allocations, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](research.md#performance-techniques)) |
-| `refused_`: one account refuses one request in four | refused requests resent: 149.5 µs CPU per request; no failed requests |
+Variants (plain path), each against plain Wye:
+
+- **`auth_`**, Ed25519 gateway tokens: +88 µs CPU per full verification (the check itself 55-62 µs); on a reused connection the per-connection cache makes it free.
+- **`models_`**, model permissions: +1 allocation per request; +0.67 ms/MB on Claude Code-shaped uploads (the repeated-`model` check lexes the rest of the body); free on one-string bodies.
+- **`diag_`**, cache diagnostics: +2 allocations per request; +75% upload CPU on Claude Code-shaped bodies (2.6 vs 1.49 ms/MB), hence per-session sampling.
+- **`otlp_`**, OTLP export: within noise (121.5 vs 120.5 µs CPU per request).
+- **`openai_`**, OpenAI Responses: 25 µs CPU per event against 18.5 on Messages, from larger events ([below](#openai-stream-scanners-micro-benchmark)).
+- **`bedrock_`**, a Claude route to Bedrock: +5 allocations per request ([the hold](glossary.md), the model's copy, the prefixed id, the new `content-length`, one unattributed); CPU within noise (130.5 vs 120.5 µs, `models_` 124).
+- **`failover_`**, a route with failover: +7 allocations per request; +25% CPU per MB on Claude Code-shaped uploads (1.86 vs 1.49 ms/MB) and 99.5 vs 40.5 allocations, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](research.md#performance-techniques)).
+- **`refused_`**, one upstream rejects one request in four: the rejected requests are resent, 149.5 µs CPU per request; no failed requests.
 
 **Stress** (TLS path, median of 7, 2026-10-24). 1,000 paced streams while 1 MiB uploads run 8 at a time: events +1.0 / 1.9 ms p50 / p99, uploads +2.4 ms p50. Beside 200 clients that stopped reading: events +2.7 ms p99, 0.49 MB RSS per stalled stream with the 256 KiB upstream window (2.0 MB with 1 MiB), no failures; RSS stays at its peak after they close, because the allocator keeps the freed pages. 32 first requests on a new process: +2.9 ms p50 ([pre-warming](research.md#performance-techniques)).
 
@@ -80,7 +80,7 @@ Sustainable (≤10 ms added p99): 1,500 streams, ~36,000 events/s per worker. Th
 - Paced load, TLS, 2026-10-24 (`sample`, 10 s of 2,000 streams), of busy samples: `writev` to clients 43% (one write per event, inherent at token pace), `recvfrom` from the upstream 16%, waits on h2's per-connection lock 10% (`poll_data`, `is_end_stream`), Wye's own code under 1%.
 - Memory per stream, 2026-10-25 (`heap` and `malloc_history`, 2,000 paced TLS streams), of the ~24 KB of heap: hyper's HTTP/1.1 client connection holds a fixed 8.5 KB read buffer and an 8.5 KB write buffer (70%), its dispatcher 3.5 KB, the Tokio task 0.9 KB, request headers 0.7 KB, timer and service closure 0.2 KB. hyper 1.x exposes only a cap on those buffers (`max_buf_size`, set to 32 KiB), so shrinking them needs a hyper change.
 
-**Compressed responses** (2026-10-17, first real session): every stream was recorded `usage_status: unknown`. Claude Code asks for `gzip, deflate, br, zstd`; Anthropic answers Brotli; the mock never compresses, so no test caught it. Fix: ask the upstream for `identity`. Its cost, from 353 real responses rebuilt as streams and compressed with a flush per event:
+**Compressed responses** (2026-10-17, first real session): every stream was recorded `usage_status: unknown`. Claude Code asks for `gzip, deflate, br, zstd`; Anthropic answers Brotli; the mock never compresses, so no test caught it. Fix: ask the upstream for `identity`. Its overhead, from 353 real responses rebuilt as streams and compressed with a flush per event:
 
 | Delta size | Identity per response | Per event | gzip -6 | Brotli q4 / q11 | zstd -3 |
 |---|---|---|---|---|---|
@@ -88,9 +88,9 @@ Sustainable (≤10 ms added p99): 1,500 streams, ~36,000 events/s per worker. Th
 | 16 B | 21.5 KB | 173 B | 3.5× | 4.5× / 4.6× | 4.6× |
 | 32 B | 14.3 KB | 211 B | 3.1× | 3.6× / 3.7× | 3.7× |
 
-Identity costs 10-30 KB more per response, ~28 kbit/s while streaming: 0.12 ms per event on a 10 Mbit/s link against a 20 ms token gap. Decompressing a copy instead costs 6-11 µs per event (20-90% of Wye's relay cost), needs an attacker-sized decoder window per stream, and ends zero allocations per event. Rejected.
+Identity costs 10-30 KB more per response, ~28 kbit/s while streaming: 0.12 ms per event on a 10 Mbit/s link against a 20 ms token gap. Decompressing a copy instead costs 6-11 µs per event (20-90% of Wye's relay overhead), needs an attacker-sized decoder window per stream, and ends zero allocations per event. Rejected.
 
-**TLS uploads** (open gap: KrakenD 2.0 vs Wye 2.6-3.1 ms CPU per MB). Like for like over HTTP/1.1, Wye is ~10% behind; HTTP/2 adds ~9% more. Of HTTP/2 busy samples: 45% rustls `writev`, 16% AES-GCM, 15% `recvfrom`, 10% the h2 mutex; h2 flushes one 16 KiB frame at a time (64 KiB frames: 2.59 ms; 256 KiB: 2.29 ms). Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (~2 MB/s at 30 ms) unless the server grows it; `scripts/upload-latency.sh` measures that against the real API (needs a key). The default stays HTTP/2 until it does.
+**TLS uploads** (open gap: KrakenD 2.0 vs Wye 2.6-3.1 ms CPU per MB). Like for like over HTTP/1.1, Wye is ~10% behind; HTTP/2 adds ~9% more. Of HTTP/2 busy samples: 45% rustls `writev`, 16% AES-GCM, 15% `recvfrom`, 10% the h2 mutex; h2 flushes one 16 KiB frame at a time (64 KiB frames: 2.59 ms; 256 KiB: 2.29 ms). Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (~2 MB/s at 30 ms) unless Anthropic grows it; `scripts/upload-latency.sh` measures that against the real API (needs an API key). The default stays HTTP/2 until it does.
 
 ## Against KrakenD
 
@@ -197,21 +197,21 @@ All runs send `"stream":true` on streaming requests and name the model `anthropi
 
 ## Benchmark suite: kept, cut, missing
 
-The suite measures the gateway's own cost under agent-shaped load, and each part has to justify its run time. Gated scenarios: [development.md](development.md#benchmark).
+The suite measures the gateway's own overhead under agent-shaped load, and each part has to justify its run time. Gated scenarios: [development.md](development.md#benchmark).
 
 | Part | Verdict | Why |
 |---|---|---|
 | Bulk throughput (MB/s) | Reported; CPU per MB gated | Least relevant to token-paced traffic; CPU per MB stays gated |
 | KrakenD runs | Retired from routine runs | Cannot stream SSE on CE; the recorded result above stands |
 | Missing: agent trace replay | Add (M5) | [TraceLab](research.md#related-work) context sizes, output lengths, turn gaps |
-| Missing: floor baseline | Add (M5) | Wye against a dumb streaming proxy shows what its features cost |
+| Missing: floor baseline | Add (M5) | Wye against a dumb streaming proxy shows its features' overhead |
 | Missing: separate load machine, Linux | Add (M5) | The laptop's load generator saturates first at multi-core load |
 
 **Competitors.** KrakenD was the first reference (a mature general gateway); LiteLLM is the most-used open-source LLM gateway; agentgateway is the closest in kind. The set, each in pass-through at its best case:
 
 | Gateway | Why |
 |---|---|
-| nginx or Envoy, plain streaming proxy (`proxy_buffering off`) | The floor: the cost of a proxy that does nothing |
+| nginx or Envoy, plain streaming proxy (`proxy_buffering off`) | The floor: the overhead of a proxy that does nothing |
 | Envoy AI Gateway | The infrastructure-standard data plane with LLM routing |
 | agentgateway (Rust) | Done ([above](#against-agentgateway)): an AI-agent proxy in Rust, the closest in kind |
 | Bifrost (Go) | Done ([above](#against-bifrost)): markets low overhead against LiteLLM, Wye's own claim |
@@ -228,13 +228,13 @@ Adopted 2026-10-29, after the gate failed five times in a row on `sse_ttfb_added
 
 The gate now runs both commits in alternating rounds and compares medians: the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order.
 
-| Option | Verdict | Why |
-|---|---|---|
-| The parent in alternating rounds | Adopted | Both sides share the machine's state; nothing is recorded first, so it runs on any machine. Costs a second build and twice the benchmark time |
-| Both at once ([duet benchmarking](https://arxiv.org/abs/2001.05811)) | Rejected | The paced and stress scenarios load every core: two runs at once would measure each other |
-| A cloud VM as the gate machine | Rejected | Instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). A dedicated machine stays the option for published numbers |
-| The parent's results from its own gate run | Rejected | Halves the benchmark but brings the time gap back |
-| A fixed reference commit | Rejected for now | Catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand |
+The options weighed:
+
+- **The parent in alternating rounds**: adopted. Both sides share the machine's state; nothing is recorded first, so it runs on any machine. Costs a second build and twice the benchmark time.
+- **Both at once** ([duet benchmarking](https://arxiv.org/abs/2001.05811)): rejected. The paced and stress scenarios load every core: two runs at once would measure each other.
+- **A cloud VM as the gate machine**: rejected. Instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). A dedicated machine stays the option for published numbers.
+- **The parent's results from its own gate run**: rejected. Halves the benchmark but brings the time gap back.
+- **A fixed reference commit**: rejected for now. Catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand.
 
 In the first run, an A/A in effect, the median difference across 69 gated metrics was 3.8%, and allocations differed by at most 7% (uploads).
 
@@ -249,7 +249,7 @@ Tolerances retuned 2026-10-29 from eight A/A comparisons, quiet and busy (load a
 | `tls_cold_unary_added_p50_us` | 5 ms | 5.3 ms (busy) | 7 ms |
 | `tls_stalled_event_added_p99_us` | 2 ms | 2.0 ms (quiet) | 3 ms |
 
-Per-event cost stays guarded by CPU per event and zero allocations per event.
+Per-event overhead stays guarded by CPU per event and zero allocations per event.
 
 The new floors were not enough under everyday load: on identical code the run and its rerun failed on different metrics, `alloc_upload_bytes_per_request`, then `tls_upload_added_p50_us`. So a regression counts only when the same metric fails both the run and the rerun. In both gate runs that failed twice on identical code, the two comparisons shared no metric.
 

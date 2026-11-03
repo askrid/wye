@@ -43,3 +43,5 @@ New here: the [README](../README.md#what-it-does) says what Wye does, the [gloss
 - **Research:** idea to investigate, not a product promise.
 - Do not claim performance improvements without published, reproducible benchmarks.
 - Support is declared per **endpoint × provider × feature**. Do not imply more.
+- **Terms:** one name per concept, as [glossary.md](glossary.md) defines it; a new concept gets its entry there first.
+- **Layout:** one line per paragraph and per list item (editors and GitHub wrap them). Tables hold short values; prose goes in lists, so GitHub does not squeeze it into narrow columns. Code lines stay under 90 characters.
