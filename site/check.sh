@@ -13,9 +13,9 @@ cargo clippy --locked --all-targets --quiet -- -D warnings
 cargo test --locked --quiet
 cargo run --locked --quiet
 
-# What a first visit downloads, compressed as a server sends it: each page
-# and every stylesheet, script, and SVG gzipped, the fonts as they are. The
-# site should never be the slow part, as the gateway never is.
+# What a first visit to one page downloads, compressed as a server sends it:
+# the page and every stylesheet, script, and SVG gzipped, the fonts as they
+# are. The footer of pages/index.html states this budget.
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }
 shared=$(cat out/assets/fonts/*.woff2 | wc -c)

@@ -11,7 +11,7 @@ description = "Builds the Wye website from the repository's own files"
 
 # Its own workspace: the site is built and checked apart from the gateway
 # (site/check.sh), so its dependencies never enter the gateway's lockfile
-# and a site change never runs the gateway's benchmark gate.
+# and a site change never runs the gateway's commit gate.
 [workspace]
 
 [dependencies]

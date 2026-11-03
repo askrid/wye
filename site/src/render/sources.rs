@@ -8,6 +8,7 @@ use std::process::Command;
 use super::{DOCUMENTS, Sources};
 
 impl Sources {
+    /// Reads every source a directive may use from the repository at `repo`.
     pub fn load(repo: &Path) -> Result<Self, String> {
         let read = |relative: &str| {
             let path = repo.join(relative);

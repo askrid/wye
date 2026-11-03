@@ -1,23 +1,35 @@
-//! Page directives and the repository sources they read.
+//! Page directives: each `{{name ARG|ARG}}` in a page becomes text drawn from
+//! the repository (`render/sources.rs` reads it). One that cannot be filled
+//! fails the build, and the error names the directive as written.
 //!
-//! | Directive | Becomes |
-//! | --- | --- |
-//! | `{{version}}` | the wye crate's version |
-//! | `{{release}}` | the version, with ", a prerelease" while it has a pre-release part |
-//! | `{{commit}}` | the commit the page is built from: `GITHUB_SHA` in CI, else the checkout's `HEAD` |
-//! | `{{license}}`, `{{repo}}` | the workspace's license and repository URL |
-//! | `{{homepage}}` | the site's own address, `homepage` in site/Cargo.toml: one place to change when it moves |
-//! | `{{machine}}` | the benchmark machine in `bench/baseline.json` |
-//! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
-//! | `{{fence FILE\|PREFIX}}` | the first fenced block in FILE whose first line starts with PREFIX, highlighted |
-//! | `{{field FILE\|PREFIX\|KEY}}` | KEY's value in that fenced block, read as a JSON object |
-//! | `{{opening FILE\|PART}}` | FILE's opening paragraph: its bold `tagline`, the `rest` rendered, or the rest as plain `text` |
-//! | `{{section FILE\|HEADING}}` | the Markdown under `## HEADING` in FILE, rendered |
-//! | `{{item FILE\|HEADING\|LEAD}}` | the item of that section's list whose bold lead starts with LEAD, rendered |
-//! | `{{rest FILE\|HEADING}}` | every item of that list the page has not placed yet, so a new one is never dropped |
-//! | `{{paragraph FILE\|HEADING\|START}}` | the paragraph of that section that starts with START, rendered |
-//! | `{{ratios FILE\|HEADING\|COLUMN}}` | a bar chart of that section's table column of multiples of Wye ("7×") |
-//! | `{{versus FILE\|HEADING\|ROW}}` | a bar chart of the first figure in each gateway column of the row starting with ROW |
+//! - `{{version}}`: the wye crate's version.
+//! - `{{release}}`: the version, with ", a prerelease" while it has a
+//!   pre-release part.
+//! - `{{commit}}`: the commit the page is built from: `GITHUB_SHA` in CI, else
+//!   the checkout's `HEAD`.
+//! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
+//! - `{{homepage}}`: the site's own address, `homepage` in site/Cargo.toml, so
+//!   a move changes one line.
+//! - `{{machine}}`: the benchmark machine in `bench/baseline.json`.
+//! - `{{metric NAME|DECIMALS}}`: a metric from `bench/baseline.json`;
+//!   `NAME/1000` divides it first.
+//! - `{{fence FILE|PREFIX}}`: the first fenced block in FILE whose first line
+//!   starts with PREFIX, highlighted.
+//! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
+//!   object.
+//! - `{{opening FILE|PART}}`: FILE's opening paragraph: its bold `tagline`,
+//!   the `rest` rendered, or the rest as plain `text`.
+//! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
+//! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
+//!   lead starts with LEAD, rendered.
+//! - `{{rest FILE|HEADING}}`: every item of that list the page has not placed
+//!   yet, so a new one is never dropped.
+//! - `{{paragraph FILE|HEADING|START}}`: the paragraph of that section that
+//!   starts with START, rendered.
+//! - `{{ratios FILE|HEADING|COLUMN}}`: a bar chart of that section's table
+//!   column of multiples of Wye ("7×").
+//! - `{{versus FILE|HEADING|ROW}}`: a bar chart of the first figure in each
+//!   gateway column of the row that starts with ROW.
 
 use std::collections::{BTreeSet, HashMap};
 

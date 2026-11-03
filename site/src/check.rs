@@ -9,6 +9,7 @@ use std::path::Path;
 /// Files by their path under `out/`, with the text of pages and stylesheets.
 type Files = BTreeMap<String, Option<String>>;
 
+/// Every problem in the built site under `out`, all reported at once.
 pub fn check(out: &Path) -> Result<(), String> {
     let mut files = Files::new();
     collect(out, "", &mut files)?;

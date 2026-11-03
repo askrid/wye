@@ -3,6 +3,7 @@
 
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
 
+/// `text` safe in HTML text and in a double-quoted attribute.
 pub fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -140,8 +141,8 @@ fn link_url(dest: &str, repo_url: &str, source: &str) -> String {
     }
 }
 
-/// HTML for a code block: prompts, comments, TOML tables and keys, and JSON
-/// keys get a class; everything else is plain text.
+/// HTML for a code block: prompts, comments, TOML tables and keys, JSON keys,
+/// and shell words with a hyphen get a class; everything else is plain text.
 pub fn highlight(lang: &str, code: &str) -> String {
     let mut out = String::with_capacity(code.len() + code.len() / 2);
     for (i, line) in code.lines().enumerate() {

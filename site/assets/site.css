@@ -69,17 +69,18 @@
   --text-face: "Wye Text", "Wye Text fallback", Menlo, Consolas, monospace;
   /* Type roles, in rem so a reader's text size scales them all: body text;
      the lede and each stop's lead; section headings; output (code, charts,
-     tables, the trace's cap); captions (facts, footer, chart captions, the
-     version, buttons); the rail, large enough for a 24 px target a row. */
+     tables); captions (facts, footer, chart captions, the version,
+     buttons); the rail. */
   --body: 1.0625rem;
   --lead: 1.125rem;
   --h2: 1.875rem;
   --output: 0.9375rem;
   --caption: 0.8125rem;
   --rail: 1.15625rem;
-  /* The headline is README's tagline, sized to its column and wrapped,
-     balanced: "Nothing stops at a wye." sets as "Nothing stops" over "at a
-     wye.", whose longer line is 7.8 em. */
+  /* The headline is README's tagline, wrapped and balanced: "Nothing
+     stops" over "at a wye.". The longer line is 13 advances of 0.58 em
+     (0.6 less the tracking), 7.54 em: / 10.5 sets it across about 72% of
+     the column, / 8 on a phone (below) about 94%. */
   --h1: min(3.25rem, 100cqi / 10.5);
   /* 64 zeros of Wye Text: about 70 characters of prose. */
   --measure: 64ch;
@@ -164,10 +165,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   font-weight: 600;
   text-decoration: none;
 }
-/* The mark: the junction as the diagram draws it, one line forking in two,
-   on a tile. Same drawing as assets/icon-fork.svg, the favicon, which is
-   named for its drawing: browsers keep a favicon long after it changes, so
-   a new mark takes a new file name. */
+/* The mark: one line forking in two, on a tile. assets/icon-fork.svg, the
+   favicon, is the same drawing; browsers keep a favicon long after it
+   changes, so a new mark takes a new file name. */
 .mark svg { width: 1.75rem; height: 1.75rem; align-self: center; }
 .mark .version { color: var(--graphite); font-size: var(--caption); font-weight: 400; }
 .mark .tile { fill: var(--ground); stroke: var(--edge); }
@@ -213,11 +213,12 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
    each with what Wye decided there, the failover a fork at the upstream,
    the record at the end. Every row keeps three columns: the line from 0,
    names from 6, what happened from 16, so a name never runs into its
-   decision. The grid is 48 characters by 13 lines, sized to fill its
-   container: 48 advances of 0.6 em are 28.8 em. In a narrow container the
-   same trace is drawn 35 characters wide, each decision under its name, so
-   it never shrinks below about 13 px. It stays still: it reads top to
-   bottom in the order things happen. */
+   decision. The grid is 48 characters by 13 lines, sized to its container:
+   48 advances of 0.6 em are 28.8 em, and dividing by 29.2 leaves 1.4% for
+   rounding, so the trace never scrolls. A narrow container gets the same
+   trace 35 characters wide (21 em, / 21.3), each decision under its name:
+   13.5 px on a 320 px phone. It stays still: it reads top to bottom in the
+   order things happen. */
 .junction { margin: 0; min-width: 0; }
 .junction-art { min-width: 0; overflow-x: auto; container-type: inline-size; }
 .junction pre {
@@ -256,7 +257,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   margin: 0;
   padding: 0;
   font-family: var(--display);
-  /* At this size a row is 24 px, the smallest comfortable target. */
+  /* With the line height below, a row is 24 px, WCAG 2.2's minimum target. */
   font-size: var(--rail);
   /* The box-drawing height, so the tree's vertical strokes join. */
   line-height: 1.3;
@@ -387,7 +388,7 @@ pre.code code { font: inherit; }
 .code .prompt { color: var(--ink); }
 .code .c { color: var(--graphite); }
 .code .t { color: var(--ink); font-weight: 600; }
-/* Config keys recede, so the values lead. */
+/* Config and JSON keys recede, so the values lead. */
 .code .k { color: var(--graphite); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
@@ -459,8 +460,8 @@ pre.code code { font: inherit; }
   }
 }
 
-/* Footer: facts about the page, each one the build checks, and the commit
-   it was built from. */
+/* Footer: facts about the page (site/check.sh checks its size and
+   origins) and the commit it was built from. */
 .foot {
   display: grid;
   gap: 0.375rem;
@@ -474,8 +475,8 @@ pre.code code { font: inherit; }
 .foot a { color: var(--text); }
 
 /* Charts drawn in block characters (site/src/chart.rs): names and values
-   are text, the bars hidden from screen readers; Wye in ink, the others in
-   graphite. */
+   are text, the bars hidden from screen readers; Wye's line in ink, the
+   other bars in graphite. */
 .chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
 .chart figcaption { color: var(--graphite); font-size: var(--caption); }
 .bars {

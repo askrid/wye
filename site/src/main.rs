@@ -2,9 +2,10 @@
 //!
 //! Each page in `site/pages/` is HTML with directives in double braces that
 //! pull content from the repository, so the site never keeps a second copy
-//! of a number, a version, or a block of real output (`render.rs` lists
-//! them). The build fails on an unknown directive or a missing source, then
-//! checks the output: every resource is local and every local link resolves.
+//! of a number, a version, or a block of real output (`render.rs` lists the
+//! directives). The build fails on an unknown directive or a missing
+//! source, then checks the output: every resource is local and every local
+//! link resolves.
 
 mod chart;
 mod check;

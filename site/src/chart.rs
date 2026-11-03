@@ -1,5 +1,5 @@
 //! Bar charts drawn in block characters, from tables in the repository's
-//! Markdown: other gateways beside Wye, at their real proportions.
+//! Markdown: other gateways beside Wye, to scale up to a cut-off marked "»".
 
 use crate::markdown;
 
