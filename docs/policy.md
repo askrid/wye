@@ -22,12 +22,12 @@ Claims of Wye's own tokens (identity-provider tokens are below):
 
 The issuer signs tokens outside the runtime, with `wye token issue` (offline, from a private key file) or an external issuer producing the same format. Replicas hold verification keys only, selected by key ID so keys can rotate. All checks run before contacting upstream.
 
-Tokens are compact JWTs, parsed by one strict parser whatever their issuer; the key, not the token, fixes the algorithm (below).
+Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 
 - Refused with `401 authentication_error` before any upstream contact: another `alg`, an unknown header field (including `crit`), a `kid` not in `[[auth.keys]]` or an issuer's key set, a bad signature, the wrong `iss` or `aud`, expiry, `iat`/`nbf` more than 60 s ahead, or `exp - iat` above `max_token_ttl_secs` (default one week). Claims are parsed only after the signature verifies.
 - Read from `Authorization: Bearer` or `x-api-key`; replaced by the provider key, never forwarded.
 - Cached per connection: a request repeating the last verified token skips signature verification, compares the bytes in constant time, and rechecks expiry. The cache holds one verified token and dies with the connection; keys are fixed for the process lifetime, so its answers equal a fresh check.
-- A full verification takes about 88 µs of CPU; on a reused connection, authenticated requests have the same overhead as unauthenticated ones (`auth_` metrics, [benchmarks.md](benchmarks.md#current-harness-and-baseline)).
+- On a reused connection, authenticated requests have the same overhead as unauthenticated ones; a full verification's: `auth_` in [benchmarks.md](benchmarks.md#current-harness-and-baseline).
 
 The key fixes the algorithm; the token never chooses it: Ed25519 for Wye's own tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
 
@@ -53,16 +53,14 @@ Each `[[auth.issuers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256
 - **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
 - **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye's own tokens (`max_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
 - **Grants**: `[[auth.issuers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
-- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config. A full verification happens once per connection, as for Wye's own tokens (the per-connection cache).
+- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config; the per-connection cache applies as to Wye's own tokens.
 - **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
 
-Macaroons or Biscuit allow attenuation (team → project → subagent) without contacting an issuer; not needed so far, and tracked as [narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms).
-
-A token can assert a maximum per request, never the cumulative amount spent. Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
+A token can assert a maximum per request, never the cumulative amount spent; deriving a narrower token without the issuer is research ([narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms)). Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
 
 ### Revocation
 
-Without shared state or an admin API, immediate per-token revocation is not guaranteed. Use short lifetimes, key rotation, and (planned) Git-managed deny policies rolled out to replicas. A rolling deploy can briefly run mixed config versions; recording the config version (planned) diagnoses that window. Offboarding therefore takes effect when the person's last token expires: disable them at the issuer or IdP and rely on the configured maximum token lifetime (`max_token_ttl_secs`; longer-lived tokens are refused), not on revocation.
+Without shared state or an admin API, immediate per-token revocation is not guaranteed. Use short lifetimes and key rotation; a deny list in config is [planned](roadmap.md#m1-team-ready-claude-code). A rolling deploy can briefly run mixed config versions; recording the config version in usage records ([planned](roadmap.md#m1b-agent-aware-visibility)) would show that window. Offboarding therefore takes effect when the person's last token expires: disable them at the issuer or IdP and rely on the configured maximum token lifetime (`max_token_ttl_secs`; longer-lived tokens are refused), not on revocation.
 
 Short lifetimes need automatic renewal: [token renewal](operations.md#token-renewal). Wye only verifies.
 
@@ -71,7 +69,7 @@ Short lifetimes need automatic renewal: [token renewal](operations.md#token-rene
 `forward_caller_credential = true`, which `wye init` writes by default, is for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
 
 - Loopback bind only; startup fails when it is combined with a non-loopback listener.
-- No gateway token, so no identity, model permissions, or provider-held budgets. A login's usage counts against the caller's plan; an API key's bills the API.
+- No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.
 - No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which this mode excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
 - Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/subscription.toml`](../examples/subscription.toml) is a complete config.
 
@@ -86,31 +84,9 @@ Output-token ceilings are implemented. `[auth] max_output_tokens` and a token's 
 - Not a non-negative integer, or repeated: `400`. Absent: forwarded on Messages (the provider requires it), refused on the OpenAI APIs. `count_tokens` generates nothing and is not bounded.
 - The ceiling bounds one generation. Chat Completions' `n` asks for several choices, each up to the ceiling, so a request may generate `n` times as much; `n` is not read yet.
 
-A hard cost ceiling requires conservative bounds on every billable dimension: input tokens, output tokens (including hidden reasoning tokens), provider-hosted tools, service tiers, and any other usage charge. Tokenization and billing differ by provider; `max_output_tokens` is not a dollar cap. If a safe bound cannot be established, refuse in hard-cap mode or label enforcement estimated-only. Never advertise estimation as a guaranteed ceiling.
-
 ### Provable cost ceiling
 
-Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built: nothing below runs yet. Wye could bound cost without a tokenizer, and therefore without per-provider tokenizer dependencies or network calls:
-
-```text
-max_input_tokens = min(input_bytes, model_context_window) + provider_overhead
-max_cost = max_input_tokens × highest_input_price_reachable
-         + output_cap       × output_price_per_token
-```
-
-The context window caps the input bound: a request larger than the window is rejected by the provider, so it cannot bill more input than the window holds.
-
-- Input bound: for byte-level BPE tokenizers, each token covers at least one byte, so input tokens ≤ UTF-8 bytes of the billable text. Wye takes the request body size, an over-count that includes JSON syntax, so the bound stays conservative. Whether the property holds must be verified per provider tokenizer ([research.md](research.md#verification-needed)); a model whose tokenizer is not verified cannot use hard mode.
-- Output bound: Wye would insert or lower the output-token field ([allowlisted rewrite](architecture.md#forwarding-contract)) to `output_cap`, which must count reasoning tokens for the model. Where a provider does not bill reasoning within that limit, hard mode is unavailable for the model.
-- Images: Claude Code sends images whenever it reads a screenshot or image file. Anthropic bills an image by its pixel dimensions, capped after server-side resizing, so each image has a fixed per-model token maximum; add that maximum per image block instead of counting its base64 bytes. Until that is verified, hard mode refuses images explicitly.
-- Everything else is refused in hard mode: audio and files (priced by separate formulas, to be added per provider only when bounded), provider-hosted tools billed per call, priority or other service tiers, and any field the [price table](glossary.md) does not cover.
-- Cached input is billed at or below the normal input price, so the bound ignores caching safely. Cache *writes* priced above normal input (Anthropic) use the highest write price the request can trigger; a 1-hour TTL costs more than a 5-minute one.
-- Prompt-length price tiers: where a provider raises the per-token price above a context-length threshold, price the whole bound at the tier its worst-case token count (input bytes plus output cap) reaches.
-- Provider-added input: some billed tokens are absent from the body: chat-template tokens, and the tool-use system prompt a provider adds when `tools` is present. Add each documented overhead to the bound; a model with undocumented overhead cannot use hard mode.
-
-The bound is loose on purpose, and it always holds. Telemetry reports both the bound and the actual cost from usage.
-
-That makes it a runaway guard. Agent traffic such as Claude Code reads most input from the prompt cache at 5 to 10 percent of the input price, while the bound must assume cache writes, so the bound can exceed actual cost by an order of magnitude. Use it to stop pathological requests (an enormous context at the most expensive tier, an unbounded output), and [provider-held budgets](#provider-held-budgets) to cap spend. Hard mode would be off by default on the Claude Code route; when enabled, it must not lower `max_tokens` below what the client requested unless the operator accepts truncated responses, and it refuses instead when the request's own `max_tokens` already exceeds the configured cap.
+Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built. `max_output_tokens` is not a dollar cap: a hard cost ceiling needs a conservative bound on every billable dimension (input tokens, output tokens including hidden reasoning tokens, provider-hosted tools, service tiers, any other usage charge), and tokenization and billing differ by provider. Where Wye cannot establish a safe bound, hard mode refuses the request or labels enforcement estimated-only; an estimate is never advertised as a guaranteed ceiling. The bound and what it needs verified: [research.md](research.md#6-provable-cost-bound).
 
 ### Price table
 
@@ -164,7 +140,7 @@ Which price applies:
 - **Fields**: `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config.
 - **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - **Matching**: by the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
-- **Per upstream** (implemented): Claude through another provider ([across providers](architecture.md#claude-across-providers-and-upstreams)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
+- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers-and-upstreams)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 
 How cost is computed:
 
@@ -184,11 +160,11 @@ OpenAI Responses and Chat Completions:
 - OpenAI's `input_tokens` (Chat: `prompt_tokens`) include cached tokens; Wye records the cached share (`input_tokens_details.cached_tokens`, Chat: `prompt_tokens_details.cached_tokens`) as `cache_read_input_tokens` and the rest as `input_tokens`, so `cache_read` prices the cached share and records mean the same as on Messages. Reasoning tokens are part of `output_tokens`, as OpenAI bills them.
 - Hosted tools billed per call (`web_search`, `file_search`, `code_interpreter`, `image_generation`) and a `service_tier` other than `default` make the cost `partial`. A stream cut before its terminal event has no usage (OpenAI reports it only there), so its cost is `unknown`.
 
-With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP carries them too, and the `wye.cost` metric is in USD, a double: the export is display ([telemetry](operations.md#telemetry)). The same table feeds the [provable cost ceiling](#provable-cost-ceiling), which additionally needs each model's context window and verified bounds.
+With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP carries them too, and the `wye.cost` metric is in USD, a double: the export is display ([telemetry](operations.md#telemetry)).
 
 ## State boundary
 
-Wye has no external store and no coordination by design, so it cannot enforce exact cumulative quotas across replicas.
+Wye has no external store and no coordination by design, so it cannot enforce exact cumulative quotas across replicas. The approaches weighed and rejected for them: [research.md](research.md#rejected-approaches).
 
 | Control | Built into Wye? | Reason |
 |---|---|---|
@@ -219,31 +195,7 @@ Defaults: [`examples/wye.toml`](../examples/wye.toml).
 
 ### Provider-held budgets
 
-Planned next after [fewer expensive tokens](roadmap.md#m2c-fewer-expensive-tokens); not built. Providers already keep an authoritative per-account spend ledger. Wye can use it instead of building one:
-
-- Create one provider project or workspace per budget owner (team, project, environment), each with its own API key and a spend limit set at the provider.
-- Map gateway identities to provider keys in config: an upstream lists the token subjects it serves (patterns, as model permissions use), so a team's requests go only to its own upstreams.
-- [Failover](glossary.md) stays among a team's own upstreams. Moving a rejected request to another owner's upstream would spend another budget.
-- When the provider limit is exhausted, the provider rejects requests; Wye relays that as an explicit budget error.
-
-This gives cumulative budgets enforced by the party that bills, with no Wye state and no coordination between replicas. Limits are as strict as the provider makes them: some providers enforce spend limits as hard stops, others only alert, and enforcement may lag actual usage. Verify each provider before relying on it ([research.md](research.md#verification-needed)). Combined with the [provable per-request ceiling](#provable-cost-ceiling), overshoot past the provider limit is bounded by the in-flight requests at the moment of cutoff.
-
-Prompt caches are per account, so splitting traffic across more provider keys reduces cache sharing between budget owners. That is usually the intended isolation.
-
-### Signed balances and delayed cutoff
-
-If a token says `$20 remaining` and Wye returns a new `$18` token, a client can still reuse the original on another replica: signature verification does not track redemption. This is the double-spending boundary known from Privacy Pass and offline e-cash.
-
-Feeding OTLP usage to an external aggregator that triggers a GitOps policy rollout gives monitoring and a delayed cutoff, not a budget: export loss, aggregation windows, rollout delay, and in-flight requests all cause overshoot.
-
-### Rejected approaches
-
-- Redis / PostgreSQL / SQLite ledgers: solve global quotas but add state and an operational dependency; SQLite makes even one instance stateful.
-- Peer-to-peer actors: ownership, replication, fencing, quorum, and failover keep state inside the gateway; total cluster loss destroys unpersisted balances.
-- Escrow / quota leasing: reduces coordination but still needs durable ownership and recovery.
-- Gossip / CRDT counters: converge eventually but cannot cap concurrent overspend without coordination.
-- RLN / nullifiers, one-time credentials, hash chains, proof of work: prevention or detection of double spending needs remembered redemption state or a trusted counter.
-- Trusted hardware: could hold monotonic state client-side but is impractical as a default for Codex or generic applications.
+Planned next after [fewer expensive tokens](roadmap.md#m2c-fewer-expensive-tokens), not built: cumulative spend limits enforced by the provider that bills, which already keeps an authoritative ledger. Each budget owner's gateway tokens would reach only upstreams holding its own provider key, whose spend limit the provider enforces, so Wye keeps no ledger and replicas need no coordination ([design](roadmap.md#m2-cost-policy-for-claude)).
 
 ## Security requirements
 

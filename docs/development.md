@@ -4,9 +4,15 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 
 ## Layout
 
+One repository; the four crates are the members of one Cargo workspace.
+
 | Path | Contents |
 |---|---|
-| `crates/`, `examples/` | [architecture.md](architecture.md#repository-and-workspace) |
+| `crates/gateway-core` | Portable policy with no I/O: config, tokens, permissions, upstream selection, pricing, scanners |
+| `crates/wye` | The binary: server, upstream client, usage log and OTLP, CLI |
+| `crates/wye-testkit` | Test CA, mock upstream, signing keys, identity-provider tokens |
+| `crates/wye-bench` | The benchmark and its gate comparison, load and capacity runs, competitor runs |
+| `examples/` | `wye.toml` (the config reference), `subscription.toml`, `policy-tests/` |
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
 | `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
 | `scripts/ab.sh` | A/B comparison of two binaries |
@@ -16,6 +22,8 @@ How changes are made, verified, and committed. Wye must never be the bottleneck 
 | `Dockerfile`, `scripts/image-smoke.sh` | OCI image and its build-and-run smoke test (needs Docker; not part of the gate) |
 | `.github/workflows/`, `dist-workspace.toml`, `deny.toml` | CI and release workflows, the release build's settings, the dependency policy |
 | `site/` | The website, built from the repository's own files; its own Cargo workspace and check, `site/check.sh` ([site/README.md](../site/README.md)) |
+
+Because `gateway-core` does no I/O ([functional core](#design-principles)), it could back the planned [WASM adapter](roadmap.md#m6-optional-extensions); add no crate per provider, and no speculative transport interface for that adapter.
 
 ## Commit gate
 
@@ -34,7 +42,7 @@ The pre-commit hook runs it for every commit that touches more than docs and the
 git config core.hooksPath .githooks
 ```
 
-`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate. A stored result would carry the machine's state on the day it was recorded ([why](benchmarks.md#gate-method-the-parent-in-alternating-rounds)), so nothing is recorded first and the gate runs on any machine.
+`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
 
 - **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
@@ -45,9 +53,16 @@ git config core.hooksPath .githooks
 
 A check takes about 8 minutes after an ordinary code change: tests about 15 s, incremental builds of both commits about a minute, and six benchmark runs of about 67 s each (`wye-bench` prints each phase's duration to stderr). The first check in a checkout takes about 90 s more; a dependency change rebuilds both commits.
 
-A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats. A failed request or stream is never noise and fails the check at once.
+A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats ([evidence](benchmarks.md#gate-tolerances)). A failed request or stream is never noise and fails the check at once.
 
-The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-method-the-parent-in-alternating-rounds)). Smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md).
+The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-tolerances)). Smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md#performance-techniques).
+
+Why the parent in alternating rounds: a stored result carries the machine's state on the day it was recorded ([evidence](benchmarks.md#gate-tolerances)), while two commits run in alternating rounds share the machine's state of the moment, and with nothing recorded first the gate runs on any machine. The method is the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order, at the price of a second build and twice the benchmark time. Rejected alternatives:
+
+- Both commits at once ([duet benchmarking](https://arxiv.org/abs/2001.05811)): the paced and stress scenarios load every core, so two runs at once would measure each other.
+- A cloud VM as the gate machine: instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). A dedicated machine stays the option for published numbers.
+- The parent's results from its own gate run: halves the benchmark but brings the time gap back.
+- A fixed reference commit: catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand (above).
 
 ## Continuous integration
 
@@ -59,9 +74,9 @@ The workflows, each with when it runs and what it gates:
 - **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/ci-bench.sh`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule (`scripts/bench-gate.sh`). Latency and CPU are reported in the job summary only.
 - **`docker.yml`**, on pushes to `main`, and pull requests that touch the image: `scripts/image-smoke.sh`.
 - **`site.yml`**, on pushes to `main` and pull requests that touch the website or a file it reads: `site/check.sh` and `cargo deny check` for the site's workspace; from `main`, a deploy of `site/out` to GitHub Pages.
-- **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by dist ([operations.md](operations.md#distribution)); never edited by hand.
+- **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by [dist](https://github.com/axodotdev/cargo-dist) from `dist-workspace.toml`; edit that file and run `dist generate`, never `release.yml` by hand. Each target builds on a native runner with the benchmarked `release` profile; what a release publishes: [operations.md](operations.md#distribution).
 
-Allocation counts vary under 1% between runs and do not depend on the machine, so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update for the gateway, one for the website, and one for the Dockerfile's base images a week; actions are pinned by commit and updated by hand (`release.yml`'s by upgrading dist and rerunning `dist init`). CI makes no provider calls and needs no secrets.
+Allocation counts do not depend on the machine ([their spread](#benchmark)), so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update for the gateway, one for the website, and one for the Dockerfile's base images a week; actions are pinned by commit and updated by hand (`release.yml`'s by upgrading dist and rerunning `dist init`). CI makes no provider calls and needs no secrets.
 
 A release: bump `version` in `crates/wye/Cargo.toml`, commit through the gate, then `git tag v0.1.0 && git push origin v0.1.0`. `dist plan` previews what the tag will build.
 
@@ -82,7 +97,7 @@ The variants, all on the plain path:
 
 Failed requests and streams are gated at zero:
 
-- A failure count takes the worst of the rounds, not the median, and its limit is absolute, never the parent's count (the `refused_` uploads allow 3).
+- A failure count's limit is absolute, never the parent's count.
 - A stream counts as failed when it errors, ends before all its events, or has not ended after 30 s, in every SSE scenario of every variant (`*_sse_failed_streams`), throughput included.
 - A request that takes longer than 30 s fails too, so a hung gateway fails the check instead of hanging it.
 - The CPU phases' failures count too, and the allocation phases refuse to report counts from a run in which anything failed.
@@ -119,30 +134,39 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 
 The variables `wye` itself reads are in [operations.md](operations.md#environment-variables).
 
-## Code changes
+## Writing code
 
-- Correctness and protocol compatibility first; then no unnecessary allocation, buffering, locks, or blocking on the request path.
-- Every change ends with a review pass over the files it touched: names, duplication, dead code, stale comments, module boundaries. Refactor instead of patching when logic repeats, a module does two jobs, or a name no longer fits.
-- A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
-- Structure is kept up continuously, not in cleanup projects: search for leftovers after a rename, split a file that grows past about 400 lines without a clear reason, and refactor toward the code that exists, never toward a feature that does not.
-- Tests are deterministic: local mock upstream, no paid provider calls. Parsers of untrusted input get property tests.
-- `unwrap`, `expect`, panics, and indexing are denied outside tests (`wye-bench` and `wye-testkit` allow some); `unsafe` is forbidden in `gateway-core` and denied elsewhere.
+Correctness and protocol compatibility come first; then no unnecessary allocation, buffering, locks, or blocking on the request path. Every optimization needs a measurement.
 
-## Rust conventions
+### Design principles
 
-The rules [Design principles](#design-principles) does not already state. Correctness comes first; every optimization needs a measurement.
+How the code is structured. Each principle names where the code follows it, so a review can check new code against an example.
+
+- **Functional core, imperative shell.** Decisions are pure functions in `gateway-core`, with no I/O (sockets, files, the environment), clock, or Tokio: policy and the output-token ceiling, upstream selection, pricing, cache-miss classification, upgrade rules, gateway-token checks. `crates/wye` reads sockets, feeds the core bytes and headers, and acts on the answer. Like a sans-I/O protocol library, the core is tested without a socket, and property tests cover its parsers ([Bernhardt](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell), [sans-I/O in Rust](https://www.firezone.dev/blog/sans-io)).
+- **One implementation of each decision.** `wye explain` and `wye policy-test` decide through `gateway-core`'s `admission::BodyChecks`, as `serve` does, and `wye doctor` resolves secrets with `startup`'s functions, instead of restating them: an offline answer that can drift from the gateway's is worse than none. A `proxy` test sends the same requests to a gateway and to `explain` and requires the same answers. The same holds for:
+  - vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP);
+  - refusals: one function, `responses::refuse`, turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
+- **Parse, don't validate.** Config, tokens, model patterns, and prices become types at the boundary, so later code cannot meet an invalid value; fields that only make sense together live in one type ([King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)).
+- **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Reserved`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
+- **A bound bounds what it names.** A memory budget counts memory, not payload: a held chunk counts at least `MIN_CHUNK_CHARGE`, since a body sent a byte at a time pins far more than its bytes. A deadline covers every wait it names: the connect timeout covers the TLS handshake too.
+- **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never the request path's internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
+- **Closed sets are enums, dispatch is static.** `Api`, `Provider`, and `UsageScanner` are enums matched per chunk; a trait needs two implementations; the data path is generic, and `dyn` stays at cold boundaries such as startup.
+
+### Rust conventions
+
+The rules the design principles do not already state.
 
 **Toolchain and style**
 - Stable Rust, edition 2024, pinned in `rust-toolchain.toml`; lints and dependency versions are set once in the workspace's `Cargo.toml`.
 - Names follow the Rust API Guidelines; a module with children is `foo.rs` plus `foo/`, never `mod.rs`.
 - Every module has a `//!` doc and every public item a `///` doc (rustdoc runs with `-D warnings`); comments say why, not what.
-- One way to do each thing: extend the existing pattern (one HTTPS client setup, one config snapshot, one refusal function) before adding a second.
+- One way to do each thing: extend the existing pattern (one HTTPS client setup, one config snapshot) before adding a second.
 
 **Types and errors**
 - Errors are typed enums per concern (`ConfigError`, `TokenError`, `PolicyError`, ...); the CLI turns them into messages. No `anyhow`.
 - Identifiers and units get their own types. Money is an integer, pico-USD (`pricing::Pico`), never floating point; arithmetic that would overflow makes a cost `unknown`, never wrong.
 - A secret's type redacts it in `Debug` and never implements `Serialize` (`UpstreamAuth`, `HashKey`).
-- No panic on the request path: `unwrap`, `expect`, and indexing are denied by lint, and each connection runs in its own task, so a panic cannot reach another stream.
+- No panic on the request path: `unwrap`, `expect`, `panic!`, and indexing are denied by lint outside tests (`wye-bench` and `wye-testkit` allow some), and each connection runs in its own task, so a panic cannot reach another stream.
 
 **The data path**
 - Bodies are `bytes::Bytes` frames on streaming bodies: relayed without copying, a streaming response never collected.
@@ -164,17 +188,39 @@ The rules [Design principles](#design-principles) does not already state. Correc
 **Performance work**
 - Measure first: `wye-bench` for the system, `scripts/ab.sh` for effects below the gate's sensitivity, the `alloc_` metrics for heap allocations, and sampled stacks (`sample`, `perf`) for where CPU and waits go.
 - A streamed event allocates nothing (`alloc_sse_per_event` is gated at zero).
-- Low-level optimization (`#[inline]`, SIMD, `unsafe`, custom allocators, release-profile settings) lands only with a recorded before and after ([research.md](research.md)). Hot-path work the gate does not measure states its own measurement in the commit message.
+- Low-level optimization (`#[inline]`, SIMD, `unsafe`, custom allocators, release-profile settings) lands only with a before and after, adopted by the gate's [A/B rule](#commit-gate) and recorded in [research.md](research.md#performance-techniques). Hot-path work the gate does not measure states its own measurement in the commit message.
 
 **Tests**
 - Deterministic: local mock upstreams, `tokio::time::pause` for timeouts, no paid provider calls.
-- Property tests (proptest) for SSE chunk splits, UTF-8 boundaries, and cost arithmetic; `loom` for any custom synchronization (there is none today). Fuzz targets for the parsers of untrusted input are an [open finding](roadmap.md#open-findings).
+- Property tests (proptest) for the parsers of untrusted input, SSE chunk splits, UTF-8 boundaries, and cost arithmetic; `loom` for any custom synchronization (there is none today). Fuzz targets for those parsers are an [open finding](roadmap.md#open-findings).
+
+### Refactoring
+
+Structure is kept up continuously, not in cleanup projects.
+
+- Every change ends with a review pass over the files it touched: names, duplication, dead code, stale comments, module boundaries. Search for leftovers after a rename.
+- Refactor instead of patching when logic repeats, a module does two jobs, a name no longer fits, or a file grows past about 400 lines without a clear reason. Refactor toward the code that exists, never toward a feature that does not.
+- A refactor changes no behavior, keeps existing tests unmodified, and is committed separately with "No behavior change" in the message.
+
+## Documentation
+
+These docs and the README are the source of truth for design, status, and results; [docs/README.md](README.md) names the one document that owns each concern.
+
+- One fact, one owner: every other document links to the owner instead of restating it, so documents cannot contradict each other.
+- A change updates the docs it affects in the same commit: status in [roadmap.md](roadmap.md), the config reference in [examples/wye.toml](../examples/wye.toml), structure in [architecture.md](architecture.md), numbers in [benchmarks.md](benchmarks.md), experiments in [research.md](research.md).
+- Unbuilt design is planned work in roadmap.md or an idea in research.md; a user document (the README, the guide, operations) describes what is built. Where a design document describes what is not, it says so: **planned** or **proposal** (not yet implemented; the shape may change), or **research** (an idea to investigate, not a product promise).
+- Finished work leaves research.md: its conclusion becomes one line in the owning document, and the history stays in git.
+- No performance claim without published, reproducible benchmarks; never present an estimate or a lab result as a production measurement.
+- Support is declared per **endpoint × provider × feature**. Do not imply more.
+- **Terms:** one name per concept, as [glossary.md](glossary.md) defines it; a new concept gets its entry there first.
+- **Layout:** one line per paragraph and per list item (editors and GitHub wrap them). Tables hold short values; prose goes in lists, so GitHub does not squeeze it into narrow columns. Code lines stay under 90 characters.
+- After editing docs, check that every relative link and anchor resolves.
 
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `<type>(<scope>): <summary>`, then a body that says why and keeps the evidence (before/after numbers, the trade-off, what was rejected).
 
-- **Type**, one per commit: `feat`, `fix`, `perf` (measured), `refactor` (no behavior change), `test`, `docs`, `build`, `ci`, `chore`, `revert`.
+- **Type**, one per commit: `feat`, `fix`, `perf` (measured), `refactor` ([no behavior change](#refactoring)), `test`, `docs`, `build`, `ci`, `chore`, `revert`.
 - **Summary**: imperative, lowercase, no period, about 50 characters; the subject line is never over 72.
 - **Scope**, from this list; omitted only when a change spans the repository:
 
@@ -198,20 +244,6 @@ The rules [Design principles](#design-principles) does not already state. Correc
 
 A documentation commit about one area takes that area's scope (`docs(policy)`).
 
-## Design principles
-
-How the code is structured, beyond the rules in [Code changes](#code-changes). Each principle names where the code follows it, so a review can check new code against an example.
-
-- **Functional core, imperative shell.** Decisions are pure functions in `gateway-core`, with no I/O, clock, or Tokio: policy and the output-token ceiling, upstream selection, pricing, cache-miss classification, upgrade rules, gateway-token checks. `crates/wye` reads sockets, feeds the core bytes and headers, and acts on the answer. Like a sans-I/O protocol library, the core is tested without a socket, and property tests cover its parsers ([Bernhardt](https://www.destroyallsoftware.com/screencasts/catalog/functional-core-imperative-shell), [sans-I/O in Rust](https://www.firezone.dev/blog/sans-io)).
-- **One implementation of each decision.** `wye explain` and `wye policy-test` decide through `gateway-core`'s `admission::BodyChecks`, as `serve` does, and `wye doctor` resolves secrets with `startup`'s functions, instead of restating them: an offline answer that can drift from the gateway's is worse than none. A `proxy` test sends the same requests to a gateway and to `explain` and requires the same answers. The same holds for:
-  - vocabularies: one enum per closed set, such as a record's outcome, usage status, and cache-miss reason, written as a string only at the edge (the JSON line, OTLP);
-  - refusals: one function, `responses::refuse`, turns a policy refusal (`admission::Refusal`) into a response in the request's API shape.
-- **Parse, don't validate.** Config, tokens, model patterns, and prices become types at the boundary, so later code cannot meet an invalid value; fields that only make sense together live in one type ([King](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/)).
-- **Resources are guards.** Every permit, gauge unit, budget byte, and usage record belongs to a value that releases or writes it on drop (`gauge::Reserved`, `usage_log::Unanswered`, `FailoverBody`'s hand-back), because dropping a future is how Tokio cancels. A request yields exactly one record because a guard writes it.
-- **A bound bounds what it names.** A memory budget counts memory, not payload: a held chunk counts at least `MIN_CHUNK_CHARGE`, since a body sent a byte at a time pins far more than its bytes. A deadline covers every wait it names: the connect timeout covers the TLS handshake too.
-- **Deep modules, inward dependencies.** A module hides a decision behind a small interface; a public item used once, or a function that only passes arguments on, is folded back ([Ousterhout](https://web.stanford.edu/~ouster/cgi-bin/book.php)). Dependencies point one way: the CLI uses `gateway-core` and `startup`, never the request path's internals; sibling modules in `crates/wye` form no cycles; `gateway-core` depends on nothing in `crates/wye`.
-- **Closed sets are enums, dispatch is static.** `Api`, `Provider`, and `UsageScanner` are enums matched per chunk; a trait needs two implementations; the data path is generic, and `dyn` stays at cold boundaries such as startup.
-
 ## Review rounds
 
 The review pass at the end of every change sees only the files it touched. A review round reads the whole repository: after a run of feature work, before a release, and when asked. It covers code, tests, the benchmark, scripts, CI, dependencies, configuration, examples, comments, the README, and the docs.
@@ -224,5 +256,5 @@ The review pass at the end of every change sees only the files it touched. A rev
    - **Structure:** the code against the [design principles](#design-principles): duplicated decisions, stringly-typed vocabularies, resources released by hand, dependency cycles.
 2. A finding counts only after it is traced through the code. A bug gets a test that fails before the fix. After the fix, undo it once and confirm the test fails again (a mutation check), so the test is known to guard the fix.
 3. Run `wye report` on a real usage log. A number the report hides or mislabels is a bug like any other.
-4. Each fix is its own commit through the gate. Refactors are separate commits and change no behavior.
+4. Each fix is its own commit through the gate; [refactors](#refactoring) are separate commits.
 5. Record each finding that is not fixed, with the reason, where the next round will find it: open work in [roadmap.md](roadmap.md), open questions in [research.md](research.md).

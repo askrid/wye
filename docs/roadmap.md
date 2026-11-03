@@ -1,50 +1,57 @@
 # Roadmap
 
-Each milestone leaves a runnable system with focused tests. Order of the next work: [product.md](product.md#next). What was built when: git log.
+Status, build order, open work, and exit criteria. Each milestone leaves a runnable system with focused tests. What was built when: git log; what each release contains: [CHANGELOG.md](../CHANGELOG.md).
 
 ## Status
 
-- **M0: Claude Code stream proxy**: done and gated. Full sessions run on a claude.ai login since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions). Open: the exit check with an API key.
-- **Realistic-workload benchmark**: done. Uploads, 2,000 token-paced streams, capacity per core, stress scenarios, agentgateway, Bifrost, LiteLLM, and KrakenD comparisons.
-- **M1: team-ready Claude Code**
-  - Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service` (the systemd path is tested but has not run on a real Linux machine), `wye probe`, `upstream.api_key_file`, local OCI image with a smoke test, release archives from a `v*` tag (`0.1.0-rc.1` published).
-  - Open: published images, Compose example, Helm chart, secrets from files for every key, a deny list, a Docker Swarm service updating without dropping streams, the exit check.
-- **M1b: agent-aware visibility**: A1-A4 built (retry headers, `GET /v1/models`, spend by [request class](glossary.md), cache-miss reasons, session traces, `wye report`, tool calls). Open: A5.
-- **M2: cost policy**
-  - Built: the price table ([policy.md](policy.md#price-table)) in records, OTLP, `wye report`, and `wye explain`; cache-miss diagnostics (opt-in, sampled per session).
-  - Next after M2c: provider-held budgets. Not started: the cost ceiling.
-- **M2b: model aliases and upgrade checks**: done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit check, a real alias move.
-- **M2c: fewer expensive tokens**: next ([product.md](product.md#next)); not started. Evidence: [where the tokens go](research.md#where-the-tokens-go).
-- **M3: Codex**
-  - Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, stored responses reaching their upstream by cache affinity ([as built](architecture.md#upstream-held-state)).
-  - Next: a real Codex workflow (needs an OpenAI key), tool-event fixtures from it, the `include_usage` decision.
-- **M4: Claude across providers and accounts**
-  - Built: routes with several [upstreams](glossary.md), `cache_affine` or `ordered`, failover before output, Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-upstreams)).
-  - Open: one live request each on Bedrock and Claude Platform on AWS, SigV4, Vertex; these need the auth decisions in [architecture.md](architecture.md#open-design-decisions).
-- **M5: benchmarks and optimization**
-  - Started early: the [commit gate](glossary.md) since M0, with provider, failover, and rejection variants; agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
-  - Open: agent trace replay, a floor baseline, a separate Linux load machine, the remaining competitors.
-- **M6: optional extensions**: `wye policy-diff` done (the CI half of [queryable policy](research.md#5-queryable-and-provable-policy)); the rest not started.
+Prerelease `0.1.0-rc.1`: tested and benchmarked on one machine, and in use with Claude Code on a claude.ai subscription since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions).
 
-## Open work and exits
+Not yet checked against the live services:
+
+- Claude Code with an API key.
+- Codex: built from Codex's source and tests, not from a real session.
+- Bedrock and Claude Platform on AWS: built from the providers' documentation and tested against mocks; Bedrock's API key header needs one live request.
+- `wye service` under systemd: tested, but not run on a real Linux machine.
+
+Next, in this order:
+
+1. Fewer expensive tokens ([M2c](#m2c-fewer-expensive-tokens)).
+2. Spend caps per team, held by the provider ([M2](#m2-cost-policy-for-claude)).
+3. The live checks above.
+4. The cost ceiling (M2).
+5. A published container image, which the [principles](product.md#principles) promise, and a Compose example ([M1](#m1-team-ready-claude-code)).
+6. Narrowable tokens (M1).
+7. Vertex AI and AWS SigV4 ([M4](#m4-claude-across-providers-and-accounts)).
+
+Later: model routing by subagent type, beyond size ([research](research.md#1-agent-aware-routing)), a Helm chart, and other agents on their native APIs.
 
 ### M0: Claude Code stream proxy
 
-Exit: a real Claude Code session, with an API key and with a claude.ai login through passthrough, works through Wye with streaming, tool use, prompt caching, extended thinking, and token counting. Half done: the API-key session is open.
+Done and gated. Open: the API-key half of the exit.
+
+Exit: a real Claude Code session, with an API key and with a claude.ai login through passthrough, works through Wye with streaming, tool use, prompt caching, extended thinking, and token counting.
 
 ### M1: team-ready Claude Code
+
+Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `upstream.api_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
+
+Open:
 
 - Published images, a Compose example, and a Helm chart (internal service, health probes, secret references).
 - Every secret from a file too: `hash_key_file` for cache diagnostics and `otlp_headers_file` for OTLP, since `wye service` cannot pass environment secrets ([running as a service](operations.md#running-as-a-service)).
 - A deny list in config (token subjects or key ids), so offboarding need not wait for the last token to expire; it takes effect on the next restart or rollout ([revocation](policy.md#revocation)).
 - A Docker Swarm service updating without dropping streams.
-- Narrowable tokens: a token holder hands a subagent or a CI job a narrower token (fewer models, a lower ceiling, a shorter life) without the issuer ([research](research.md#3-narrowable-tokens-for-agent-swarms)); sixth in [product.md](product.md#next)'s order.
+- [Narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms) for a subagent or a CI job.
 
 Exit: a team runs Claude Code through a shared Wye with per-developer gateway tokens and sees usage per developer and session in its existing [OpenTelemetry backend](glossary.md).
 
 ### M1b: agent-aware visibility
 
-- A5, report-only secret detection, sampled per session. It needs a dependency decision and a measured overhead per MB, and values never leave the process ([background](research.md#agent-native-directions)).
+Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md), cache-miss reasons, session traces, `wye report`, and tool calls.
+
+Open:
+
+- Report-only secret detection, sampled per session. It needs a dependency decision and a measured overhead per MB, and values never leave the process ([background](research.md#agent-native-directions)).
 - Usage records gain the time to first token, the config version (to see a rollout's mixed window), and the provider's request id (for support tickets).
 - `wye report` by subject and by model, and over a time window (`--since`).
 
@@ -52,34 +59,46 @@ Exit: a team sees, in its own OTel backend or with `wye report`, each Claude Cod
 
 ### M2: cost policy for Claude
 
-- **Provider-held budgets, next after M2c** ([design](policy.md#provider-held-budgets)). An upstream lists the token subjects it serves, so each team's requests use its own Anthropic workspace key and the spend limit set on it; failover stays among that team's upstreams, never another budget's; an exhausted limit comes back as an explicit budget error. First: check how hard and how fast Anthropic's workspace limits stop requests ([research](research.md#verification-needed)).
-- The [provable cost ceiling](policy.md#provable-cost-ceiling) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only. Off by default on the Claude Code route.
+Built: the price table ([policy.md](policy.md#price-table)) in records, OTLP, `wye report`, and `wye explain`; cache diagnostics (opt-in, sampled per session).
+
+Open:
+
+- **Provider-held budgets, next after M2c.** The provider's own spend ledger caps each team, with no Wye state:
+  - Each budget owner (team, project, environment) gets its own provider workspace and API key, with a spend limit set at the provider.
+  - An upstream lists the token subjects it serves (patterns, as model permissions use). Failover stays among that owner's upstreams, since another's would spend another budget.
+  - An exhausted limit comes back as an explicit budget error.
+  - Limits are as strict as the provider makes them (a hard stop or only an alert, possibly late): check Anthropic's first ([research](research.md#verification-needed)). With the cost ceiling, overshoot is bounded by the requests in flight at the cutoff.
+  - Prompt caches are per account, so budget owners share no cache, which is usually the intended isolation.
+- The [cost ceiling](research.md#6-provable-cost-bound) as a runaway guard for Claude models whose bounds are verified, capped by the context window; everything else labelled estimated-only; off by default on the Claude Code route.
 - `wye explain` and policy tests report which upstream and budget a request uses, and the cost decision.
 
 Exit: a team's monthly Claude spend is capped by Anthropic workspace limits with no Wye state, and every request reports a provable or explicitly estimated cost bound next to its actual cost.
 
 ### M2b: model aliases and upgrade checks
 
+Done ([architecture.md](architecture.md#model-aliases-and-upgrade-checks)). Open: the exit.
+
 Exit: a team moves a model alias for all its services by one reviewed config change, after the upgrade check showed no failing client.
 
 ### M2c: fewer expensive tokens
 
-In agent traffic most prompt tokens are already cache reads at 5 to 10 percent of the input price; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt: a changed byte in a cached prefix turns those reads into writes at 12.5 to 40 times the price.
+Not started. In agent traffic most prompt tokens are already cache reads; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt, since a changed byte in a cached prefix turns cheap cache reads into cache writes.
 
 - **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the log:
   - Context carried past a threshold, and what clearing or compacting earlier would have cost.
-  - Cache rebuilds with their cause (from [cache diagnostics](research.md#2-cache-miss-diagnostics)).
-  - The cache TTL, 5 minutes or 1 hour, that would have cost least for this user's idle gaps.
+  - Context each tool's output added, from the tool-time hint: the prompt's growth between two requests times the requests that re-read it until compaction, at the cache-read price ("Bash output re-read 180 times cost $41").
+  - Cache rebuilds with their cause, from cache diagnostics.
+  - The cache TTL, 5 minutes or 1 hour, that would have cost least for this user's idle gaps, for subagents too ("subagent cache writes expired unread: $X; a 1h TTL would save $Y"), named as Claude Code's `promptCacheTtl` and `subagentPromptCacheTtl` settings.
   - Background and subagent requests on large models.
   - Tool definitions sent on every request and never called.
 
-  Usage records gain the two inputs the report lacks: cache writes split by TTL, and the size of the tools section.
+  Usage records gain the two inputs the report lacks: cache writes split by TTL (the usage scanner already parses it), and the size of the tools section.
 - **Size-aware model routing.** An opt-in policy that sends small requests of a class (auxiliary first) to a smaller model through the allowlisted `model` rewrite.
   - It decides from headers and the body's length, so every replica agrees and nothing is read beyond what an alias already reads.
   - It never touches a main-thread request, or a request large enough to be reading another model's cache.
-  - `wye explain` shows the decision; the client sees it too, since the response names the model that ran, and usage records keep both the requested and the served model.
+  - `wye explain` shows the decision; the response names the model that ran, and usage records keep both the requested and the served model.
   - Off by default until quality is measured per request class ([research](research.md#1-agent-aware-routing)).
-- **Savings estimate.** A request whose model Wye changed records what the same tokens would have cost at the requested model's price. `wye report` and an OTLP metric show "saved by Wye", the sum of those estimates with the reason, apart from "waste found", what the report's fixes would save, which Wye does not claim. Savings with no per-request counterfactual, such as the cache hits that cache affinity keeps, are not counted.
+- **Savings estimate.** A request whose model Wye changed records what the same tokens would have cost at the requested model's price. `wye report` and an OTLP metric sum these, with the reason, as "saved by Wye", apart from "waste found" (what the report's fixes would save, which Wye does not claim). Savings with no per-request counterfactual, such as cache hits that cache affinity keeps, are not counted.
 
 Decided (2026-11-01): Wye does not add cache markers to app requests that send none, a rewrite beyond the allowlist. The waste report names those requests and prices what markers would save.
 
@@ -87,30 +106,54 @@ Exit: on real logs, every line of waste the report names comes with a priced fix
 
 ### M3: Codex
 
-Open: a real Codex workflow streaming and calling tools through Wye, with tool-event fixtures from it; the `include_usage` policy; the OpenAI SDK with equivalent unary and streaming behavior; Codex on a ChatGPT login, passed through as Claude Code's claude.ai login is, once its endpoint and terms are checked ([research](research.md#verification-needed)). Agent-aware telemetry for Codex uses whatever signals Codex sends; the usage record, metrics, and `wye report` stay one model across agents.
+Built: `[routes.openai]`, Responses and Chat Completions passthrough, OpenAI-shaped gateway errors, permissions and ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, and stored responses reaching their upstream by cache affinity ([upstream-held state](architecture.md#upstream-held-state)).
+
+Open:
+
+- A real Codex workflow streaming and calling tools through Wye (needs an OpenAI key), with tool-event fixtures from it.
+- The `include_usage` decision ([open design decisions](architecture.md#open-design-decisions)).
+- The OpenAI SDK with equivalent unary and streaming behavior.
+- Codex on a ChatGPT login, passed through as Claude Code's claude.ai login is, once its endpoint and terms are checked ([research](research.md#verification-needed)).
 
 Exit: a team runs Claude Code and Codex through one Wye, under one policy, and sees both in one telemetry model.
 
 ### M4: Claude across providers and accounts
 
+Built: routes with several [upstreams](glossary.md), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-upstreams)).
+
+Open (the auth questions are in [open design decisions](architecture.md#open-design-decisions)):
+
 - One live request each on Bedrock and Claude Platform on AWS; contract tests per provider against recorded responses.
-- A small opt-in real-provider smoke test per provider (planned; none exists yet). It checks SDK compatibility and does not replace deterministic protocol tests.
+- An opt-in smoke test per provider against the real service, for SDK compatibility; it does not replace the deterministic protocol tests.
 - SigV4 for Bedrock and Claude Platform on AWS.
-- Google Vertex AI: model in the URL, `anthropic_version` splice (property-tested: every other byte unchanged), access tokens.
-- Re-read an `api_key_file` when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
+- Google Vertex AI: model in the URL, the `anthropic_version` splice (property-tested: every other byte unchanged), access tokens.
+- Re-reading an `api_key_file` when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
 - Excluding an upstream for a model or feature it does not serve.
 
 Exit: a team serves Claude Code from at least two providers, keeps prompt-cache hit rates within a few points of a single provider, rides out one provider's overload without failed turns, and sees cost per provider.
 
 ### M5: benchmarks and optimization
 
-Adds a floor baseline (nginx or Envoy as a plain streaming proxy), the [remaining competitors](benchmarks.md#benchmark-suite-kept-cut-missing), 10k streams, Linux and a separate load machine, replay of the public TraceLab coding-agent trace ([research.md](research.md#related-work)), and targeted optimization of memory, TTFT, backpressure, and CPU.
+Started early: the [commit gate](glossary.md) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
+
+Open:
+
+- A floor baseline: nginx or Envoy as a plain streaming proxy (`proxy_buffering off`), the overhead of a proxy that does nothing.
+- Replay of the public TraceLab coding-agent trace: context sizes, output lengths, turn gaps ([related work](research.md#related-work)).
+- Linux and a separate load machine, since the laptop's load generator saturates first at multi-core load; then 10k streams.
+- A mock upstream that varies time to first token (token rate, stream length, and a rejection rate already vary).
+- The next competitors, each in pass-through at its best case, with its license, version, and Claude Code support checked first and the result and configuration recorded in [benchmarks.md](benchmarks.md):
+  - LiteLLM's Rust gateway, next: its July 2026 benchmark claims 0.7 ms p99 overhead against Bifrost's 4.5 ms.
+  - Envoy AI Gateway: the infrastructure-standard data plane with LLM routing.
+  - Helicone AI Gateway (Rust): the same language and speed pitch.
+  - Portkey gateway (Node): a popular open-source gateway.
+- Targeted optimization of memory, time to first token, backpressure, and CPU.
 
 Exit: comparative results document actual performance, workload assumptions, and tradeoffs, with no speedup goal that a measurement does not back.
 
 ### M6: optional extensions
 
-Edge/WASM adapter, [signed usage receipts](research.md#4-signed-usage-receipts), the rest of [queryable policy](research.md#5-queryable-and-provable-policy), connect-only hedging, and other request-local experiments.
+Done: `wye policy-diff`, the CI half of [queryable policy](research.md#5-queryable-and-provable-policy). Not started: an edge (WASM) adapter, [signed usage receipts](research.md#4-signed-usage-receipts), the rest of queryable policy, connect-only hedging, and other request-local experiments.
 
 Exit: each extension preserves or explicitly revises statelessness and compatibility guarantees.
 
@@ -118,7 +161,7 @@ Exit: each extension preserves or explicitly revises statelessness and compatibi
 
 Found by review rounds ([development.md](development.md#review-rounds)) and not fixed yet, with the reason. The next round starts here.
 
-- No minimum read rate: a client that accepts one window update a minute keeps its stream, permit, and about 0.7 MB, since the write timeout resets on any progress.
+- No minimum read rate: a client that accepts one window update a minute keeps its stream, its permit, and the memory of a [stalled stream](benchmarks.md#current-harness-and-baseline), since the write timeout resets on any progress.
   - Why it is open: bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate.
 - Client connections are not capped, and `/healthz` and `/readyz` take no permit, so a connection flood is bounded only by the open-file limit.
   - Why it is open: a connection cap is a new limit to size and document; accept errors already pause instead of spinning.
@@ -135,7 +178,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - A chunked body whose chunk-size lines are padded (HTTP/1.1 allows leading zeros) can pin 8-32 KiB of the connection's read buffer per held or kept chunk, which counts 1 KiB, so under such a client the hold and failover budgets bound their charges, not memory.
   - Why it is open: a strict bound copies each held or kept chunk, one more allocation per request (gated), or caps chunk-size framing, which hyper does not expose; it takes an authenticated client uploading gigabytes.
 - A client that stalls mid-upload after the hold is reported as an upstream timeout (504) after `response_header_timeout_secs` (600 s), and keeps its permit and, on a failover route, its share of the kept-body budget.
-  - Why it is open: Decided (2026-11-02): no idle timer on uploads, which would add a timer to every request and a new way for slow uploads to fail; the wait stays bounded by `response_header_timeout_secs`.
+  - Why it is open: decided (2026-11-02): no idle timer on uploads, which would add a timer to every request and a new way for slow uploads to fail; the wait stays bounded by `response_header_timeout_secs`.
 - Test and benchmark code repeats setup (recording upstreams, SSE responses, leaked `'static` bodies, CPU before-and-after pairs), and `wye-bench` leaves its gateways running when interrupted.
   - Why it is open: cleanup with no behavior change; next round.
 - CI's benchmark rebuilds the reference commit from scratch on every run: its cache holds the build, but `bench-against.sh` removes a reference tree without a worktree.
@@ -152,11 +195,8 @@ From the CLI review (2026-10-30), not fixed:
 - `bench/baseline.json` lacks the ten `*_sse_failed_streams` metrics: it is a record, not a gate input, so it waits for the next refresh on an idle machine.
 - `wye doctor` does not warn about a provider key file others can read: mounted secrets are often 0444, so it would need to tell them apart.
 - `wye claude` starts the agent with an expired gateway token, which then gets 401s. The token's `exp` could be read locally first.
-- `policy-diff` takes no `-` for a config (`git show main:wye.toml | wye policy-diff - wye.toml`): key sets are read relative to each config, so a worktree remains the right way.
-- No `--json` on `report`, and no shell completions; both could come from what exists when someone needs them.
-- `wye claude` does not read the config's `listen`, on purpose: the config is the gateway's, and the gateway may be remote. A changed port needs `WYE_URL`.
 - A `gateway_error` record does not say why: `wye report` shows `502 6` on a real log, and neither the record nor the report tells a refused connection from a broken stream. Six in a burst of auxiliary requests (2026-10-30) stay unexplained for that reason.
-- The report has no cost column until the config has `[pricing]`, and `wye init` writes none, since a price table in the binary would need upkeep ([visibility ideas](research.md#visibility-for-one-developer)).
+- The report has no cost column until the config has `[pricing]`, which `wye init` does not write ([why](policy.md#price-table); [visibility ideas](research.md#visibility-for-one-developer)).
 
 ## First release (0.1)
 
@@ -172,46 +212,13 @@ Postponed while solo-maintained: CONTRIBUTING, issue forms, Discussions, SECURIT
 
 ## Before 1.0
 
-### Functional / API
+Every [invariant](architecture.md#invariants) and [security requirement](policy.md#security-requirements) is held by a test, and:
 
-- [ ] Every supported endpoint × provider × feature combination has passing conformance and integration tests.
-- [ ] The published support matrix is generated from those test results, not written by hand.
-- [ ] Anthropic Messages passes the Claude Code gateway contract tests for the target Claude Code version.
-- [ ] Native OpenAI Responses streaming works with the target Codex version.
-- [ ] Chat Completions unary and streaming work with OpenAI.
-- [ ] Each Claude provider passes the Messages contract tests; failover happens only before any response byte, never after output.
-- [ ] Aliases resolve the same in `explain` and `serve`; upgrade checks report and never change a request.
-- [ ] Unsupported provider/endpoint combinations are refused explicitly.
-- [ ] No unbounded buffering on SSE with a slow downstream.
-- [ ] Cancellation frees gateway resources and does not claim to cancel already billed usage.
-
-### Policy / security
-
-- [ ] Signature, issuer, audience, expiry, and model permissions enforced before upstream dispatch.
-- [ ] Model permissions and ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused.
-- [ ] Config references and environment secrets validated; errors fail closed.
-- [x] Caller-credential passthrough refuses to start on a non-loopback bind (config test `rejects_non_loopback_listen`).
-- [ ] Provider credentials and prompt bodies not logged by default.
-- [ ] Hard per-request cost mode refuses requests with unbounded or unknown billable dimensions.
-- [ ] Hard cost mode is enabled only for models whose tokens-≤-bytes bound and reasoning-token billing are verified.
-- [ ] Only allowlisted fields are rewritten; caller limits are never raised.
-- [ ] `wye explain` output matches `serve` decisions for the same request, token, and config.
-- [ ] Token replay documented and not represented as preventable without redemption state.
-- [ ] No global/monthly budget or global RPM enforcement advertised.
-
-### Operations / DX
-
-- [ ] `wye serve` works from a prebuilt binary.
-- [ ] OCI image and Compose example need no gateway datastore.
-- [ ] Helm release exposes Wye internally with health probes and secret references.
-- [ ] An SDK backend switches using base URL plus gateway token.
-- [ ] `wye claude` and `wye codex` launch their agents against the gateway without changing the user's own configuration.
-- [ ] An OTel backend shows usage and cost by subject, model, and session without a custom dashboard.
-- [ ] Rollout and shutdown drain streams within a configured deadline.
-
-### Benchmarks
-
-- [ ] Mock upstream varies TTFT, token rate, failure rate, and stream length. (Token rate, stream length, and a rejection rate are built; TTFT is not.)
-- [ ] Reports include p50/p95/p99 added latency, RSS, CPU, and slow-consumer behavior.
-- [ ] Competitor tests use comparable features and disclose differences.
+- [ ] Each endpoint × provider × feature in the support matrix passes conformance and integration tests, and the matrix is generated from their results.
+- [ ] Claude Code and Codex at their target versions, Chat Completions with OpenAI, and each Claude provider pass contract tests against the live service.
+- [ ] The image, the Compose example, and the Helm release need no datastore.
 - [ ] Cost-saving claims are backed by usage, pricing, and task-quality evidence.
+- [x] Model permissions and ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused (`crates/gateway-core/src/policy/tests.rs`, `crates/wye/tests/proxy/gateway_tokens.rs`).
+- [x] `wye explain` answers as `serve` does, word for word, and an endpoint no route serves is refused (`crates/wye/tests/proxy/explain.rs`).
+- [x] Shutdown drains streams within a configured deadline (`crates/wye/tests/proxy/lifecycle.rs`).
+- [x] `wye claude` and `wye codex` start their agents against the gateway without changing the user's own configuration (`crates/wye/src/cli/wrapper.rs`).

@@ -154,7 +154,7 @@ http_version = "auto"
 
 # Cache-miss diagnostics: keyed hashes of the prompt sections in each usage
 # record, so an OpenTelemetry backend can tell why a prompt-cache read missed
-# (docs/research.md, "Cache-miss diagnostics"). The key is required, at least
+# (docs/architecture.md, "Cache diagnostics"). The key is required, at least
 # 32 bytes, and the same on every replica: `openssl rand -hex 32`. Scanning
 # adds CPU time per uploaded MB; sample_percent diagnoses that share of Claude
 # Code sessions, each one completely, chosen alike on every replica.

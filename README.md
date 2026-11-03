@@ -12,7 +12,7 @@
 
 ## Performance
 
-Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provider, not production measurements. Other gateways ran in the same run as Wye, each at its best configuration; each cell is the other gateway's figure divided by Wye's (TLS; streamed events measured with 2,000 token-paced streams):
+Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provider, not production measurements. Each gateway ran in the same run as Wye, at its best configuration, and each cell is its figure divided by Wye's in that run (TLS; streamed events measured with 2,000 token-paced streams). The runs date from 2026-10-15 (KrakenD, LiteLLM) to 2026-11-01 (agentgateway), so Wye's build differs between rows:
 
 | Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
 |---|---|---|---|---|
@@ -34,13 +34,13 @@ What Wye itself adds:
 | 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
 | Memory per open stream at that load | | 9.3 KB |
 
-A heavy Claude Code user, about five concurrent streams, costs about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The added delay per event does not accumulate over a stream, so tokens per second are unchanged.
+A heavy Claude Code user, about five concurrent streams, uses about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The added delay per event does not accumulate over a stream, so tokens per second are unchanged.
 
 Every commit that changes code is benchmarked against its parent in alternating rounds on the same machine (`scripts/check.sh`), and a change that makes Wye slower or heavier beyond the commit gate's tolerances is not committed.
 
 ## Quick start
 
-> **Status:** prerelease (`0.1.0-rc.1`). Tested and benchmarked on one machine, and in use with Claude Code on a claude.ai subscription. See [Status](#status) for what is not yet verified against live providers.
+> **Status:** prerelease (`0.1.0-rc.1`), tested and benchmarked on one machine. [Status](#status) says what is not yet verified against live providers.
 
 ```bash
 cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.99+
@@ -71,7 +71,7 @@ By request class
 
 - **Shows usage and cost.** One record per request with its tokens, cost, and model, plus the session, subagent, request class, and tool calls for Claude Code and Codex. `wye report` summarizes the log without a backend; OTLP exports logs, metrics, and one trace per Claude Code session to yours. Each prompt-cache miss carries its cause (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#telemetry), [prices](docs/policy.md#price-table))
 - **Gives a team scoped access.** Gateway tokens replace the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). Each gateway token carries the models and output-token ceiling it may use, and a request outside them is refused before the provider has all of it; with `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker lists only those models. ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
-- **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), shared by weight: each key or account is an [upstream](docs/glossary.md). Each session stays on one upstream so its prompt cache stays warm, and with `failover` on, a request rejected with `429` or `529` moves to the next upstream before any output. Bedrock and Claude Platform on AWS are not yet verified against the live services. ([several keys or providers](docs/guide.md#several-keys-or-providers))
+- **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), shared by weight and with failover between them: each key or account is an [upstream](docs/glossary.md). ([several keys or providers](docs/guide.md#several-keys-or-providers))
 - **Changes models in one place.** Aliases map a stable name to a model per team or token, and upgrade checks report which Messages requests a newer model would reject before the switch. Requests are never altered to fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
 - **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` check policy in CI and fail when a change widens access. `wye doctor` checks provider keys, files, and endpoints without billing anything. ([commands](docs/operations.md#commands))
 - **Works with existing clients.** Claude Code, Codex, and applications on the official Anthropic and OpenAI SDKs connect by base URL; `wye claude` and `wye codex` set it for you. Anthropic Messages, OpenAI Responses, and Chat Completions pass through without translation, changing only a model id that config maps, and streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
@@ -79,7 +79,7 @@ By request class
 
 ## Who it's for
 
-- **Individual developers.** See where tokens and money go, per session, subagent, and tool, with prompt-cache misses flagged and cost once the config has prices, from `wye report` alone. Next (planned): which tokens were waste, and what each fix would save. The caller's own login or API key goes through, so the gateway holds no secret.
+- **Individual developers.** See where tokens and money go, per session, subagent, and tool, with prompt-cache misses flagged and cost once the config has prices, from `wye report` alone, with no secret in the gateway.
 - **Teams.** A gateway token per developer and CI job, provider keys only in the deployment, policy reviewed in Git and tested in CI, and usage per developer and session in your OpenTelemetry backend. A team that runs only Claude Code with SSO may prefer Anthropic's own self-hosted gateway for Claude Code, which follows every Claude Code release.
 - **Applications on the official SDKs.** Model names, keys, failover, and cost move out of application code, and a model upgrade becomes a config change once the upgrade check reports nothing that would break (it reads Anthropic Messages requests). Wye alone does not protect a public endpoint from abuse: per-user authentication and quotas stay in your backend.
 
@@ -91,8 +91,8 @@ What teams usually expect from an LLM gateway, and Wye's answer. The differences
 |---|---|
 | Spend by team, user, and app | Yes. Down to the agent session, subagent, and tool, with prompt-cache misses explained |
 | Scoped keys instead of the provider key | Yes. A signed gateway token per developer, CI job, or app, from Wye or your identity provider |
-| Spend caps and rate limits | Partly. Per-request output-token ceilings today, and the provider's own rate limits. Spend caps per team come after the waste report, enforced by the provider on each team's own key (planned); Wye keeps no counters |
-| Failover and load across keys | Yes. With `failover` on, before any output; each session stays on one upstream so its prompt cache stays warm |
+| Spend caps and rate limits | Partly. Per-request output-token ceilings, and the provider's own limits; Wye keeps no counters. Spend caps per team, held by the provider, are [planned](docs/roadmap.md#m2-cost-policy-for-claude) |
+| Failover and load across keys | Yes. Shared by weight, with failover before any output ([configuration](#configuration)) |
 | Logs, metrics, and traces | Yes. In your OpenTelemetry backend, one trace per Claude Code session |
 | Switching models centrally | Yes. Aliases, and upgrade checks report which Messages requests a newer model would reject before the switch |
 | Policy you can review and test | Yes. One TOML file in Git, checked in CI by `wye policy-test` and `wye policy-diff` |
@@ -100,7 +100,7 @@ What teams usually expect from an LLM gateway, and Wye's answer. The differences
 | Guardrails, redaction, response caching | No. [What Wye will not do](#what-wye-will-not-do) says why |
 | Little to operate | Yes. One binary, no database ([performance](#performance)) |
 
-Why native APIs: a provider integration keeps needing work after it ships. On Anthropic's API, within one year, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates every request into one format lags each such change. Wye passes each native API through untranslated, so new provider features on the endpoints it serves work on the day they ship. The only body field it changes is `model` (an alias, or Bedrock's `anthropic.` ids), spliced in place, and the response names the model that ran.
+Why native APIs: a provider integration keeps needing work after it ships. On Anthropic's API, within one year, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates every request into one format lags each such change. Wye passes each native API through untranslated, so new provider features on the endpoints it serves work on the day they ship ([what it changes](docs/architecture.md#forwarding-contract)).
 
 ## Configuration
 
@@ -170,7 +170,7 @@ Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP l
 }
 ```
 
-Costs are exact decimal strings computed in integers. A model with no price is recorded as `unknown`, never as $0.
+Costs are exact decimal strings computed in integers; a model with no price is recorded as [`unknown`](docs/glossary.md#usage-and-cost).
 
 `wye explain` shows what the gateway would do with a request, offline, by calling the same functions in the same order:
 
@@ -192,16 +192,11 @@ decision: forward
 
 ## Status
 
-Built and covered by tests: everything listed under [What it does](#what-it-does).
+Built and covered by tests: everything listed under [What it does](#what-it-does). Claude Code has run through Wye on a claude.ai subscription since 2026-10-30.
 
-Not yet verified against the live services:
-- Bedrock and Claude Platform on AWS were built from the providers' documentation and tested against mocks. Bedrock's API key header in particular needs one live request to confirm.
-- Codex support was built from Codex's source and tests, not from a real session.
-- Claude Code runs through Wye on a claude.ai subscription (since 2026-10-30: streaming, tool use, prompt caching, extended thinking, token counting, background sessions), not yet with an API key.
+Not yet run against the live services, only against mocks: Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS. `wye service` has not run under systemd on a real Linux machine.
 
-Next (planned): a report of which tokens were waste and what each fix saves, and a smaller model for small background requests; then spend caps per team, enforced by the provider on each team's own key.
-
-Not built yet: a published container image, Vertex AI, AWS SigV4 signing, per-request cost ceilings, and reloading short-lived provider keys without a restart. [docs/roadmap.md](docs/roadmap.md) tracks all of it.
+Next: a report of which tokens were waste and what each fix saves, and a smaller model for small background requests; then spend caps per team, held by the provider. Not built yet: a published container image, Vertex AI, and AWS SigV4. [docs/roadmap.md](docs/roadmap.md#status) tracks all of it.
 
 ## What Wye will not do
 
@@ -215,7 +210,7 @@ Not built yet: a published container image, Vertex AI, AWS SigV4 signing, per-re
 
 ## Development
 
-Tests run against local mock upstreams and never call a paid API, and every commit that changes code passes the commit gate against its parent. See [docs/development.md](docs/development.md).
+Tests run against local mock upstreams and never call a paid API. See [docs/development.md](docs/development.md).
 
 ## Documentation
 
