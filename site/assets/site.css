@@ -1,4 +1,4 @@
-/* The Wye site: the route a request takes, drawn as a terminal draws it. */
+/* The Wye site: one request's path through Wye, drawn as a terminal draws it. */
 
 /* Wye Mono: IBM Plex Mono, subset to Latin, box drawing, and block
    elements, and renamed, since "Plex" is a Reserved Font Name under its
@@ -47,8 +47,7 @@
 }
 
 /* Dark only: the page is one terminal, whatever the system's theme.
-   Monochrome: white on black, amber only for the failover route, red only
-   for rejections. */
+   White on black; amber only for failover, red only for rejections. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -60,7 +59,7 @@
   --ink: #ededed;
   --text: #c9c9c9;
   --graphite: #8f8f8f;
-  /* The first route and links are ink; the failover route is amber. */
+  /* The request's line and links are ink; its failover branch is amber. */
   --line: var(--ink);
   --branch: #f2b544;
   --signal: #ff6b6b;
@@ -178,23 +177,23 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* First screen, in source order: what Wye is, how to start it, and the
-   route a request takes through it. Once the page is wide enough for both
-   to keep their size, the route stands beside the copy as a figure, both
+   path a request takes through it. Once the page is wide enough for both
+   to keep their size, the trace stands beside the copy as a figure, both
    on one top edge, and the install block spans the page below so its
    comments stay on their lines. */
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "copy" "install" "route";
+  grid-template-areas: "copy" "install" "trace";
   align-items: start;
   gap: 2.5rem clamp(2.5rem, 5vw, 4.5rem);
   padding-block: clamp(2rem, 4vw, 3.5rem) clamp(2.5rem, 5vw, 4rem);
 }
 @media (min-width: 80rem) {
-  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); grid-template-areas: "copy route" "install install"; }
+  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); grid-template-areas: "copy trace" "install install"; }
 }
 .hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
-.hero .junction { grid-area: route; }
+.hero .junction { grid-area: trace; }
 .hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
@@ -210,7 +209,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .hero .code .c { display: none; }
 }
 
-/* The route, drawn as a terminal would: one request through every stop,
+/* The trace, drawn as a terminal would: one request through every stop,
    each with what Wye decided there, the failover a fork at the upstream,
    the record at the end. Every row keeps three columns: the line from 0,
    names from 6, what happened from 16, so a name never runs into its
@@ -240,10 +239,10 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .junction .no { color: var(--signal); }
 .junction .r2 { color: var(--branch); }
 
-/* The request's route: the sections are stops in the order a request meets
+/* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
    printed like `tree`. */
-.route {
+.path {
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);
   column-gap: clamp(2rem, 4vw, 4rem);
@@ -363,9 +362,9 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   font-weight: 600;
 }
 
-/* Narrow screens: no rail; the route runs down the stops' left edge. */
+/* Narrow screens: no rail; a line runs down the stops' left edge. */
 @media (max-width: 64rem) {
-  .route { display: block; }
+  .path { display: block; }
   .rail { display: none; }
   .stop { margin-left: 2px; padding-left: 1.25rem; border-left: 2px solid var(--line); }
 }
