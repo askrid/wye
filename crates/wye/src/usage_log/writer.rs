@@ -171,7 +171,7 @@ pub(super) async fn write_records<W>(
     // which a slow collector can hold past shutdown's flush.
     let count = dropped.load(Ordering::Relaxed);
     if count > 0 && log_open {
-        let line = format!("{{\"event\":\"usage_log_dropped\",\"count\":{count}}}\n");
+        let line = format!("{{\"event\":\"usage_log_dropped\",\"records\":{count}}}\n");
         let _ = out.write_all(line.as_bytes()).await;
         let _ = out.flush().await;
     }

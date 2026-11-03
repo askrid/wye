@@ -14,6 +14,7 @@
 - A body sent in chunks so small that it alone passes `max_held_request_bytes` gets `413` instead of the retryable `529` (`503` on the OpenAI APIs), which no retry could clear.
 - The refusal of an output-token value over the ceiling says `exceeds the output-token ceiling of N`; it said `this gateway token's limit` even when the ceiling came from `[auth] max_output_tokens` alone. `wye explain` shows `(ceiling N)`.
 - Breaking: the route option `failover_max_held_bytes` is `failover_max_kept_bytes`, the glossary's word for bodies kept for failover ("held" is the hold). A config with the old name fails at startup with an unknown-field error.
+- Breaking, usage records: each `failovers` entry carries `reason` (`429`, `529`, or `connect`) instead of `status` or `error`; the field `prompt` is `prompt_hashes` (the OTLP attribute `wye.prompt` is `wye.prompt_hashes`); the `usage_log_dropped` event counts in `records`, as `otlp_dropped` does (was `count`).
 
 ## 0.1.0-rc.1
 

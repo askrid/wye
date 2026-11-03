@@ -168,7 +168,7 @@ Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP l
   "cost_status": "complete",
   "pricing_version": "anthropic-2026-11-01",
   "tool_calls": { "Bash": 1 },
-  "failovers": [{ "upstream": "anthropic", "status": 429 }]
+  "failovers": [{ "upstream": "anthropic", "reason": "429" }]
 }
 ```
 

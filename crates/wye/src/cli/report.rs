@@ -59,11 +59,12 @@ struct Record {
     failovers: Vec<FailoverRecord>,
 }
 
-/// An upstream that refused the request before another answered.
+/// An upstream that rejected the request before another answered.
 #[derive(Deserialize)]
 struct FailoverRecord {
     upstream: Option<String>,
-    status: Option<u16>,
+    /// `429`, `529`, or `connect`.
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -219,11 +220,11 @@ impl Summary {
             self.upstreams.entry(upstream.clone()).or_default().add(&r);
         }
         for failover in &r.failovers {
-            let reason = failover
-                .status
-                .map_or_else(|| "connect".to_owned(), |s| s.to_string());
             let upstream = failover.upstream.clone().unwrap_or_default();
-            *self.failovers.entry((upstream, reason)).or_default() += 1;
+            *self
+                .failovers
+                .entry((upstream, failover.reason.clone()))
+                .or_default() += 1;
         }
         if let Some(miss) = &r.cache_miss {
             *self.misses.entry(miss.clone()).or_default() += 1;

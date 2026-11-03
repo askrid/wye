@@ -88,7 +88,7 @@ async fn a_rate_limit_or_an_overload_moves_the_request_to_the_next_upstream() {
         assert_eq!(record["upstream"], "b");
         assert_eq!(
             record["failovers"],
-            serde_json::json!([{"upstream": "a", "status": status}])
+            serde_json::json!([{"upstream": "a", "reason": status.to_string()}])
         );
     }
 }
@@ -108,7 +108,7 @@ async fn a_refused_connection_moves_the_request_on() {
     let record = h.usage_record().await;
     assert_eq!(
         record["failovers"],
-        serde_json::json!([{"upstream": "a", "error": "connect"}])
+        serde_json::json!([{"upstream": "a", "reason": "connect"}])
     );
 }
 
@@ -143,7 +143,7 @@ async fn a_stalled_tls_handshake_moves_the_request_on() {
     let record = h.usage_record().await;
     assert_eq!(
         record["failovers"],
-        serde_json::json!([{"upstream": "a", "error": "connect"}])
+        serde_json::json!([{"upstream": "a", "reason": "connect"}])
     );
 }
 
@@ -267,7 +267,7 @@ async fn a_refusal_during_the_upload_resends_the_whole_body() {
     assert_eq!(seen_b.recv().await.unwrap(), body.as_str());
     assert_eq!(
         h.usage_record().await["failovers"],
-        serde_json::json!([{"upstream": "a", "status": 429}])
+        serde_json::json!([{"upstream": "a", "reason": "429"}])
     );
 }
 
@@ -309,7 +309,7 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
     assert_eq!(seen_b.recv().await.unwrap(), body, "the whole body, resent");
     assert_eq!(
         h.usage_record().await["failovers"],
-        serde_json::json!([{"upstream": "a", "error": "connect"}])
+        serde_json::json!([{"upstream": "a", "reason": "connect"}])
     );
 }
 
@@ -413,6 +413,6 @@ async fn when_every_upstream_refuses_the_last_refusal_is_the_answer() {
     assert_eq!(record["upstream"], "b");
     assert_eq!(
         record["failovers"],
-        serde_json::json!([{"upstream": "a", "status": 429}])
+        serde_json::json!([{"upstream": "a", "reason": "429"}])
     );
 }

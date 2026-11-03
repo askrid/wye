@@ -97,7 +97,7 @@ pub(super) struct Line<'a> {
     #[serde(skip_serializing_if = "Option::is_none", serialize_with = "cache_miss")]
     pub(super) cache_miss: Option<CacheMiss>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) prompt: Option<PromptRecord>,
+    pub(super) prompt_hashes: Option<PromptRecord>,
     /// For a checked request, the target models that would reject it and why.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upgrade_issues: Option<UpgradeIssues<'a>>,
@@ -144,7 +144,7 @@ impl Line<'_> {
             pricing_version: None,
             tool_calls: None,
             cache_miss: None,
-            prompt: None,
+            prompt_hashes: None,
             upgrade_issues: None,
             failovers: &[],
         }
@@ -234,7 +234,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             headers.compaction,
             headers.context_compacted,
         ),
-        prompt: r
+        prompt_hashes: r
             .info
             .prompt
             .as_ref()
@@ -293,10 +293,7 @@ impl Serialize for RejectedAttempt {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;
         map.serialize_entry("upstream", &self.upstream.as_deref())?;
-        match self.reason.status() {
-            Some(status) => map.serialize_entry("status", &status)?,
-            None => map.serialize_entry("error", self.reason.as_str())?,
-        }
+        map.serialize_entry("reason", self.reason.as_str())?;
         map.end()
     }
 }

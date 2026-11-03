@@ -81,7 +81,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     let upgrade_issues = line.upgrade_issues.as_ref().map(json);
     let failovers = (!line.failovers.is_empty()).then(|| json(&line.failovers));
     // Nested and variable-length: one JSON string the backend can parse.
-    let prompt = line.prompt.as_ref().map(json);
+    let prompt_hashes = line.prompt_hashes.as_ref().map(json);
     write_attributes(
         buf,
         &[
@@ -136,7 +136,10 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
                 attr::CACHE_MISS,
                 line.cache_miss.map(|m| Value::Str(m.as_str())),
             ),
-            ("wye.prompt", prompt.as_deref().map(Value::Str)),
+            (
+                "wye.prompt_hashes",
+                prompt_hashes.as_deref().map(Value::Str),
+            ),
         ],
     );
 }

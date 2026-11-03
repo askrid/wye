@@ -53,7 +53,7 @@ impl FailoverReason {
         }
     }
 
-    /// The refusing status; `None` for a connection.
+    /// The rejecting status; `None` for a connection.
     pub fn status(self) -> Option<u16> {
         match self {
             Self::RateLimited => Some(429),

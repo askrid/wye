@@ -256,7 +256,7 @@ The usage record, field by field:
 - `outcome` (`completed` | `failed` | `cancelled` | `gateway_error`): recorded when the response body is dropped, so every outcome is counted; a client that leaves before the response headers is `cancelled` with `status` `499`.
 - `duration_ms`, `headers_ms`: milliseconds; `headers_ms` = time to response headers.
 - `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
-- `failovers`, such as `[{"upstream": "a", "status": 429}]`, with `"error": "connect"` in place of `status` for a failed connection: attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
+- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (below).
 
@@ -279,7 +279,7 @@ The usage record, field by field:
 **Cache.**
 
 - `cache_miss` (`compaction` | `after_compaction` | `unexplained`): a cache write with no cache read; the first cache write of a session or a subagent also reads `unexplained`.
-- `prompt`: keyed prompt hashes, with [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags.
+- `prompt_hashes`: keyed prompt hashes, with [`[cache_diagnostics]`](research.md#2-cache-miss-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags.
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1-128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. Planned fields: `ttft_ms`, `config_version`. No `provider`: the `upstream` id names the upstream, and config maps it to its provider.
 
@@ -287,7 +287,7 @@ OTLP logs: each record becomes a log record at `{otlp_endpoint}/v1/logs`, resour
 
 - OpenTelemetry semantic conventions where they exist: `gen_ai.system` (`anthropic` or `openai` by endpoint), `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`.
 - Then the agent fields of either client: `gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.context_compacted`.
-- `wye.*` for the rest: `wye.outcome`, `wye.duration_ms`, `wye.headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt`, and `wye.upgrade_issues` as JSON strings.
+- `wye.*` for the rest: `wye.outcome`, `wye.duration_ms`, `wye.headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
 
 OTLP metrics are cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the OTel backend.
 
@@ -318,7 +318,7 @@ OTLP traces have one server span per request (`POST` and the endpoint, such as `
 
 Each reported tool call becomes a sibling span `tool <name>` (`gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
 
-Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped`, `otlp_dropped`). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
+Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
 
 `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
 

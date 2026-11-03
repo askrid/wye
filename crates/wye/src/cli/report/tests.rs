@@ -11,7 +11,7 @@ const LOG: &str = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages","st
 {"event":"request","unix_ms":2000,"path":"/v1/messages","status":529,"outcome":"gateway_error","duration_ms":0.1,"session_id":"session-bbbb-2","usage_status":"not_observed"}
 not json
 wye: listening on http://127.0.0.1:8080
-{"event":"usage_log_dropped","count":3}
+{"event":"usage_log_dropped","records":3}
 "#;
 
 #[test]
@@ -214,9 +214,9 @@ fn splits_cost_by_upstream_when_records_name_one() {
 
 #[test]
 fn counts_failovers_by_upstream_and_reason() {
-    let log = r#"{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","status":429}]}
-{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","status":429}]}
-{"event":"request","outcome":"completed","upstream":"a","failovers":[{"upstream":"c","error":"connect"}]}
+    let log = r#"{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","reason":"429"}]}
+{"event":"request","outcome":"completed","upstream":"b","failovers":[{"upstream":"a","reason":"429"}]}
+{"event":"request","outcome":"completed","upstream":"a","failovers":[{"upstream":"c","reason":"connect"}]}
 "#;
     let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let section = out.split("\nFailovers:").nth(1).unwrap();
