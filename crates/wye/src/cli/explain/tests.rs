@@ -138,7 +138,7 @@ fn explains_forwarding_and_each_refusal() {
         br#"{"model":"claude-haiku-4-5","max_tokens":100}"#,
     )
     .report();
-    assert!(report.contains("max_tokens: 100 (limit 100)"), "{report}");
+    assert!(report.contains("max_tokens: 100 (ceiling 100)"), "{report}");
 
     // An output-token ceiling alone still makes the server read the body, so a
     // request without a model is refused, as `serve` refuses it.
@@ -311,7 +311,7 @@ fn explains_responses_on_the_openai_route() {
     let report = ok.report();
     assert!(ok.refused.is_none(), "{report}");
     assert!(
-        report.contains("max_output_tokens: 500 (limit 1000)"),
+        report.contains("max_output_tokens: 500 (ceiling 1000)"),
         "{report}"
     );
     assert!(
@@ -326,7 +326,7 @@ fn explains_responses_on_the_openai_route() {
     let missing = run("/v1/responses", br#"{"model":"gpt-5.5","input":[]}"#);
     assert_eq!(
         missing.refused.as_ref().map(|r| r.2.as_str()),
-        Some("max_output_tokens is required: this gateway token's limit is 1000")
+        Some("max_output_tokens is required: the output-token ceiling is 1000")
     );
 
     let no_claude = run(

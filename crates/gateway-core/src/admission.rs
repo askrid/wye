@@ -238,12 +238,12 @@ impl fmt::Display for OutputCeilingError {
         match self.requested {
             Some(requested) => write!(
                 f,
-                "{} {requested} exceeds this gateway token's limit of {}",
+                "{} {requested} exceeds the output-token ceiling of {}",
                 self.field, self.limit
             ),
             None => write!(
                 f,
-                "{} is required: this gateway token's limit is {}",
+                "{} is required: the output-token ceiling is {}",
                 self.field, self.limit
             ),
         }

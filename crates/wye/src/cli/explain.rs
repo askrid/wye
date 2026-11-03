@@ -272,8 +272,8 @@ impl Explanation {
             }
             let field = api.output_token_field();
             self.step(match requested {
-                Some(requested) => format!("{field}: {requested} (limit {limit})"),
-                None => format!("{field}: absent (limit {limit}; the provider requires it)"),
+                Some(requested) => format!("{field}: {requested} (ceiling {limit})"),
+                None => format!("{field}: absent (ceiling {limit}; the provider requires it)"),
             });
         }
         Ok(())

@@ -12,6 +12,7 @@
 - Fix: with OTLP on, a usage log whose reader stalls keeps as many records as without OTLP, and shutdown exports the final metrics even while the usage log is blocked.
 - `wye report` keeps each count on the line of its name when it wraps.
 - A body sent in chunks so small that it alone passes `max_held_request_bytes` gets `413` instead of the retryable `529` (`503` on the OpenAI APIs), which no retry could clear.
+- The refusal of an output-token value over the ceiling says `exceeds the output-token ceiling of N`; it said `this gateway token's limit` even when the ceiling came from `[auth] max_output_tokens` alone. `wye explain` shows `(ceiling N)`.
 
 ## 0.1.0-rc.1
 
