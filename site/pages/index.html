@@ -48,12 +48,12 @@
     </div>
 
     <figure class="junction">
-      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its gateway token; the model stop maps the alias claude-coding to {{field README.md|{|model}}; at the upstream stop the session stays on anthropic, which rejects the request with 429 before any output, so with failover on, Wye resends it to {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
+      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its gateway token; the model stop maps the alias {{field README.md|{|requested_model}} to {{field README.md|{|model}}; at the upstream stop the session stays on anthropic, which rejects the request with 429 before any output, so with failover on, Wye resends it to {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
 <pre class="trace-wide">claude code
 │
 o     <b>gate</b>      <span class="d">gateway token checked</span>
 │
-o     <b>model</b>     <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
+o     <b>model</b>     <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
 │
 o     <b>upstream</b>  <span class="d">session stays on anthropic</span>
 ├──<span class="no">x</span>  rejected  <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
@@ -68,7 +68,7 @@ o  <b>gate</b>
 │  <span class="d">gateway token checked</span>
 │
 o  <b>model</b>
-│  <span class="d">claude-coding -&gt; {{field README.md|{|model}}</span>
+│  <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
 │
 o  <b>upstream</b>
 │  <span class="d">session stays on anthropic</span>
@@ -127,7 +127,7 @@ o  <b>upstream</b>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
         <h2 id="stream-h"><a href="#stream"><span class="hash" aria-hidden="true">#</span> stream</a></h2>
-        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements. Every commit that changes code is benchmarked against its parent, and one that makes Wye slower or heavier is not committed.</p></div>
+        <div class="item"><p><strong>What it adds.</strong> Lab numbers from one laptop ({{machine}}) against a local mock provider, not production measurements.</p>{{paragraph README.md|Performance|Every commit}}</div>
         <div class="table-scroll">
           <table class="numbers">
             <thead>
@@ -159,7 +159,7 @@ o  <b>upstream</b>
         {{item README.md|What it does|Shows usage}}
         {{fence README.md|$ wye report}}
         {{fence README.md|{}}
-        <p>Costs are exact decimal strings computed in integers; a model with no price is recorded as unknown, never as $0.</p>
+        {{paragraph README.md|Records and decisions|Costs are}}
       </section>
 
       <section class="part" id="compare" aria-labelledby="compare-h">
@@ -169,13 +169,13 @@ o  <b>upstream</b>
 
       <section class="part" id="config" aria-labelledby="config-h">
         <h2 id="config-h"><a href="#config"><span class="hash" aria-hidden="true">#</span> config</a></h2>
-        <p>One file, kept in Git: a route with two upstreams, failover, and a price table. Secrets come from environment variables or files, never from the config, and an unknown field stops the gateway at startup.</p>
+        {{paragraph README.md|Configuration|A route with}}
         {{fence README.md|[server]}}
+        {{paragraph README.md|Configuration|Each session stays}}
         {{item README.md|What it does|Checks decisions}}
         <div class="long-lines">{{fence README.md|$ wye explain}}</div>
         {{item README.md|What it does|Runs where}}
         {{rest README.md|What it does}}
-        <p>Every option, with its default and limits: <a href="{{repo}}/blob/main/examples/wye.toml">examples/wye.toml</a>.</p>
       </section>
 
       <section class="part" id="status" aria-labelledby="status-h">
