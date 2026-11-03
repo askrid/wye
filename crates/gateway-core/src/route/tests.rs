@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{Config, DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_HELD_BYTES};
+use crate::config::{Config, DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_KEPT_BYTES};
 
 /// A route with one upstream per `(id, weight)`.
 fn route(upstreams: &[(&str, u32)]) -> Route {
@@ -156,7 +156,7 @@ fn failover_settings_are_validated() {
     assert!(f.retries(FailoverReason::Connect));
     assert_eq!(FailoverReason::of_status(500), None);
     assert_eq!(f.max_body_bytes, DEFAULT_FAILOVER_MAX_BODY_BYTES);
-    assert_eq!(f.max_kept_bytes, DEFAULT_FAILOVER_MAX_HELD_BYTES);
+    assert_eq!(f.max_kept_bytes, DEFAULT_FAILOVER_MAX_KEPT_BYTES);
     let parse = |extra: &str, ids: &[&str]| {
         let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
         for id in ids {
@@ -175,7 +175,7 @@ fn failover_settings_are_validated() {
     assert!(parse("failover_max_body_bytes = 10", &["a", "b"]).contains("need failover"));
     assert!(
         parse(
-            "failover = [\"429\"]\nfailover_max_held_bytes = 0",
+            "failover = [\"429\"]\nfailover_max_kept_bytes = 0",
             &["a", "b"]
         )
         .contains("greater than zero")

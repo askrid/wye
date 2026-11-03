@@ -72,7 +72,7 @@ http_version = "auto"
 # upstream in the same turn; never after a response byte:
 # failover = ["429", "529", "connect"]
 # failover_max_body_bytes = 8388608    # larger bodies go without failover
-# failover_max_held_bytes = 268435456  # bodies kept for resending, across the process (a chunk counts at least 1 KiB)
+# failover_max_kept_bytes = 268435456  # bodies kept for resending, across the process (a chunk counts at least 1 KiB)
 #
 # Up to 16 upstreams. Each takes every [upstream] field above except
 # forward_caller_credential.

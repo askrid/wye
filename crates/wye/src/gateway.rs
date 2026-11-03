@@ -66,7 +66,7 @@ pub struct Gateway {
     /// Request bytes held while reading `model`, across all requests.
     held_bytes: Gauge,
     /// Request bytes kept for failover, across all requests; bounded per
-    /// route by its `failover_max_held_bytes`.
+    /// route by its `failover_max_kept_bytes`.
     failover_kept: Gauge,
     max_held_request_bytes: usize,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.

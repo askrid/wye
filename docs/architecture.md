@@ -300,7 +300,7 @@ Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on 
 
 **Failover within a request** (implemented, on `[routes.openai]` too) happens only where it cannot duplicate billing, and only before any response byte reached the client. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover ([retries](#failover)), and config refuses any other reason.
 
-Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `failover_max_held_bytes` across the process (default 256 MiB, separate from `server.max_held_request_bytes`, so kept bodies never starve the hold that reads `model`).
+Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `failover_max_kept_bytes` across the process (default 256 MiB, separate from `server.max_held_request_bytes`, so kept bodies never starve the hold that reads `model`).
 
 A dropped attempt hands back its sent chunks plus the unread rest of the client's body through a oneshot channel, so a rejection that arrives mid-upload moves on too: the next upstream gets the sent bytes, then the rest as the client sends it. A body over either bound, or an attempt still holding its body 100 ms after the rejection (hyper still writing), is answered as it is, never refused and never partly resent.
 
@@ -371,7 +371,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 
 Details for the shortened rows:
 
-- `MIN_CHUNK_CHARGE` counts against `max_held_request_bytes` and `failover_max_held_bytes`, so a body sent in tiny chunks cannot pin more memory than those bounds say.
+- `MIN_CHUNK_CHARGE` counts against `max_held_request_bytes` and `failover_max_kept_bytes`, so a body sent in tiny chunks cannot pin more memory than those bounds say.
 - `WRITE_BATCH`: while a write waits with OTLP on, up to `QUEUE_CAPACITY` records taken for export are kept for the next.
 - The `usage.rs` constants bound, in order: a usage-bearing Messages SSE line; a `content_block_start` line; the start of any other line, enough to recognize `event:`; tool names counted per response, and the longest counted by name; a model name kept in a usage record.
 

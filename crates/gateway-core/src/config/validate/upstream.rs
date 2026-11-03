@@ -20,7 +20,7 @@ pub(crate) struct RawRoute {
     pub(crate) select: Option<String>,
     pub(crate) failover: Option<Vec<String>>,
     pub(crate) failover_max_body_bytes: Option<u64>,
-    pub(crate) failover_max_held_bytes: Option<u64>,
+    pub(crate) failover_max_kept_bytes: Option<u64>,
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
@@ -118,9 +118,9 @@ fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
     };
     let failover = match raw.failover {
         None => {
-            if raw.failover_max_body_bytes.is_some() || raw.failover_max_held_bytes.is_some() {
+            if raw.failover_max_body_bytes.is_some() || raw.failover_max_kept_bytes.is_some() {
                 return Err(ConfigError::Invalid(
-                    "failover_max_body_bytes and failover_max_held_bytes need failover",
+                    "failover_max_body_bytes and failover_max_kept_bytes need failover",
                 ));
             }
             None
@@ -134,9 +134,9 @@ fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
                     "failover_max_body_bytes",
                 )?,
                 max_kept_bytes: nonzero(
-                    raw.failover_max_held_bytes
-                        .unwrap_or(DEFAULT_FAILOVER_MAX_HELD_BYTES),
-                    "failover_max_held_bytes",
+                    raw.failover_max_kept_bytes
+                        .unwrap_or(DEFAULT_FAILOVER_MAX_KEPT_BYTES),
+                    "failover_max_kept_bytes",
                 )?,
             };
             for reason in &on {
