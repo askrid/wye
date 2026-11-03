@@ -39,6 +39,18 @@ mod sources;
 /// The documents directives may read, relative to the repository root.
 const DOCUMENTS: [&str; 3] = ["README.md", "CHANGELOG.md", "docs/benchmarks.md"];
 
+/// The directives whose first two arguments name a document and one of its
+/// headings.
+const HEADED: [&str; 7] = [
+    "section",
+    "item",
+    "rest",
+    "paragraph",
+    "numbers",
+    "ratios",
+    "versus",
+];
+
 /// Everything a page may draw from the repository, read once per build.
 pub struct Sources {
     version: String,
@@ -49,9 +61,15 @@ pub struct Sources {
     documents: HashMap<&'static str, String>,
 }
 
+/// What expanding one page carries from directive to directive.
+struct Page {
+    /// The list items rendered so far.
+    placed: BTreeSet<String>,
+    anchors: markdown::Anchors,
+}
+
 impl Sources {
-    /// `placed` names the list items this page has rendered so far.
-    fn expand(&self, directive: &str, placed: &mut BTreeSet<String>) -> Result<String, String> {
+    fn expand(&self, directive: &str, page: &mut Page) -> Result<String, String> {
         let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
         let args: Vec<&str> = match args.trim() {
             "" => Vec::new(),
@@ -99,7 +117,7 @@ impl Sources {
                 })?;
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline)),
-                    "rest" => Ok(markdown::to_html(rest, &self.repo_url, file)),
+                    "rest" => Ok(markdown::to_html(rest, &self.repo_url, file, &page.anchors)),
                     "text" => Ok(markdown::escape(
                         &rest
                             .replace(['`', '*'], "")
@@ -114,6 +132,7 @@ impl Sources {
                 self.section(file, heading)?,
                 &self.repo_url,
                 file,
+                &page.anchors,
             )),
             ("item", [file, heading, prefix]) => {
                 let items = self.items(file, heading)?;
@@ -123,16 +142,16 @@ impl Sources {
                     .ok_or_else(|| {
                         format!("{file}: no item under \"## {heading}\" opens with {prefix:?}")
                     })?;
-                if !placed.insert(item_key(file, heading, item)) {
+                if !page.placed.insert(item_key(file, heading, item)) {
                     return Err(format!("{file}: the item {prefix:?} is placed twice"));
                 }
-                Ok(self.item_html(item, file))
+                Ok(self.item_html(item, file, &page.anchors))
             }
             ("rest", [file, heading]) => {
                 let mut out = String::new();
                 for item in self.items(file, heading)? {
-                    if placed.insert(item_key(file, heading, &item)) {
-                        out.push_str(&self.item_html(&item, file));
+                    if page.placed.insert(item_key(file, heading, &item)) {
+                        out.push_str(&self.item_html(&item, file, &page.anchors));
                     }
                 }
                 Ok(out)
@@ -142,7 +161,12 @@ impl Sources {
                     .ok_or_else(|| {
                         format!("{file}: no paragraph under \"## {heading}\" starts with {start:?}")
                     })?;
-                Ok(markdown::to_html(paragraph, &self.repo_url, file))
+                Ok(markdown::to_html(
+                    paragraph,
+                    &self.repo_url,
+                    file,
+                    &page.anchors,
+                ))
             }
             ("numbers", [file, heading, first]) => {
                 markdown::numbers(self.section(file, heading)?, first).ok_or_else(|| {
@@ -171,10 +195,10 @@ impl Sources {
             .ok_or_else(|| format!("{file}: no section \"## {heading}\""))
     }
 
-    fn item_html(&self, item: &str, file: &str) -> String {
+    fn item_html(&self, item: &str, file: &str, anchors: &markdown::Anchors) -> String {
         format!(
             "<div class=\"item\">{}</div>",
-            markdown::to_html(item, &self.repo_url, file)
+            markdown::to_html(item, &self.repo_url, file, anchors)
         )
     }
 
@@ -191,7 +215,10 @@ impl Sources {
 /// Expands every `{{directive}}` in a page.
 pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
     let mut out = String::with_capacity(template.len() * 2);
-    let mut placed = BTreeSet::new();
+    let mut page = Page {
+        placed: BTreeSet::new(),
+        anchors: anchors(template),
+    };
     let mut rest = template;
     while let Some((before, open)) = rest.split_once("{{") {
         out.push_str(before);
@@ -199,13 +226,52 @@ pub fn render(template: &str, sources: &Sources) -> Result<String, String> {
         let directive = directive.trim();
         out.push_str(
             &sources
-                .expand(directive, &mut placed)
+                .expand(directive, &mut page)
                 .map_err(|e| format!("{{{{{directive}}}}}: {e}"))?,
         );
         rest = after;
     }
     out.push_str(rest);
     Ok(out)
+}
+
+/// Headings the page renders in exactly one of its `<section id="…">`
+/// elements, by `FILE#slug`; a directive belongs to the last section opened
+/// before it. A heading spread over several sections, such as a list placed
+/// item by item, keeps its links on GitHub.
+fn anchors(template: &str) -> markdown::Anchors {
+    let mut found: HashMap<String, BTreeSet<Option<&str>>> = HashMap::new();
+    for (i, chunk) in template.split("<section").enumerate() {
+        let id = (i > 0)
+            .then(|| chunk.split_once('>'))
+            .flatten()
+            .and_then(|(tag, _)| tag.split_once(" id=\""))
+            .and_then(|(_, rest)| rest.split_once('"'))
+            .map(|(id, _)| id);
+        for opened in chunk.split("{{").skip(1) {
+            let Some((directive, _)) = opened.split_once("}}") else {
+                continue;
+            };
+            let directive = directive.trim();
+            let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
+            let mut args = args.split('|').map(str::trim);
+            if let (true, Some(file), Some(heading)) =
+                (HEADED.contains(&name), args.next(), args.next())
+            {
+                let key = format!("{file}#{}", markdown::slug(heading));
+                found.entry(key).or_default().insert(id);
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter_map(
+            |(key, ids)| match ids.into_iter().collect::<Vec<_>>().as_slice() {
+                [Some(id)] => Some((key, (*id).to_owned())),
+                _ => None,
+            },
+        )
+        .collect()
 }
 
 /// Names a list item by its document, section, and lead (the whole item if it
@@ -308,6 +374,21 @@ mod tests {
                 .unwrap_err()
                 .contains("starts with \"Nobody\"")
         );
+    }
+
+    #[test]
+    fn keeps_links_to_headings_the_page_renders_whole() {
+        let page = "<section class=\"hero\">{{opening README.md|rest}}</section>\
+                    <section class=\"part\" id=\"compare\">{{section README.md|How it compares}}</section>\
+                    <section id=\"one\">{{item README.md|What it does|Shows}}</section>\
+                    <section id=\"two\">{{ item README.md|What it does|Gives }}</section>";
+        let anchors = anchors(page);
+        assert_eq!(
+            anchors.get("README.md#how-it-compares").map(String::as_str),
+            Some("compare")
+        );
+        assert_eq!(anchors.get("README.md#what-it-does"), None);
+        assert_eq!(anchors.len(), 1);
     }
 
     #[test]

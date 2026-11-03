@@ -1,7 +1,14 @@
 //! The Markdown the site reads from the repository: fenced blocks with light
-//! highlighting, and sections rendered with their links pointed at GitHub.
+//! highlighting, and sections rendered with their links pointed at GitHub,
+//! or at the page itself where it renders the heading they name.
+
+use std::collections::HashMap;
 
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
+
+/// Repository headings the page renders in one of its own sections, by
+/// `FILE#slug`, with that section's id: `README.md#performance` → `stream`.
+pub type Anchors = HashMap<String, String>;
 
 /// `text` safe in HTML text and in a double-quoted attribute.
 pub fn escape(text: &str) -> String {
@@ -166,6 +173,20 @@ pub fn numbers(text: &str, first: &str) -> Option<String> {
     Some(out)
 }
 
+/// A heading's anchor as GitHub writes it: lowercase, punctuation dropped,
+/// spaces as hyphens. `What Wye will not do` gives `what-wye-will-not-do`.
+pub fn slug(heading: &str) -> String {
+    heading
+        .to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?
@@ -174,7 +195,7 @@ pub fn lead(item: &str) -> Option<&str> {
 }
 
 /// Renders Markdown from `source` (a path relative to the repository root).
-pub fn to_html(markdown: &str, repo_url: &str, source: &str) -> String {
+pub fn to_html(markdown: &str, repo_url: &str, source: &str, anchors: &Anchors) -> String {
     let events = Parser::new_ext(markdown, Options::ENABLE_TABLES).map(|event| match event {
         Event::Start(Tag::Link {
             link_type,
@@ -183,7 +204,7 @@ pub fn to_html(markdown: &str, repo_url: &str, source: &str) -> String {
             id,
         }) => Event::Start(Tag::Link {
             link_type,
-            dest_url: CowStr::from(link_url(&dest_url, repo_url, source)),
+            dest_url: CowStr::from(link_url(&dest_url, repo_url, source, anchors)),
             title,
             id,
         }),
@@ -195,12 +216,16 @@ pub fn to_html(markdown: &str, repo_url: &str, source: &str) -> String {
 }
 
 /// Where a link in a repository document points once its text is on the
-/// site: other files and anchors open on GitHub, as they do from the file.
-fn link_url(dest: &str, repo_url: &str, source: &str) -> String {
+/// site: a heading of the same document that the page renders stays on the
+/// page; other files and anchors open on GitHub, as they do from the file.
+fn link_url(dest: &str, repo_url: &str, source: &str, anchors: &Anchors) -> String {
     if dest.contains("://") || dest.starts_with("mailto:") {
         return dest.to_owned();
     }
     if let Some(anchor) = dest.strip_prefix('#') {
+        if let Some(id) = anchors.get(&format!("{source}#{anchor}")) {
+            return format!("#{id}");
+        }
         return match source {
             "README.md" => format!("{repo_url}#{anchor}"),
             _ => format!("{repo_url}/blob/main/{source}#{anchor}"),
@@ -376,29 +401,40 @@ mod tests {
     }
 
     #[test]
-    fn links_open_on_github() {
+    fn links_open_on_the_page_or_github() {
         let repo = "https://github.com/askrid/wye";
+        let none = Anchors::new();
+        let page: Anchors = [("README.md#performance".to_owned(), "stream".to_owned())].into();
         assert_eq!(
-            link_url("docs/roadmap.md", repo, "README.md"),
+            link_url("#performance", repo, "README.md", &page),
+            "#stream"
+        );
+        assert_eq!(
+            link_url("#performance", repo, "docs/guide.md", &page),
+            "https://github.com/askrid/wye/blob/main/docs/guide.md#performance"
+        );
+        assert_eq!(slug("What Wye will not do"), "what-wye-will-not-do");
+        assert_eq!(
+            link_url("docs/roadmap.md", repo, "README.md", &none),
             "https://github.com/askrid/wye/blob/main/docs/roadmap.md"
         );
         assert_eq!(
-            link_url("#features", repo, "README.md"),
+            link_url("#features", repo, "README.md", &none),
             "https://github.com/askrid/wye#features"
         );
         assert_eq!(
-            link_url("#a", repo, "docs/guide.md"),
+            link_url("#a", repo, "docs/guide.md", &none),
             "https://github.com/askrid/wye/blob/main/docs/guide.md#a"
         );
         assert_eq!(
-            link_url("product.md", repo, "docs/guide.md"),
+            link_url("product.md", repo, "docs/guide.md", &none),
             "https://github.com/askrid/wye/blob/main/docs/product.md"
         );
         assert_eq!(
-            link_url("https://x.dev/", repo, "README.md"),
+            link_url("https://x.dev/", repo, "README.md", &none),
             "https://x.dev/"
         );
-        let html = to_html("See [Features](#features).", repo, "README.md");
+        let html = to_html("See [Features](#features).", repo, "README.md", &none);
         assert_eq!(
             html,
             "<p>See <a href=\"https://github.com/askrid/wye#features\">Features</a>.</p>\n"
