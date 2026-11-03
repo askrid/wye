@@ -15,6 +15,7 @@
 - The refusal of an output-token value over the ceiling says `exceeds the output-token ceiling of N`; it said `this gateway token's limit` even when the ceiling came from `[auth] max_output_tokens` alone. `wye explain` shows `(ceiling N)`.
 - Breaking: the route option `failover_max_held_bytes` is `failover_max_kept_bytes`, the glossary's word for bodies kept for failover ("held" is the hold). A config with the old name fails at startup with an unknown-field error.
 - Breaking, usage records: each `failovers` entry carries `reason` (`429`, `529`, or `connect`) instead of `status` or `error`; the field `prompt` is `prompt_hashes` (the OTLP attribute `wye.prompt` is `wye.prompt_hashes`); the `usage_log_dropped` event counts in `records`, as `otlp_dropped` does (was `count`).
+- `wye service restart` rewrites the service definition when this `wye` or the config's `drain_delay_secs` and `shutdown_grace_secs` call for a new one, and has the service manager load it; a restart used to keep the old stop timeout.
 
 ## 0.1.0-rc.1
 

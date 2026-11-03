@@ -154,7 +154,7 @@ pub fn install(
         config: config_path,
         log: context.wye_home.join(USAGE_LOG_FILE),
         errors: context.wye_home.join(ERRORS_FILE),
-        stop_secs: (config.server.drain_delay + config.server.shutdown_grace).as_secs() + 5,
+        stop_secs: stop_secs(&config),
     };
     let definition = service.definition(context.manager)?;
     let file = context.file();
@@ -301,20 +301,50 @@ pub fn status(context: &Context) -> Result<bool, String> {
 /// `wye service restart`: checks the installed config, then restarts.
 pub fn restart(context: &Context) -> Result<(), String> {
     let show = &context.show;
-    let service = context.ours()?;
-    let config = check(&service.config, show)
+    let installed = context.ours()?;
+    let config = check(&installed.config, show)
         .map_err(|e| format!("{e}\nThe service keeps running as it was."))?;
-    run_all(
-        &restart_commands(context.manager, &uid()?),
-        show,
-        stopping(&service),
-    )?;
+    let service = refreshed(&installed, &config);
+    let definition = service.definition(context.manager)?;
+    let file = context.file();
+    let uid = uid()?;
+    // The running gateway stops under the definition its manager loaded.
+    let wait = stopping(&installed).max(stopping(&service));
+    let commands = if std::fs::read_to_string(&file).ok().as_deref() == Some(&*definition) {
+        restart_commands(context.manager, &uid)
+    } else {
+        // An older wye wrote it, or the config's drain or grace changed: the
+        // manager loads the new one, as `install` does when replacing.
+        write_atomically(&file, &definition)?;
+        say!(
+            "Updated {} for this wye and config (stop timeout {} s).",
+            show(&file),
+            service.stop_secs
+        );
+        start_commands(context.manager, &uid, &file, true)
+    };
+    run_all(&commands, show, wait)?;
     wait_for(
         &local_url(config.server.listen),
         &service.errors,
         show,
-        stopping(&service) + START_WAIT,
+        wait + START_WAIT,
     )
+}
+
+/// The service this wye would install for `installed`'s program and
+/// config: its stop timeout follows the config as it is now.
+fn refreshed(installed: &Service, config: &Config) -> Service {
+    Service {
+        stop_secs: stop_secs(config),
+        ..installed.clone()
+    }
+}
+
+/// How long the manager waits for the gateway to stop: the config's drain
+/// delay and shutdown grace, and a margin.
+fn stop_secs(config: &Config) -> u64 {
+    (config.server.drain_delay + config.server.shutdown_grace).as_secs() + 5
 }
 
 /// `wye service uninstall`: stops the service and removes its definition.

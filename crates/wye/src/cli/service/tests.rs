@@ -177,3 +177,23 @@ fn loading_the_service_waits_out_the_old_gateway_shutting_down() {
     );
     assert!(tries > 1);
 }
+
+#[test]
+fn a_restart_brings_the_stop_timeout_up_to_the_config() {
+    let installed = service("/Users/a");
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\ndrain_delay_secs = 10\nshutdown_grace_secs = 60\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n",
+    )
+    .unwrap();
+    let refreshed = refreshed(&installed, &config);
+    assert_eq!(refreshed.stop_secs, 75, "drain + grace + 5");
+    assert_eq!(
+        Service {
+            stop_secs: installed.stop_secs,
+            ..refreshed
+        },
+        installed,
+        "the program, config, and logs stay as installed"
+    );
+}

@@ -61,9 +61,9 @@ pub const COMMANDS: &[Command] = &[
         id: Id::ServiceRestart,
         name: "service restart",
         summary: "Restart the background gateway, after checking its config",
-        notes: "Run it after editing the config. After a new wye, or a new drain or grace \
-                setting, run `wye service install` again: a restart keeps the old definition \
-                and its stop timeout.",
+        notes: "Run it after editing the config or installing a new wye. It rewrites the \
+                service definition first when this wye or the config's drain and grace call \
+                for a new one.",
         ..BASE
     },
     Command {
