@@ -17,7 +17,7 @@ fn aliases() -> Aliases {
 const NONE: BodyChecks<'static> = BodyChecks {
     configured: None,
     granted: None,
-    token_limit: None,
+    output_ceiling: None,
     aliases: None,
     prefixes_model_ids: false,
 };
@@ -47,7 +47,7 @@ fn the_body_is_held_for_any_check_and_lexed_on_for_permissions_and_ceilings() {
             ..NONE
         },
         BodyChecks {
-            token_limit: Some(100),
+            output_ceiling: Some(100),
             ..NONE
         },
     ] {
@@ -81,12 +81,15 @@ fn permissions_apply_to_the_resolved_model_and_name_the_sent_one() {
 #[test]
 fn a_token_value_is_final_when_read_and_a_missing_one_at_the_end() {
     let checks = BodyChecks {
-        token_limit: Some(100),
+        output_ceiling: Some(100),
         ..NONE
     };
-    assert_eq!(checks.check_tokens(Api::Messages, Some(100), false), Ok(()));
+    assert_eq!(
+        checks.check_output_ceiling(Api::Messages, Some(100), false),
+        Ok(())
+    );
     let refusal = checks
-        .check_tokens(Api::Messages, Some(101), false)
+        .check_output_ceiling(Api::Messages, Some(101), false)
         .unwrap_err();
     assert_eq!(
         refusal.to_string(),
@@ -94,19 +97,27 @@ fn a_token_value_is_final_when_read_and_a_missing_one_at_the_end() {
     );
     // The OpenAI APIs let the field out; under a ceiling it is required,
     // once the whole body shows it is missing.
-    assert_eq!(checks.check_tokens(Api::Responses, None, false), Ok(()));
-    let refusal = checks.check_tokens(Api::Responses, None, true).unwrap_err();
+    assert_eq!(
+        checks.check_output_ceiling(Api::Responses, None, false),
+        Ok(())
+    );
+    let refusal = checks
+        .check_output_ceiling(Api::Responses, None, true)
+        .unwrap_err();
     assert_eq!(
         (refusal.status(), refusal.kind()),
         (403, "permission_error")
     );
-    assert_eq!(NONE.check_tokens(Api::Responses, None, true), Ok(()));
+    assert_eq!(
+        NONE.check_output_ceiling(Api::Responses, None, true),
+        Ok(())
+    );
 }
 
 #[test]
 fn the_ceiling_is_the_stricter_one_and_only_where_output_is_generated() {
     let checks = |configured, generates| {
-        BodyChecks::new(None, configured, None, None, generates, false).token_limit
+        BodyChecks::new(None, configured, None, None, generates, false).output_ceiling
     };
     assert_eq!(checks(Some(100), true), Some(100));
     assert_eq!(checks(Some(100), false), None, "count_tokens");

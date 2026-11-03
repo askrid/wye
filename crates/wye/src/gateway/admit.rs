@@ -72,7 +72,7 @@ impl Gateway {
             api,
             &self.held_bytes,
             self.max_held_request_bytes,
-            checks.token_limit,
+            checks.output_ceiling,
         )
         .await
         .map_err(|e| Box::new(hold_error(api, e)))?;
@@ -110,7 +110,7 @@ impl Gateway {
         }
         let body_read = held.ended() || body.is_end_stream();
         checks
-            .check_tokens(api, held.max_output_tokens(), body_read)
+            .check_output_ceiling(api, held.max_output_tokens(), body_read)
             .map_err(refuse)?;
         let model_span = checks
             .prefixes_model_ids

@@ -14,7 +14,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::{admission::TokenLimitError, policy::PolicyError};
+use gateway_core::{admission::OutputCeilingError, policy::PolicyError};
 use http_body_util::LengthLimitError;
 use hyper::body::{Body, Frame, SizeHint};
 
@@ -26,7 +26,7 @@ pub(crate) enum PolicyRefusal {
     /// A repeated `model`, an escaped top-level key, or a bad output-token field.
     Invalid(PolicyError),
     /// The output-token maximum above the request's ceiling, or missing.
-    TokenLimit(TokenLimitError),
+    OutputCeiling(OutputCeilingError),
     /// The body grew past `server.max_request_body_bytes`.
     TooLarge,
     /// The client's body failed: bad framing, or cut off.
@@ -60,8 +60,8 @@ pub(super) fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Optio
         if let Some(e) = e.downcast_ref::<PolicyError>() {
             return Some(PolicyRefusal::Invalid(*e));
         }
-        if let Some(e) = e.downcast_ref::<TokenLimitError>() {
-            return Some(PolicyRefusal::TokenLimit(*e));
+        if let Some(e) = e.downcast_ref::<OutputCeilingError>() {
+            return Some(PolicyRefusal::OutputCeiling(*e));
         }
         if e.is::<LengthLimitError>() {
             return Some(PolicyRefusal::TooLarge);

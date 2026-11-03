@@ -44,14 +44,17 @@ pub fn endpoint(path: &str) -> Option<Endpoint> {
 impl Api {
     /// The top-level request field that bounds generated tokens, as named
     /// in error messages and diagnostics.
-    pub fn token_field(self) -> &'static str {
-        self.token_fields().first().copied().unwrap_or_default()
+    pub fn output_token_field(self) -> &'static str {
+        self.output_token_fields()
+            .first()
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Every top-level field that bounds generated tokens: Chat Completions
     /// keeps the older `max_tokens` beside `max_completion_tokens`. A body
     /// naming two of them is refused, as one naming the same twice.
-    pub(crate) fn token_fields(self) -> &'static [&'static str] {
+    pub(crate) fn output_token_fields(self) -> &'static [&'static str] {
         match self {
             Self::Messages => &["max_tokens"],
             Self::Responses => &["max_output_tokens"],
@@ -63,7 +66,7 @@ impl Api {
     /// field. Anthropic requires `max_tokens`, so the provider rejects such a
     /// request itself; on OpenAI's APIs the field is optional and its absence
     /// means the model's maximum, which no ceiling can allow.
-    pub fn token_field_required(self) -> bool {
+    pub fn output_token_field_required(self) -> bool {
         self != Self::Messages
     }
 
@@ -137,7 +140,10 @@ mod tests {
         assert_eq!((responses.api, responses.generates), (Api::Responses, true));
         let chat = endpoint("/v1/chat/completions").unwrap();
         assert_eq!((chat.api, chat.generates), (Api::ChatCompletions, true));
-        assert_eq!(Api::ChatCompletions.token_field(), "max_completion_tokens");
+        assert_eq!(
+            Api::ChatCompletions.output_token_field(),
+            "max_completion_tokens"
+        );
         for other in ["/v1/completions", "/v1/models", "/v1/responses/abc", "/"] {
             assert_eq!(endpoint(other), None, "{other}");
         }

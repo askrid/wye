@@ -224,8 +224,8 @@ impl Explanation {
         // The server holds the body until its model is read, decides on what
         // it knows then, and checks the rest as it streams; explain reads the
         // file the same way, as if the hold ended right after the model.
-        let mut scanner = admission::scanner(api, checks.token_limit);
-        let held = held_len(api, checks.token_limit, body);
+        let mut scanner = admission::scanner(api, checks.output_ceiling);
+        let held = held_len(api, checks.output_ceiling, body);
         let (start, rest) = body.split_at(held);
         scanner.feed(start);
         let sent = match scanner.finish() {
@@ -252,7 +252,8 @@ impl Explanation {
         if let Err(refusal) = checks.permit(&model, &sent) {
             return Err(self.refuse_policy(&refusal));
         }
-        if let Err(refusal) = checks.check_tokens(api, scanner.max_output_tokens(), rest.is_empty())
+        if let Err(refusal) =
+            checks.check_output_ceiling(api, scanner.max_output_tokens(), rest.is_empty())
         {
             return Err(self.refuse_policy(&refusal));
         }
@@ -264,12 +265,12 @@ impl Explanation {
                 return Err(self.refuse_policy(&Refusal::Invalid(e)));
             }
         }
-        if let Some(limit) = checks.token_limit {
+        if let Some(limit) = checks.output_ceiling {
             let requested = scanner.max_output_tokens();
-            if let Err(refusal) = checks.check_tokens(api, requested, true) {
+            if let Err(refusal) = checks.check_output_ceiling(api, requested, true) {
                 return Err(self.refuse_policy(&refusal));
             }
-            let field = api.token_field();
+            let field = api.output_token_field();
             self.step(match requested {
                 Some(requested) => format!("{field}: {requested} (limit {limit})"),
                 None => format!("{field}: absent (limit {limit}; the provider requires it)"),
@@ -348,13 +349,13 @@ impl Explanation {
         config: &Config,
         upstream: &Upstream,
         api: Api,
-        token_limit: Option<u64>,
+        output_ceiling: Option<u64>,
         body: &[u8],
     ) {
         // The gateway reads the model on a route that rewrites its id even
         // when no policy does; explain reads it for the price too.
         let model = self.model.clone().or_else(|| {
-            let mut scanner = admission::scanner(api, token_limit);
+            let mut scanner = admission::scanner(api, output_ceiling);
             scanner.feed(body);
             scanner.finish().ok().map(str::to_owned)
         });
@@ -476,7 +477,7 @@ pub fn explain(
         out.policy(config, api, &checks, identity.as_ref(), body)?;
         let upstream = out.route(route, session, identity.as_ref());
         out.upstream(upstream, path);
-        out.model_and_price(config, upstream, api, checks.token_limit, body);
+        out.model_and_price(config, upstream, api, checks.output_ceiling, body);
         if api == Api::Messages {
             out.body_scans(config, session, body, targets);
         }
@@ -488,8 +489,8 @@ pub fn explain(
 
 /// Bytes of `body` through the end of its top-level `model` value, where
 /// the server's hold ends; the whole body when there is none to find.
-fn held_len(api: Api, token_limit: Option<u64>, body: &[u8]) -> usize {
-    let mut probe = admission::scanner(api, token_limit);
+fn held_len(api: Api, output_ceiling: Option<u64>, body: &[u8]) -> usize {
+    let mut probe = admission::scanner(api, output_ceiling);
     probe.feed(body);
     probe
         .model_span()

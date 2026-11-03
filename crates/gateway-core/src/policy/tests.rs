@@ -277,10 +277,10 @@ fn reads_max_tokens_and_rejects_bad_values() {
         tokens(br#"{"max_tokens":1,"max_tokens":2}"#),
         Err(PolicyError::RepeatedMaxTokens)
     );
-    assert_eq!(token_limit(None, None), None);
-    assert_eq!(token_limit(Some(8000), None), Some(8000));
-    assert_eq!(token_limit(Some(8000), Some(32000)), Some(8000));
-    assert_eq!(token_limit(None, Some(4000)), Some(4000));
+    assert_eq!(output_ceiling(None, None), None);
+    assert_eq!(output_ceiling(Some(8000), None), Some(8000));
+    assert_eq!(output_ceiling(Some(8000), Some(32000)), Some(8000));
+    assert_eq!(output_ceiling(None, Some(4000)), Some(4000));
 }
 
 #[test]

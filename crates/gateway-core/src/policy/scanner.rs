@@ -64,7 +64,7 @@ impl PolicyScanner {
             expect_key: false,
             capture: Capture::None,
             key: Kept::default(),
-            token_keys: api.token_fields(),
+            token_keys: api.output_token_fields(),
             escaped: false,
             model_next: false,
             model: Kept::default(),

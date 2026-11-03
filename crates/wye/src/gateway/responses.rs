@@ -60,7 +60,9 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "upstream request failed",
         ),
         ForwardError::Policy(PolicyRefusal::Invalid(e)) => refuse(api, &Refusal::Invalid(e)),
-        ForwardError::Policy(PolicyRefusal::TokenLimit(e)) => refuse(api, &Refusal::TokenLimit(e)),
+        ForwardError::Policy(PolicyRefusal::OutputCeiling(e)) => {
+            refuse(api, &Refusal::OutputCeiling(e))
+        }
         ForwardError::Policy(PolicyRefusal::TooLarge) => too_large(api),
         ForwardError::Policy(PolicyRefusal::Broken) => unreadable_body(api),
     }

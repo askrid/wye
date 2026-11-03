@@ -25,7 +25,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    admission::{self, TokenCeiling},
+    admission::{self, OutputCeiling},
     api::Api,
     policy::{PolicyError, PolicyScanner},
 };
@@ -129,7 +129,7 @@ pub(crate) struct Hold {
     /// The whole body is in `chunks`.
     ended: bool,
     /// The request's output-token ceiling, checked again as the rest streams.
-    ceiling: Option<TokenCeiling>,
+    ceiling: Option<OutputCeiling>,
     /// Whether the rest of the body is checked as it streams (a repeated
     /// `model`, a late output-token field); off when no permission or ceiling
     /// applies.
@@ -198,7 +198,7 @@ pub(crate) async fn hold_until_model<B>(
     api: Api,
     budget: &Gauge,
     max_held: usize,
-    token_limit: Option<u64>,
+    output_ceiling: Option<u64>,
 ) -> Result<Box<Hold>, HoldError>
 where
     B: Body<Data = Bytes> + Unpin,
@@ -207,9 +207,9 @@ where
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
         budget: budget.hold_none(),
-        scanner: admission::scanner(api, token_limit),
+        scanner: admission::scanner(api, output_ceiling),
         ended: false,
-        ceiling: token_limit.map(|limit| TokenCeiling { api, limit }),
+        ceiling: output_ceiling.map(|limit| OutputCeiling { api, limit }),
         check_rest: true,
     });
     let deadline = Instant::now() + HOLD_TIMEOUT;

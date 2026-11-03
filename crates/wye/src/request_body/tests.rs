@@ -1,4 +1,4 @@
-use gateway_core::{admission::TokenLimitError, api::Api};
+use gateway_core::{admission::OutputCeilingError, api::Api};
 
 use super::*;
 use crate::test_body::Client;
@@ -121,7 +121,7 @@ async fn a_late_max_tokens_above_the_limit_fails_the_body() {
     let error = collect(RequestBody::after_hold(held, client))
         .await
         .unwrap_err();
-    let over = error.downcast_ref::<TokenLimitError>().unwrap();
+    let over = error.downcast_ref::<OutputCeilingError>().unwrap();
     assert_eq!((over.requested, over.limit), (Some(9000), 4000));
 }
 
@@ -136,7 +136,7 @@ async fn trailers_end_the_body_for_a_required_field() {
         match body.frame().await {
             Some(Ok(frame)) if frame.is_trailers() => break false,
             Some(Ok(_)) => {}
-            Some(Err(e)) => break e.is::<TokenLimitError>(),
+            Some(Err(e)) => break e.is::<OutputCeilingError>(),
             None => break false,
         }
     };
@@ -285,7 +285,7 @@ async fn responses_need_max_output_tokens_under_a_ceiling() {
     let error = collect(RequestBody::after_hold(held, client))
         .await
         .unwrap_err();
-    let missing = error.downcast_ref::<TokenLimitError>().unwrap();
+    let missing = error.downcast_ref::<OutputCeilingError>().unwrap();
     assert_eq!(missing.requested, None);
     assert_eq!(
         missing.to_string(),

@@ -15,11 +15,11 @@ use crate::{
     token::Identity,
 };
 
-/// The scanner for a request body under `token_limit`: the field is read only
+/// The scanner for a request body under `output_ceiling`: the field is read only
 /// when a ceiling applies, so a value only a ceiling would mind is not refused.
-pub fn scanner(api: Api, token_limit: Option<u64>) -> PolicyScanner {
+pub fn scanner(api: Api, output_ceiling: Option<u64>) -> PolicyScanner {
     let scanner = PolicyScanner::for_api(api);
-    if token_limit.is_some() {
+    if output_ceiling.is_some() {
         scanner
     } else {
         scanner.without_token_field()
@@ -35,7 +35,7 @@ pub struct BodyChecks<'a> {
     pub granted: Option<&'a [ModelPattern]>,
     /// The output-token ceiling, the stricter of config's and the
     /// token's; `None` for an endpoint that generates nothing.
-    pub token_limit: Option<u64>,
+    pub output_ceiling: Option<u64>,
     pub aliases: Option<&'a Aliases>,
     /// An upstream of the route has its own model ids (Bedrock), so the
     /// model's place in the body is needed.
@@ -55,9 +55,9 @@ impl<'a> BodyChecks<'a> {
         generates: bool,
         prefixes_model_ids: bool,
     ) -> Self {
-        let token_limit = generates
+        let output_ceiling = generates
             .then(|| {
-                policy::token_limit(
+                policy::output_ceiling(
                     configured_max_output_tokens,
                     identity.and_then(|i| i.max_output_tokens),
                 )
@@ -66,7 +66,7 @@ impl<'a> BodyChecks<'a> {
         Self {
             configured,
             granted: identity.and_then(|i| i.models.as_deref()),
-            token_limit,
+            output_ceiling,
             aliases,
             prefixes_model_ids,
         }
@@ -83,7 +83,7 @@ impl<'a> BodyChecks<'a> {
     /// ceilings, not for an alias or a provider's model id alone, since
     /// lexing the rest costs CPU per uploaded MB.
     pub fn checks_rest(&self) -> bool {
-        self.configured.is_some() || self.granted.is_some() || self.token_limit.is_some()
+        self.configured.is_some() || self.granted.is_some() || self.output_ceiling.is_some()
     }
 
     /// The alias `sent` names and the model it resolves to for `subject`;
@@ -108,17 +108,17 @@ impl<'a> BodyChecks<'a> {
         }
     }
 
-    /// The output-token check ([`TokenCeiling::check`]).
-    pub fn check_tokens(
+    /// The output-token check ([`OutputCeiling::check`]).
+    pub fn check_output_ceiling(
         &self,
         api: Api,
         requested: Option<u64>,
         body_read: bool,
     ) -> Result<(), Refusal> {
-        match self.token_limit {
-            Some(limit) => TokenCeiling { api, limit }
+        match self.output_ceiling {
+            Some(limit) => OutputCeiling { api, limit }
                 .check(requested, body_read)
-                .map_or(Ok(()), |e| Err(Refusal::TokenLimit(e))),
+                .map_or(Ok(()), |e| Err(Refusal::OutputCeiling(e))),
             None => Ok(()),
         }
     }
@@ -126,21 +126,21 @@ impl<'a> BodyChecks<'a> {
 
 /// One request's output-token ceiling, on its API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenCeiling {
+pub struct OutputCeiling {
     pub api: Api,
     pub limit: u64,
 }
 
-impl TokenCeiling {
+impl OutputCeiling {
     /// The check as a body is read: a value is final once read, a missing
     /// field only once `body_read` (the whole body was read without one).
-    pub fn check(self, requested: Option<u64>, body_read: bool) -> Option<TokenLimitError> {
+    pub fn check(self, requested: Option<u64>, body_read: bool) -> Option<OutputCeilingError> {
         let refused = match requested {
             Some(requested) => requested > self.limit,
-            None => body_read && self.api.token_field_required(),
+            None => body_read && self.api.output_token_field_required(),
         };
-        refused.then_some(TokenLimitError {
-            field: self.api.token_field(),
+        refused.then_some(OutputCeilingError {
+            field: self.api.output_token_field(),
             requested,
             limit: self.limit,
         })
@@ -158,7 +158,7 @@ pub enum Refusal {
     Model(Box<str>),
     /// The output-token maximum is above the ceiling, or missing where the
     /// ceiling requires it.
-    TokenLimit(TokenLimitError),
+    OutputCeiling(OutputCeilingError),
     /// A known endpoint whose API no route serves.
     NoRoute { api: Api, path: Box<str> },
     /// A path or method the gateway does not proxy.
@@ -174,7 +174,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => 400,
             Self::Unauthenticated => 401,
-            Self::Model(_) | Self::TokenLimit(_) => 403,
+            Self::Model(_) | Self::OutputCeiling(_) => 403,
             Self::NoRoute { .. } | Self::NotProxied => 404,
             Self::TooLarge => 413,
         }
@@ -188,7 +188,9 @@ impl Refusal {
             Self::NotProxied => Some("unsupported endpoint"),
             Self::Unauthenticated => Some("invalid or missing gateway token"),
             Self::TooLarge => Some("request body exceeds the gateway limit"),
-            Self::Invalid(_) | Self::Model(_) | Self::TokenLimit(_) | Self::NoRoute { .. } => None,
+            Self::Invalid(_) | Self::Model(_) | Self::OutputCeiling(_) | Self::NoRoute { .. } => {
+                None
+            }
         }
     }
 
@@ -197,7 +199,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => "invalid_request_error",
             Self::Unauthenticated => "authentication_error",
-            Self::Model(_) | Self::TokenLimit(_) => "permission_error",
+            Self::Model(_) | Self::OutputCeiling(_) => "permission_error",
             Self::NoRoute { .. } | Self::NotProxied => "not_found_error",
             Self::TooLarge => "request_too_large",
         }
@@ -209,7 +211,7 @@ impl fmt::Display for Refusal {
         match self {
             Self::Invalid(e) => f.write_str(e.as_str()),
             Self::Model(model) => write!(f, "this gateway token may not use the model {model:?}"),
-            Self::TokenLimit(e) => e.fmt(f),
+            Self::OutputCeiling(e) => e.fmt(f),
             Self::NoRoute { api, path } => {
                 write!(f, "no route serves {path}: add {}", api.route().sections())
             }
@@ -223,7 +225,7 @@ impl fmt::Display for Refusal {
 /// An output-token maximum above the request's ceiling, or missing where
 /// the ceiling requires it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenLimitError {
+pub struct OutputCeilingError {
     /// The output-token field's name.
     pub field: &'static str,
     /// `None`: the request did not set the field.
@@ -231,7 +233,7 @@ pub struct TokenLimitError {
     pub limit: u64,
 }
 
-impl fmt::Display for TokenLimitError {
+impl fmt::Display for OutputCeilingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.requested {
             Some(requested) => write!(
@@ -248,7 +250,7 @@ impl fmt::Display for TokenLimitError {
     }
 }
 
-impl std::error::Error for TokenLimitError {}
+impl std::error::Error for OutputCeilingError {}
 
 #[cfg(test)]
 mod tests;
