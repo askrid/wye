@@ -78,6 +78,19 @@ pub fn list_items(section: &str) -> Vec<String> {
     items
 }
 
+/// The paragraph that opens a document, before its first section, split at
+/// its bold tagline: `**Gateways got fat.** Wye is…` gives the tagline and
+/// the rest.
+pub fn opening(doc: &str) -> Option<(&str, &str)> {
+    let intro = doc.split("\n## ").next()?;
+    let paragraph = intro
+        .split("\n\n")
+        .map(str::trim)
+        .find(|paragraph| paragraph.starts_with("**"))?;
+    let (tagline, rest) = paragraph.strip_prefix("**")?.split_once("**")?;
+    Some((tagline, rest.trim()))
+}
+
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?

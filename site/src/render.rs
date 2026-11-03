@@ -11,6 +11,7 @@
 //! | `{{metric NAME\|DECIMALS}}` | a metric from `bench/baseline.json`; `NAME/1000` divides it first |
 //! | `{{fence FILE\|PREFIX}}` | the first fenced block in FILE whose first line starts with PREFIX, highlighted |
 //! | `{{field FILE\|PREFIX\|KEY}}` | KEY's value in that fenced block, read as a JSON object |
+//! | `{{opening FILE\|PART}}` | FILE's opening paragraph: its bold `tagline`, the `rest` rendered, or the rest as plain `text` |
 //! | `{{section FILE\|HEADING}}` | the Markdown under `## HEADING` in FILE, rendered |
 //! | `{{item FILE\|HEADING\|LEAD}}` | the item of that section's list whose bold lead starts with LEAD, rendered |
 //! | `{{rest FILE\|HEADING}}` | every item of that list the page has not placed yet, so a new one is never dropped |
@@ -122,6 +123,27 @@ impl Sources {
                     serde_json::Value::String(text) => text.clone(),
                     other => other.to_string(),
                 }))
+            }
+            ("opening", [file, part]) => {
+                let (tagline, rest) = markdown::opening(self.document(file)?).ok_or_else(|| {
+                    format!(
+                        "{file}: no opening paragraph with a bold tagline before its first section"
+                    )
+                })?;
+                match *part {
+                    "tagline" => Ok(markdown::escape(tagline)),
+                    "rest" => Ok(markdown::to_html(rest, &self.repo_url, file)),
+                    "text" => Ok(markdown::escape(
+                        &rest
+                            .replace(['`', '*'], "")
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    )),
+                    other => Err(format!(
+                        "opening {file}: {other:?} is not tagline, rest, or text"
+                    )),
+                }
             }
             ("section", [file, heading]) => {
                 let text = markdown::section(self.document(file)?, heading)
@@ -320,7 +342,8 @@ mod tests {
             .collect(),
             documents: [(
                 "README.md",
-                "# Wye\n\n```console\n$ wye report\n3 requests\n```\n\n\
+                "# Wye\n\n**Gateways got fat.** Wye is one\n`binary`.\n\n\
+                 ```console\n$ wye report\n3 requests\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
                  ## Performance\n\nNumbers.\n\nWhere others lead: one, on\n[two](docs/b.md).\n\n\
@@ -347,6 +370,17 @@ mod tests {
         let mut stable = sources();
         stable.version = "1.0.0".into();
         assert_eq!(render("{{release}}", &stable).unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn splits_the_opening_paragraph_at_its_tagline() {
+        let page =
+            "{{opening README.md|tagline}}|{{opening README.md|rest}}|{{opening README.md|text}}";
+        assert_eq!(
+            render(page, &sources()).unwrap(),
+            "Gateways got fat.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary."
+        );
+        assert!(render("{{opening README.md|title}}", &sources()).is_err());
     }
 
     #[test]
