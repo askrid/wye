@@ -4,7 +4,7 @@
 
 # Wye
 
-**Nothing stops at a wye.** Wye is a gateway for Claude Code, Codex, and apps on the provider SDKs: one binary and one TOML file, no database, no dashboard, and each provider's own API passed through without translation.
+**An LLM gateway without bloat.** Wye sits between Claude Code, Codex, or apps on the provider SDKs and the model APIs they call: one binary and one TOML file, no database, no dashboard, and each provider's own API passed through without translation.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases) [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
