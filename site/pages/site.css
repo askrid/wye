@@ -77,7 +77,7 @@
   --output: 0.9375rem;
   --caption: 0.8125rem;
   --rail: 1.15625rem;
-  /* The headline is README's tagline, wrapped and balanced: "An LLM
+  /* The headline is README's tagline, wrapped and balanced: "LLM
      gateway" over "without bloat.". The longer line is 14 advances of
      0.58 em (0.6 less the tracking), 8.12 em: / 11.3 sets it across about
      72% of the column, / 8.6 on a phone (below) about 94%. */
