@@ -29,12 +29,11 @@ What Wye itself adds:
 |---|---|---|
 | Latency per request (p50) | 0.28 ms | 0.22 ms |
 | CPU per request | 120 µs | 161 µs |
-| CPU per streamed token event | 18.5 µs | |
 | Heap allocations per streamed event | 0 | |
 | 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
-| Memory per open stream at that load | | 9.3 KB |
+| CPU per event and memory per open stream at that load | | 37 µs, 9.3 KB |
 
-A heavy Claude Code user (about five concurrent streams) takes about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The per-event delay doesn't add up over a stream, so tokens per second don't change.
+A heavy Claude Code user (about five concurrent streams) takes about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The per-event delay doesn't add up over a stream, so tokens per second don't change. On my laptop, 35 hours of Claude Code sessions (2,562 requests) took 31 s of CPU and 25 MB of memory ([in use](docs/benchmarks.md#in-use)).
 
 Every commit that changes code is benchmarked against its parent, in alternating rounds on the same machine (`scripts/check.sh`). If it makes Wye slower or heavier beyond the commit gate's tolerances, it doesn't get in.
 

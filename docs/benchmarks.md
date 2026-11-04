@@ -84,6 +84,24 @@ Profiles of the plain, TLS, and paced paths, memory per stream by owner, and the
 
 **TLS uploads** (open gap: KrakenD 2.0 vs Wye 2.6-3.1 ms CPU per MB). Like for like over HTTP/1.1, Wye is ~10% behind; HTTP/2 adds ~9% more. Of HTTP/2 busy samples: 45% rustls `writev`, 16% AES-GCM, 15% `recvfrom`, 10% the h2 mutex; h2 flushes one 16 KiB frame at a time (64 KiB frames: 2.59 ms; 256 KiB: 2.29 ms). Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (~2 MB/s at 30 ms) unless Anthropic grows it; `scripts/upload-latency.sh` measures that against the real API (needs an API key). The default stays HTTP/2 until it does.
 
+## In use
+
+The gateway this laptop runs for its own Claude Code sessions, measured 2026-11-04: `wye 0.1.0-rc.1` built 2026-11-03, the passthrough setup, api.anthropic.com over TLS + HTTP/2 on Wi-Fi. CPU from `ps`, bytes from the upstream connections (`nettop`), requests from the usage log.
+
+| Measure | Value |
+|---|---|
+| Uptime; requests; output tokens | 35 h; 2,562; 2.3 million |
+| CPU, all of it | 31.4 s (12 ms per request) |
+| Memory (RSS; physical footprint) | 24.8 MB; 18.5 MB |
+| CPU while no request is open | none measurable |
+| 8 busy minutes: requests, bytes sent upstream, bytes back | 28; 100 MB; 0.8 MB |
+| 8 busy minutes: CPU | 0.61 s, 6.1 ms per MB sent |
+| Busiest 30 s | 3.3 ms of CPU per second |
+
+Claude Code resends its context with every request, 3.6 MB per request in those minutes, so uploads, not streamed events, set the cost. The lab's unit costs predict 0.38 s of the 0.61: about 2 ms per MB on this path (a plain client and a TLS upstream, between the two upload figures above) and 37 µs for each of about 5,000 paced events. The other 2.3 ms per MB is sending over a real network rather than loopback: curl, uploading 32 MB over TLS from the same laptop, used 4.1 ms of CPU per MB. A client calling the provider directly pays that itself.
+
+The busiest 30 s used a third of the [sizing estimate](operations.md#sizing-estimate) for a heavy user (10 ms per second), and the memory is within the 15-27 MB at idle of the comparison runs below.
+
 ## Against KrakenD
 
 KrakenD 3.0.1 CE in pass-through (`no-op` encoding) at its best case (no access log); Wye keeps its usage log. Single run, all 16 threads, 2026-10-15.
