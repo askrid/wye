@@ -90,7 +90,7 @@ A release: bump `version` in `crates/wye/Cargo.toml`, commit through the gate, t
 The variants, all on the plain path:
 
 - **`auth_`, `models_`, `diag_`, `otlp_`**: per-request scenarios; `models_` and `diag_` also uploads.
-- **`bedrock_`**: Wye with a Claude route to one Bedrock upstream: every request held until its `model` is read ([the hold](glossary.md)) and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations.
+- **`bedrock_`**: Wye with a Claude route to one Bedrock upstream: every request held until its `model` is read ([the hold](glossary.md#requests-and-where-they-go)) and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations.
 - **`failover_`**: Wye with a Claude route of two upstreams (both the mock) and `failover`: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload.
 - **`refused_`**: `failover_` whose first upstream, tried first (`select = "ordered"`), rejects every fourth request with `429` before reading it: per-request scenarios and uploads; failed requests gated (uploads allow 3: one rejected after its body was delivered whole is answered as it is).
 - **`openai_`**: Wye on `[routes.openai]`; the mock answers `/v1/responses` with OpenAI Responses JSON and streams (created, text deltas, completed with usage): per-request scenarios and CPU per event, so the Responses scanners are gated.

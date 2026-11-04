@@ -43,11 +43,11 @@ Open:
 - A Docker Swarm service updating without dropping streams.
 - [Narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms) for a subagent or a CI job.
 
-Exit: a team runs Claude Code through a shared Wye with per-developer gateway tokens and sees usage per developer and session in its existing [OpenTelemetry backend](glossary.md).
+Exit: a team runs Claude Code through a shared Wye with per-developer gateway tokens and sees usage per developer and session in its existing [OpenTelemetry backend](glossary.md#usage-and-cost).
 
 ### M1b: agent-aware visibility
 
-Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md), cache-miss reasons, session traces, `wye report`, and tool calls.
+Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md#usage-and-cost), cache-miss reasons, session traces, `wye report`, and tool calls.
 
 Open:
 
@@ -119,7 +119,7 @@ Exit: a team runs Claude Code and Codex through one Wye, under one policy, and s
 
 ### M4: Claude across providers and accounts
 
-Built: routes with several [upstreams](glossary.md), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-upstreams)).
+Built: routes with several [upstreams](glossary.md#requests-and-where-they-go), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-upstreams)).
 
 Open (the auth questions are in [open design decisions](architecture.md#open-design-decisions)):
 
@@ -134,7 +134,7 @@ Exit: a team serves Claude Code from at least two providers, keeps prompt-cache 
 
 ### M5: benchmarks and optimization
 
-Started early: the [commit gate](glossary.md) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
+Started early: the [commit gate](glossary.md#development) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
 
 Open:
 

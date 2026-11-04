@@ -17,7 +17,7 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 
 Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.99 or later). Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases).
 
-`wye init` writes a config, never over an existing file, and prints the next steps. It has three [setups](glossary.md):
+`wye init` writes a config, never over an existing file, and prints the next steps. It has three [setups](glossary.md#the-product):
 
 | Command | For | Config |
 |---|---|---|
@@ -29,7 +29,7 @@ Where the credentials come from:
 
 - **Passthrough** (`wye init`): each caller's own credential goes through: Claude Code's claude.ai login, or an API key. The gateway holds no secret.
 - **API key** (`wye init --api-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends.
-- **Team** (`wye init --team`): callers present [gateway tokens](glossary.md). The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/issuer.key` (mode 600) unless one is there to reuse.
+- **Team** (`wye init --team`): callers present [gateway tokens](glossary.md#access). The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/issuer.key` (mode 600) unless one is there to reuse.
 
 The first two listen on loopback only; `--team` listens on every interface. `--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--team`, in `OPENAI_API_KEY`).
 
@@ -61,8 +61,8 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 `wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OTel backend. The [README](../README.md) shows a sample.
 
-- **First lines:** requests, sessions, outcomes, and error statuses. A 429 [rejection](glossary.md) is an answer, so its outcome reads `completed`, and its status is listed.
-- **By [request class](glossary.md), by [upstream](glossary.md):** tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and cost with `[pricing]`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
+- **First lines:** requests, sessions, outcomes, and error statuses. A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed.
+- **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and cost with `[pricing]`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
 - **Cache misses:** a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
 - **Failovers, upgrade issues:** when records have them.
 - **Tools:** calls the model requested, and calls and time Claude Code reported.

@@ -1,6 +1,6 @@
 # Benchmarks
 
-Wye's [overhead](glossary.md), how it is measured, and how it compares. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS) over loopback against a mock upstream, release build, median of 3 runs. They are lab results, not production measurements.
+Wye's [overhead](glossary.md#usage-and-cost), how it is measured, and how it compares. Unless noted, numbers come from one laptop (i9-9880H, 16 threads, macOS) over loopback against a mock upstream, release build, median of 3 runs. They are lab results, not production measurements.
 
 ## Method
 
@@ -52,7 +52,7 @@ Variants (plain path), each against plain Wye:
 - **`diag_`**, cache diagnostics: +2 allocations per request; +75% upload CPU on Claude Code-shaped bodies (2.6 vs 1.49 ms/MB), hence per-session sampling.
 - **`otlp_`**, OTLP export: within noise (121.5 vs 120.5 µs CPU per request).
 - **`openai_`**, OpenAI Responses: 25 µs CPU per event against 18.5 on Messages, because the mock's Responses events are ~50 bytes larger; with matched sizes (`WYE_BENCH_EVENT_BYTES=114` on Messages), 17.6-17.9 against 17.1-17.3 µs, so the Responses scanner adds about 0.5 µs per event in a real relay (caches, split lines), more than in its micro-benchmark below.
-- **`bedrock_`**, a Claude route to Bedrock: +5 allocations per request ([the hold](glossary.md), the model's copy, the prefixed id, the new `content-length`, one unattributed); CPU within noise (130.5 vs 120.5 µs, `models_` 124).
+- **`bedrock_`**, a Claude route to Bedrock: +5 allocations per request ([the hold](glossary.md#requests-and-where-they-go), the model's copy, the prefixed id, the new `content-length`, one unattributed); CPU within noise (130.5 vs 120.5 µs, `models_` 124).
 - **`failover_`**, a route with failover: +7 allocations per request; +25% CPU per MB on Claude Code-shaped uploads (1.86 vs 1.49 ms/MB) and 99.5 vs 40.5 allocations, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](research.md#performance-techniques)).
 - **`refused_`**, one upstream rejects one request in four: the rejected requests are resent, 149.5 µs CPU per request; no failed requests.
 

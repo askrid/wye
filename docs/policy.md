@@ -4,7 +4,7 @@ What Wye authorizes and enforces per request, what it cannot enforce without sha
 
 ## Gateway tokens
 
-[Provider keys](glossary.md) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md). Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every proxied request must carry a valid token.
+[Provider keys](glossary.md#requests-and-where-they-go) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md#access). Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every proxied request must carry a valid token.
 
 Claims of Wye's own tokens (identity-provider tokens are below):
 
@@ -31,9 +31,9 @@ Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 
 The key fixes the algorithm; the token never chooses it: Ed25519 for Wye's own tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
 
-Model permissions: `[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md).
+Model permissions: `[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md#models).
 
-- **[The hold](glossary.md)**: with either list, Wye holds the request body only until its top-level `model` is read (Claude Code sends it first, so usually one chunk). Without either list (or an alias, an output-token ceiling, or a provider with its own model ids), the body is not read.
+- **[The hold](glossary.md#requests-and-where-they-go)**: with either list, Wye holds the request body only until its top-level `model` is read (Claude Code sends it first, so usually one chunk). Without either list (or an alias, an output-token ceiling, or a provider with its own model ids), the body is not read.
   - `server.max_held_request_bytes` bounds held bytes across all requests together (default 64 MiB), each chunk counting at least 1 KiB for the memory it pins. Beyond it: an overload error, or `413` when the request's own chunks alone would pass it, since no retry could succeed.
   - A client that stalls while held gets `408`, and its held bytes are released ([limits](operations.md#failure-behavior)).
 - **Refusals**, before upstream contact:
@@ -51,7 +51,7 @@ Identity-provider tokens: Wye also accepts JWTs issued directly by a trusted OID
 Each `[[auth.issuers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). Wye's own `issuer`, `audience`, and `[[auth.keys]]` become optional: a deployment can trust only its IdP.
 
 - **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
-- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye's own tokens (`max_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
+- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye's own tokens (`max_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
 - **Grants**: `[[auth.issuers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
 - **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config; the per-connection cache applies as to Wye's own tokens.
 - **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
@@ -140,7 +140,7 @@ Which price applies:
 - **Fields**: `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config.
 - **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - **Matching**: by the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
-- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers-and-upstreams)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
+- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers-and-upstreams)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 
 How cost is computed:
 
@@ -176,7 +176,7 @@ Wye has no external store and no coordination by design, so it cannot enforce ex
 | Global concurrent streams | No | Needs coordinated permits |
 | Team or monthly budget | Not in Wye; delegated to the [provider](#provider-held-budgets) | Needs an authoritative ledger; the provider has one |
 | Single-use gateway tokens | No | Needs replay tracking |
-| Historical usage and cost charts | Via your [OpenTelemetry backend](glossary.md) | Observation, not enforcement |
+| Historical usage and cost charts | Via your [OpenTelemetry backend](glossary.md#usage-and-cost) | Observation, not enforcement |
 | Provider-side quotas | External | Wye does not depend on them for correctness |
 
 Rate limiting is stateful even when the state is ephemeral, so a local token bucket is excluded. External ingress or application rate limiting is a deployment responsibility.

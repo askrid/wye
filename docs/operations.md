@@ -87,11 +87,11 @@ Not checked yet: model availability per upstream.
 
 A refusal prints the status and error the gateway would send. The body is read as the gateway reads it: up to its `model`, then the rest when permissions or a ceiling apply. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the gateway answers a compressed or non-UTF-8 body under a policy with `415`).
 
-**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md), after aliases), `upstream`, `path`, `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases, and the test suite runs them.
+**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models), after aliases), `upstream`, `path`, `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. [`examples/policy-tests/`](../examples/policy-tests) has a config and four cases, and the test suite runs them.
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
-- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_token_ttl_secs`, a newly trusted [issuer](glossary.md) (a signing key, Wye's own tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
+- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye's own tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
 - Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows; output-token ceilings and trusted issuers compare by value.
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
@@ -123,7 +123,7 @@ Short-lived tokens need a command that fetches a fresh one, so nobody pastes tok
 
 `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over the helper, so leave both unset (and run `wye claude` without `--token-file` or `WYE_TOKEN`). The helper can be distributed through managed settings. Each new token takes one full verification per connection, then the [per-connection cache](policy.md#gateway-tokens) applies.
 
-In GitHub Actions, the job's [identity-provider token](glossary.md) (GitHub's OIDC token) is the gateway token, so the repository holds no secret. Wye trusts the issuer ([`[[auth.issuers]]`](policy.md#gateway-tokens)):
+In GitHub Actions, the job's [identity-provider token](glossary.md#access) (GitHub's OIDC token) is the gateway token, so the repository holds no secret. Wye trusts the issuer ([`[[auth.issuers]]`](policy.md#gateway-tokens)):
 
 ```toml
 [[auth.issuers]]
@@ -221,7 +221,7 @@ For container platforms, `upstream.api_key_file` reads the provider key from a m
 
 ### Sizing (estimate)
 
-From the TLS-path benchmark on a laptop, not yet measured on EC2: Wye's [overhead](glossary.md) for a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) is about 10 ms of CPU per second, about 1% of a core, and about 250 KB of memory (49 KB of heap per stream after a large upload, from the allocation benchmark). A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
+From the TLS-path benchmark on a laptop, not yet measured on EC2: Wye's [overhead](glossary.md#usage-and-cost) for a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) is about 10 ms of CPU per second, about 1% of a core, and about 250 KB of memory (49 KB of heap per stream after a large upload, from the allocation benchmark). A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
 
 Wye does not lower a stream's tokens per second. It adds a roughly constant delay per event that does not accumulate ([measured](benchmarks.md#current-harness-and-baseline)), small against the provider's 10-20 ms between tokens. Model permissions and cache diagnostics add overhead per request and per uploaded MB, not per streamed event.
 
@@ -239,7 +239,7 @@ The usage record, field by field:
 - `outcome` (`completed` | `failed` | `cancelled` | `gateway_error`): recorded when the response body is dropped, so every outcome is counted; a client that leaves before the response headers is `cancelled` with `status` `499`.
 - `duration_ms`, `headers_ms`: milliseconds; `headers_ms` = time to response headers.
 - `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
-- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
+- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md#requests-and-where-they-go) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (below).
 
