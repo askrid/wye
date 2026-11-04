@@ -50,7 +50,7 @@ wye claude            # Claude Code through the gateway, signed in as usual
 wye report            # what it recorded
 ```
 
-This default setup forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases). The [guide](docs/guide.md) covers the other setups: a team gateway behind HTTPS, applications on the official SDKs, upgrades, and troubleshooting.
+This default setup forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases). The [guide](docs/guide.md) covers the other setups: a gateway that holds a provider key, a shared gateway behind HTTPS for a team or an app's services, upgrades, and troubleshooting.
 
 After a short Claude Code session:
 

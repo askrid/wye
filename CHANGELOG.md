@@ -3,6 +3,7 @@
 ## Unreleased
 
 - License: MIT, instead of WTFPL.
+- Breaking: `wye init --api-key` is now `--provider-key`, and `--team` is now `--shared`. The setups come from two choices, who can reach the gateway and whose credential pays, so the flags name those choices instead of a mechanism and an audience: a shared gateway serves a team or an app's services. `--shared` with `--provider-key` is no longer an error, since a shared gateway always holds the provider key.
 - Examples, one directory per use: `examples/developer/` (was `examples/subscription.toml`), `examples/team/` (developers through SSO, CI through GitHub Actions tokens, two keys with failover), and `examples/app/` (a gateway token per service, aliases with a canary, a second provider for failover, OpenAI), the last two with policy tests that the test suite runs. `examples/policy-tests/` is gone; its config trusted a public test key.
 - The sample price tables (README, `docs/policy.md`, `examples/wye.toml`) priced cache reads on Opus 5.5 and Sonnet 5.5 at 0.1 times input; Anthropic charges 0.05 times. A table copied from them counts cache reads at twice their cost: set `cache_read = "0.20"` for Opus 5.5 and `"0.10"` for Sonnet 5.5.
 - `examples/wye.toml` sets the `[server]` and `[upstream]` options live at their defaults instead of in comments, so which keys exist is visible.

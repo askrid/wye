@@ -6,7 +6,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 
 - **Wye**: the product. **The gateway**: a running Wye process. **Replica**: one of several identical gateways behind a load balancer. Not: the server, the proxy.
 - **Config**: the one TOML file a gateway reads at startup (`wye.toml`); every option, with its default: [examples/wye.toml](../examples/wye.toml). Not: policy (for the whole file).
-- **Setup**: one of the three starting points `wye init` writes: **passthrough** (the default: the caller's own login or key, no secret in Wye), **api-key** (`--api-key`: Wye holds the provider key), **team** (`--team`: gateway tokens, all interfaces, and the provider key from the deployment's environment).
+- **Setup**: what `wye init` writes, from two choices: who can reach the gateway (this machine, or other machines with gateway tokens) and whose credential pays (the caller's, or a provider key Wye holds). Three setups result: **passthrough** (the default: this machine, the caller's own login or key, no secret in Wye), **provider key** (`--provider-key`: this machine, Wye holds the provider key), **shared** (`--shared`: gateway tokens, every interface, the provider key from the deployment's environment). A shared gateway cannot pass callers' credentials through. Not: team setup, api-key setup.
 
 ## Requests and where they go
 

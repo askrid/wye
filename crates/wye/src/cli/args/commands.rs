@@ -125,23 +125,25 @@ pub const COMMANDS: &[Command] = &[
         summary: "Write a starter config",
         options: &[
             Opt::flag(
-                "api-key",
-                "The gateway holds an Anthropic API key, in a file",
+                "provider-key",
+                "The gateway holds an Anthropic API key, in a file (still this machine only)",
             ),
             Opt::flag(
-                "team",
-                "A shared gateway: tokens, a signing key, listens on all interfaces",
+                "shared",
+                "Reachable from other machines: gateway tokens, a signing key, the provider key from the environment",
             ),
             Opt::flag("openai", "Also serve the OpenAI APIs (for Codex)"),
             Opt::value(
                 "out",
                 "path",
-                "Where to write it (default: ~/.wye/wye.toml; with --team, ./wye.toml)",
+                "Where to write it (default: ~/.wye/wye.toml; with --shared, ./wye.toml)",
             ),
         ],
-        notes: "By default, for you on this machine: Claude Code's login, or any API key a \
-                caller sends, goes through, and the gateway holds no secret. Never \
-                overwrites a file.",
+        notes: "Two choices: who can reach the gateway (this machine, or --shared) and \
+                whose credential pays (the caller's, or --provider-key). By default, \
+                for you on this machine: Claude Code's login, or any API key a caller \
+                sends, goes through, and the gateway holds no secret. Never overwrites \
+                a file.",
         ..BASE
     },
     Command {
@@ -153,7 +155,7 @@ pub const COMMANDS: &[Command] = &[
             "path",
             "Where to write it (default: ~/.wye/issuer.key)",
         )],
-        notes: "Prints the public half for [[auth.keys]]. `wye init --team` makes the first \
+        notes: "Prints the public half for [[auth.keys]]. `wye init --shared` makes the first \
                 key; this one is for rotation.",
         ..BASE
     },

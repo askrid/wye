@@ -109,7 +109,7 @@ http_version = "auto"
 # api_key_env = "OPENAI_API_KEY"
 
 # Gateway tokens. Required to listen beyond loopback; incompatible with
-# forward_caller_credential. `wye init --team` writes this section and a
+# forward_caller_credential. `wye init --shared` writes this section and a
 # signing key; gateway tokens are issued offline with the signing key:
 #   wye token issue alice --ttl 1d
 # Claude Code sends the gateway token with ANTHROPIC_AUTH_TOKEN (or

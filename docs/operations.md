@@ -25,7 +25,7 @@ A user's files live in `~/.wye`, or `$WYE_HOME`:
 | `wye.toml` | The config | `wye init` | every command that takes `-c` |
 | `usage.jsonl` | Usage records | `wye service`, or your redirect | `wye report` |
 | `wye.log` | The background gateway's messages | `wye service` | you, when it does not answer |
-| `issuer.key` | The signing key, mode 600 | `wye init --team`, `wye token keygen` | `wye token issue`; never the gateway |
+| `issuer.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
 | `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
 
 A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.

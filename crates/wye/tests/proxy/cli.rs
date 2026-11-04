@@ -383,9 +383,9 @@ fn the_defaults_work_on_a_fresh_home() {
     let report = err(&setup.run(&["report"]));
     assert!(report.contains("wye service install"), "{report}");
 
-    // `init --team` writes where a team reviews it, and keeps the key out.
+    // `init --shared` writes where its reviewers see it, and keeps the key out.
     std::fs::remove_file(setup.repo.join("wye.toml")).unwrap();
-    assert!(setup.run(&["init", "--team"]).status.success());
+    assert!(setup.run(&["init", "--shared"]).status.success());
     assert!(setup.repo.join("wye.toml").exists());
     assert!(setup.home.join(".wye/issuer.key").exists());
     let issued = setup.run(&["token", "issue", "alice", "-c", "wye.toml"]);

@@ -17,21 +17,18 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 
 Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.99 or later). Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases).
 
-`wye init` writes a config, never over an existing file, and prints the next steps. It has three [setups](glossary.md#the-product):
+`wye init` writes a config, never over an existing file, and prints the next steps. Its [setup](glossary.md#the-product) answers two questions: who can reach the gateway, and whose credential pays the provider.
 
-| Command | For | Config |
+| | The caller's own credential | A provider key the gateway holds |
 |---|---|---|
-| `wye init` | You, on this machine | `~/.wye/wye.toml` |
-| `wye init --api-key` | You, with a key the gateway holds | `~/.wye/wye.toml` |
-| `wye init --team` | A shared gateway | `./wye.toml`, for the repository it is reviewed in |
+| **This machine only** (loopback) | `wye init`: you, with your claude.ai login or API key | `wye init --provider-key`: you with a company key, or a sidecar beside one app |
+| **Other machines** (gateway tokens) | not possible: a shared gateway cannot forward callers' credentials | `wye init --shared`: a team, or an app's services |
 
-Where the credentials come from:
+- **Passthrough** (`wye init`): each caller's own credential goes through: Claude Code's claude.ai login, or an API key. The gateway holds no secret. Config: `~/.wye/wye.toml`.
+- **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`; for a sidecar, `--out` puts it in the app's repository.
+- **Shared** (`--shared`): callers present [gateway tokens](glossary.md#access), and the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/issuer.key` (mode 600) unless one is there to reuse. Config: `./wye.toml`, for the repository it is reviewed in.
 
-- **Passthrough** (`wye init`): each caller's own credential goes through: Claude Code's claude.ai login, or an API key. The gateway holds no secret.
-- **API key** (`wye init --api-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends.
-- **Team** (`wye init --team`): callers present [gateway tokens](glossary.md#access). The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/issuer.key` (mode 600) unless one is there to reuse.
-
-The first two listen on loopback only; `--team` listens on every interface. `--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--team`, in `OPENAI_API_KEY`).
+`--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
 
 With the default, a login counts against your plan and an API key bills the API. As without Wye, an exported `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` takes over from your login.
 
@@ -45,7 +42,7 @@ wye service status
 wye service uninstall   # the config and the log stay
 ```
 
-A service does not inherit your shell's environment, so it refuses a config with secrets in environment variables; `wye init` and `wye init --api-key` write none. [Running as a service](operations.md#running-as-a-service) has the detail.
+A service does not inherit your shell's environment, so it refuses a config with secrets in environment variables; `wye init` and `wye init --provider-key` write none. [Running as a service](operations.md#running-as-a-service) has the detail.
 
 In a terminal:
 
@@ -76,7 +73,7 @@ No image is published yet, so build one from a clone of Wye. Then, in your confi
 
 ```bash
 docker build -t wye .                               # in the clone
-wye init --team                                     # ./wye.toml and ~/.wye/issuer.key
+wye init --shared                                   # ./wye.toml and ~/.wye/issuer.key
 wye token issue alice -c wye.toml --out alice.token # valid for a week
 docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
@@ -91,7 +88,7 @@ wye claude
 - Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.
 - `wye token issue --models` and `--max-output-tokens` narrow what one token may do; it can never widen the config ([gateway tokens](policy.md#gateway-tokens)).
 - A token cannot be revoked, only outlived, so keep lifetimes short ([revocation](policy.md#revocation)). `apiKeyHelper` and CI identity avoid pasting tokens ([token renewal](operations.md#token-renewal)).
-- `wye codex` needs `[routes.openai]`: `wye init --team --openai`, and `-e OPENAI_API_KEY` for the container.
+- `wye codex` needs `[routes.openai]`: `wye init --shared --openai`, and `-e OPENAI_API_KEY` for the container.
 - `wye policy-diff` in CI flags a config change that widens access.
 - [examples/team/](../examples/team) is a complete team config with its policy tests: developers through SSO, CI jobs through GitHub Actions tokens, two Anthropic keys with failover, prices, and telemetry.
 
@@ -104,11 +101,16 @@ ANTHROPIC_BASE_URL=https://wye.example.com ANTHROPIC_API_KEY=<key> python app.py
 OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<key> node app.js
 ```
 
+Wye stands between your backend and the provider, never between your users and your backend: your users sign in to your backend, which keeps their authentication and quotas, and only the backend calls Wye. Two places to run it:
+
+- **Beside the app** (`wye init --provider-key --out <path>`): a sidecar on the same host or pod, on loopback, holding the provider key. No tokens to manage; without `[auth]`, records name no subject, so there are no per-service model permissions, output-token ceilings, or canaries by subject.
+- **One internal gateway for several services** (`wye init --shared`): each service gets its own gateway token, so permissions, ceilings, aliases, and usage are per service.
+
 The key depends on the gateway:
 
 - With `[auth]`: a gateway token, which Wye reads from `x-api-key` or `Authorization: Bearer`.
 - The default `wye init`: the app's own API key, which goes through.
-- A gateway that holds a provider key (`wye init --api-key`): any non-empty placeholder, since the SDKs refuse to send a request without a key.
+- A gateway that holds a provider key (`wye init --provider-key`): any non-empty placeholder, since the SDKs refuse to send a request without a key.
 
 Streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add.
 

@@ -17,19 +17,23 @@ use super::{
     token,
 };
 
-/// Who the gateway is for.
+/// Who can reach the gateway, and whose credential pays: a local gateway
+/// passes callers' credentials through or holds a provider key; a shared one
+/// always holds the provider key, since it cannot forward credentials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// One developer: each caller's own credential goes through, whether
     /// Claude Code's login or an API key, so the gateway holds no secret for
     /// Claude.
     Passthrough,
-    /// One developer whose gateway holds an Anthropic API key, read from a
-    /// file next to the config, so a background service finds it too.
-    ApiKey,
+    /// A local gateway that holds an Anthropic API key, read from a file
+    /// next to the config, so a background service finds it too: one
+    /// developer with a company key, or a sidecar beside one app.
+    ProviderKey,
     /// A shared gateway: gateway tokens (`[auth]`), all interfaces, and the
-    /// provider key from the deployment's environment.
-    Team,
+    /// provider key from the deployment's environment: a team, or an app's
+    /// services.
+    Shared,
 }
 
 /// What `wye init` writes, and where.
@@ -39,13 +43,13 @@ pub struct InitOptions {
     /// Also serve OpenAI Responses and Chat Completions (for Codex).
     pub openai: bool,
     pub out: PathBuf,
-    /// Wye's home directory, where `--team` keeps the signing key.
+    /// Wye's home directory, where `--shared` keeps the signing key.
     pub home: Option<PathBuf>,
 }
 
 impl InitOptions {
     /// The config text, validated; `public_key` is the signing key's public
-    /// half, for `Mode::Team`.
+    /// half, for `Mode::Shared`.
     pub fn config(&self, public_key: &str) -> Result<String, String> {
         let (listen, credential, openai_key) = match self.mode {
             Mode::Passthrough => (
@@ -55,13 +59,13 @@ impl InitOptions {
                  forward_caller_credential = true",
                 "api_key_file = \"openai.key\"",
             ),
-            Mode::ApiKey => (
+            Mode::ProviderKey => (
                 "127.0.0.1:8080",
                 "# Read at startup from this file, next to this config:\n\
                  api_key_file = \"anthropic.key\"",
                 "api_key_file = \"openai.key\"",
             ),
-            Mode::Team => (
+            Mode::Shared => (
                 "0.0.0.0:8080",
                 "api_key_env = \"ANTHROPIC_API_KEY\"",
                 "api_key_env = \"OPENAI_API_KEY\"",
@@ -80,7 +84,7 @@ impl InitOptions {
                  base_url = \"https://api.openai.com\"\n{openai_key}\n"
             ));
         }
-        if self.mode == Mode::Team {
+        if self.mode == Mode::Shared {
             text.push_str(&format!(
                 "\n# Gateway tokens: `wye token issue <name>` signs one with the key whose\n\
                  # public half is below. Give each gateway its own audience.\n\
@@ -92,7 +96,7 @@ impl InitOptions {
         Ok(text)
     }
 
-    /// Where `--team` keeps the signing key.
+    /// Where `--shared` keeps the signing key.
     fn key_path(&self) -> Result<PathBuf, String> {
         self.home
             .as_ref()
@@ -120,10 +124,10 @@ impl InitOptions {
         let mut steps: Vec<(String, String)> = vec![];
         let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
         let mut keys = Vec::new();
-        if self.mode == Mode::ApiKey {
+        if self.mode == Mode::ProviderKey {
             keys.push(key("Anthropic API key", "anthropic.key"));
         }
-        if self.openai && self.mode != Mode::Team {
+        if self.openai && self.mode != Mode::Shared {
             keys.push(key("OpenAI key", "openai.key"));
         }
         if !keys.is_empty() {
@@ -135,7 +139,7 @@ impl InitOptions {
                 String::new(),
             ));
         }
-        if self.mode == Mode::Team {
+        if self.mode == Mode::Shared {
             let keys = if self.openai {
                 "ANTHROPIC_API_KEY and OPENAI_API_KEY"
             } else {
@@ -147,7 +151,7 @@ impl InitOptions {
             "Check the keys, files, and endpoints:".to_owned(),
             format!("wye doctor{c}"),
         ));
-        if self.mode == Mode::Team {
+        if self.mode == Mode::Shared {
             steps.push((
                 "Issue a token for each person or app:".to_owned(),
                 format!("wye token issue alice{c} --out alice.token"),
@@ -195,20 +199,17 @@ impl InitOptions {
 
 /// `wye init`: what the options ask for, written; returns what to print.
 pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<String, String> {
-    let mode = match (parsed.flag("api-key"), parsed.flag("team")) {
-        (true, true) => {
-            return Err("--api-key and --team do not mix: a team's gateway reads \
-                        its key from the deployment's environment"
-                .into());
-        }
-        (true, false) => Mode::ApiKey,
-        (false, true) => Mode::Team,
+    // A shared gateway always holds the provider key, so --provider-key
+    // beside --shared changes nothing.
+    let mode = match (parsed.flag("provider-key"), parsed.flag("shared")) {
+        (_, true) => Mode::Shared,
+        (true, false) => Mode::ProviderKey,
         (false, false) => Mode::Passthrough,
     };
-    // A team's config belongs in the repository it is reviewed in.
+    // A shared gateway's config belongs in the repository it is reviewed in.
     let out = match (parsed.value("out"), mode) {
         (Some(out), _) => PathBuf::from(out),
-        (None, Mode::Team) => PathBuf::from(CONFIG_FILE),
+        (None, Mode::Shared) => PathBuf::from(CONFIG_FILE),
         (None, _) => files::in_home(CONFIG_FILE, "pass --out", env)?,
     };
     init(
@@ -223,7 +224,7 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result
 }
 
 /// Writes the starter config to `options.out`, never over an existing file
-/// (or through a symlink); with `--team`, also the signing key, unless one is
+/// (or through a symlink); with `--shared`, also the signing key, unless one is
 /// there to reuse.
 pub fn init(
     options: &InitOptions,
@@ -240,7 +241,7 @@ pub fn init(
         ));
     }
     let mut wrote_key = None;
-    let public_key = if options.mode == Mode::Team {
+    let public_key = if options.mode == Mode::Shared {
         let path = options.key_path()?;
         let (key, created) = token::signing_key(&path)?;
         if created {
@@ -294,30 +295,30 @@ mod tests {
     #[test]
     fn writes_a_valid_config_for_each_mode_and_never_overwrites() {
         let key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-        for mode in [Mode::Passthrough, Mode::ApiKey, Mode::Team] {
+        for mode in [Mode::Passthrough, Mode::ProviderKey, Mode::Shared] {
             for openai in [false, true] {
                 let text = options(mode, openai, Path::new("/h/wye.toml"))
                     .config(key)
                     .unwrap();
                 let config = Config::from_toml_str(&text).unwrap();
                 assert_eq!(config.routes.openai.is_some(), openai);
-                assert_eq!(config.auth.is_some(), mode == Mode::Team);
+                assert_eq!(config.auth.is_some(), mode == Mode::Shared);
             }
         }
 
         let dir = wye_testkit::TempDir::new("init");
         let out = dir.join("home/wye.toml");
         let env = |_: &str| None;
-        let team = options(Mode::Team, false, &out);
-        let printed = init(&team, &env).unwrap();
+        let shared = options(Mode::Shared, false, &out);
+        let printed = init(&shared, &env).unwrap();
         assert!(printed.contains("signing key"), "{printed}");
         assert!(
             printed.contains("\n     wye token issue alice --out alice.token\n"),
             "{printed}"
         );
-        assert!(init(&team, &env).unwrap_err().contains("exists"));
-        // A second team config reuses the key.
-        let again = options(Mode::Team, false, &dir.join("home/other.toml"));
+        assert!(init(&shared, &env).unwrap_err().contains("exists"));
+        // A second shared config reuses the key.
+        let again = options(Mode::Shared, false, &dir.join("home/other.toml"));
         let printed = init(&again, &env).unwrap();
         assert!(!printed.contains("signing key"), "{printed}");
         assert!(printed.contains("\n     wye doctor -c "), "{printed}");
@@ -328,7 +329,7 @@ mod tests {
         let steps = |out: &str| {
             let options = InitOptions {
                 home: Some("/h".into()),
-                ..options(Mode::Team, false, Path::new(out))
+                ..options(Mode::Shared, false, Path::new(out))
             };
             options.next_steps(|p| p.display().to_string())
         };
@@ -359,7 +360,7 @@ mod tests {
 
     #[test]
     fn personal_configs_read_keys_from_files_next_to_them() {
-        let steps = options(Mode::ApiKey, true, Path::new("/h/wye.toml"))
+        let steps = options(Mode::ProviderKey, true, Path::new("/h/wye.toml"))
             .next_steps(|p| p.display().to_string());
         assert!(steps.contains("/h/anthropic.key") && steps.contains("/h/openai.key"));
         assert!(

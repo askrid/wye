@@ -48,7 +48,7 @@ fn mistakes_are_named() {
     assert_eq!(usage("serve", &["--confg", "x"]), "unknown option --confg");
     assert_eq!(usage("serve", &["-c"]), "--config needs a <path>");
     assert_eq!(usage("serve", &["extra"]), "unexpected argument extra");
-    assert_eq!(usage("init", &["--team=yes"]), "--team takes no value");
+    assert_eq!(usage("init", &["--shared=yes"]), "--shared takes no value");
     // A repeated option would leave one of its values unused.
     assert_eq!(
         usage("token issue", &["a", "--models", "x", "--models=y"]),
