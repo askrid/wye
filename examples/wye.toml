@@ -3,7 +3,7 @@
 # options of its two live sections are set to their defaults, so every key
 # shows; the optional sections and the alternatives stay commented out, since
 # turning one on changes what Wye does. On a claude.ai subscription, start
-# from examples/subscription.toml instead.
+# from examples/developer/wye.toml instead.
 #
 #   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
@@ -47,7 +47,7 @@ api_key_env = "ANTHROPIC_API_KEY"
 # api_key_file = "/run/secrets/anthropic_api_key"
 # Or forward each caller's own credential: a claude.ai login, or an API key,
 # which bills the API (loopback only, no [auth]; `wye init` writes this, and
-# examples/subscription.toml is a complete config):
+# examples/developer/wye.toml is a complete config):
 # forward_caller_credential = true
 connect_timeout_secs = 10              # TCP and the TLS handshake together
 # Non-streaming generations send no headers until they finish:

@@ -265,15 +265,22 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
     assert_eq!(record["path"], "/v1/messages");
 }
 
-/// The sample policy tests in examples/ pass against their config.
+/// The policy tests of the team and app examples pass against their configs.
 #[test]
 fn example_policy_tests_pass() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/policy-tests");
-    let config =
-        Config::from_toml_str(&std::fs::read_to_string(dir.join("wye.toml")).unwrap()).unwrap();
-    let (report, passed) = wye::policy_test(&config, &dir, 0).unwrap();
-    assert!(passed, "{report}");
-    assert!(report.ends_with("4 passed, 0 failed\n"), "{report}");
+    for example in ["team", "app"] {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(example);
+        let config = std::fs::read_to_string(dir.join("wye.toml")).unwrap();
+        let config = Config::from_toml_str(&config).unwrap();
+        let (report, passed) = wye::policy_test(&config, &dir.join("policy-tests"), 0).unwrap();
+        assert!(passed, "{example}: {report}");
+        assert!(
+            report.ends_with("7 passed, 0 failed\n"),
+            "{example}: {report}"
+        );
+    }
 }
 
 #[test]

@@ -1,5 +1,0 @@
-# A canary token's "coding" requests run on the model its rollout rule names.
-decision = "forward"
-model = "claude-haiku-5-5"
-[token]
-subject = "team-canary-search"

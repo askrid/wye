@@ -4,7 +4,9 @@
 use super::*;
 
 const REFERENCE: &str = include_str!("../../../../../examples/wye.toml");
-const SUBSCRIPTION: &str = include_str!("../../../../../examples/subscription.toml");
+const DEVELOPER: &str = include_str!("../../../../../examples/developer/wye.toml");
+const TEAM: &str = include_str!("../../../../../examples/team/wye.toml");
+const APP: &str = include_str!("../../../../../examples/app/wye.toml");
 
 /// The reference with every commented-out option enabled: its active
 /// `[upstream]` gives way to `[routes.claude]`, and the credential
@@ -51,8 +53,9 @@ fn every_section_enabled(reference: &str) -> String {
 
 #[test]
 fn the_examples_parse_as_they_stand() {
-    Config::from_toml_str(REFERENCE).unwrap();
-    Config::from_toml_str(SUBSCRIPTION).unwrap();
+    for example in [REFERENCE, DEVELOPER, TEAM, APP] {
+        Config::from_toml_str(example).unwrap();
+    }
 }
 
 /// The reference's live options are set to their defaults, so that every key

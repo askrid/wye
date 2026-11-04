@@ -1,0 +1,4 @@
+# A caller without a gateway token gets nothing.
+decision = "refuse"
+status = 401
+error = "authentication_error"

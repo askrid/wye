@@ -1,0 +1,1 @@
+{"model":"support-reply","max_tokens":2048,"stream":true,"messages":[{"role":"user","content":"My invoice shows two charges for March."}]}

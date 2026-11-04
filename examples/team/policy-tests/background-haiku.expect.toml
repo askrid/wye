@@ -1,0 +1,5 @@
+# Claude Code's small background requests use Haiku, so every grant needs it.
+decision = "forward"
+[token]
+subject = "sam@contractor.example"
+models = ["claude-sonnet-*", "claude-haiku-*"]

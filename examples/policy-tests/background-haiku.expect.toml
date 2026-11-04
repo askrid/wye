@@ -1,5 +1,0 @@
-# Claude Code's background requests use Haiku; a team token must allow it.
-decision = "forward"
-[token]
-subject = "team-research"
-models = ["claude-sonnet-*", "claude-haiku-*"]

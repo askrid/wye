@@ -1,0 +1,4 @@
+# Without a gateway token, nothing gets through.
+decision = "refuse"
+status = 401
+error = "authentication_error"

@@ -1,0 +1,9 @@
+# A session lands on the same upstream on every replica; a change that moves
+# sessions between keys (a new upstream, other weights) fails here, since a
+# moved session loses its prompt cache.
+decision = "forward"
+session = "4f1c2b9e-7a0d-4e55-9c3a-2d8e6f1b0a77"
+upstream = "anthropic-a"
+[token]
+subject = "dana@acme.com"
+models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]

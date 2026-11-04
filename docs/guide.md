@@ -93,6 +93,7 @@ wye claude
 - A token cannot be revoked, only outlived, so keep lifetimes short ([revocation](policy.md#revocation)). `apiKeyHelper` and CI identity avoid pasting tokens ([token renewal](operations.md#token-renewal)).
 - `wye codex` needs `[routes.openai]`: `wye init --team --openai`, and `-e OPENAI_API_KEY` for the container.
 - `wye policy-diff` in CI flags a config change that widens access.
+- [examples/team/](../examples/team) is a complete team config with its policy tests: developers through SSO, CI jobs through GitHub Actions tokens, two Anthropic keys with failover, prices, and telemetry.
 
 ## Using it from apps
 
@@ -110,6 +111,8 @@ The key depends on the gateway:
 - A gateway that holds a provider key (`wye init --api-key`): any non-empty placeholder, since the SDKs refuse to send a request without a key.
 
 Streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add.
+
+[examples/app/](../examples/app) is a complete config for a product's backend, with its policy tests: a gateway token per service, model aliases with a canary, Anthropic with Claude Platform on AWS as failover, OpenAI, an upgrade check, and prices.
 
 ## Several keys or providers
 

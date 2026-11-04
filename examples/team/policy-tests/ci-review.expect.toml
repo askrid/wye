@@ -1,0 +1,5 @@
+# A GitHub Actions job in the acme organization reviews with Sonnet.
+decision = "forward"
+[token]
+subject = "acme/payments"
+models = ["claude-sonnet-*", "claude-haiku-*"]

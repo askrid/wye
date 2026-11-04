@@ -1,0 +1,6 @@
+# max_tokens above 8,192 is refused before the provider sees it.
+decision = "refuse"
+status = 403
+error = "permission_error"
+[token]
+subject = "ticket-summarizer"

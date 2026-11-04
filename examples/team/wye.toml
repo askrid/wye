@@ -1,0 +1,131 @@
+# Wye for an engineering team: developers on Claude Code and the GitHub
+# Actions jobs that run it, through two replicas behind an HTTPS load
+# balancer. Nobody holds a long-lived secret: developers sign in through the
+# company's SSO, CI jobs use GitHub's own token, and the Anthropic keys live
+# only in the deployment.
+#
+# Before the first start, fetch the two key sets this file names (and again
+# when an identity provider rotates its keys; Wye never fetches them):
+#
+#   curl -o github.jwks https://token.actions.githubusercontent.com/.well-known/jwks
+#   curl -o sso.jwks https://acme.okta.com/oauth2/default/v1/keys
+#
+# Then, in CI on every change to this file:
+#
+#   wye policy-test -c wye.toml                     # the cases in policy-tests/
+#   wye policy-diff ../base/wye.toml wye.toml       # exits 3 if access widens
+#
+# Developers: an apiKeyHelper in Claude Code's managed settings prints a fresh
+# SSO token (docs/operations.md, "Token renewal"); then `wye claude` with
+# WYE_URL, or ANTHROPIC_BASE_URL alone.
+
+[server]
+listen = "0.0.0.0:8080"
+# Keep serving with /readyz failing for 10 s after SIGTERM, so the load
+# balancer stops sending before connections are refused:
+drain_delay_secs = 10
+
+# Two Anthropic API keys, each with its own rate limit. Each Claude Code
+# session stays on one of them (hashed from its session id, the same on both
+# replicas), so its prompt cache stays warm; a request one key rejects with
+# 429 or 529 moves to the other before any output.
+[routes.claude]
+failover = ["429", "529", "connect"]
+
+[[routes.claude.upstreams]]
+id = "anthropic-a"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_KEY_A"
+
+[[routes.claude.upstreams]]
+id = "anthropic-b"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_KEY_B"
+
+[auth]
+# Every model anyone may use; each identity provider's grants narrow it.
+models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]
+max_output_tokens = 64000
+
+# Developers, through the company's SSO. The subject is the email, so usage
+# records and `wye report` show who used what.
+[[auth.issuers]]
+issuer = "https://acme.okta.com/oauth2/default"
+audience = "wye"
+algorithm = "RS256"
+jwks_file = "sso.jwks"
+subject_claim = "email"
+
+# Engineers get every model; contractors no Opus. A token in neither group
+# may use no model.
+[[auth.issuers.grants]]
+claim = "groups"
+value = "engineering"
+models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]
+
+[[auth.issuers.grants]]
+claim = "groups"
+value = "contractors"
+models = ["claude-sonnet-*", "claude-haiku-*"]
+
+# CI: a GitHub Actions job's OIDC token, so repositories hold no secret. The
+# subject is the repository; jobs outside the acme organization get nothing.
+[[auth.issuers]]
+issuer = "https://token.actions.githubusercontent.com"
+audience = "wye"
+algorithm = "RS256"
+jwks_file = "github.jwks"
+subject_claim = "repository"
+
+[[auth.issuers.grants]]
+claim = "repository_owner"
+value = "acme"
+models = ["claude-sonnet-*", "claude-haiku-*"]
+
+# Claude Code's /model picker shows these, each developer only those they may
+# use (with CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1).
+[discovery]
+models = [
+  { id = "claude-opus-5-5", display_name = "Claude Opus 5.5", description = "Hard problems" },
+  { id = "claude-sonnet-5-5", display_name = "Claude Sonnet 5.5", description = "Everyday coding" },
+  { id = "claude-haiku-5-5", display_name = "Claude Haiku 5.5", description = "Quick edits" },
+]
+
+# Cost on every usage record and in `wye report`. Check each price against
+# the provider's pricing page; a price change is a reviewed commit.
+[pricing]
+version = "anthropic-2026-11-01"
+
+[[pricing.models]]
+models = ["claude-opus-5-5"]
+input = "4.00"
+output = "20.00"
+cache_read = "0.20"
+cache_write_5m = "5.00"
+cache_write_1h = "8.00"
+
+[[pricing.models]]
+models = ["claude-sonnet-5-5"]
+input = "2.00"
+output = "10.00"
+cache_read = "0.10"
+cache_write_5m = "2.50"
+cache_write_1h = "4.00"
+
+[[pricing.models]]
+models = ["claude-haiku-5-5"]
+input = "0.10"
+output = "0.50"
+# cache_read and the cache writes: until set, requests that use the cache
+# cost "partial".
+
+# Why a prompt cache missed, for one session in ten:
+# export WYE_CACHE_HASH_KEY="$(openssl rand -hex 32)", the same on every replica.
+[cache_diagnostics]
+hash_key_env = "WYE_CACHE_HASH_KEY"
+sample_percent = 10
+
+# Usage records, metrics, and a trace per Claude Code session to the
+# cluster's OpenTelemetry collector.
+[telemetry]
+otlp_endpoint = "http://otel-collector:4318"

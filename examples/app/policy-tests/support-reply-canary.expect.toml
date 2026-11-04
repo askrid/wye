@@ -1,0 +1,5 @@
+# Its canary deployment gets the newer model.
+decision = "forward"
+model = "claude-sonnet-5-5"
+[token]
+subject = "support-bot-canary"

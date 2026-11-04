@@ -1,0 +1,7 @@
+# The support bot asks for "support-reply" and gets the stable model, from
+# Anthropic first.
+decision = "forward"
+model = "claude-sonnet-5"
+upstream = "anthropic"
+[token]
+subject = "support-bot"

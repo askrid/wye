@@ -1,0 +1,8 @@
+# max_tokens above the 64,000 output-token ceiling is refused before the
+# provider sees the request.
+decision = "refuse"
+status = 403
+error = "permission_error"
+[token]
+subject = "dana@acme.com"
+models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]

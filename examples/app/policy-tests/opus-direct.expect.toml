@@ -1,0 +1,6 @@
+# A service that names Opus directly is refused: no service may use it.
+decision = "refuse"
+status = 403
+error = "permission_error"
+[token]
+subject = "support-bot"

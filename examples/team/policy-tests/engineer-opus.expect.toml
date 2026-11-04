@@ -1,0 +1,5 @@
+# An engineer may use Opus (the SSO "engineering" grant).
+decision = "forward"
+[token]
+subject = "dana@acme.com"
+models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]

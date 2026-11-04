@@ -12,7 +12,7 @@ One repository; the four crates are the members of one Cargo workspace.
 | `crates/wye` | The binary: server, upstream client, usage log and OTLP, CLI |
 | `crates/wye-testkit` | Test CA, mock upstream, signing keys, identity-provider tokens |
 | `crates/wye-bench` | The benchmark and its gate comparison, load and capacity runs, competitor runs |
-| `examples/` | `wye.toml` (the config reference), `subscription.toml`, `policy-tests/` |
+| `examples/` | `wye.toml` (the config reference); one directory per use: `developer/`, `team/`, `app/`, each a `wye.toml` and, for the last two, its `policy-tests/` |
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
 | `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
 | `scripts/ab.sh` | A/B comparison of two binaries |

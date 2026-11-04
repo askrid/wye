@@ -1,7 +1,0 @@
-# Opus is outside the configured ceiling, even for a token that names it.
-decision = "refuse"
-status = 403
-error = "permission_error"
-[token]
-subject = "team-research"
-models = ["claude-*"]

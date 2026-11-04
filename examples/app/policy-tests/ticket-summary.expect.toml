@@ -1,0 +1,5 @@
+# The summarizer runs on Haiku.
+decision = "forward"
+model = "claude-haiku-5-5"
+[token]
+subject = "ticket-summarizer"

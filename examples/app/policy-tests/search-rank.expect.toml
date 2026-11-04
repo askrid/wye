@@ -1,0 +1,6 @@
+# The search service ranks results with OpenAI Responses.
+decision = "forward"
+path = "/v1/responses"
+upstream = "openai"
+[token]
+subject = "search"

@@ -71,7 +71,7 @@ Short lifetimes need automatic renewal: [token renewal](operations.md#token-rene
 - Loopback bind only; startup fails when it is combined with a non-loopback listener.
 - No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.
 - No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which this mode excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
-- Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/subscription.toml`](../examples/subscription.toml) is a complete config.
+- Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/developer/wye.toml`](../examples/developer/wye.toml) is a complete config.
 
 ## Per-request ceilings
 

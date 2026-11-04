@@ -1,3 +1,0 @@
-# Every request needs a gateway token once [auth] is configured.
-decision = "refuse"
-status = 401
