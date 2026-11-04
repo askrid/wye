@@ -187,6 +187,19 @@ pub fn slug(heading: &str) -> String {
         .collect()
 }
 
+/// Inline Markdown as one line of plain text, for a page description: the
+/// words of links, code, and emphasis kept, their markup dropped.
+pub fn plain(markdown: &str) -> String {
+    let text: String = Parser::new(markdown)
+        .filter_map(|event| match event {
+            Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+            Event::SoftBreak | Event::HardBreak => Some(" ".to_owned()),
+            _ => None,
+        })
+        .collect();
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?
@@ -398,6 +411,14 @@ mod tests {
         assert!(!status.contains("Three."));
         assert_eq!(section(DOC, "Next"), Some("\nThree.\n"));
         assert_eq!(section(DOC, "Missing"), None);
+    }
+
+    #[test]
+    fn plain_text_keeps_the_words_of_links_and_code() {
+        assert_eq!(
+            plain("Adds **under** a [millisecond](#performance) per\n`request` & more."),
+            "Adds under a millisecond per request & more."
+        );
     }
 
     #[test]

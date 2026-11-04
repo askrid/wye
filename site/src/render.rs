@@ -122,13 +122,7 @@ impl Sources {
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline)),
                     "rest" => Ok(markdown::to_html(rest, &self.repo_url, file, &page.anchors)),
-                    "text" => Ok(markdown::escape(
-                        &rest
-                            .replace(['`', '*'], "")
-                            .split_whitespace()
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    )),
+                    "text" => Ok(markdown::escape(&markdown::plain(rest))),
                     other => Err(format!("{other:?} is not tagline, rest, or text")),
                 }
             }
