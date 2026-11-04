@@ -2,7 +2,7 @@
 
 <h1><img src="site/assets/icon-fork.svg" alt="" width="44" align="absmiddle"> Wye</h1>
 
-**An LLM gateway without bloat.** Wye sits between Claude Code, Codex, or apps on the provider SDKs and the model APIs they call: one binary and one TOML file, no database, no dashboard, and each provider's own API passed through without translation.
+**An LLM gateway without bloat.** Wye sits between Claude Code, Codex, or your app and the provider's API, passes requests through untranslated, and records what each one cost. It adds under a millisecond per request ([p50, lab](#performance)). Replicas share no state, so you scale by running more, and a request the provider rejects can fail over to another upstream before any output. One binary, one TOML file, no database, no dashboard.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases) [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
