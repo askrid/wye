@@ -56,61 +56,59 @@
     <figure class="junction">
       <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its gateway token; the model stop maps the alias {{field README.md|{|requested_model}} to {{field README.md|{|model}}; at the upstream stop the session stays on anthropic, which rejects the request with 429 before any output, so with failover on, Wye resends it to {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
 <pre class="trace-wide">claude code
-│
-o     <b>gate</b>      <span class="d">gateway token checked</span>
-│
-o     <b>model</b>     <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
-│
-o     <b>upstream</b>  <span class="d">session stays on anthropic</span>
-├──<span class="no">x</span>  rejected  <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
-<span class="r2">╰──</span>o  failover  <span class="d">to {{field README.md|{|upstream}}</span>
-<span class="r2">   │</span>
-   o  <b>stream</b>    <span class="d">as it arrives, unbuffered</span>
-<span class="r2">   │</span>
-   o  <b>record</b>    {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+┃
+┣━ <b>gate</b>       <span class="d">gateway token checked</span>
+┃
+┣━ <b>model</b>      <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
+┃
+┣━ <b>upstream</b>   <span class="d">session stays on anthropic</span>
+┃  <span class="d">├─</span><span class="no">x</span>        <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+┃  <span class="r2">└─o</span>        <span class="d">failover to {{field README.md|{|upstream}}</span>
+┃
+┣━ <b>stream</b>     <span class="d">as it arrives, unbuffered</span>
+┃
+┗━ <b>record</b>     {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
 <pre class="trace-narrow">claude code
-│
-o  <b>gate</b>
-│  <span class="d">gateway token checked</span>
-│
-o  <b>model</b>
-│  <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
-│
-o  <b>upstream</b>
-│  <span class="d">session stays on anthropic</span>
-├──<span class="no">x</span>  rejected
-│     <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
-<span class="r2">╰──</span>o  failover
-<span class="r2">   │</span>  <span class="d">to {{field README.md|{|upstream}}</span>
-<span class="r2">   │</span>
-   o  <b>stream</b>
-<span class="r2">   │</span>  <span class="d">as it arrives, unbuffered</span>
-<span class="r2">   │</span>
-   o  <b>record</b>
-      {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+┃
+┣━ <b>gate</b>
+┃  <span class="d">gateway token checked</span>
+┃
+┣━ <b>model</b>
+┃  <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
+┃
+┣━ <b>upstream</b>
+┃  <span class="d">session stays on anthropic</span>
+┃  <span class="d">├─</span><span class="no">x</span> <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+┃  <span class="r2">└─o</span> <span class="d">failover to {{field README.md|{|upstream}}</span>
+┃
+┣━ <b>stream</b>
+┃  <span class="d">as it arrives, unbuffered</span>
+┃
+┗━ <b>record</b>
+   {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
       </div>
     </figure>
   </section>
 
   <div class="path">
-    <nav class="rail" aria-label="The stops of a request through Wye">
-      <ul class="tree">
-        <li><span class="root">stops/</span>
+    <nav class="rail" aria-label="On this page">
+      <ul class="contents">
+        <li>
           <ol>
-            <li class="to-client"><a href="#client"><span class="branch" aria-hidden="true">├── </span><span class="name">client</span></a></li>
-            <li class="to-gate"><a href="#gate"><span class="branch" aria-hidden="true">├── </span><span class="name">gate</span></a></li>
-            <li class="to-model"><a href="#model"><span class="branch" aria-hidden="true">├── </span><span class="name">model</span></a></li>
-            <li class="to-upstream"><a href="#upstream"><span class="branch" aria-hidden="true">├── </span><span class="name">upstream</span></a></li>
-            <li class="to-stream"><a href="#stream"><span class="branch" aria-hidden="true">├── </span><span class="name">stream</span></a></li>
-            <li class="to-record"><a href="#record"><span class="branch" aria-hidden="true">└── </span><span class="name">record</span></a></li>
+            <li class="to-client"><a href="#client"><span class="name">client</span></a></li>
+            <li class="to-gate"><a href="#gate"><span class="name">gate</span></a></li>
+            <li class="to-model"><a href="#model"><span class="name">model</span></a></li>
+            <li class="to-upstream"><a href="#upstream"><span class="name">upstream</span></a></li>
+            <li class="to-stream"><a href="#stream"><span class="name">stream</span></a></li>
+            <li class="to-record"><a href="#record"><span class="name">record</span></a></li>
           </ol>
         </li>
-        <li><span class="root">also/</span>
+        <li>
           <ul>
-            <li class="to-compare"><a href="#compare"><span class="branch" aria-hidden="true">├── </span><span class="name">compare</span></a></li>
-            <li class="to-config"><a href="#config"><span class="branch" aria-hidden="true">├── </span><span class="name">config</span></a></li>
-            <li class="to-status"><a href="#status"><span class="branch" aria-hidden="true">├── </span><span class="name">status</span></a></li>
-            <li class="to-limits"><a href="#limits"><span class="branch" aria-hidden="true">└── </span><span class="name">will-not-do</span></a></li>
+            <li class="to-compare"><a href="#compare"><span class="name">compare</span></a></li>
+            <li class="to-config"><a href="#config"><span class="name">config</span></a></li>
+            <li class="to-status"><a href="#status"><span class="name">status</span></a></li>
+            <li class="to-limits"><a href="#limits"><span class="name">will not do</span></a></li>
           </ul>
         </li>
       </ul>

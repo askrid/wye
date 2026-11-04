@@ -211,11 +211,13 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 
 /* The trace, drawn as a terminal would: one request through every stop,
    each with what Wye decided there, the failover a fork at the upstream,
-   the record at the end. Every row keeps three columns: the line from 0,
-   names from 6, what happened from 16, so a name never runs into its
-   decision. The grid is 48 characters by 13 lines, sized to its container:
-   48 advances of 0.6 em are 28.8 em, and dividing by 29.2 leaves 1.4% for
-   rounding, so the trace never scrolls. A narrow container gets the same
+   the record at the end. The request's path is a heavy trunk; what happens
+   beside it (the rejection, the failover) branches off in light strokes.
+   Every row keeps three columns: the line from 0, names from 3, what
+   happened from 14, so a name never runs into its decision. The grid is 46
+   characters by 13 lines, sized to its container: 46 advances of 0.6 em
+   are 27.6 em, and dividing by 28 leaves 1.4% for rounding, so the trace
+   never scrolls. A narrow container gets the same
    trace 35 characters wide (21 em, / 21.3), each decision under its name:
    13.5 px on a 320 px phone. It stays still: it reads top to bottom in the
    order things happen. */
@@ -223,9 +225,9 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .junction-art { min-width: 0; overflow-x: auto; container-type: inline-size; }
 .junction pre {
   margin: 0;
-  width: 48ch;
+  width: 46ch;
   font-family: var(--display);
-  font-size: min(1.125rem, 100cqi / 29.2);
+  font-size: min(1.125rem, 100cqi / 28);
   /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
      the strokes of one line meet those of the next. */
   line-height: 1.3;
@@ -242,7 +244,8 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
-   printed like `tree`. */
+   plain names in two groups set apart by space (the hero's trace is the
+   page's one drawing). */
 .path {
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);
@@ -252,27 +255,23 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 }
 .stops { min-width: 0; }
 .rail { position: sticky; top: 0; align-self: start; padding-block: clamp(2rem, 5vw, 3.5rem); }
-.tree {
+.contents {
   list-style: none;
   margin: 0;
   padding: 0;
   font-family: var(--display);
   /* With the line height below, a row is 24 px, WCAG 2.2's minimum target. */
   font-size: var(--rail);
-  /* The box-drawing height, so the tree's vertical strokes join. */
   line-height: 1.3;
 }
 /* Two groups, each a list of its own, so a screen reader announces the
-   stops as one list of six. Only link rows keep their spaces: the
-   markup's line breaks between a group's name and its list are not drawn. */
-.tree ol, .tree ul { list-style: none; margin: 0; padding: 0; }
-.tree li li { white-space: pre; }
-.tree .root { display: block; color: var(--graphite); }
-.tree > li + li { margin-top: 1.1rem; }
-.tree a { display: block; color: var(--ink); text-decoration: none; }
-.tree .branch { color: var(--graphite); }
-.tree a:hover .name { text-decoration: underline; }
-.tree .name { padding-inline: 0.15em; }
+   stops as one list of six; a row's height apart, twice the space
+   inside a group. */
+.contents ol, .contents ul { list-style: none; margin: 0; padding: 0; }
+.contents > li + li { margin-top: 1.5rem; }
+.contents a { display: block; color: var(--graphite); text-decoration: none; }
+.contents a:hover .name { color: var(--ink); text-decoration: underline; }
+.contents .name { padding-inline: 0.15em; }
 
 /* The stop being read is selected, as in a terminal list: inverse video.
    Each section is a view timeline narrowed to a band a fifth of the way
@@ -302,7 +301,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .to-config { --stop: --config; }
   .to-status { --stop: --status; }
   .to-limits { --stop: --limits; }
-  .tree .name {
+  .contents .name {
     animation: wye-selected linear;
     animation-timeline: var(--stop);
     animation-range: cover 0% cover 100%;
