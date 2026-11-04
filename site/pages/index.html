@@ -141,11 +141,11 @@ o  <b>upstream</b>
         <h2 id="stream-h"><a href="#stream"><span class="hash" aria-hidden="true">#</span> stream</a></h2>
         {{paragraph README.md|Performance|Lab results}}
         <figure class="chart">
-          <figcaption>Added latency per request, p50, TLS, as a multiple of Wye's in the same run. Shorter is better.</figcaption>
+          <figcaption>Added latency per request (p50, TLS), in multiples of Wye's from the same run. Shorter is better.</figcaption>
           {{ratios README.md|Performance|Added latency (p50)}}
         </figure>
         <figure class="chart">
-          <figcaption>Delay per event across 2,000 token-paced streams, p50. Shorter is better.</figcaption>
+          <figcaption>Delay per event (p50) with 2,000 token-paced streams open. Shorter is better.</figcaption>
           {{versus docs/benchmarks.md|Against agentgateway|2,000 paced streams: event delay}}
         </figure>
         {{paragraph README.md|Performance|Where others lead}}
@@ -173,7 +173,7 @@ o  <b>upstream</b>
         {{paragraph README.md|Configuration|Each session stays}}
         {{item README.md|What it does|Checks decisions}}
         <div class="long-lines">{{fence README.md|$ wye explain}}</div>
-        {{item README.md|What it does|Runs where}}
+        {{item README.md|What it does|Runs}}
         {{rest README.md|What it does}}
       </section>
 
@@ -192,7 +192,7 @@ o  <b>upstream</b>
 
 <footer class="wrap foot">
   <p>wye {{version}} · {{license}} · <a href="{{repo}}">github.com/askrid/wye</a></p>
-  <p>This page: under 150 KiB with its fonts, no cookies, no requests to other origins, readable with scripts off. Built from the repository at <a href="{{repo}}/commit/{{commit}}">{{commit}}</a>.</p>
+  <p>This page: under 150 KiB with fonts. No cookies, no requests to other sites, works without JavaScript. Built from <a href="{{repo}}/commit/{{commit}}">{{commit}}</a>.</p>
 </footer>
 </body>
 </html>
