@@ -28,7 +28,7 @@ Provider facts a feature depends on, each confirmed with a source before that fe
 
 ## Related work
 
-Each entry: the work, its core idea, and its fit with no shared state. Work that needs shared state is under [rejected approaches](#rejected-approaches).
+Each entry: the work, its core idea, and its fit with no shared state; summaries come from abstracts, so check figures before citing them. Work that needs shared state is under [rejected approaches](#rejected-approaches).
 
 - ***The Tail at Scale***: hedged requests. Fit: request-local; risks duplicate billing.
 - **Netflix `concurrency-limits`**: RTT-derived adaptive admission. Fit: needs cross-request local state.
@@ -41,15 +41,17 @@ Each entry: the work, its core idea, and its fit with no shared state. Work that
 - **[R2-Router](https://arxiv.org/abs/2602.02823)**, **[When Routing Collapses](https://arxiv.org/abs/2602.03478)**, **[ContextualRouter](https://aclanthology.org/2026.eacl-srw.22)** (2026): route by model and output budget; routers drift to the strongest model; kNN matches complex routers. Fit: simple routing tables fit static config.
 - **[IETF Attenuating Agent Tokens](https://datatracker.ietf.org/doc/html/draft-niyikiza-oauth-attenuating-agent-tokens-00)** (draft): JWT-based offline attenuation for agent delegation. Fit: a standard format for narrowable tokens.
 
-Summaries come from abstracts; check figures against the papers before citing them.
-
 ## Feature directions
 
-Request-local, config in Git, analysis in the user's OpenTelemetry backend. Built, and documented where the feature lives: 2, [cache-miss diagnostics](architecture.md#cache-diagnostics); the clean stream endings of 7 ([failure behavior](operations.md#failure-behavior)); and [aliases and upgrade checks](architecture.md#model-aliases-and-upgrade-checks).
+Request-local, config in Git, analysis in the user's OpenTelemetry backend. Built, and documented where the feature lives: [cache-miss diagnostics](architecture.md#cache-diagnostics), clean stream endings ([failure behavior](operations.md#failure-behavior)), and [aliases and upgrade checks](architecture.md#model-aliases-and-upgrade-checks).
 
 ### 1. Agent-aware routing
 
-Decided (2026-11-01): the agent keeps the phase decision, since only it knows the phase (Claude Code does not signal plan mode to a gateway), and Wye holds the request-local policy around it. That is aliases, model permissions, and the allowlisted `model` rewrite within one model family, keyed on Claude Code's request-class and agent-type headers and fitted offline from the cost per [request class](glossary.md#usage-and-cost): first [size-aware model routing](glossary.md#planned) for small auxiliary requests ([M2c](roadmap.md#m2c-fewer-expensive-tokens)), later by subagent type, on every turn of that subagent so its cache survives. Before any default: `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, each class's share in opt-in telemetry, and its quality on a smaller model in a task-level evaluation. Not proposed: classifying prompt content, or switching a conversation's model mid-session.
+Decided (2026-11-01): the agent keeps the phase decision, since only it knows the phase (Claude Code does not signal plan mode to a gateway), and Wye holds the request-local policy around it. That is aliases, model permissions, and the allowlisted `model` rewrite within one model family, keyed on Claude Code's request-class and agent-type headers and fitted offline from the cost per [request class](glossary.md#usage-and-cost).
+
+Order: [size-aware model routing](glossary.md#planned) for small auxiliary requests first ([M2c](roadmap.md#m2c-fewer-expensive-tokens)), later by subagent type, on every turn of that subagent so its cache survives. Before any default: `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, each class's share in opt-in telemetry, and its quality on a smaller model in a task-level evaluation.
+
+Not proposed: classifying prompt content, or switching a conversation's model mid-session.
 
 Why: agents already route by phase (Claude Code's [`opusplan`](https://code.claude.com/docs/en/model-config) and [subagent models](https://code.claude.com/docs/en/sub-agents), [Codex](https://learn.chatgpt.com/docs/config-file/config-reference), [Aider](https://aider.chat/docs/usage/modes.html), [Cline](https://docs.cline.bot/core-workflows/plan-and-act)); routers that classify each request (Cursor, [Copilot](https://docs.github.com/en/copilot/concepts/models/auto-model-selection), [OpenRouter](https://openrouter.ai/docs/guides/routing/routers/auto-router), [LiteLLM](https://docs.litellm.ai/docs/proxy/auto_routing)) pin a session or switch only at cache boundaries, because each model has [its own cache](https://code.claude.com/docs/en/prompt-caching); and 2026 studies find routing needs the agent's own trajectory ([SWE-Router](https://arxiv.org/abs/2607.00053), [Agent-as-a-Router](https://arxiv.org/abs/2606.22902)).
 

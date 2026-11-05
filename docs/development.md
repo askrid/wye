@@ -44,7 +44,11 @@ git config core.hooksPath .githooks
 
 `scripts/bench.sh gate` builds the parent in a worktree (`target/reference`, kept between checks), and `wye-bench gate` runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
 
-- **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
+A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats ([evidence](benchmarks.md#gate-tolerances)). A failed request or stream is never noise and fails the check at once.
+
+The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-tolerances)). Smaller effects need `scripts/bench.sh ab <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md#performance-techniques).
+
+- A change that fails the check is not committed, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
 - A series of commits that leaves the request path's work unchanged (renames, messages, CLI output, tests, docs alongside code) may benchmark once: each commit but the last runs `WYE_GATE_BENCH=series git commit`, which still runs every step but the release builds and the benchmark, and before any of the series is pushed its tip passes `WYE_GATE_AGAINST=<the series' base> scripts/check.sh`. A change meant to alter performance, or one in doubt, is benchmarked on its own commit.
 - A metric the parent does not measure yet reads `new`, unless it is a failure count or a release time past its fixed limit; it is gated from the next commit on.
@@ -54,31 +58,37 @@ git config core.hooksPath .githooks
 
 A check takes about 8 minutes after an ordinary code change: tests about 15 s, incremental builds of both commits about a minute, and six benchmark runs of about 67 s each (`wye-bench` prints each phase's duration to stderr). The first check in a checkout takes about 90 s more; a dependency change rebuilds both commits.
 
-A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats ([evidence](benchmarks.md#gate-tolerances)). A failed request or stream is never noise and fails the check at once.
-
-The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-tolerances)). Smaller effects need `scripts/bench.sh ab <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md#performance-techniques).
-
 Why the parent in alternating rounds: a stored result carries the machine's state on the day it was recorded ([evidence](benchmarks.md#gate-tolerances)), while the two commits share the machine's state of the moment, and with nothing recorded first the gate runs on any machine. The method is the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order, at the price of a second build and twice the benchmark time. Rejected alternatives:
 
 - Both commits at once ([duet benchmarking](https://arxiv.org/abs/2001.05811)): the paced and stress scenarios load every core, so two runs at once would measure each other.
-- A cloud VM as the gate machine: instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). Published numbers come from one, the [reference environment](benchmarks.md#reference-environment), which runs every gateway in one session and measures host variance across runs; it gates nothing.
+- A cloud VM as the gate machine: instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). The [reference environment](benchmarks.md#reference-environment) is one, for published numbers only; it gates nothing.
 - The parent's results from its own gate run: halves the benchmark but brings the time gap back.
 - A fixed reference commit: catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand (above).
 
 ## Continuous integration
 
-GitHub Actions run on every pull request and push to `main` (`.github/workflows/`). They add to the commit gate without replacing it: shared runners are too noisy to gate latency or CPU.
+GitHub Actions run on every pull request and push to `main` (`.github/workflows/`). They add to the commit gate without replacing it: shared runners are too noisy to gate latency or CPU. CI makes no provider calls and needs no secrets.
 
 - **`ci.yml`**, on pushes to `main` and pull requests that touch more than the website: `cargo fmt --check`, clippy and rustdoc with `-D warnings`, tests on Linux and macOS, release and `alloc-stats` builds, `cargo deny check`.
-- **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/bench.sh ci`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule. Latency and CPU are reported in the job summary only.
+- **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/bench.sh ci`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule. Latency and CPU are reported in the job summary only. Allocation counts do not depend on the machine ([their spread](benchmarks.md#current-harness-and-baseline)), so their gate on a shared runner is as strict as the local one.
 - **`docker.yml`**, on pushes to `main`, and pull requests that touch the image: `scripts/image-smoke.sh`.
 - **`site.yml`**, on pushes to `main` and pull requests that touch the website or a file it reads: `site/check.sh` and `cargo deny check` for the site's workspace; from `main`, a deploy of `site/out` to GitHub Pages.
-- **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by [dist](https://github.com/axodotdev/cargo-dist) from `dist-workspace.toml`; edit that file and run `dist generate`, never `release.yml` by hand. Each target builds on a native runner with the benchmarked `release` profile; what a release publishes: [operations.md](operations.md#distribution). Beside the builds it calls **`release-checks.yml`** (read-only), which waits for the newest `ci.yml` run on a push to `main` of the tagged commit and fails unless it passed; the release is created only if that check succeeds.
+- **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by [dist](https://github.com/axodotdev/cargo-dist) from `dist-workspace.toml`; edit that file and run `dist generate`, never `release.yml` by hand. Each target builds on a native runner with the benchmarked `release` profile; what a release publishes: [operations.md](operations.md#distribution). Beside the builds it calls `release-checks.yml` (read-only), which waits for the newest `ci.yml` run on a push to `main` of the tagged commit and fails unless it passed; the release is created only if that check succeeds.
 - **`advisories.yml`**, weekly and on demand: `cargo deny check advisories`, so an advisory against a locked dependency shows up even when nothing is pushed.
 
-Allocation counts do not depend on the machine ([their spread](benchmarks.md#current-harness-and-baseline)), so their gate on a shared runner is as strict as the local one. Dependabot opens one grouped Cargo update for the gateway, one for the website, and one for the Dockerfile's base images (pinned by tag and digest) a week. Every action is pinned by commit SHA, with its version in a comment, and updated by hand: `release.yml`'s through `github-action-commits` in `dist-workspace.toml` and `dist generate`. Three things there stay as dist 0.32 generates them, with no option to change them: `plan` and each native build install dist with `curl … cargo-dist-installer.sh | sh` from dist's release URL for the pinned version, without a checksum; the workflow-level permission is `contents: write`, which every job but the native builds and the CI check inherits, `plan` on pull requests included; and plan jobs (`plan-jobs`) do not hold back the release, which is why the CI check is a local-artifacts job. CI makes no provider calls and needs no secrets.
+Dependabot opens one grouped Cargo update for the gateway, one for the website, and one for the Dockerfile's base images (pinned by tag and digest) a week. Every action is pinned by commit SHA, with its version in a comment, and updated by hand: `release.yml`'s through `github-action-commits` in `dist-workspace.toml` and `dist generate`. Three things there stay as dist 0.32 generates them, with no option to change them:
 
-A release: bump `version` in `crates/wye/Cargo.toml` and the `--tag` of the install command in the README's Quick start and [guide.md](guide.md#choosing-a-setup), commit through the gate, push to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. The tag publishes only once `ci` has passed on that commit (it waits for a run in progress); if `ci` failed, rerun it and then the release's failed jobs, or fix it and tag the fix as the next version. `dist plan` previews what the tag will build.
+- `plan` and each native build install dist with `curl … cargo-dist-installer.sh | sh` from dist's release URL for the pinned version, without a checksum.
+- The workflow-level permission is `contents: write`, which every job but the native builds and the CI check inherits, `plan` on pull requests included.
+- Plan jobs (`plan-jobs`) do not hold back the release, which is why the CI check is a local-artifacts job.
+
+### Releases
+
+1. Bump `version` in `crates/wye/Cargo.toml` and the `--tag` of the install command in the README's Quick start and [guide.md](guide.md#installing).
+2. Commit through the gate and push to `main`.
+3. `git tag v0.1.0 && git push origin v0.1.0`.
+
+The tag publishes only once `ci` has passed on that commit (it waits for a run in progress); if `ci` failed, rerun it and then the release's failed jobs, or fix it and tag the fix as the next version. `dist plan` previews what the tag will build.
 
 ## Benchmark
 
@@ -101,28 +111,25 @@ Failed requests and streams are gated at zero:
 - A stream counts as failed when it errors, ends before all its events, or has not ended after 30 s, in every SSE scenario of every variant (`*_sse_failed_streams`), throughput included.
 - A request that takes longer than 30 s fails too, so a hung gateway fails the check instead of hanging it.
 - The CPU phases' failures count too, and the allocation phases refuse to report counts from a run in which anything failed.
+- Cancellation release times have a fixed limit of one second, whatever the parent reads.
 
-The cancellation release times have a fixed limit of one second, whatever the parent reads. `--agentgateway <path>`, `--bifrost <path>`, `--litellm <path>`, and `--krakend <path>` run the same scenarios through those gateways ([comparison runs](benchmarks.md#comparison-runs)).
+`--agentgateway <path>`, `--bifrost <path>`, `--litellm <path>`, and `--krakend <path>` run the same scenarios through those gateways ([comparison runs](benchmarks.md#comparison-runs)).
 
 Two subcommands run several builds in alternating rounds, each side through its own `wye-bench`, as a child process:
 
 - `wye-bench alternate --side <name>=<wye-bench>,<wye>[,<alloc-stats wye>] ... --rounds N --repeat R --out <dir>`: each side's `run --repeat R` once per round, the order reversed every other round, then `<dir>/<name>.json`, the median of its rounds (failure counts: the worst). `scripts/bench.sh ab` is this and `wye-bench diff`.
 - `wye-bench gate --reference <checkout> --current <checkout> --out <dir> [compare flags]`: three rounds of each checkout's `target/release` and `target/alloc/release` builds, compared by both commits' `wye-bench compare`, with the rerun rule of the [commit gate](#commit-gate).
 
-The [reference environment](benchmarks.md#reference-environment) (`bench/reference/run.sh`) runs only when someone starts it by hand.
-
 CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `ps` rounds to whole seconds), in 10 ms steps either way; each CPU scenario runs long enough to make the step negligible.
 
 `--wye-alloc <path>` adds `alloc_` metrics from a `--features alloc-stats` build, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (benchmarks only; never ship it): allocations and bytes per request, per streamed event, and per stream; live heap per idle stream, also after a 512 KB request and on TLS, and per stalled stream on TLS; allocations per 1 MiB upload. Counts barely vary ([spread](benchmarks.md#current-harness-and-baseline)), so the gate catches one extra allocation per request, stream, or event, which CPU timing cannot resolve.
 
-`wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <name> --seconds N` keeps one scenario running and prints the gateway's pid, for `sample <pid>` (macOS) or `perf` (Linux):
+`wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <name> --seconds N` keeps one scenario running and prints the gateway's pid, for `sample <pid>` (macOS) or `perf` (Linux); `--wye-refused` runs the `refused_` variant and prints failed requests:
 
 - `upload`, `tls-upload`: 1 MiB uploads on the plain or the TLS path.
 - `paced`: the soak test. Resident memory, and with an alloc-stats build the live heap, after every batch of 2,000 streams.
 - `capacity`: Wye on one Tokio worker (`WYE_BENCH_GATEWAY_THREADS=N` for more), stepping paced streams up until streams fail, the worker saturates, or the added p99 passes 100 ms, and reporting the largest step within 10 ms; `--seconds` is ignored.
 - `events`: the gated CPU-per-event scenario (unpaced 64-byte events; `WYE_BENCH_EVENT_BYTES` changes the payload), printing CPU per event; with `--wye-openai` the events are OpenAI Responses.
-
-`--wye-refused` runs the `refused_` variant and prints failed requests.
 
 ## Scripts and benchmark variables
 
@@ -164,41 +171,48 @@ Each principle names where the code follows it, so a review can check new code a
 
 The rules the design principles do not already state.
 
-**Toolchain and style**
+#### Toolchain and style
+
 - Stable Rust, edition 2024, pinned in `rust-toolchain.toml`; lints and dependency versions are set once in the workspace's `Cargo.toml`.
 - Names follow the Rust API Guidelines; a module with children is `foo.rs` plus `foo/`, never `mod.rs`.
 - Every module has a `//!` doc and every public item a `///` doc (rustdoc runs with `-D warnings`); comments say why, not what.
 - One way to do each thing: extend the existing pattern (one HTTPS client setup, one config snapshot) before adding a second.
 
-**Types and errors**
+#### Types and errors
+
 - Errors are typed enums per concern (`ConfigError`, `TokenError`, `PolicyError`, ...); the CLI turns them into messages. No `anyhow`.
 - Identifiers and units get their own types. Money is an integer, pico-USD (`pricing::Pico`), never floating point; arithmetic that would overflow makes a cost `unknown`, never wrong.
 - A secret's type redacts it in `Debug` and never implements `Serialize` (`UpstreamAuth`, `HashKey`).
 - No panic on the request path: `unwrap`, `expect`, `panic!`, and indexing are denied by lint outside tests (`wye-bench` and `wye-testkit` allow some), and each connection runs in its own task, so a panic cannot reach another stream.
 
-**The data path**
+#### The data path
+
 - Bodies are `bytes::Bytes` frames on streaming bodies: relayed without copying, a streaming response never collected.
 - What can be resolved at startup is: upstream URIs, header values, price tables. No `format!` or `String` building per request where a precomputed value works.
 - Request bodies are read by hand-written scanners over `memchr`, for the few fields policy needs; small JSON objects (gateway-token claims, a usage object) are parsed with borrowing serde types (`RawValue`, `IgnoredAny`). A forwarded body is never re-serialized: a rewrite splices the new value in place.
 - Every buffer and queue has a fixed bound: a `DEFAULT_*` in `config.rs` where operators tune it, otherwise a constant listed under [Fixed limits](architecture.md#fixed-limits).
 
-**Concurrency**
+#### Concurrency
+
 - Tokio's multi-thread runtime. A worker never blocks: no blocking I/O, and CPU work longer than about 100 µs goes to `spawn_blocking`.
 - No locks on the request path; shared state is immutable behind `Arc`. Where a lock is unavoidable, a synchronous `Mutex`, never held across `.await` (denied by lint).
 - Every spawned task has an owner that awaits or aborts it: a `JoinSet`, or a `JoinHandle` its starter keeps. No detached tasks.
 - Backpressure comes from polling the body; a channel, where one is needed, is bounded. Usage records never slow the data path: a full queue drops and counts.
 - Every `select!` documents its branches' cancel safety. `Relaxed` atomics are for statistics counters only; any other ordering says why.
 
-**Unsafe and dependencies**
+#### Unsafe and dependencies
+
 - `unsafe` is forbidden in `gateway-core` and denied elsewhere. The one exception, `wye/src/alloc_stats.rs` (a `GlobalAlloc`, built only with `--features alloc-stats`), carries a `// SAFETY:` proof per block.
 - Each dependency is justified in its commit, maintained, and added with `default-features = false`; prefer what Tokio and Hyper already pull in. `cargo deny` runs in CI.
 
-**Performance work**
+#### Performance work
+
 - Measure first: `wye-bench` for the system, `scripts/bench.sh ab` for effects below the gate's sensitivity, the `alloc_` metrics for heap allocations, and sampled stacks (`sample`, `perf`) for where CPU and waits go.
 - A streamed event allocates nothing (`alloc_sse_per_event` is gated at zero).
 - Low-level optimization (`#[inline]`, SIMD, `unsafe`, custom allocators, release-profile settings) lands only with a before and after, adopted by the gate's [A/B rule](#commit-gate). Hot-path work the gate does not measure states its own measurement in the commit message.
 
-**Tests**
+#### Tests
+
 - Deterministic: local mock upstreams, `tokio::time::pause` for timeouts, no paid provider calls.
 - Property tests (proptest) for the parsers of untrusted input, SSE chunk splits, UTF-8 boundaries, and cost arithmetic; `loom` for any custom synchronization (there is none today). Fuzz targets for those parsers are an [open finding](roadmap.md#open-findings).
 
@@ -216,12 +230,12 @@ These docs and the README are the source of truth for design, status, and result
 
 - One fact, one owner: every other document links to the owner instead of restating it, so documents cannot contradict each other.
 - A change updates the docs it affects in the same commit: status in [roadmap.md](roadmap.md), the config reference in [examples/wye.toml](../examples/wye.toml), structure in [architecture.md](architecture.md), numbers in [benchmarks.md](benchmarks.md), experiments in [research.md](research.md).
-- Unbuilt design is planned work in roadmap.md or an idea in research.md; a user document (the README, the guide, operations) describes what is built. Where a design document describes what is not, it says so: **planned** or **proposal** (not yet implemented; the shape may change), or **research** (an idea to investigate, not a product promise).
+- Unbuilt design is planned work in roadmap.md or an idea in research.md; a user document (the README, the guide, operations) describes what is built. Where a design document describes what is not, it says so: planned or proposal (not yet implemented; the shape may change), or research (an idea to investigate, not a product promise).
 - Finished work leaves research.md: its conclusion becomes one line in the owning document, and the history stays in git.
 - No performance claim without published, reproducible benchmarks; never present an estimate or a lab result as a production measurement.
-- Support is declared per **endpoint × provider × feature**. Do not imply more.
-- **Terms:** one name per concept, as [glossary.md](glossary.md) defines it; a new concept gets its entry there first.
-- **Layout:** one line per paragraph and per list item (editors and GitHub wrap them). Tables hold short values; prose goes in lists, so GitHub does not squeeze it into narrow columns. Code lines stay under 90 characters.
+- Support is declared per endpoint × provider × feature. Do not imply more.
+- One name per concept, as [glossary.md](glossary.md) defines it; a new concept gets its entry there first.
+- One line per paragraph and per list item (editors and GitHub wrap them). Tables hold short values; prose goes in lists, so GitHub does not squeeze it into narrow columns. Code lines stay under 90 characters.
 - After editing docs, check that every relative link and anchor resolves.
 
 ## Commit messages

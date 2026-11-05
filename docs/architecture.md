@@ -31,13 +31,15 @@ App / Claude Code / Codex ──> ingress / Kubernetes Service
 
 Replicas never communicate at request time. A new request may land on any ready replica. A stream stays on its replica until it ends.
 
+Immutable configuration, connection pools, and in-flight request state are compatible with statelessness; persistent conversations, global quotas, and cumulative spend accounting are not.
+
 Infrastructure provides service discovery, TLS/ingress, scheduling, replica count, rollout, secret delivery, and any aggregate rate limiting. Wye provides its listener, graceful shutdown, and health endpoints ([operations.md](operations.md)).
 
 ## Request path
 
 1. Validate endpoint, framing, and request size.
 2. Verify the signed [gateway token](glossary.md#access) against its issuer's keys in config; without `[auth]`, refuse a request a web page may have sent ([policy.md](policy.md#a-gateway-without-auth)).
-3. Enforce static model permissions and output-token ceilings ([policy.md](policy.md)).
+3. Enforce static model permissions, output-token ceilings, and (planned) the cost ceiling ([policy.md](policy.md)).
 4. Resolve a model alias; select the route that serves this endpoint natively, and among its [upstreams](glossary.md#requests-and-where-they-go) the one policy picks (`cache_affine` or `ordered`).
 5. Apply allowlisted rewrites (the [served model](glossary.md#models), the provider's model id, [size-aware model routing](glossary.md#planned)).
 6. Forward upstream unchanged beyond the allowlist.
@@ -45,7 +47,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 8. Propagate cancellation, apply [failover](glossary.md#requests-and-where-they-go), release request resources.
 9. Extract reported usage, or mark it unknown; export telemetry asynchronously.
 
-Built for all three APIs, except two parts: the cost ceiling in step 3 ([roadmap](roadmap.md#m2-cost-policy-for-claude)) and size-aware model routing in step 5 ([roadmap](roadmap.md#m2c-fewer-expensive-tokens)).
+Planned: the cost ceiling ([M2](roadmap.md#m2-cost-policy-for-claude)) and size-aware model routing ([M2c](roadmap.md#m2c-fewer-expensive-tokens)); the rest is built for all three APIs.
 
 ## Runtime stack
 
@@ -63,8 +65,6 @@ Built for all three APIs, except two parts: the cost ceiling in step 3 ([roadmap
 The OTLP exporter is hand-written (OTLP/HTTP JSON on the existing hyper client), instead of the OpenTelemetry Rust SDK and its gRPC stack.
 
 Direct Hyper gives explicit control over request and response bodies. Reconsider Axum if endpoints and middleware grow enough to justify it.
-
-Immutable configuration, connection pools, and in-flight request state are compatible with statelessness; persistent conversations, global quotas, and cumulative spend accounting are not.
 
 ## Public API
 
@@ -117,13 +117,17 @@ Gateway-generated errors on `/v1/responses` use OpenAI's shape: `{"error": {"mes
 
 ## Forwarding contract
 
-**Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. The body streams upstream and is never re-serialized.
+### Bodies
 
-`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#gateway-tokens), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within `server.max_total_held_bytes`.
+Preserve request JSON, unknown fields, tool definitions, and provider-native options. The body streams upstream and is never re-serialized.
+
+`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#model-permissions), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within `server.max_total_held_bytes`.
 
 Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
-**Request rewrites.** Wye rewrites only an explicit allowlist of request fields; everything else passes through byte for byte, and a rewrite splices the new value in place. Each field, when it is rewritten, and why:
+### Request rewrites
+
+Wye rewrites only an explicit allowlist of request fields; everything else passes through byte for byte, and a rewrite splices the new value in place. Each field, when it is rewritten, and why:
 
 - **`model`**, for a [model alias](#model-aliases-and-upgrade-checks) (implemented), a Claude provider's model id (Bedrock, implemented), or size-aware model routing (planned, [roadmap](roadmap.md#m2c-fewer-expensive-tokens)): replace an alias with the model config maps it to, the model a rule picks for the request class, or the selected provider's id for the same model (`anthropic.claude-opus-5-5` on Bedrock). Never a different model family.
 - **`model` → URL, `anthropic_version`**, for Vertex AI (planned): Vertex names the model in the URL and needs `"anthropic_version": "vertex-2023-10-16"` in the body: the top-level `model` member is cut and the version member spliced in; every other byte is unchanged.
@@ -132,29 +136,27 @@ Never buffer the generated response. Relay SSE bytes without parsing or rebuildi
 
 Each rewrite is set in config (aliases for every route, model ids by the upstream's provider), covered by tests, and reported by `wye explain`. Adding a field to this list is a design change.
 
-### Usage extraction
+### Headers and destination
 
-A bounded, read-only observer reads the same bytes Wye relays. It never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream. `UsageScanner` picks the scanner per API as an enum; each scanner's limits are documented on its constants and under [Fixed limits](#fixed-limits).
+- Strip hop-by-hop headers, including those named by `Connection`; forward only appropriate end-to-end headers.
+- Replace caller authorization (`Authorization` or `x-api-key`) with the configured [provider key](glossary.md#requests-and-where-they-go), except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough).
+- With the provider key, drop the caller's `OpenAI-Organization` and `OpenAI-Project`, which would choose what the provider key bills, and the response's `anthropic-organization-id`, `openai-organization`, and `openai-project`, which name the operator's account to the token holder. In passthrough the account is the caller's, and they stay.
+- Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response adds only bytes, while decompressing a copy adds CPU overhead per event ([measured](research.md#performance-techniques)).
+- The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
 
-A body wrapper emits one record when the body is dropped, so every outcome is recorded. A request the client leaves before its response headers is recorded as cancelled with nginx's status `499`. A body also counts as completed once its declared length is delivered: the client connection stops polling then, and an HTTP/2 upstream may send its end-of-stream frame after the data.
+### Backpressure and cancellation
 
-- **Messages streams** always carry usage (`message_start`, `message_delta`), so no rewrite is needed. Tool names come from `content_block_start`.
-- **Responses streams** carry usage only in the terminal event, whose data line holds the whole response, often megabytes. It is lexed with constant memory, so a lookalike `"usage"` in generated text is never read. `response.output_item.added` gives tool calls by name, and hosted tools billed per call mark the cost partial. A stream cut before the terminal event is `unknown`; there is no `partial`, because OpenAI sends no interim counts.
-- **Chat Completions streams** carry usage only in a final chunk the client asks for with `stream_options.include_usage`. Wye does not add the field (the [rewrite](#forwarding-contract) is an open decision: the extra chunk with empty `choices` trips some clients), so a stream without it records `unknown`. `prompt_tokens` include cached tokens and are split like Responses' `input_tokens`.
-- **Non-streaming JSON** (all three APIs) carries `model` and `usage` as top-level members after the generated content. A constant-memory lexer keeps those and counts tool calls among `content` blocks or `output` items; Chat's sit in `choices` and are not counted. A body cut off before `usage` is `unknown`.
-- Error responses, `count_tokens` (which generates nothing), and responses that are neither SSE nor JSON carry no usage: `none`.
+Downstream body polling applies backpressure. No unbounded queues or detached readers. Client disconnect releases or cancels upstream work, verified by integration tests. Already generated tokens may still be billed.
 
-**Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured [provider key](glossary.md#requests-and-where-they-go), except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough); with the provider key, also drop the caller's `OpenAI-Organization` and `OpenAI-Project`, which would choose what the provider key bills, and the response's `anthropic-organization-id`, `openai-organization`, and `openai-project`, which name the operator's account to the token holder (in passthrough the account is the caller's, and they stay). Forward only appropriate end-to-end headers.
+### Errors
 
-Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response adds only bytes, while decompressing a copy adds CPU overhead per event ([measured](research.md#performance-techniques)).
+Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded by whose it is: a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with `connect`, `timeout`, or `reset`), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#usage-records-and-telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`).
 
-The caller never selects the upstream destination (no open proxy or SSRF surface). Preserve the configured base-path prefix.
+After headers are sent, an upstream failure terminates the stream (`truncated`); it cannot become a new JSON error response.
 
-**Backpressure and cancellation.** Downstream body polling applies backpressure. No unbounded queues or detached readers. Client disconnect releases or cancels upstream work, verified by integration tests. Already generated tokens may still be billed.
+### Timeouts
 
-**Errors.** Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded by whose it is: a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with `connect`, `timeout`, or `reset`), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#usage-records-and-telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`). After headers are sent, an upstream failure terminates the stream (`truncated`); it cannot become a new JSON error response.
-
-**Timeouts.** Four on the upstream and client sides, two on a held body, and no total request timeout, which would kill valid generations:
+Four on the upstream and client sides, two on a held body, and no total request timeout, which would kill valid generations:
 
 - Connect: short, over the TCP connect and the TLS handshake together. A peer that stalls the handshake fails as a refused connection, so failover applies.
 - Response headers: several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure).
@@ -164,9 +166,21 @@ The caller never selects the upstream destination (no open proxy or SSRF surface
 
 Shutdown: [operations.md](operations.md#health-and-shutdown).
 
+### Usage extraction
+
+A bounded, read-only observer reads the same bytes Wye relays. It never delays, buffers, or changes them, and an oversized or malformed event marks usage `unknown` instead of failing the stream. `UsageScanner` picks the scanner per API as an enum; each scanner's limits are documented on its constants and under [Fixed limits](#fixed-limits).
+
+A body wrapper emits one record when the body is dropped, so every outcome is recorded. A request the client leaves before its response headers is recorded as cancelled with nginx's status `499`. A body also counts as completed once its declared length is delivered: the client connection stops polling then, and an HTTP/2 upstream may send its end-of-stream frame after the data.
+
+- **Messages streams** always carry usage (`message_start`, `message_delta`), so no rewrite is needed. Tool names come from `content_block_start`.
+- **Responses streams** carry usage only in the terminal event, whose data line holds the whole response, often megabytes. It is lexed with constant memory, so a lookalike `"usage"` in generated text is never read. `response.output_item.added` gives tool calls by name, and hosted tools billed per call mark the cost partial. A stream cut before the terminal event is `unknown`; there is no `partial`, because OpenAI sends no interim counts.
+- **Chat Completions streams** carry usage only in a final chunk the client asks for with `stream_options.include_usage`. Wye does not add the field (the [rewrite](#request-rewrites) is an open decision: the extra chunk with empty `choices` trips some clients), so a stream without it records `unknown`. `prompt_tokens` include cached tokens and are split like Responses' `input_tokens`.
+- **Non-streaming JSON** (all three APIs) carries `model` and `usage` as top-level members after the generated content. A constant-memory lexer keeps those and counts tool calls among `content` blocks or `output` items; Chat's sit in `choices` and are not counted. A body cut off before `usage` is `unknown`.
+- Error responses, `count_tokens` (which generates nothing), and responses that are neither SSE nor JSON carry no usage: `none`.
+
 ## Upstream selection and failover
 
-Upstreams are configured per route (`[[routes.claude.upstreams]]` or `[[routes.openai.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affinity) by session id, weighted by configured shares; or `ordered`, the first upstream in config, the rest only on failover. Not built: excluding an upstream by the request's model or a feature it is known not to support. No health state is shared or remembered between requests. Each upstream keeps its own connection lanes and provider key; `forward_caller_credential` works only with a single `[upstream]`.
+Upstreams are configured per route (`[[routes.claude.upstreams]]` or `[[routes.openai.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affinity) by session id, weighted by configured shares; or `ordered`, the first upstream in config, the rest only on failover. Not built: excluding an upstream by the request's model or a feature it is known not to support. No health state is shared or remembered between requests. Each upstream keeps its own connection lanes and provider key; `forward_caller_credential` works only on the Claude route's only upstream.
 
 ### Cache affinity
 
@@ -217,9 +231,35 @@ Streams on a lane share its HTTP/2 connection window. With hyper's default (5 Mi
 
 On the client side, each connection's kernel send buffer is fixed at 128 KiB (`server.rs`; Linux doubles the value, so 256 KiB there) instead of autotuning to as much as 4 MiB. The worst case, every in-flight request stalled at once, is `max_concurrent_requests` × (a stalled stream's memory plus this buffer).
 
-### Model aliases and upgrade checks
+### Claude across providers
 
-#### Aliases
+Status: Claude Platform on AWS and Bedrock with API keys are implemented; Vertex and SigV4 are planned. [Upstream selection and failover](#upstream-selection-and-failover) work the same across providers.
+
+The same Claude models are sold by four providers. Wye can serve one Claude Code fleet from several of them, choosing per request and failing over, because all four speak the Anthropic Messages API with small, known differences.
+
+Each provider's endpoint, request, stream, auth, and model id:
+
+- **Anthropic**: `api.anthropic.com/v1/messages`. Messages over SSE. Auth: `x-api-key`. Model id: `claude-opus-5-5`.
+- **Claude Platform on AWS** (Anthropic-operated): `aws-external-anthropic.{region}.api.aws/v1/messages`. Messages, same-day parity, over SSE. Auth: SigV4 (`aws-external-anthropic`) or short-term API key; workspace id required. Model id: `claude-opus-5-5`.
+- **Amazon Bedrock**, Messages endpoint (Opus 4.7 and later): `bedrock-mantle.{region}.api.aws/anthropic/v1/messages`. Messages over SSE. Auth: SigV4 (`bedrock-mantle`) or a Bedrock API key in `x-api-key`. Model id: `anthropic.claude-opus-5-5`.
+- **Google Vertex AI**: `aiplatform.googleapis.com/v1/projects/{p}/locations/{loc}/publishers/anthropic/models/{model}:streamRawPredict`. Messages without `model`, with `anthropic_version`; SSE (to verify). Auth: OAuth access token (`Authorization: Bearer`). Model id: `claude-opus-5-5`.
+
+Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
+
+Claude Platform on AWS (implemented, API keys only): `provider = "claude-platform-aws"` with `base_url = "https://aws-external-anthropic.{region}.api.aws"` and the required `workspace_id`; Wye sends the provider key as `Authorization: Bearer` and `anthropic-workspace-id` on every request. Requests, responses, and model ids are the first-party API's, so nothing else changes (platform.claude.com, "Claude Platform on AWS", read 2026-10-26). Its short-term API keys last at most 12 hours and Wye reads provider keys at startup, so a deployment on them restarts (or rolls) within that window until a key refresher lands; SigV4 (service `aws-external-anthropic`) is the open decision below.
+
+Amazon Bedrock (implemented with API keys, [not yet checked against the live service](roadmap.md#status)): `provider = "bedrock"` with `base_url = "https://bedrock-mantle.{region}.api.aws/anthropic"`.
+
+- Wye sends the Bedrock API key as `x-api-key`, as Anthropic's page says for the standard SDK. AWS's page shows `Authorization: Bearer`, and [one live request](research.md#verification-needed) will settle it.
+- Model ids carry an `anthropic.` prefix. On a route with a Bedrock upstream, Wye holds each request until its `model` and gives each attempt its upstream's id: `claude-opus-5-5` becomes `anthropic.claude-opus-5-5` for Bedrock and stays as sent for the others, with `content-length` adjusted. Routes without a Bedrock upstream are unchanged.
+- Records, OTLP, and pricing see the model the provider reports. Whether Bedrock reports its `anthropic.` id there, which a price entry would then need to name, is part of the live check.
+- A failover resend gets the next upstream's id, in the bytes already sent or in the unread rest; a value split between the two (a rejection in the middle of the first chunk) is answered as it is.
+
+Usage and cost (implemented): records, OTLP, and `wye report` split by the upstream's `id`, which names the account; config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
+
+## Model aliases and upgrade checks
+
+### Aliases
 
 A client sends an alias and config decides the model:
 
@@ -231,14 +271,14 @@ model = "claude-opus-5-5"
 when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 ```
 
-- Resolution reads the top-level `model` with the existing [policy scanner](policy.md#gateway-tokens) hold (Claude Code and the SDKs send `model` first; configuring `[[aliases]]` makes the hold apply to every request) and splices the served model's name in place of the alias: the held chunks are sliced around the value, so only the new name is allocated, every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
+- Resolution reads the top-level `model` with the existing [policy scanner](policy.md#model-permissions) hold (Claude Code and the SDKs send `model` first; configuring `[[aliases]]` makes the hold apply to every request) and splices the served model's name in place of the alias: the held chunks are sliced around the value, so only the new name is allocated, every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
 - Canary: `when` rules match the token's subject (exact or a prefix ending in `*`, as in model permissions); the first match wins, and callers without a token get the alias's `model`. Resolution is one step: an alias names a model, never another alias.
 - Model permissions apply to the served model, and the price table to the model the provider reports (the served one). `GET /v1/models` lists aliases after the catalog's models, each when the model it resolves to for that caller is permitted. Claude Code's model picker keeps only ids containing `claude` or `anthropic`, so aliases meant for it are named accordingly (`claude-coding`).
 - Visibility: `requested_model` in records ([operations.md](operations.md#usage-records-and-telemetry)); `wye explain` prints the resolution, and a policy test can pin the served model, so a rollout is reviewed like any policy change.
 - Overhead: with aliases alone the rest of the body is not lexed ([measured](benchmarks.md#current-harness-and-baseline)).
 - Mapping one name to several providers of a model is [a route](#upstream-selection-and-failover), not a second alias mechanism.
 
-#### Upgrade checks
+### Upgrade checks
 
 Moving an alias, or a client, to a new model fails in production when the new model rejects what the old one accepted. Wye ships a rule table of each model's breaking request changes, every rule citing the provider's migration notes and covered by its own test; `gateway-core/src/upgrade.rs` holds the models each applies to (dated ids included), the caveats, and the source section. Each rule and the field it reads:
 
@@ -259,7 +299,7 @@ Source: Anthropic's model migration guide, its per-model sections (the [Opus 5.5
 - Offline: `wye explain --config wye.toml --target-model claude-opus-5-5 request.json` (repeatable; without it, the configured targets) prints each issue with the fix and its source; `wye report` lists issues by target, rule, and client.
 - Report only: the request is forwarded unchanged ([non-goal](product.md#non-goals)). The rule table is versioned with Wye.
 
-### Cache diagnostics
+## Cache diagnostics
 
 Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a request's prompt sections that name which section changed before a [cache miss](glossary.md#usage-and-cost). Per request: hashes of `tools` and `system` with their counts, the message count, up to four `cache_control` breakpoints, and the last eight message-prefix hashes (`prompt_hashes` in [records](operations.md#usage-records-and-telemetry)). The OpenTelemetry backend compares consecutive requests of a session in cache order (tools, system, messages); the first mismatch names the cause.
 
@@ -268,32 +308,6 @@ Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a 
 - xxh3 in process; every exported hash is HMAC-SHA256 under a shared key, truncated to 64 bits, so hashes compare across replicas but cannot be matched against guessed prompts. The key is required.
 - A constant-memory scanner; a body it cannot follow is recorded `unknown` and forwarded unchanged. Property tests cover random bodies, whitespace, and chunkings.
 - Sampled per session (`sample_percent`), by a hash of the session id, so every replica agrees. Sampling, not a faster scanner, bounds the overhead ([benchmarks.md](benchmarks.md#current-harness-and-baseline), [the SIMD verdict](research.md#performance-techniques)).
-
-### Claude across providers
-
-Status: Claude Platform on AWS and Bedrock with API keys are implemented; Vertex and SigV4 are planned. [Upstream selection and failover](#upstream-selection-and-failover) work the same across providers.
-
-The same Claude models are sold by four providers. Wye can serve one Claude Code fleet from several of them, choosing per request and failing over, because all four speak the Anthropic Messages API with small, known differences. Wye only chooses among them: no request is translated or sent to another model family.
-
-Each provider's endpoint, request, stream, auth, and model id:
-
-- **Anthropic**: `api.anthropic.com/v1/messages`. Messages over SSE. Auth: `x-api-key`. Model id: `claude-opus-5-5`.
-- **Claude Platform on AWS** (Anthropic-operated): `aws-external-anthropic.{region}.api.aws/v1/messages`. Messages, same-day parity, over SSE. Auth: SigV4 (`aws-external-anthropic`) or short-term API key; workspace id required. Model id: `claude-opus-5-5`.
-- **Amazon Bedrock**, Messages endpoint (Opus 4.7 and later): `bedrock-mantle.{region}.api.aws/anthropic/v1/messages`. Messages over SSE. Auth: SigV4 (`bedrock-mantle`) or a Bedrock API key in `x-api-key`. Model id: `anthropic.claude-opus-5-5`.
-- **Google Vertex AI**: `aiplatform.googleapis.com/v1/projects/{p}/locations/{loc}/publishers/anthropic/models/{model}:streamRawPredict`. Messages without `model`, with `anthropic_version`; SSE (to verify). Auth: OAuth access token (`Authorization: Bearer`). Model id: `claude-opus-5-5`.
-
-Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
-
-**Claude Platform on AWS** (implemented, API keys only): `provider = "claude-platform-aws"` with `base_url = "https://aws-external-anthropic.{region}.api.aws"` and the required `workspace_id`; Wye sends the provider key as `Authorization: Bearer` and `anthropic-workspace-id` on every request. Requests, responses, and model ids are the first-party API's, so nothing else changes (platform.claude.com, "Claude Platform on AWS", read 2026-10-26). Its short-term API keys last at most 12 hours and Wye reads provider keys at startup, so a deployment on them restarts (or rolls) within that window until a key refresher lands; SigV4 (service `aws-external-anthropic`) is the open decision below.
-
-**Amazon Bedrock** (implemented with API keys, [not yet checked against the live service](roadmap.md#status)): `provider = "bedrock"` with `base_url = "https://bedrock-mantle.{region}.api.aws/anthropic"`.
-
-- Wye sends the Bedrock API key as `x-api-key`, as Anthropic's page says for the standard SDK. AWS's page shows `Authorization: Bearer`, and [one live request](research.md#verification-needed) will settle it.
-- Model ids carry an `anthropic.` prefix. On a route with a Bedrock upstream, Wye holds each request until its `model` and gives each attempt its upstream's id: `claude-opus-5-5` becomes `anthropic.claude-opus-5-5` for Bedrock and stays as sent for the others, with `content-length` adjusted. Routes without a Bedrock upstream are unchanged.
-- Records, OTLP, and pricing see the model the provider reports. Whether Bedrock reports its `anthropic.` id there, which a price entry would then need to name, is part of the live check.
-- A failover resend gets the next upstream's id, in the bytes already sent or in the unread rest; a value split between the two (a rejection in the middle of the first chunk) is answered as it is.
-
-**Usage and cost** (implemented). Records, OTLP, and `wye report` split by the upstream's `id`, which names the account; config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
 
 ## Configuration
 
@@ -319,7 +333,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer |
 | `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | A rejected attempt's hand-back of its body for failover |
 | `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_total_held_bytes` and `max_total_kept_bytes` (1 KiB), so tiny chunks cannot pin more than those say |
-| `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | A held body's longest silence and total time to `model` ([timeouts](#forwarding-contract)) |
+| `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | A held body's longest silence and total time to `model` ([timeouts](#timeouts)) |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer; more are dropped and counted |
 | `WRITE_BATCH` | `wye/src/usage_log/writer.rs` | Records formatted into one write, which bounds the write buffer (below) |
 | `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting, one export attempt |

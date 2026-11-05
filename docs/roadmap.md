@@ -56,7 +56,7 @@ Built: the price table ([policy.md](policy.md#price-table)) in records, OTLP, `w
 
 Open:
 
-- **Provider-held budgets.** The provider's own spend ledger caps each team, with no Wye state:
+- Provider-held budgets: the provider's own spend ledger caps each team, with no Wye state:
   - Each budget owner (team, project, environment) gets its own provider workspace and API key, with a spend limit set at the provider.
   - An upstream lists the token subjects it serves (patterns, as model permissions use). Failover stays among that owner's upstreams, since another's would spend another budget.
   - An exhausted limit comes back as an explicit budget error.
@@ -126,7 +126,7 @@ Exit: a team serves Claude Code from at least two providers, keeps prompt-cache 
 
 ### M5: benchmarks and optimization
 
-Started early: the [commit gate](glossary.md#development) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
+Started early: the [commit gate](development.md#commit-gate) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
 
 Open:
 
@@ -157,7 +157,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - No minimum read rate: a client that accepts one window update a minute keeps its stream, its permit, and the memory of a [stalled stream](benchmarks.md#current-harness-and-baseline), since the write timeout resets on any progress. Open: bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate.
 - Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s), or `stream_idle_timeout_secs` (120 s) once a stream has started. Open: some front ends answer frequent pings with `GOAWAY`; needs a check against each provider.
 - Chat Completions' `n` asks for several choices, each up to the output-token ceiling, so one request may generate `n` times the ceiling ([policy.md](policy.md#per-request-ceilings)). Open: reading `n` is one more field under the hold; refuse or multiply is a policy choice.
-- Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-tokens)). Open: each such field is provider-specific; a list of them is a design change.
+- Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#model-permissions)). Open: each such field is provider-specific; a list of them is a design change.
 - OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process. Open: the excess is counted in `wye.records.dropped`; per-attribute caps need a design.
 - Tests: a few negative checks (`try_recv` on an empty channel, in aliases, OpenAI, and failover tests) could race the upstream, and some tests wait with fixed sleeps, among them a rejection mid-upload in the failover tests (200 ms for the rejection to arrive first). Open: test cleanup; none has flaked on the laptop or CI.
 - A chunked body whose chunk-size lines are padded (HTTP/1.1 allows leading zeros) can pin 8-32 KiB of the connection's read buffer per held or kept chunk, which counts 1 KiB, so under such a client the hold and failover budgets bound their charges, not memory. Open: a strict bound copies each held or kept chunk, one more allocation per request (gated), or caps chunk-size framing, which hyper does not expose; it takes an authenticated client uploading gigabytes.
@@ -182,7 +182,7 @@ What must be true to tag it:
 - [ ] One full Claude Code session with an API key.
 - [ ] A container image on GHCR.
 
-Postponed while solo-maintained: CONTRIBUTING, issue forms, Discussions, SECURITY.md, code of conduct.
+Postponed while solo-maintained: CONTRIBUTING, issue forms, Discussions, code of conduct.
 
 ## Before 1.0
 

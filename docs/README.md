@@ -10,7 +10,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 
 ## Run it
 
-- [operations.md](operations.md): distribution, CLI, deployment topologies, usage records and telemetry, health, shutdown, failure behavior.
+- [operations.md](operations.md): distribution, CLI, deployment topologies, token renewal, health and shutdown, usage records and telemetry, failure behavior.
 
 ## Trust it
 
@@ -23,5 +23,5 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 
 - [development.md](development.md): repository layout, commit gate, CI, benchmark scenarios, releases, code rules, documentation conventions, commit messages, review rounds.
 - [roadmap.md](roadmap.md): status, open work, exit criteria, open findings, release checklists.
-- [research.md](research.md): facts to verify, related work, feature directions (the cost bound among them), visibility for one developer, where the tokens go, rejected approaches, performance techniques.
-- [product.md](product.md): why Wye exists, its principles, its non-goals (linked), and where it stands among alternatives.
+- [research.md](research.md): facts to verify, related work, feature directions with the cost bound, visibility for one developer, where the tokens go, rejected approaches, performance techniques.
+- [product.md](product.md): why Wye exists, its principles, its non-goals, and where it stands among alternatives.

@@ -1,9 +1,8 @@
 # Wye configuration reference: every field, with its default and limits.
-# As it stands, this file runs Claude Code with one Anthropic API key. The
-# fields of its live sections are set to their defaults, so every field
-# shows; the optional sections and the alternatives stay commented out, since
-# turning one on changes what Wye does. On a claude.ai subscription, start
-# from examples/developer/wye.toml instead.
+# As it stands, this file runs Claude Code with one Anthropic API key. Live
+# sections set every field to its default; optional sections and alternatives
+# are commented out, since each changes what Wye does. On a claude.ai
+# subscription, start from examples/developer/wye.toml instead.
 #
 #   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
@@ -35,8 +34,7 @@ max_concurrent_requests = 10000
 # Open client connections, idle ones included; at the limit, new connections
 # wait in the kernel's listen queue until one closes. Default twice
 # max_concurrent_requests; at least that, at most 1048576. Needs an open-file
-# limit about twice this (a client and an upstream connection each): `wye
-# service` sets 65536; `wye serve` keeps the one it inherits (`ulimit -n`):
+# limit about twice this (docs/operations.md, "Running as a service"):
 max_connections = 20000
 # Behind a load balancer: keep serving with /readyz failing this long after
 # SIGTERM, so traffic moves away before connections are refused:
@@ -139,8 +137,8 @@ http_version = "auto"
 # further. Omit to allow all:
 # models = ["claude-sonnet-*", "claude-haiku-*"]
 # Output-token ceiling: the largest output-token value a request may ask for
-# (max_tokens, max_output_tokens, or max_completion_tokens per API)
-# (gateway tokens issued with --max-output-tokens can only lower it):
+# max_tokens, max_output_tokens, or max_completion_tokens, per API; a gateway
+# token issued with --max-output-tokens can only lower it:
 # max_output_tokens = 32000
 # Below the [auth] fields: in TOML, every key after a table header belongs
 # to that table.
@@ -157,7 +155,7 @@ http_version = "auto"
 # [[auth.identity_providers]]
 # issuer = "https://token.actions.githubusercontent.com"
 # audience = "wye-prod"
-# algorithm = "RS256"                  # or ES256, EdDSA; pinned, never read from the token
+# algorithm = "RS256"                  # or ES256, EdDSA; never read from the token
 # jwks_file = "github.jwks"            # read at startup
 # subject_claim = "repository"         # names the subject; default "sub"
 # Models by claim value (a string claim equal to value, or a list containing
@@ -172,8 +170,8 @@ http_version = "auto"
 # section changed before a cache miss (docs/architecture.md, "Cache
 # diagnostics"). Scanning adds CPU time per uploaded MB; sample_percent
 # diagnoses that share of Claude Code sessions, each completely. The key
-# (required, at least 32 bytes: `openssl rand -hex 32`) and the sample are the
-# same on every replica.
+# (required, at least 32 bytes: `openssl rand -hex 32`) and sample_percent
+# must match on every replica.
 # [cache_diagnostics]
 # hash_key_env = "WYE_CACHE_HASH_KEY"
 # sample_percent = 100
@@ -185,7 +183,7 @@ http_version = "auto"
 # base_url: beyond this machine, records and OTLP headers need https.
 # [telemetry]
 # otlp_endpoint = "http://localhost:4318"  # no credentials in the URL
-# otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2": the API key goes here
+# otlp_headers_env = "OTLP_HEADERS"    # "key=value,...": a backend's API key
 # service_name = "wye"
 
 # Model catalog for GET /v1/models (absent without this section): Claude
@@ -203,11 +201,11 @@ http_version = "auto"
 # model, and a model upgrade is one reviewed change here. Model permissions
 # apply to the served model; usage records show both (requested_model,
 # model). `when` rules (up to 32, first match by subject) move matching
-# subjects first. Name an alias Claude Code should list as [discovery] says
-# above.
+# subjects first. Claude Code's picker lists only names containing "claude"
+# or "anthropic".
 # [[aliases]]
 # name = "claude-coding"
-# model = "claude-opus-5-5"
+# model = "claude-sonnet-5"
 # when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 
 # The price table, so every usage record carries its cost. Copy prices from
@@ -220,7 +218,7 @@ http_version = "auto"
 # version = "anthropic-2026-11-01"     # recorded with every cost
 # [[pricing.prices]]
 # models = ["claude-opus-5-5"]
-# upstreams = ["aws-us-west-2"]        # only for these route upstreams (partner or regional prices)
+# upstreams = ["aws-us-west-2"]        # only when one of these serves (regional prices)
 # input = "4.00"
 # output = "20.00"
 # cache_read = "0.20"                  # optional, like the cache writes below
@@ -245,5 +243,5 @@ http_version = "auto"
 # Results: upgrade_issues in usage records, wye.upgrade.issues in OTLP,
 # `wye report`, and `wye explain --config wye.toml --target-model <model> request.json`.
 # [upgrade_check]
-# targets = ["claude-opus-5-5"]        # up to 16 models
-# sample_percent = 100                 # share of sessions (or clients) checked; lower it on busy fleets
+# targets = ["claude-sonnet-5-5"]      # up to 16 models
+# sample_percent = 100                 # share of sessions (or clients) checked

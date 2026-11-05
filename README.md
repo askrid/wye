@@ -38,7 +38,7 @@ Every commit that changes code is benchmarked against its parent, in alternating
 
 ## Quick start
 
-> **Status:** prerelease (`0.1.0-rc.2`), tested and benchmarked on one machine. [Status](#status) says what is not yet verified against live providers.
+Prerelease, tested and benchmarked on one machine; [status](#status) lists what is not yet verified against live providers.
 
 ```bash
 cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked   # Rust 1.99+
@@ -67,7 +67,7 @@ By request class
 
 ## What it does
 
-- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss is recorded with its reason (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
+- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss is recorded with its reason (`compaction`, `after_compaction`, or `unexplained`). ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
 - **Gives each caller its own gateway token.** Instead of the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and its output-token ceiling; anything else is refused before the provider gets the whole request. With `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker shows only those models. ([teams](docs/guide.md#using-it-for-a-team), [apps](docs/guide.md#using-it-from-apps), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), split by weight, with failover between them. Each key or account is an [upstream](docs/glossary.md#requests-and-where-they-go). ([several upstreams](docs/guide.md#several-upstreams))
 - **Changes models in one place.** Aliases map a name to a model, per gateway-token subject (a person, a repository, or a service). Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
@@ -75,15 +75,9 @@ By request class
 - **Works with existing clients.** Point Claude Code, Codex, or any app on the official Anthropic or OpenAI SDK at it by base URL; `wye claude` and `wye codex` do it for you. Messages, Responses, and Chat Completions go through untranslated, except a model id your config maps. Streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. Replicas behind any load balancer never talk to each other, and each sends a session to the same upstream, so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment))
 
-## Who it's for
-
-- **Individual developers.** See where tokens and money go, per session, subagent, and tool, with prompt-cache misses flagged and cost once the config has prices, from `wye report` alone, with no secret in the gateway.
-- **Teams.** A gateway token per developer and CI job, provider keys only in the deployment, policy reviewed in Git and tested in CI, and usage per developer and session in your OpenTelemetry backend. A team that runs only Claude Code with SSO may prefer Anthropic's own self-hosted gateway for Claude Code, which follows every Claude Code release.
-- **Applications on the official SDKs.** Model names, keys, failover, and cost move out of application code, and a model upgrade becomes a config change once the upgrade check reports nothing that would break (it reads Anthropic Messages requests). Wye alone does not protect a public endpoint from abuse: per-user authentication and quotas stay in your backend.
-
 ## How it compares
 
-Two choices explain most answers: every client keeps its provider's own API, and Wye keeps no state between requests.
+Two choices explain most answers: each provider's native API, passed through, and no state between requests.
 
 | Teams usually want | Wye |
 |---|---|
@@ -98,7 +92,9 @@ Two choices explain most answers: every client keeps its provider's own API, and
 | Guardrails, redaction, response caching | No. [What Wye will not do](#what-wye-will-not-do) says why |
 | Scale out by adding replicas | Yes. Behind any load balancer. The provider keys' rate limits are the ceiling; more keys raise it |
 
-Why native APIs: provider APIs keep changing. Within one year on Anthropic's API, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates everything into one format is always catching up. Wye passes each native API through, so new features on the endpoints it serves work the day they ship ([what it changes](docs/architecture.md#forwarding-contract)).
+A team that runs only Claude Code with SSO may prefer Anthropic's own self-hosted gateway for Claude Code, which follows every Claude Code release.
+
+Why native APIs: provider APIs keep changing. Within one year on Anthropic's API, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates everything into one format is always catching up ([what Wye changes](docs/architecture.md#forwarding-contract)).
 
 ## Configuration
 
@@ -138,7 +134,7 @@ Each session stays on one upstream. A rejected request moves to the other; two k
 
 ## Records and decisions
 
-One usage record per request, on stdout and, with `[telemetry]`, as an OTLP log record, a span, and metrics:
+A usage record:
 
 ```json
 {
@@ -170,7 +166,7 @@ One usage record per request, on stdout and, with `[telemetry]`, as an OTLP log 
 
 Costs are exact decimal strings, computed in integers. A model with no price is recorded as [`unknown`](docs/glossary.md#usage-and-cost), never $0.
 
-`wye explain` shows what the gateway would do with a request, offline, by calling the same functions in the same order:
+`wye explain` calls the gateway's own functions, in the same order:
 
 ```console
 $ wye explain -c wye.toml --session session-a request.json
@@ -198,12 +194,13 @@ Next: a report of which tokens were wasted and what each fix would save, and a s
 
 ## What Wye will not do
 
-- Global rate limits, spending budgets, or quota counters. They need shared state; providers already enforce them per key or workspace.
-- Circuit breakers, cooldowns, or balancing by measured latency: they remember across requests. Failover handles a rejection within the request.
+- Count toward global rate limits, spending budgets, or quotas: that needs shared state; providers already enforce them per key or workspace.
+- Break circuits, cool down upstreams, or balance by measured latency: each remembers across requests. Failover handles a rejection within the request.
 - Translate between provider APIs, rewrite prompts, swap in another model when one fails, or cache responses.
 - Filter content (guardrails, redaction) or store prompts.
 - Terminate TLS: a load balancer, an ingress, or Caddy in front does it, and renews the certificate.
 - Run agents or tools.
+- Protect a public endpoint from abuse: per-user authentication and quotas stay in your backend.
 - Grow a dashboard or an admin API. Config changes go through Git and a restart or rolling deploy.
 
 ## Development

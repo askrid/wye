@@ -6,7 +6,7 @@ What Wye authorizes and enforces per request, what it cannot enforce without sha
 
 [Provider keys](glossary.md#requests-and-where-they-go) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md#access). Without an `[auth]` section Wye listens on loopback only, and serves no web page ([below](#a-gateway-without-auth)); with one it may listen on any address, and every request to an API endpoint must carry a valid gateway token.
 
-Claims of Wye tokens (identity-provider tokens are below):
+Claims of Wye tokens ([identity-provider tokens](#identity-provider-tokens) below):
 
 ```json
 {
@@ -27,11 +27,54 @@ Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 - Refused with `401 authentication_error` before any upstream contact: another `alg`, an unknown header field (including `crit`), a `kid` not in `[[auth.signing_keys]]` or an issuer's key set, a bad signature, the wrong `iss` or `aud`, expiry, `iat`/`nbf` more than 60 s ahead, or `exp - iat` above `max_gateway_token_ttl_secs` (default one week; config refuses more than 30 days, since a token cannot be [revoked](#revocation) before it expires). Claims are parsed only after the signature verifies.
 - Read from `Authorization: Bearer` or `x-api-key`; replaced by the provider key, never forwarded.
 - Cached per connection: a request repeating the last verified token skips signature verification, compares the bytes in constant time, and rechecks expiry. The cache holds one verified token and dies with the connection; keys are fixed for the process lifetime, so its answers equal a fresh check.
-- On a reused connection, authenticated requests have the same overhead as unauthenticated ones; a full verification's: `auth_` in [benchmarks.md](benchmarks.md#current-harness-and-baseline).
+- On a reused connection, authenticated requests have the same overhead as unauthenticated ones; a full verification costs what the `auth_` scenarios in [benchmarks.md](benchmarks.md#current-harness-and-baseline) show.
 
 The key fixes the algorithm; the token never chooses it: Ed25519 for Wye tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
 
-Model permissions: `[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md#models).
+A token can assert a maximum per request, never the cumulative amount spent; deriving a narrower token without the issuer is research ([narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms)). Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
+
+### Identity-provider tokens
+
+Wye also accepts JWTs issued directly by a trusted OIDC identity provider, so teams need no token-minting service: GitHub Actions or another workload identity for CI, and the team's IdP (through `apiKeyHelper`) for developers.
+
+Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). The `issuer`, `audience`, and `[[auth.signing_keys]]` of Wye tokens become optional: a deployment can trust only its IdP.
+
+- **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.signing_keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
+- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye tokens (`max_gateway_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
+- **Grants**: `[[auth.identity_providers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
+- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format; the per-connection cache applies as to Wye tokens.
+- **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
+
+### Revocation
+
+A gateway token cannot be revoked before it expires: Wye keeps no shared state and has no admin API. Offboarding takes effect when the person's last token expires, so disable them at the issuer or IdP, keep `max_gateway_token_ttl_secs` short, and renew tokens automatically ([token renewal](operations.md#token-renewal)). Removing a signing key from config refuses every token it signed, once every replica runs that config. A deny list in config is [planned](roadmap.md#m1-team-ready-claude-code).
+
+### A gateway without `[auth]`
+
+Without gateway tokens, reaching the port is the credential. A loopback gateway therefore serves every program of every user on its machine: another local account can spend the provider key it holds, or send its own credential through it. On a machine with other users, configure `[auth]`.
+
+A web page the user visits runs on the machine too. Through DNS rebinding (a name of the attacker's that resolves to `127.0.0.1`), its script could send requests to the port and read the replies; a cross-origin `fetch` could send them blind. So without `[auth]`, Wye refuses a request with `403 permission_error`, before any upstream contact, when:
+
+- its `Host` is missing, or is not `localhost`, `127.0.0.1`, or `[::1]` (with or without a port);
+- it carries an `Origin` header;
+- or it carries `Sec-Fetch-Site` with any value but `none` (a navigation the user typed).
+
+Browsers send these; Claude Code, Codex, and the SDKs name the gateway as their base URL does and send no `Origin` (checked with Claude Code 2.1.318, which sends `Host: 127.0.0.1:<port>` and no `Origin` or `Sec-Fetch-*`). A program that reaches the gateway by another name, such as an `/etc/hosts` alias, is refused too: use `localhost`.
+
+`/healthz`, `/readyz`, and Claude Code's `HEAD /api/hello` answer anyone, since they carry nothing. With `[auth]`, the gateway token decides, whatever the headers. `wye explain --header` shows the decision for given headers.
+
+### Caller-credential passthrough
+
+`forward_caller_credential = true` on the Claude route's only upstream, which `wye init` writes by default, is the passthrough setup, for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
+
+- Loopback bind only; startup fails when it is combined with a non-loopback listener. Requests a web page may have sent are refused ([above](#a-gateway-without-auth)).
+- No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.
+- No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which passthrough excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
+- Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/developer/wye.toml`](../examples/developer/wye.toml) is a complete config.
+
+## Model permissions
+
+`[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md#models).
 
 - **[The hold](glossary.md#requests-and-where-they-go)**: with either list, Wye holds the request body only until its top-level `model` is read (Claude Code sends it first, so usually one chunk). Without either list (or an alias, an output-token ceiling, or a provider with its own model ids), the body is not read.
   - `server.max_total_held_bytes` bounds held bytes across all requests, each chunk counting at least 1 KiB for the memory it pins ([local resource bounds](#local-resource-bounds)).
@@ -44,50 +87,21 @@ Model permissions: `[auth] models` lists the models any token may use; a token's
 - **Scope**: permissions read the top-level `model`. A model named inside the body, such as the `model` of a Responses `image_generation` tool, is not checked.
 - **The tail check**: JSON allows a repeated key, and a provider might honor a later `"model"`, so the rest of the body is lexed as it streams; a second top-level `model`, or an escaped top-level key, fails the body and aborts the upstream request. It adds CPU overhead per MB on structure-dense bodies ([benchmarks.md](benchmarks.md#current-harness-and-baseline)) and can go if the provider is verified to reject duplicate keys.
 
-Identity-provider tokens: Wye also accepts JWTs issued directly by a trusted OIDC identity provider, so teams need no token-minting service: GitHub Actions or another workload identity for CI, and the team's IdP (through `apiKeyHelper`) for developers.
-
-Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). The `issuer`, `audience`, and `[[auth.signing_keys]]` of Wye tokens become optional: a deployment can trust only its IdP.
-
-- **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.signing_keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
-- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye tokens (`max_gateway_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
-- **Grants**: `[[auth.identity_providers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
-- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format; the per-connection cache applies as to Wye tokens.
-- **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
-
-A token can assert a maximum per request, never the cumulative amount spent; deriving a narrower token without the issuer is research ([narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms)). Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
-
-### Revocation
-
-Without shared state or an admin API, immediate per-token revocation is not guaranteed. Use short lifetimes and key rotation; a deny list in config is [planned](roadmap.md#m1-team-ready-claude-code). A rolling deploy can briefly run mixed config versions; recording the config version in usage records ([planned](roadmap.md#m1b-agent-aware-visibility)) would show that window. Offboarding therefore takes effect when the person's last token expires: disable them at the issuer or IdP and keep `max_gateway_token_ttl_secs` short, with automatic [token renewal](operations.md#token-renewal); Wye only verifies.
-
-### A gateway without `[auth]`
-
-Without gateway tokens, reaching the port is the credential. A loopback gateway therefore serves every program of every user on its machine: another local account can spend the provider key it holds, or send its own credential through it. On a machine with other users, configure `[auth]`.
-
-A web page the user visits runs on the machine too. Through DNS rebinding (a name of the attacker's that resolves to `127.0.0.1`), its script could send requests to the port and read the replies; a cross-origin `fetch` could send them blind. So without `[auth]`, Wye refuses with `403 permission_error`, before any upstream contact, a request:
-
-- whose `Host` is not `localhost`, `127.0.0.1`, or `[::1]`, with or without a port, or that has none;
-- that carries an `Origin` header;
-- or that carries `Sec-Fetch-Site` with any value but `none` (a navigation the user typed).
-
-Browsers send these; Claude Code, Codex, and the SDKs name the gateway as their base URL does and send no `Origin` (checked with Claude Code 2.1.318, which sends `Host: 127.0.0.1:<port>` and no `Origin` or `Sec-Fetch-*`). A program that reaches the gateway by another name, such as an `/etc/hosts` alias, is refused too: use `localhost`. `/healthz`, `/readyz`, and Claude Code's `HEAD /api/hello` answer anyone, since they carry nothing. With `[auth]`, the gateway token decides, whatever the headers. `wye explain --header` shows the decision for given headers.
-
-### Caller-credential passthrough
-
-`forward_caller_credential = true` on the Claude route's only upstream, which `wye init` writes by default, is the passthrough setup, for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
-
-- Loopback bind only; startup fails when it is combined with a non-loopback listener. Requests a web page may have sent are refused ([above](#a-gateway-without-auth)).
-- No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.
-- No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which passthrough excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
-- Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/developer/wye.toml`](../examples/developer/wye.toml) is a complete config.
-
 ## Per-request ceilings
 
 Admission refuses requests that break model permissions, size limits, or output-token ceilings, or (planned) a cost ceiling.
 
-`[auth] max_output_tokens` and a token's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bound the `max_tokens` a `/v1/messages` request may ask for, the `max_output_tokens` of a `/v1/responses` request, and the `max_completion_tokens` (or older `max_tokens`) of a `/v1/chat/completions` request, where a body naming both is refused; the stricter applies. On the OpenAI APIs the field is optional (Messages requires it) and its absence means the model's maximum, so under a ceiling a request without it is refused (`max_output_tokens is required`), before the provider sees a complete request; Codex does not set it, so give Codex users a token without a ceiling.
+The stricter of `[auth] max_output_tokens` and the token's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bounds:
 
-- Read with the same scanner and hold as [model permissions](#gateway-tokens), never rewritten, and only when a ceiling applies: without one, a value such as `null` or `4096.0` is the provider's to judge.
+| Endpoint | Field |
+|---|---|
+| `/v1/messages` | `max_tokens` (required by the API) |
+| `/v1/responses` | `max_output_tokens` |
+| `/v1/chat/completions` | `max_completion_tokens`, or the older `max_tokens`; a body naming both is refused |
+
+On the OpenAI APIs the field is optional and its absence means the model's maximum, so under a ceiling a request without it is refused (`max_output_tokens is required`) before the provider sees a complete request. Codex does not set it: give Codex users a token without a ceiling.
+
+- Read with the same scanner and hold as [model permissions](#model-permissions), never rewritten, and only when a ceiling applies: without one, a value such as `null` or `4096.0` is the provider's to judge.
 - Above the ceiling: `403 permission_error` before upstream contact when read during the hold; otherwise the upstream request is aborted mid-body (the provider never sees it whole) and the answer is still `403`.
 - Not a non-negative integer, or repeated: `400`. `count_tokens` generates nothing and is not bounded.
 - The ceiling bounds one generation. Chat Completions' `n` asks for several choices, each up to the ceiling, so a request may generate `n` times as much; `n` is not read yet.
@@ -96,7 +110,7 @@ Admission refuses requests that break model permissions, size limits, or output-
 
 Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built. An output-token ceiling is not a cost ceiling: that needs a conservative bound on every billable dimension (input tokens, output tokens including hidden reasoning tokens, provider-hosted tools, service tiers, any other usage charge), and tokenization and billing differ by provider. Where Wye cannot establish a safe bound, hard mode refuses the request or labels enforcement estimated-only; an estimate is never advertised as a guaranteed ceiling. The bound and what it needs verified: [research.md](research.md#6-provable-cost-bound).
 
-### Price table
+## Price table
 
 Prices are declarative, versioned, and live in `wye.toml` next to the policy that uses them, so a price change is a reviewed commit like any other. Wye ships no built-in price table, which would go silently stale the day a provider changed its prices.
 
@@ -149,7 +163,7 @@ Which price applies:
 
 How cost is computed:
 
-- **Integer money**: money is never floating point. Each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error.
+- **Integer money**: each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error.
 - **Checked arithmetic**: a request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`.
 - **Cache writes by TTL**: Anthropic reports `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; the usage scanner reads both. Cache writes the split does not cover (no split reported, or a total `cache_creation_input_tokens` larger than it) are priced at `cache_write_1h` when it is set, else `cache_write_5m`, so the reported cost does not undercount, and the cost is `partial`.
 
@@ -157,7 +171,7 @@ When cost is partial or unknown:
 
 - **Not priced**: fast mode, priority or other service tiers, regional inference premiums, and server tools billed per use (web search) are reported in `usage` but not in the table. A request that used any of them (a positive count in `usage.server_tool_use`, a `service_tier` or `speed` other than `standard`) is `partial`, with the token cost still recorded. Batch requests do not pass through the gateway.
 - **Cut streams**: a stream that ended before its final usage is `partial`.
-- **No usage, no cost**: a record without observed usage (a gateway or provider error, `count_tokens`, a response that is neither SSE nor JSON) is `unknown`, never $0.
+- **No usage**: a record without observed usage (a gateway or provider error, `count_tokens`, a response that is neither SSE nor JSON) is `unknown`, never $0.
 
 OpenAI Responses and Chat Completions:
 
@@ -165,7 +179,7 @@ OpenAI Responses and Chat Completions:
 - OpenAI's `input_tokens` (Chat: `prompt_tokens`) include cached tokens; Wye records the cached share (`input_tokens_details.cached_tokens`, Chat: `prompt_tokens_details.cached_tokens`) as `cache_read_input_tokens` and the rest as `input_tokens`, so `cache_read` prices the cached share and records mean the same as on Messages. Reasoning tokens are part of `output_tokens`, as OpenAI bills them.
 - Hosted tools billed per call (`web_search`, `file_search`, `code_interpreter`, `image_generation`) and a `service_tier` other than `default` make the cost `partial`. A stream cut before its terminal event has no usage (OpenAI reports it only there), so its cost is `unknown`.
 
-With `[pricing]`, every usage record carries its cost, computed in the usage writer task, off the request path. OTLP carries it too, and the `wye.cost` metric is in USD, a double: the export is display ([fields](operations.md#usage-records-and-telemetry)).
+With `[pricing]`, every usage record carries its cost, computed in the usage writer task, off the request path. OTLP carries it too, and the `wye.cost` metric is a USD double, for display; the exact value is the record's `cost_usd` ([fields](operations.md#usage-records-and-telemetry)).
 
 ## State boundary
 
@@ -194,7 +208,8 @@ Limits that protect one process are allowed. They answer "can this process serve
 - `server.max_total_kept_bytes`: request bytes kept so that [failover](glossary.md#requests-and-where-they-go) can resend them, across all requests; beyond it, a request is forwarded without failover, never refused. A route's `failover_max_body_bytes` bounds one request's kept body the same way.
 - `server.max_request_body_bytes`: a body past it gets `413`.
 - A 32 KiB read buffer per client connection, which also bounds request headers: larger headers get `431`.
-- `server.max_connections` (default twice `max_concurrent_requests`, so 20,000; at least `max_concurrent_requests`, at most 1,048,576): open client connections, idle ones included. At the limit Wye stops accepting until one closes; new connections wait in the kernel's listen queue, and past its length the kernel refuses them. Accepting and closing them instead would cost work per connection and invite an immediate retry. Each connection is a file descriptor, and so is its upstream connection while a request is in flight, so the limit needs an open-file limit of about twice its value; Wye does not change its own ([where it comes from](operations.md#running-as-a-service)). Past the open-file limit, accepting fails and pauses for 100 ms at a time.
+- `server.max_connections` (default twice `max_concurrent_requests`, so 20,000; at least `max_concurrent_requests`, at most 1,048,576): open client connections, idle ones included. At the limit Wye stops accepting until one closes; new connections wait in the kernel's listen queue, and past its length the kernel refuses them. Accepting and closing them instead would cost work per connection and invite an immediate retry.
+  - Each connection is a file descriptor, and so is its upstream connection while a request is in flight, so the limit needs an open-file limit of about twice its value; Wye does not change its own ([where it comes from](operations.md#running-as-a-service)). Past the open-file limit, accepting fails and pauses for 100 ms at a time.
 - `server.client_write_timeout_secs`: a client that accepts no response bytes that long is disconnected, releasing its permit and buffers.
 - The bounded usage-log and OTLP queues ([operations.md](operations.md#usage-records-and-telemetry)).
 
@@ -207,13 +222,12 @@ Planned next after [fewer expensive tokens](roadmap.md#m2c-fewer-expensive-token
 ## Security requirements
 
 - Provider keys never leave the gateway or its deployment environment.
-- Gateway tokens are validated before dispatch; scoped and short-lived where practical.
-- Untrusted browsers never receive reusable provider keys or gateway tokens, and a gateway without `[auth]` serves no request a web page may have sent.
+- Gateway tokens are verified before any upstream contact.
+- Browsers never get a provider key or gateway token; a gateway without `[auth]` listens on loopback only and refuses requests a web page may have sent.
 - Upstream URLs come only from trusted config.
-- Bound inbound headers, JSON bodies, parsed SSE event sizes, outbound buffering, redirects, and timeouts.
-- Protect key material; prefer public-key verification so signing keys stay out of the data plane.
-- Errors, usage records, and telemetry never leak prompts or secrets by default.
+- Inbound headers, JSON bodies, parsed SSE events, outbound buffers, redirects, and timeouts are bounded ([local resource bounds](#local-resource-bounds)).
+- Replicas hold public keys only; signing keys stay out of the data plane.
+- Errors, usage records, and telemetry never contain prompts or secrets.
 - Public applications supply their own abuse prevention and global limits.
-- Insecure local-development auth settings never apply to a non-loopback bind.
 
 No exactly-once delivery, exactly-once billing, or durable execution is guaranteed.

@@ -1,8 +1,8 @@
 # User guide
 
-How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operations.md](operations.md) for the CLI, deployment, and usage records; [policy.md](policy.md) for tokens, permissions, and pricing; [examples/wye.toml](../examples/wye.toml) for every option.
+How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operations.md](operations.md) for the CLI, deployment, and usage records; [policy.md](policy.md) for tokens, permissions, and pricing; [examples/wye.toml](../examples/wye.toml) for every field.
 
-- Set it up: [choosing a setup](#choosing-a-setup), [running it](#running-it)
+- Set it up: [installing](#installing), [choosing a setup](#choosing-a-setup), [running it](#running-it)
 - See what your agents used and spent: [reading `wye report`](#reading-wye-report)
 - Share one gateway with a team: [using it for a team](#using-it-for-a-team)
 - Connect your own apps: [using it from apps](#using-it-from-apps)
@@ -13,11 +13,19 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 - Change the config or Wye itself: [changing or upgrading](#changing-or-upgrading)
 - Fix something: [troubleshooting](#troubleshooting)
 
+## Installing
+
+`cargo install` builds the latest release (Rust 1.99 or later); without `--tag`, the unreleased `main`:
+
+```bash
+cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
+```
+
+Linux and macOS archives are on the [releases page](https://github.com/askrid/wye/releases); `gh attestation verify <archive> --repo askrid/wye` shows the tag and commit one was built from ([SECURITY.md](../SECURITY.md#releases)).
+
 ## Choosing a setup
 
-Install the latest release with `cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked` (Rust 1.99 or later); without `--tag` it builds the unreleased `main`. Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases): `gh attestation verify <archive> --repo askrid/wye` checks that this repository's release workflow built one, from which tag and commit ([SECURITY.md](../SECURITY.md#releases)).
-
-`wye init` writes a config, and next to it `policy-tests/` with sample requests that `wye policy-test` checks against it ([what they cover](operations.md#commands)). It never writes over an existing file, and prints the next steps. Its [setup](glossary.md#the-product) answers two questions: who can reach the gateway, and whose credential pays the provider.
+`wye init` writes a config, and next to it `policy-tests/` with sample requests that `wye policy-test` checks against it ([what they cover](operations.md#commands)). It never writes over an existing file, and prints the next steps. It writes one of three [setups](glossary.md#the-product):
 
 | | The caller's own credential | A provider key the gateway holds |
 |---|---|---|
@@ -42,21 +50,19 @@ wye service status
 wye service uninstall   # the config, the usage log, and the message log stay
 ```
 
-A service does not inherit your shell's environment, so it refuses a config with secrets in environment variables; `wye init` and `wye init --provider-key` write none. [Running as a service](operations.md#running-as-a-service) has the detail.
+A service does not inherit your shell's environment, so it refuses a config with secrets in environment variables; `wye init` and `wye init --provider-key` write none ([running as a service](operations.md#running-as-a-service)).
 
 In a terminal:
 
 ```bash
-wye serve >> ~/.wye/usage.jsonl
+wye serve >> ~/.wye/usage.jsonl   # usage records; messages go to stderr
 ```
 
-Usage records go to stdout and messages to stderr, and `~/.wye/usage.jsonl` is where `wye report` looks.
-
-Then start your agent with `wye claude` or `wye codex`, which set its base URL and leave its own settings alone. `wye claude --bg "task"` starts a background session that goes through the gateway too. `wye claude --help` has the options.
+Then start your agent with `wye claude` or `wye codex`, which set its base URL and leave its own settings alone. `wye claude --bg "task"` starts a background session that goes through the gateway too.
 
 ## Reading `wye report`
 
-`wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OpenTelemetry backend. The [README](../README.md) shows a sample.
+`wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OpenTelemetry backend. The [README](../README.md#quick-start) shows a sample.
 
 - **First lines:** requests, sessions, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
@@ -65,7 +71,7 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 - **Tools:** calls the model requested, and calls and time Claude Code reported.
 - **Top sessions and prompts:** the ten with the most tokens.
 
-Other lines are skipped and counted.
+Input lines that are not usage records are skipped and counted.
 
 ## Using it for a team
 
@@ -181,7 +187,7 @@ otlp_endpoint = "http://localhost:4318"
 otlp_headers_env = "OTLP_HEADERS"     # "key=value,...": a hosted backend's API key
 ```
 
-Each request becomes a log record and a span, each Claude Code session one trace, and metrics count them ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to the usage log. Export headers under `wye service`: [running as a service](operations.md#running-as-a-service).
+Each request becomes a log record and a span, each Claude Code session one trace, and metrics count them ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to the usage log. Under `wye service`, OTLP headers need a service definition of your own ([running as a service](operations.md#running-as-a-service)).
 
 ## Changing or upgrading
 
@@ -191,18 +197,18 @@ Edit the config or install a new `wye`, run `wye doctor`, then `wye service rest
 
 Run `wye doctor` first. It checks secrets, files, and upstreams, lists every problem, and bills nothing.
 
-**Where errors go.** Startup failures and the gateway's messages go to stderr, the message log (`~/.wye/wye.log`) under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
+Startup failures and the gateway's messages go to stderr, the message log (`~/.wye/wye.log`) under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
 
 `wye explain request.json` shows what the gateway would do with one request, offline, and why it would refuse.
 
 - `no gateway at http://127.0.0.1:8080`: nothing answers `/healthz` there. Run `wye service status`, then read the end of `~/.wye/wye.log`; or start one with `wye serve`; or name another with `--url` or `WYE_URL`.
 - `cannot listen on ...: the port is in use`: another gateway, perhaps. Stop it, or change `server.listen` and set `WYE_URL`.
 - `401 invalid or missing gateway token`: one message for every gateway-token failure, on purpose. `wye explain --token-file <file> request.json` says which: expired, wrong audience, unknown key. Any other `401` is the provider's.
-- `403 permission_error`: the gateway token may not use that model, or the request asks for more than its output-token ceiling. Run `wye explain`; see [permissions](policy.md#gateway-tokens).
+- `403 permission_error`: the gateway token may not use that model, or the request asks for more than its output-token ceiling. Run `wye explain`; see [permissions](policy.md#model-permissions).
 - `404 no route serves ...`: no route for that API. Add the section it names, such as `[routes.openai]`.
 - `408 request body stalled`: while Wye read `model`, the client sent nothing for 60 s, or had not reached it after 5 minutes. Check the client's network.
 - `415 the request body must...`: a compressed or non-UTF-8 body during [the hold](glossary.md#requests-and-where-they-go). Send plain UTF-8 JSON.
-- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_total_held_bytes`. Otherwise it comes from the provider. Clients retry on their own; raise the limit if it persists.
+- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_total_held_bytes`. Otherwise it comes from the provider. Clients retry on their own; if it persists, raise the limit.
 - One `429` at each session start: Claude Code's probe on a claude.ai login; Anthropic answers it with or without Wye. Nothing to do.
 
 [Failure behavior](operations.md#failure-behavior) lists the rest.
