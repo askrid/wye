@@ -18,7 +18,7 @@
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
 //!   paragraph without the closing period; the list after it, rendered
-//!   (`points`); or that list's bold leads as plain `text`.
+//!   (`points`); or that list as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -125,12 +125,7 @@ impl Sources {
                                 &page.anchors,
                             ));
                         }
-                        let items = markdown::list_items(points);
-                        let leads: Vec<&str> = items
-                            .iter()
-                            .filter_map(|item| markdown::lead(item))
-                            .collect();
-                        Ok(markdown::escape(&leads.join(" ")))
+                        Ok(markdown::escape(&markdown::plain(points)))
                     }
                     other => Err(format!("{other:?} is not tagline, text, or points")),
                 }
@@ -344,7 +339,7 @@ mod tests {
         let page = "{{opening README.md|tagline}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat|Fast. Small."
+            "LLM gateway without bloat|Fast. Under 1 ms. Small. One file."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())

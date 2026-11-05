@@ -199,11 +199,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
    word or line: their content wraps or scrolls inside it instead. */
 .hero-copy, .hero-install, .part, .prose { grid-template-columns: minmax(0, 1fr); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
-/* README's points under the headline: one property a line, led by its
-   bold name, as the stops' items are; no bullet, the names carry the
-   list. */
-.points ul { display: grid; gap: 0.5rem; max-width: 54ch; margin: 0; padding: 0; list-style: none; line-height: 1.5; }
-.points strong { color: var(--ink); }
+/* README's points under the headline: one sentence a line, marked as
+   README marks them. */
+.points ul { display: grid; gap: 0.5rem; max-width: 54ch; margin: 0; padding-inline-start: 2ch; list-style: "- "; line-height: 1.5; }
 /* One line of facts, the changelog last. */
 .facts { color: var(--graphite); font-family: var(--mono); font-size: var(--caption); }
 .facts a { color: var(--text); }
