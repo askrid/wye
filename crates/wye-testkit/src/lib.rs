@@ -103,7 +103,7 @@ impl TestCa {
         self.ca_cert.clone()
     }
 
-    /// The CA certificate as PEM, for `upstream.ca_file`.
+    /// The CA certificate as PEM, for an upstream's `ca_file`.
     pub fn ca_pem(&self) -> &str {
         &self.ca_pem
     }

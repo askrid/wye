@@ -244,7 +244,7 @@ The usage record, field by field:
   - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
 - `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
 - `duration_ms`, `response_headers_ms`: milliseconds, in all and to the response headers.
-- `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
+- `upstream`: the upstream's `id`; absent for a route's only upstream written without one, and for requests refused before upstream selection.
 - `failovers`, such as `[{"upstream": "a", "reason": "429"}]`: attempts rejected before the one that answered, in order, each with its [failover reason](glossary.md#requests-and-where-they-go) ([failover](architecture.md#failover)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (below).

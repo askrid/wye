@@ -81,7 +81,7 @@ pub struct Config {
 /// builds from each.
 #[derive(Debug, Clone)]
 pub struct Routes<T = Route> {
-    /// Anthropic Messages: `[upstream]`, or `[routes.claude]`.
+    /// Anthropic Messages: `[routes.claude]`.
     pub claude: Option<T>,
     /// OpenAI Responses and Chat Completions: `[routes.openai]`.
     pub openai: Option<T>,
@@ -245,10 +245,11 @@ pub enum ConfigError {
         route: &'static str,
         error: Box<ConfigError>,
     },
-    /// A problem in one `[[routes.<route>.upstreams]]` entry.
+    /// A problem in one `[[routes.<route>.upstreams]]` entry, named by its
+    /// id, or by `[0]` for a route's only upstream that has none.
     RouteUpstream {
         route: &'static str,
-        id: String,
+        id: Option<String>,
         error: Box<ConfigError>,
     },
 }
@@ -278,9 +279,16 @@ impl fmt::Display for ConfigError {
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
             Self::Route { route, error } => write!(f, "routes.{route}.{error}"),
-            Self::RouteUpstream { route, id, error } => {
-                write!(f, "routes.{route}.upstreams {id:?}: {error}")
-            }
+            Self::RouteUpstream {
+                route,
+                id: Some(id),
+                error,
+            } => write!(f, "routes.{route}.upstreams {id:?}: {error}"),
+            Self::RouteUpstream {
+                route,
+                id: None,
+                error,
+            } => write!(f, "routes.{route}.upstreams[0]: {error}"),
         }
     }
 }
@@ -309,14 +317,14 @@ impl Config {
         let raw: RawConfig =
             toml::from_str(source).map_err(|e| ConfigError::Parse(e.to_string()))?;
         let auth = raw.auth.map(validate_auth).transpose()?;
-        let routes = validate_routes(raw.upstream, raw.routes)?;
+        let routes = validate_routes(raw.routes)?;
         if auth.is_some()
             && routes
                 .upstreams()
                 .any(|u| u.provider_key == ProviderKey::ForwardCaller)
         {
             return Err(ConfigError::Auth(
-                "cannot be combined with upstream.forward_caller_credential: the caller's \
+                "cannot be combined with forward_caller_credential: the caller's \
                  credential would be the gateway token, not a provider key"
                     .into(),
             ));

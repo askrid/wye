@@ -68,10 +68,10 @@ pub(crate) struct WyeOptions<'a> {
     pub(crate) cache_diagnostics: bool,
     /// `[telemetry]` exporting to this OTLP endpoint.
     pub(crate) otlp_endpoint: Option<&'a str>,
-    /// `[routes.openai]` instead of `[upstream]`: requests go to
+    /// `[routes.openai]` instead of `[routes.claude]`: requests go to
     /// `/v1/responses`, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) openai: bool,
-    /// `[routes.claude]` with one Bedrock upstream instead of `[upstream]`:
+    /// The Claude route's one upstream on Bedrock instead of Anthropic:
     /// model ids get the provider's prefix, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) bedrock: bool,
     /// `[routes.claude]` with two accounts (both the mock) and failover:
@@ -114,7 +114,7 @@ pub(crate) fn wye_config(
              [[routes.claude.upstreams]]\nid = \"b\""
         )
     } else {
-        "[upstream]".to_owned()
+        "[[routes.claude.upstreams]]".to_owned()
     };
     let mut config = format!(
         "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
@@ -123,7 +123,8 @@ pub(crate) fn wye_config(
     if let Some(path) = ca_file {
         config.push_str(&format!("ca_file = {:?}\n", path.display().to_string()));
     }
-    // Tuning experiments: extra `[upstream]` lines without code changes.
+    // Tuning experiments: extra lines in the last upstream entry without
+    // code changes.
     if let Ok(extra) = std::env::var("WYE_BENCH_UPSTREAM") {
         config.push_str(&extra);
         config.push('\n');

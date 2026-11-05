@@ -111,7 +111,8 @@ impl Harness {
         Self::launch(&base_url, server_extra, &extra, resources, hits).await
     }
 
-    /// API-key gateway in front of a plain mock upstream, with extra `[upstream]` lines.
+    /// API-key gateway in front of a plain mock upstream, with extra lines in
+    /// its upstream entry.
     pub(crate) async fn keyed(handler: Handler, upstream_extra: &str) -> Self {
         Self::keyed_with(handler, "", upstream_extra, keyed_resources()).await
     }
@@ -141,7 +142,8 @@ impl Harness {
         Self::start_tls_with(handler, ca, trusted, None, "").await
     }
 
-    /// Like `start_tls`, with the mock's HTTP/2 stream limit and extra `[upstream]` lines.
+    /// Like `start_tls`, with the mock's HTTP/2 stream limit and extra lines in
+    /// the upstream entry.
     pub(crate) async fn start_tls_with(
         handler: Handler,
         ca: &TestCa,
@@ -192,7 +194,7 @@ impl Harness {
     ) -> Self {
         let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
-             [upstream]\nbase_url = \"{base_url}\"\n{upstream_extra}"
+             [[routes.claude.upstreams]]\nbase_url = \"{base_url}\"\n{upstream_extra}"
         );
         Self::launch_config(&config, resources, upstream_hits).await
     }

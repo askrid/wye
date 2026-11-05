@@ -5,8 +5,8 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub struct Upstream {
-    /// Names the upstream in telemetry and `wye explain`; `None` for the
-    /// single `[upstream]`.
+    /// Names the upstream in telemetry and `wye explain`; `None` only for a
+    /// route's one upstream written without one.
     pub id: Option<Box<str>>,
     /// Share of affinity keys, relative to the route's other upstreams.
     pub weight: u32,

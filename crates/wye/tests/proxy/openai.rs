@@ -76,7 +76,7 @@ async fn responses_reach_openai_with_the_provider_key() {
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body = String::from_utf8(read_body(res).await.to_vec()).unwrap();
-    assert!(body.contains("add [upstream] or [routes.claude]"), "{body}");
+    assert!(body.contains("add [routes.claude]"), "{body}");
 }
 
 #[tokio::test]

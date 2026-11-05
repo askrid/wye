@@ -53,7 +53,7 @@ Built for all three APIs, except two parts: the cost ceiling in step 3 ([roadmap
 |---|---|
 | Async execution | Tokio |
 | HTTP | Hyper 1.x, `hyper-util`, `http-body-util` |
-| TLS | Rustls (`ring` provider) upstream, built-in web PKI roots plus `upstream.ca_file`; deployment terminates inbound TLS |
+| TLS | Rustls (`ring` provider) upstream, built-in web PKI roots plus an upstream's `ca_file`; deployment terminates inbound TLS |
 | Tokens | `ring` Ed25519, ECDSA P-256, and RSA verification, `base64` |
 | Hashing | `xxhash-rust` xxh3 (prompt hashes), `ring` HMAC-SHA256 (their exported tags) and SHA-256 (session trace ids) |
 | Config / JSON | Serde, `toml`, `serde_json`; hand-written streaming scanners for request bodies and SSE (`memchr`) |
@@ -70,7 +70,7 @@ Immutable configuration, connection pools, and in-flight request state are compa
 
 Implemented:
 
-- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough for Claude Code and Anthropic SDK clients, when `[upstream]` or `[routes.claude]` is set.
+- `POST /v1/messages`, `POST /v1/messages/count_tokens`: Anthropic Messages, native passthrough for Claude Code and Anthropic SDK clients, when `[routes.claude]` is set.
 - `POST /v1/responses`: OpenAI Responses, native passthrough for Codex and OpenAI SDK clients, when `[routes.openai]` is set ([Codex integration](#codex-integration)), with usage and cost in records ([usage extraction](#usage-extraction)).
 - `POST /v1/chat/completions`: OpenAI Chat Completions, native passthrough for OpenAI SDK clients and OpenAI-compatible agents, on the same `[routes.openai]`.
 - `GET /healthz`, `GET /readyz`: operational probes; `HEAD /api/hello`: Claude Code's warm-up probe.

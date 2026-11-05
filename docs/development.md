@@ -125,7 +125,7 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 | `WYE_BENCH_GATEWAY_LOG` | `wye-bench` | Keep each gateway's output next to its config |
 | `WYE_BENCH_GATEWAY_THREADS` | `wye-bench`, `capacity` | Tokio workers (default 1) |
 | `WYE_BENCH_EVENT_BYTES` | `wye-bench`, `events` | Event payload size |
-| `WYE_BENCH_UPSTREAM` | `wye-bench` | Extra `[upstream]` lines, for tuning experiments |
+| `WYE_BENCH_UPSTREAM` | `wye-bench` | Extra lines in the upstream entry, for tuning experiments |
 | `WYE_BENCH_BIFROST_POOLS` | `wye-bench` | `default` keeps Bifrost's default pools |
 | `WYE_BENCH_PROVIDER_KEY`, `WYE_BENCH_HASH_KEY` | `wye-bench` | Set for the gateway it starts; not for you to set |
 | `WYE_IMAGE`, `WYE_SMOKE_PORT` | `scripts/image-smoke.sh` | The image tag and port |

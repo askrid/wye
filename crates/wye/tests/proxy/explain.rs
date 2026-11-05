@@ -11,7 +11,7 @@ async fn explain_and_the_server_answer_alike() {
     let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [upstream]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n{}\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n{}\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
         auth_section(
             &key,

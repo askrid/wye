@@ -88,7 +88,7 @@ impl InitOptions {
             "# Written by `wye init`. Every field, with its default and limits:\n\
              # {REPO_AT_RELEASE}/examples/wye.toml\n\n\
              [server]\nlisten = \"{listen}\"\n\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
         );
         if self.openai {
             text.push_str(&format!(

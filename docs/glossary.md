@@ -12,8 +12,8 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 
 - **Endpoint**: an API path Wye serves, such as `/v1/messages` or `/v1/responses`. Not: route (for a path).
 - **Native API**: a provider's own API, passed through without translation: Anthropic Messages, OpenAI Responses, OpenAI Chat Completions.
-- **Route**: the upstreams that serve one native API: `[routes.claude]` (or its single-upstream form, `[upstream]`) and `[routes.openai]`.
-- **Upstream**: one provider account a route sends requests to: an `id`, a provider, a base URL, and its provider key. Not: account (except to explain it), key, candidate, backend.
+- **Route**: the upstreams that serve one native API: `[routes.claude]` and `[routes.openai]`, one `[[routes.<route>.upstreams]]` entry per upstream.
+- **Upstream**: one provider account a route sends requests to: an `id` (optional for a route's only upstream), a provider, a base URL, and its provider key. Not: account (except to explain it), key, candidate, backend.
 - **Provider**: who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai`. Not: provider for an identity provider.
 - **Base URL**: where an upstream's requests go. Not: endpoint (for an upstream).
 - **Provider key**: the key Wye presents to an upstream, read from an environment variable or a file. Not: credential, the operator's key, bare "key".

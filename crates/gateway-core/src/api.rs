@@ -4,8 +4,8 @@
 /// A native API, served by its own route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Api {
-    /// Anthropic Messages (`[upstream]` or `[routes.claude]`): Claude Code
-    /// and the Anthropic SDKs.
+    /// Anthropic Messages (`[routes.claude]`): Claude Code and the Anthropic
+    /// SDKs.
     Messages,
     /// OpenAI Responses (`[routes.openai]`): Codex and the OpenAI SDKs.
     Responses,
@@ -91,7 +91,7 @@ impl Api {
 /// A route: the upstreams that serve one provider family's native APIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteId {
-    /// `[upstream]` or `[routes.claude]`: Anthropic Messages.
+    /// `[routes.claude]`: Anthropic Messages.
     Claude,
     /// `[routes.openai]`: OpenAI Responses and Chat Completions.
     OpenAi,
@@ -108,11 +108,11 @@ impl RouteId {
         }
     }
 
-    /// The config sections that give it upstreams, for messages that say
+    /// The config section that gives it upstreams, for messages that say
     /// what to add.
-    pub fn sections(self) -> &'static str {
+    pub fn section(self) -> &'static str {
         match self {
-            Self::Claude => "[upstream] or [routes.claude]",
+            Self::Claude => "[routes.claude]",
             Self::OpenAi => "[routes.openai]",
         }
     }

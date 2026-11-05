@@ -199,7 +199,7 @@ mod tests {
     fn reports_passing_and_failing_cases() {
         let dir = wye_testkit::TempDir::new("policy");
         let config = Config::from_toml_str(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
              provider_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\nmodels = [\"claude-*\"]\n\
              [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"",
         )

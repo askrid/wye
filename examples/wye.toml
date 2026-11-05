@@ -1,6 +1,6 @@
 # Wye configuration reference: every field, with its default and limits.
 # As it stands, this file runs Claude Code with one Anthropic API key. The
-# fields of its two live sections are set to their defaults, so every field
+# fields of its live sections are set to their defaults, so every field
 # shows; the optional sections and the alternatives stay commented out, since
 # turning one on changes what Wye does. On a claude.ai subscription, start
 # from examples/developer/wye.toml instead.
@@ -37,17 +37,37 @@ shutdown_grace_secs = 30               # then remaining requests are cancelled
 # cancels its upstream request and frees its buffers:
 client_write_timeout_secs = 60
 
-# A single upstream (one Anthropic account): the short form of a
-# [routes.claude] with one upstream, and the only form that can forward each
-# caller's credential.
-[upstream]
+# The Claude route: Anthropic Messages, for Claude Code and the Anthropic
+# SDKs. Here one upstream, one Anthropic account; several accounts or
+# providers are one upstream each (below). Each Claude Code session stays on
+# one upstream, chosen from the session id the same way on every replica, so
+# its prompt cache stays warm.
+[routes.claude]
+# "cache_affine" spreads sessions by weight; "ordered" uses the first
+# upstream and the others only on failover:
+select = "cache_affine"
+# With two or more upstreams: a request the upstream rejects (rate limit,
+# overload, or a connection refused or cut before the body was sent whole)
+# goes to the session's next upstream in the same turn; never after a
+# response byte:
+# failover = ["429", "529", "connect"]
+# failover_max_body_bytes = 8388608    # larger bodies go without failover
+
+# Up to 16 upstreams, one [[routes.claude.upstreams]] entry each.
+[[routes.claude.upstreams]]
+# Optional with one upstream; with two or more, required and unique. Usage
+# records and OTLP name the upstream by it:
+# id = "main"
+provider = "anthropic"                 # or "claude-platform-aws", "bedrock" (below)
+weight = 1                             # share of sessions, 1 to 1000
 base_url = "https://api.anthropic.com" # without /v1; http only for loopback hosts
 provider_key_env = "ANTHROPIC_API_KEY"
 # Or read the provider key from a mounted secret file (Docker or Kubernetes
 # secrets, systemd credentials):
 # provider_key_file = "/run/secrets/anthropic_api_key"
 # Or forward each caller's own credential: a claude.ai login, or an API key,
-# which bills the API (loopback only, no [auth]; `wye init` writes this):
+# which bills the API (a route with one upstream, loopback only, no [auth];
+# `wye init` writes this):
 # forward_caller_credential = true
 connect_timeout_secs = 10              # TCP and the TLS handshake together
 # Non-streaming generations send no headers until they finish:
@@ -60,25 +80,11 @@ http_version = "auto"
 # PEM file of extra trusted root certificates (a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
-# Several accounts or providers, one upstream each, instead of [upstream].
-# Each Claude Code session stays on one upstream, chosen from the session id
-# the same way on every replica, so its prompt cache stays warm.
-# [routes.claude]
-# "cache_affine" spreads sessions by weight; "ordered" uses the first
-# upstream and the others only on failover:
-# select = "cache_affine"
-# A request the upstream rejects (rate limit, overload, or a connection
-# refused or cut before the body was sent whole) goes to the session's next
-# upstream in the same turn; never after a response byte:
-# failover = ["429", "529", "connect"]
-# failover_max_body_bytes = 8388608    # larger bodies go without failover
-#
-# Up to 16 upstreams. Each takes every [upstream] field above except
-# forward_caller_credential.
+# Several accounts or providers: one more entry each, every one with its id.
+# Each takes every field above except forward_caller_credential.
 # [[routes.claude.upstreams]]
-# id = "team-a"                        # required and unique; in usage records and OTLP
-# provider = "anthropic"               # the default
-# weight = 2                           # share of sessions, 1 to 1000; default 1
+# id = "team-a"
+# weight = 2
 # base_url = "https://api.anthropic.com"
 # provider_key_env = "ANTHROPIC_KEY_TEAM_A"
 #

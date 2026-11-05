@@ -13,7 +13,7 @@ fn explain_messages(config: &Config, caller: CallerToken<'_>, body: &[u8]) -> Ex
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\nmax_request_body_bytes = 200\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n\
          [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra_auth}\n\
          [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n\
          [cache_diagnostics]\nhash_key_env = \"K\"",
@@ -175,7 +175,7 @@ fn explains_forwarding_and_each_refusal() {
 fn explains_alias_resolution_before_permissions() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -192,7 +192,7 @@ fn explains_alias_resolution_before_permissions() {
 fn explains_upgrade_issues_per_target_without_refusing() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [upgrade_check]\ntargets = [\"claude-opus-4-7\"]\n",
     )
     .unwrap();
@@ -351,7 +351,7 @@ fn explains_responses_on_the_openai_route() {
     );
     assert_eq!(
         no_claude.refused.as_ref().map(|r| r.2.as_str()),
-        Some("no route serves /v1/messages: add [upstream] or [routes.claude]")
+        Some("no route serves /v1/messages: add [routes.claude]")
     );
 }
 
@@ -388,7 +388,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
 fn reads_the_body_in_the_servers_order() {
     let aliased = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -462,7 +462,7 @@ fn chat_completions_carries_no_session_to_route_by() {
 fn a_passthrough_names_the_callers_credential() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
     )
     .unwrap();
     let report = explain_messages(&config, CallerToken::None, b"{}").report();

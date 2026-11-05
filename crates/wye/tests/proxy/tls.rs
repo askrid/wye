@@ -43,7 +43,7 @@ fn ca_file_resolves_relative_to_the_config_directory() {
     std::fs::create_dir_all(dir.join("certs")).unwrap();
     std::fs::write(dir.join("certs/ca.pem"), ca.ca_pem()).unwrap();
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
+        "[server]\nlisten = \"127.0.0.1:0\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
          forward_caller_credential = true\nca_file = \"certs/ca.pem\"",
     )
     .unwrap();

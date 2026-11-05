@@ -323,7 +323,8 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
         )),
         _ => {}
     }
-    // Where each upstream is, for the report: `[upstream]` has no id.
+    // Where each upstream is, for the report: a route's only upstream may
+    // have no id.
     let upstreams = |route: Option<&Route>| -> Vec<(String, String, ProviderKey)> {
         route
             .map(|r| {
@@ -332,7 +333,7 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
                     .map(|u| {
                         (
                             u.id.as_deref().map_or_else(
-                                || "[upstream]".to_owned(),
+                                || format!("routes.{name}.upstreams[0]"),
                                 |id| format!("routes.{name}: upstream {id}"),
                             ),
                             u.base_url(),

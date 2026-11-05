@@ -116,7 +116,8 @@ const STREAM_WINDOW: u32 = 256 * 1024;
 const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
 
 pub(crate) struct Upstream {
-    /// The route's name for it, in usage records; `None` for `[upstream]`.
+    /// The route's name for it, in usage records; `None` for a route's only
+    /// upstream written without one.
     pub(crate) id: Option<Arc<str>>,
     /// `anthropic-workspace-id` for Claude Platform on AWS, built once.
     workspace: Option<HeaderValue>,

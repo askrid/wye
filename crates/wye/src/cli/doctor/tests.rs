@@ -73,7 +73,7 @@ fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
     let config = |endpoint: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [upstream]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n\
+             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n\
              [telemetry]\notlp_endpoint = \"{endpoint}\"\notlp_headers_env = \"PATH\"\n"
         ))
         .unwrap()
@@ -101,14 +101,14 @@ async fn a_key_serve_would_refuse_fails_the_check() {
     std::fs::write(dir.join("key"), "sk-\u{1}broken\n").unwrap();
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_file = \"key\"\n",
+         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_file = \"key\"\n",
     )
     .unwrap();
     let (report, ok) = doctor(&config, &dir).await;
     assert!(!ok, "{report}");
     assert!(
         report.contains(
-            "FAIL  [upstream]: upstream API key contains characters not allowed in an HTTP header"
+            "FAIL  routes.claude.upstreams[0]: upstream API key contains characters not allowed in an HTTP header"
         ),
         "{report}"
     );

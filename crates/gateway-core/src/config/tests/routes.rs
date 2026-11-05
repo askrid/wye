@@ -1,4 +1,4 @@
-//! `[upstream]` and `[routes]`: upstreams, providers, and their validation.
+//! `[routes]`: upstreams, providers, and their validation.
 
 use super::*;
 
@@ -26,9 +26,11 @@ fn route_upstreams_parse_with_ids_and_weights() {
     assert_eq!(upstreams[1].id.as_deref(), Some("team-b"));
     assert_eq!(upstreams[1].weight, 1);
     assert_eq!(upstreams[1].provider_key, ProviderKey::File("b.key".into()));
-    // The single [upstream] has no id.
-    let single = parse(ACCOUNT).unwrap();
-    assert_eq!(claude(&single).upstreams()[0].id, None);
+    // A route's only upstream needs no id; it may still have one.
+    let alone = parse(ACCOUNT).unwrap();
+    assert_eq!(claude(&alone).upstreams()[0].id, None);
+    let named = parse(&format!("id = \"a\"\n{ACCOUNT}")).unwrap();
+    assert_eq!(claude(&named).upstreams()[0].id.as_deref(), Some("a"));
 }
 
 #[test]
@@ -41,8 +43,8 @@ fn route_upstreams_are_validated() {
             "routes.claude.upstreams must have between 1 and 16 entries",
         ),
         (
-            entry(""),
-            "routes.claude.upstreams: every entry needs an id",
+            entry("") + &entry("id = \"a\""),
+            "routes.claude.upstreams: every entry needs an id when the route has two or more",
         ),
         (entry("id = \"a b\""), "letters, digits"),
         (entry("id = \"\""), "letters, digits"),
@@ -62,9 +64,14 @@ fn route_upstreams_are_validated() {
         ),
         (
             "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\n\
-             forward_caller_credential = true"
-                .into(),
-            "single [upstream]",
+             forward_caller_credential = true\n"
+                .to_owned()
+                + &entry("id = \"b\""),
+            "routes.claude.upstreams: forward_caller_credential needs a route with one upstream",
+        ),
+        (
+            entry("id = \"a\"\nweight = 0").replace("id = \"a\"\n", ""),
+            "routes.claude.upstreams[0]: weight must be between 1 and 1000",
         ),
         (
             entry("id = \"a\"").replace("provider_key_env = \"K\"", "provider_key_env = \"1K\""),
@@ -75,12 +82,19 @@ fn route_upstreams_are_validated() {
             "routes.claude.upstreams \"a\": base_url \"http://x.example\": plain http",
         ),
         (
-            entry("id = \"a\"\nprovider_key_file = \"k\""),
+            entry("id = \"a\"\nprovider_key_file = \"k\"") + &entry("id = \"b\""),
             "routes.claude.upstreams \"a\": set only one of provider_key_env and provider_key_file",
         ),
         (
-            "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://x.example\"\n".into(),
+            "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://x.example\"\n"
+                .to_owned()
+                + &entry("id = \"b\""),
             "routes.claude.upstreams \"a\": set provider_key_env or provider_key_file",
+        ),
+        (
+            "[[routes.claude.upstreams]]\nbase_url = \"https://x.example\"\n".into(),
+            "routes.claude.upstreams[0]: set provider_key_env, provider_key_file, or \
+             forward_caller_credential = true",
         ),
         (
             entry("id = \"a\"\nconnect_timeout_secs = 0"),
@@ -96,19 +110,38 @@ fn route_upstreams_are_validated() {
 }
 
 #[test]
-fn upstream_and_routes_are_exclusive() {
-    let both = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n{ACCOUNT}\
-         [routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n{ACCOUNT}"
+fn a_route_is_required_and_the_upstream_section_is_gone() {
+    let neither = Config::from_toml_str("[server]\nlisten = \"127.0.0.1:8080\"\n").unwrap_err();
+    assert!(
+        neither
+            .to_string()
+            .contains("set [[routes.claude.upstreams]]"),
+        "{neither}"
+    );
+    let short = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n{ACCOUNT}"
     ))
     .unwrap_err();
-    assert!(both.to_string().contains("not both"), "{both}");
-    let neither = Config::from_toml_str("[server]\nlisten = \"127.0.0.1:8080\"\n").unwrap_err();
-    assert!(neither.to_string().contains("set [upstream]"), "{neither}");
-    let id_in_single = parse(&format!("id = \"a\"\n{ACCOUNT}")).unwrap_err();
     assert!(
-        id_in_single.to_string().contains("belong in"),
-        "{id_in_single}"
+        short.to_string().contains("unknown field `upstream`"),
+        "{short}"
+    );
+}
+
+#[test]
+fn only_a_claude_route_with_one_upstream_forwards_the_caller_credential() {
+    let forwarding = parse(FORWARDING).unwrap();
+    assert_eq!(
+        claude(&forwarding).upstreams()[0].provider_key,
+        ProviderKey::ForwardCaller
+    );
+    let openai = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.openai.upstreams]]\n{FORWARDING}"
+    ))
+    .unwrap_err();
+    assert_eq!(
+        openai.to_string(),
+        "routes.openai.upstreams[0]: forward_caller_credential belongs to routes.claude only"
     );
 }
 
@@ -128,7 +161,7 @@ fn openai_route_alone_or_beside_claude() {
     assert!(alone.routes.get(Api::Messages).is_none());
 
     let both = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n{ACCOUNT}{openai}"
+        "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n{ACCOUNT}{openai}"
     ))
     .unwrap();
     assert_eq!(claude(&both).upstreams()[0].provider, Provider::Anthropic);
@@ -157,7 +190,7 @@ fn base_url_ending_in_v1_is_refused() {
         let err = parse(&format!("base_url = \"{url}\"\nprovider_key_env = \"K\"")).unwrap_err();
         assert!(
             err.to_string().starts_with(&format!(
-                "upstream.base_url \"{url}\": drop the trailing /v1"
+                "routes.claude.upstreams[0]: base_url \"{url}\": drop the trailing /v1"
             )),
             "{err}"
         );

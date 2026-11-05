@@ -1,5 +1,5 @@
-//! The upstreams: `[upstream]` or `[routes.claude]` for Anthropic Messages,
-//! and `[routes.openai]` for OpenAI Responses and Chat Completions.
+//! The routes and their upstreams: `[routes.claude]` for Anthropic
+//! Messages, and `[routes.openai]` for OpenAI Responses and Chat Completions.
 
 use serde::Deserialize;
 
@@ -23,8 +23,7 @@ pub(crate) struct RawRoute {
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
-/// `[upstream]`, or one `[[routes.<route>.upstreams]]` entry, which also
-/// takes `id`, `provider`, `weight`, and `workspace_id`.
+/// One `[[routes.<route>.upstreams]]` entry.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawUpstream {
@@ -44,45 +43,20 @@ pub(crate) struct RawUpstream {
     pub(crate) http_version: Option<String>,
 }
 
-/// The Claude route from `[upstream]` or `[routes.claude]`, and the OpenAI
-/// route from `[routes.openai]`; at least one.
-pub(crate) fn validate_routes(
-    single: Option<RawUpstream>,
-    routes: Option<RawRoutes>,
-) -> Result<Routes, ConfigError> {
+/// The Claude route from `[routes.claude]` and the OpenAI route from
+/// `[routes.openai]`; at least one.
+pub(crate) fn validate_routes(routes: Option<RawRoutes>) -> Result<Routes, ConfigError> {
     let (claude, openai) = routes.map_or((None, None), |r| (r.claude, r.openai));
-    let claude = match (single, claude) {
-        (Some(raw), None) => {
-            if raw.id.is_some()
-                || raw.provider.is_some()
-                || raw.weight.is_some()
-                || raw.workspace_id.is_some()
-            {
-                return Err(ConfigError::Invalid(
-                    "upstream: id, provider, weight, and workspace_id belong in \
-                     [[routes.claude.upstreams]]",
-                ));
-            }
-            Some(Route::new(
-                vec![validate_upstream(raw, Provider::Anthropic, true)?],
-                Select::CacheAffine,
-                None,
-            ))
-        }
-        (None, Some(route)) => Some(validate_route(route, RouteId::Claude)?),
-        (None, None) => None,
-        (Some(_), Some(_)) => {
-            return Err(ConfigError::Invalid(
-                "set either [upstream] or [routes.claude], not both",
-            ));
-        }
-    };
+    let claude = claude
+        .map(|route| validate_route(route, RouteId::Claude))
+        .transpose()?;
     let openai = openai
         .map(|route| validate_route(route, RouteId::OpenAi))
         .transpose()?;
     if claude.is_none() && openai.is_none() {
         return Err(ConfigError::Invalid(
-            "set [upstream] (or [routes.claude]) for Claude, [routes.openai] for OpenAI, or both",
+            "set [[routes.claude.upstreams]] for Claude, [[routes.openai.upstreams]] for \
+             OpenAI, or both",
         ));
     }
     // Ids name an upstream in usage records and price entries, across routes.
@@ -97,7 +71,7 @@ pub(crate) fn validate_routes(
     if let Some(id) = ids(&openai).into_iter().find(|id| claude_ids.contains(id)) {
         return Err(ConfigError::RouteUpstream {
             route: RouteId::OpenAi.name(),
-            id: id.into(),
+            id: Some(id.into()),
             error: Box::new(ConfigError::Invalid("id is used by routes.claude too")),
         });
     }
@@ -182,25 +156,42 @@ fn validate_route_upstreams(
             "upstreams must have between 1 and 16 entries",
         )));
     }
+    // A route's only upstream needs no id to tell it apart, and only it may
+    // forward the caller's credential: several use their own provider keys.
+    let alone = raw_upstreams.len() == 1;
     let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw_upstreams.len());
     for mut entry in raw_upstreams {
-        let Some(id) = entry.id.take() else {
+        let entry_id = entry.id.take();
+        if entry_id.is_none() && !alone {
             return Err(in_route(id)(ConfigError::Invalid(
-                "upstreams: every entry needs an id",
-            )));
-        };
-        let in_entry = |error| ConfigError::RouteUpstream {
-            route,
-            id: id.clone(),
-            error: Box::new(error),
-        };
-        if !is_upstream_id(&id) {
-            return Err(in_entry(ConfigError::Invalid(
-                "id must be 1-64 letters, digits, '.', '_', or '-'",
+                "upstreams: every entry needs an id when the route has two or more",
             )));
         }
-        if upstreams.iter().any(|u| u.id.as_deref() == Some(&*id)) {
-            return Err(in_entry(ConfigError::Invalid("id is used twice")));
+        if entry.forward_caller_credential && !alone {
+            return Err(in_route(id)(ConfigError::Invalid(
+                "upstreams: forward_caller_credential needs a route with one upstream: \
+                 several upstreams use their own provider keys",
+            )));
+        }
+        let in_entry = |error| ConfigError::RouteUpstream {
+            route,
+            id: entry_id.clone(),
+            error: Box::new(error),
+        };
+        if entry.forward_caller_credential && id != RouteId::Claude {
+            return Err(in_entry(ConfigError::Invalid(
+                "forward_caller_credential belongs to routes.claude only",
+            )));
+        }
+        if let Some(entry_id) = &entry_id {
+            if !is_upstream_id(entry_id) {
+                return Err(in_entry(ConfigError::Invalid(
+                    "id must be 1-64 letters, digits, '.', '_', or '-'",
+                )));
+            }
+            if upstreams.iter().any(|u| u.id.as_deref() == Some(entry_id)) {
+                return Err(in_entry(ConfigError::Invalid("id is used twice")));
+            }
         }
         let provider = match (provider, entry.provider.as_deref()) {
             (default, None) => default,
@@ -248,14 +239,9 @@ fn validate_route_upstreams(
                 )));
             }
         };
-        if entry.forward_caller_credential {
-            return Err(in_entry(ConfigError::Invalid(
-                "forward_caller_credential needs a single [upstream]: a route's upstreams use \
-                 their own provider keys",
-            )));
-        }
-        let mut upstream = validate_upstream(entry, provider, false).map_err(in_entry)?;
-        upstream.id = Some(id.into());
+        let can_forward = alone && id == RouteId::Claude;
+        let mut upstream = validate_upstream(entry, provider, can_forward).map_err(in_entry)?;
+        upstream.id = entry_id.map(Into::into);
         upstream.weight = weight;
         upstream.workspace_id = workspace_id;
         upstreams.push(upstream);
@@ -278,58 +264,43 @@ fn is_upstream_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// A field's path as the user wrote it: `upstream.<name>` in the single
-/// `[upstream]`, bare in a route entry, whose error names the entry.
-macro_rules! field {
-    ($single:expr, $name:literal) => {
-        if $single {
-            concat!("upstream.", $name)
-        } else {
-            $name
-        }
-    };
-}
-
-/// One upstream: the single `[upstream]` (`single`) or a route entry.
+/// One upstream's address, credential, and timers; `can_forward` when
+/// forward_caller_credential is one of its credential choices.
 fn validate_upstream(
     raw: RawUpstream,
     provider: Provider,
-    single: bool,
+    can_forward: bool,
 ) -> Result<Upstream, ConfigError> {
     let provider_key = match (
         raw.provider_key_env,
         raw.provider_key_file,
         raw.forward_caller_credential,
     ) {
-        (Some(name), None, false) => {
-            ProviderKey::Env(env_name(name, field!(single, "provider_key_env"))?)
-        }
+        (Some(name), None, false) => ProviderKey::Env(env_name(name, "provider_key_env")?),
         (None, Some(path), false) => {
             if path.as_os_str().is_empty() {
-                return Err(ConfigError::Empty(field!(single, "provider_key_file")));
+                return Err(ConfigError::Empty("provider_key_file"));
             }
             ProviderKey::File(path)
         }
         (None, None, true) => ProviderKey::ForwardCaller,
         (None, None, false) => {
-            return Err(ConfigError::Invalid(if single {
-                "upstream: set provider_key_env, provider_key_file, or \
-                 forward_caller_credential = true"
+            return Err(ConfigError::Invalid(if can_forward {
+                "set provider_key_env, provider_key_file, or forward_caller_credential = true"
             } else {
                 "set provider_key_env or provider_key_file"
             }));
         }
         _ => {
-            return Err(ConfigError::Invalid(if single {
-                "upstream: set only one of provider_key_env, provider_key_file, and \
+            return Err(ConfigError::Invalid(if can_forward {
+                "set only one of provider_key_env, provider_key_file, and \
                  forward_caller_credential"
             } else {
                 "set only one of provider_key_env and provider_key_file"
             }));
         }
     };
-    let (scheme, authority, path_prefix) =
-        parse_base_url(field!(single, "base_url"), &raw.base_url)?;
+    let (scheme, authority, path_prefix) = parse_base_url("base_url", &raw.base_url)?;
     Ok(Upstream {
         id: None,
         weight: 1,
@@ -341,34 +312,33 @@ fn validate_upstream(
         provider_key,
         ca_file: match raw.ca_file {
             Some(path) if path.as_os_str().is_empty() => {
-                return Err(ConfigError::Empty(field!(single, "ca_file")));
+                return Err(ConfigError::Empty("ca_file"));
             }
             path => path,
         },
         connect_timeout: running_timer(
             raw.connect_timeout_secs
                 .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
-            field!(single, "connect_timeout_secs"),
+            "connect_timeout_secs",
         )?,
         response_header_timeout: running_timer(
             raw.response_header_timeout_secs
                 .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
-            field!(single, "response_header_timeout_secs"),
+            "response_header_timeout_secs",
         )?,
         http_version: match raw.http_version.as_deref() {
             None | Some("auto") => UpstreamHttpVersion::Auto,
             Some("1.1") => UpstreamHttpVersion::Http1,
             Some(_) => {
-                return Err(ConfigError::Invalid(field!(
-                    single,
-                    "http_version must be \"auto\" or \"1.1\""
-                )));
+                return Err(ConfigError::Invalid(
+                    "http_version must be \"auto\" or \"1.1\"",
+                ));
             }
         },
         stream_idle_timeout: running_timer(
             raw.stream_idle_timeout_secs
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
-            field!(single, "stream_idle_timeout_secs"),
+            "stream_idle_timeout_secs",
         )?,
     })
 }

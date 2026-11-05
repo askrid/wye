@@ -118,7 +118,7 @@ Streamed chat completions report usage only with `stream_options={"include_usage
 
 ## Several upstreams
 
-When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as an upstream under `[routes.claude]` instead of `[upstream]`:
+When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[routes.claude.upstreams]]` entry, each with an `id`:
 
 ```toml
 [routes.claude]
@@ -141,7 +141,7 @@ provider_key_env = "ANTHROPIC_KEY_B"
 - With `failover`, a [rejected](glossary.md#requests-and-where-they-go) request goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). Without it, a `429` goes back to the client, whose retry reaches the same upstream.
 - `select = "ordered"` makes the first upstream primary and the others standby.
 - Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI upstreams the same way.
-- A route holds its own provider keys, so it does not combine with passthrough. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
+- A route of several upstreams holds their provider keys, so it does not combine with passthrough, which needs a route with one upstream. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
 - `wye explain --session <id>` shows which upstream a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Seeing costs

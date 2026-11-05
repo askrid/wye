@@ -251,7 +251,7 @@ mod tests {
     fn config(extra: &str, public: &str) -> Config {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"0.0.0.0:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
              [auth]\nissuer = \"wye\"\naudience = \"team\"\n{extra}\n\
              [[auth.signing_keys]]\nid = \"old\"\ned25519_public_key = \"{}\"\n\
              [[auth.signing_keys]]\nid = \"now\"\ned25519_public_key = \"{public}\"\n",
@@ -308,7 +308,7 @@ mod tests {
         assert!(unknown.contains(&public_key(&other)), "{unknown}");
         let no_auth = Config::from_toml_str(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
         )
         .unwrap();
         assert!(

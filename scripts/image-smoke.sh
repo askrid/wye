@@ -27,7 +27,7 @@ cat > "$work/wye.toml" <<TOML
 [server]
 listen = "0.0.0.0:8080"
 
-[upstream]
+[[routes.claude.upstreams]]
 base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_API_KEY"
 

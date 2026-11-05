@@ -8,7 +8,7 @@ fn config(listen: &str, auth: Option<&str>, rest: &str) -> Config {
     let auth = auth.map_or(String::new(), |auth| format!("[auth]\n{auth}\n"));
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"{listen}\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          {auth}{rest}"
     ))
     .unwrap()
@@ -232,7 +232,7 @@ provider = \"openai\"
     let upstream = |credential: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
         ))
         .unwrap()
     };
@@ -240,13 +240,13 @@ provider = \"openai\"
     let keyed = upstream("provider_key_env = \"K\"");
     let report = policy_diff(&forwarded, &keyed).report();
     assert!(
-        report.contains("widens: [upstream] sends a provider key, where callers brought their own"),
+        report.contains("widens: routes.claude.upstreams[0] sends a provider key, where callers brought their own"),
         "{report}"
     );
     assert!(!policy_diff(&keyed, &forwarded).widens());
     let report = policy_diff(&keyed, &upstream("provider_key_env = \"OTHER\"")).report();
     assert!(
-        report.contains("changes: [upstream] provider key: $K -> $OTHER"),
+        report.contains("changes: routes.claude.upstreams[0] provider key: $K -> $OTHER"),
         "{report}"
     );
 }

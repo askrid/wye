@@ -223,7 +223,7 @@ async fn provider_key_file_is_read_relative_to_the_config_and_trimmed() {
     let (handler, mut rx) = recording(|seen| seen.headers);
     let (upstream, hits) = spawn_counted(handler).await;
     let config = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[upstream]\nbase_url = \"http://{upstream}\"\n\
+        "[server]\nlisten = \"127.0.0.1:0\"\n[[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\n\
          provider_key_file = \"secrets/provider-key\""
     ))
     .unwrap();

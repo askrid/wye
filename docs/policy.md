@@ -62,7 +62,7 @@ Without shared state or an admin API, immediate per-token revocation is not guar
 
 ### Caller-credential passthrough
 
-`forward_caller_credential = true`, which `wye init` writes by default, is the passthrough setup, for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
+`forward_caller_credential = true` on the Claude route's only upstream, which `wye init` writes by default, is the passthrough setup, for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
 
 - Loopback bind only; startup fails when it is combined with a non-loopback listener.
 - No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.

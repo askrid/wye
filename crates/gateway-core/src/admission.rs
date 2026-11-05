@@ -213,7 +213,7 @@ impl fmt::Display for Refusal {
             Self::Model(model) => write!(f, "this gateway token may not use the model {model:?}"),
             Self::OutputCeiling(e) => e.fmt(f),
             Self::NoRoute { api, path } => {
-                write!(f, "no route serves {path}: add {}", api.route().sections())
+                write!(f, "no route serves {path}: add {}", api.route().section())
             }
             Self::NotProxied | Self::Unauthenticated | Self::TooLarge => {
                 f.write_str(self.fixed_message().unwrap_or_default())

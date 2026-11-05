@@ -20,13 +20,12 @@ pub(super) use models::{
     RawAlias, RawPricing, RawUpgradeCheck, validate_aliases, validate_pricing,
     validate_upgrade_check,
 };
-pub(super) use upstream::{RawRoutes, RawUpstream, validate_routes};
+pub(super) use upstream::{RawRoutes, validate_routes};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawConfig {
     pub(super) server: RawServer,
-    pub(super) upstream: Option<RawUpstream>,
     pub(super) routes: Option<RawRoutes>,
     pub(super) auth: Option<RawAuth>,
     pub(super) cache_diagnostics: Option<RawCacheDiagnostics>,

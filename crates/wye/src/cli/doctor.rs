@@ -34,12 +34,12 @@ type Check = Result<String, String>;
 /// whether all passed.
 pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
     let mut checks = Vec::new();
-    for (_, route) in config.routes.iter() {
+    for (route_id, route) in config.routes.iter() {
         for upstream in route.upstreams() {
-            let name = upstream
-                .id
-                .as_deref()
-                .map_or_else(|| "[upstream]".to_owned(), |id| format!("upstream {id}"));
+            let name = upstream.id.as_deref().map_or_else(
+                || format!("routes.{}.upstreams[0]", route_id.name()),
+                |id| format!("upstream {id}"),
+            );
             checks.push(provider_key(&name, upstream, config_dir));
             checks.extend(endpoint_path(&name, upstream));
             checks.push(reachable(&name, upstream, config_dir).await);

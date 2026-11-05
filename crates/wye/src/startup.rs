@@ -83,7 +83,7 @@ impl StartupError {
         match self {
             Self::File { what, path, reason } => Self::File {
                 what: match &upstream.id {
-                    None => format!("upstream.{what}"),
+                    None => format!("routes.{}.upstreams[0]: {what}", route.name()),
                     Some(id) => format!("routes.{}.upstreams {id:?}: {what}", route.name()),
                 },
                 path,
@@ -398,10 +398,13 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         };
-        let single = error("[upstream]\n");
+        let unnamed = error("[[routes.claude.upstreams]]\n");
         assert!(
-            single.starts_with("upstream.provider_key_file /nonexistent-wye-dir/missing.key: "),
-            "{single}"
+            unnamed.starts_with(
+                "routes.claude.upstreams[0]: provider_key_file \
+                 /nonexistent-wye-dir/missing.key: "
+            ),
+            "{unnamed}"
         );
         let entry = error("[routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n");
         assert!(

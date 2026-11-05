@@ -21,7 +21,7 @@
 # Required: forwarding your login is refused on any non-loopback address.
 listen = "127.0.0.1:8080"
 
-[upstream]
+[[routes.claude.upstreams]]
 base_url = "https://api.anthropic.com"
 forward_caller_credential = true
 

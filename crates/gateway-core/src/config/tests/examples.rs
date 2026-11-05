@@ -8,24 +8,12 @@ const DEVELOPER: &str = include_str!("../../../../../examples/developer/wye.toml
 const TEAM: &str = include_str!("../../../../../examples/team/wye.toml");
 const APP: &str = include_str!("../../../../../examples/app/wye.toml");
 
-/// The reference with every commented-out option enabled: its active
-/// `[upstream]` gives way to `[routes.claude]`, and the credential
-/// alternatives that exclude each other stay commented out.
+/// The reference with every commented-out option enabled: its live upstream
+/// gets an id beside the commented ones, and the credential alternatives
+/// that exclude each other stay commented out.
 fn every_section_enabled(reference: &str) -> String {
     let mut out = String::new();
-    let mut in_upstream = false;
     for line in reference.lines() {
-        if line == "[upstream]" {
-            in_upstream = true;
-            continue;
-        }
-        if in_upstream {
-            // The single upstream ends where the route section starts.
-            if !line.starts_with("# Several accounts") {
-                continue;
-            }
-            in_upstream = false;
-        }
         let option = line.strip_prefix("# ").filter(|body| {
             // A table header is the whole line, with at most a comment after it.
             let table = body.split(" #").next().unwrap_or_default().trim_end();
@@ -62,7 +50,7 @@ fn the_examples_parse_as_they_stand() {
 /// shows: it must run exactly as its required lines alone.
 #[test]
 fn the_reference_sets_only_defaults() {
-    const REQUIRED: &str = "[server]\nlisten = \"127.0.0.1:8080\"\n\n[upstream]\n\
+    const REQUIRED: &str = "[server]\nlisten = \"127.0.0.1:8080\"\n\n[[routes.claude.upstreams]]\n\
         base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n";
     let reference = Config::from_toml_str(REFERENCE).unwrap();
     let required = Config::from_toml_str(REQUIRED).unwrap();
@@ -84,6 +72,6 @@ fn the_reference_parses_with_every_section_enabled() {
     assert!(config.auth.is_some() && config.telemetry.is_some());
     assert!(config.cache_diagnostics.is_some() && config.discovery.is_some());
     assert!(config.aliases.is_some() && config.pricing.is_some() && config.upgrade_check.is_some());
-    assert_eq!(claude(&config).upstreams().len(), 3);
+    assert_eq!(claude(&config).upstreams().len(), 4);
     assert!(config.routes.openai.is_some());
 }
