@@ -132,7 +132,8 @@ Open:
 
 - A floor baseline: nginx or Envoy streaming with `proxy_buffering off`, the overhead of a proxy that does nothing.
 - Replay of the public TraceLab coding-agent trace: context sizes, output lengths, turn gaps ([related work](research.md#related-work)).
-- Linux and a separate load machine, since the laptop's load generator saturates first at multi-core load; then 10k streams.
+- Published numbers from the [reference environment](benchmarks.md#reference-environment) (built; no run recorded yet), replacing the laptop's in this documentation.
+- A separate load machine, since the load generator saturates first at multi-core load (the reference environment gives the gateway 4 vCPUs of 16); then 10k streams.
 - A mock upstream that varies time to first token (token rate, stream length, and a rejection rate already vary).
 - The next competitors, each in passthrough at its best case, with its license, version, and Claude Code support checked first and the result and configuration recorded in [benchmarks.md](benchmarks.md):
   - LiteLLM's Rust gateway, next: its July 2026 benchmark claims 0.7 ms p99 overhead against Bifrost's 4.5 ms.

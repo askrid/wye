@@ -205,13 +205,58 @@ Competitors run with `--agentgateway`, `--bifrost`, `--litellm`, or `--krakend`.
 
 All runs send `"stream":true` on streaming requests and name the model `anthropic/bench`. Bifrost needs two more things: the mock's control headers go as `x-bf-eh-<name>`, the only extra headers it forwards, and requests leave `anthropic-version` to it, because its Anthropic route drops forwarded headers when the request carries one.
 
+## Reference environment
+
+Published numbers are to come from one pinned cloud machine instead of the laptop: `bench/reference/run.sh` builds a pushed commit on a fresh EC2 instance, runs the [comparison](#comparison-runs) against every competitor there, and copies the results into the repository. It is started only by hand; nothing in CI or on a schedule creates cloud resources, and the commit gate and the pull-request benchmark stay on the laptop and GitHub's runners ([development.md](development.md#commit-gate)).
+
+The machine and the split:
+
+- One `c7i.4xlarge` in `us-east-1` (Intel Xeon, Sapphire Rapids; 8 cores, 16 vCPUs; 32 GiB), on demand, fixed performance rather than burstable, with nothing else on it. Ubuntu 24.04 LTS, the image Canonical's public SSM parameter names on the day, its id recorded with the results. `--instance-type` also takes `c7i.2xlarge` and `c7i.8xlarge`.
+- The gateway runs on two physical cores with their hyperthreads (4 vCPUs: the last two cores, away from cpu0's interrupts), through `WYE_BENCH_GATEWAY_CPUS`; `wye-bench`, the load generator and the mock, runs on the other six (`taskset`). Every gateway gets the same four vCPUs, and LiteLLM one worker per vCPU. A larger instance only gives the load generator more room.
+- One `wye-bench run --repeat 3` with Wye, its allocation-counting build, and all four competitors, so every gateway sees the same payloads on the same host in the same hour. Gateway output is discarded, as on the laptop.
+
+What the commit pins, since the instance clones it and runs its `bench/reference/remote.sh`:
+
+| Component | Version | Artifact, checksum |
+|---|---|---|
+| Wye, `wye-bench` | the commit | built from source, `--locked`, the toolchain in `rust-toolchain.toml` |
+| rustup | 1.29.3 | `static.rust-lang.org`, published SHA-256 |
+| Bifrost | v2.3.2 | `downloads.getmaxim.ai` linux/amd64, SHA-256 of the first download (none published before v2.3.3) |
+| agentgateway | 1.7.0 (`26f5aeb`) | GitHub release `agentgateway-linux-amd64`, published SHA-256 |
+| KrakenD CE | 3.0.1 | GitHub release `generic-linux` tarball, its SHA-256 as GitHub lists it (KrakenD publishes SHA-512) |
+| LiteLLM | 1.105.0, CPython 3.12 | `bench/reference/litellm-requirements.txt`: every dependency pinned by hash |
+| AWS CLI | 2.37.12 | for the upload only; SHA-256 of the first download |
+
+Not pinned: the Ubuntu image and the build packages from its mirrors (recorded per run), and the host EC2 places the instance on. `--runs N` repeats the run on N fresh instances, one after another, to measure that host-to-host variance.
+
+Each run leaves `bench/reference/results/<date>-<commit>/run-<n>/`, committed with the numbers it backs: `results.json` and `table.txt` (Wye against each competitor), `system.json` (instance type, AMI, zone, kernel, CPU model, memory, `rustc`, Python, the CPU split, competitor versions), `lscpu.txt`, `run.json` (region, zone, AMI parameter, status, duration), each gateway's generated configuration, `remote.log`, and the Run Command output.
+
+Against Bifrost's published method (t3 instances, one headline number, payloads that differ by instance size): a fixed-performance instance, every scenario with its percentiles and failure counts, the same payloads for every gateway on one host, and host variance measured rather than assumed.
+
+To reproduce, in an account used for nothing else (the budget alarm covers the whole account):
+
+```bash
+export AWS_PROFILE=wye-refresh AWS_REGION=us-east-1
+# Once per account: results bucket, the instance's role, a $20/month budget alarm.
+aws cloudformation deploy --stack-name wye-bench-bootstrap \
+  --template-file bench/reference/bootstrap.yaml --capabilities CAPABILITY_IAM \
+  --parameter-overrides BudgetEmail=you@example.com
+bench/reference/run.sh --commit v0.1.0 --runs 3
+bench/reference/cleanup.sh        # deletes any leftover run stack
+bench/reference/cleanup.sh --all  # also the bucket, role, and budget
+```
+
+Teardown: `run.sh` deletes its stack on every exit, after a failure or Ctrl-C too, and waits until it is gone. If `run.sh` itself dies, the instance powers off 3 hours after boot and, by its shutdown behavior, terminates; the stack left behind costs nothing, and `cleanup.sh` removes it. The instance has no inbound rule: Run Command reaches it through the SSM agent, and its role may only write under `runs/` in the results bucket, whose objects expire after 30 days.
+
+Cost, from the AWS price list (2026-11-05, `us-east-1`, on demand): `c7i.4xlarge` $0.714 per hour, its 40 GB gp3 volume about $0.004 per hour, its public IPv4 address $0.005 per hour. A run takes about an hour (an estimate until the first run), about $0.75; the lifetime limit caps a forgotten one at about $2.20.
+
 ## Benchmark suite: kept, cut, missing
 
 The suite measures the gateway's own overhead under agent-shaped load, and each part has to justify its run time ([gated scenarios](development.md#benchmark)).
 
 - Bulk throughput (MB/s) is reported only, being the least relevant to token-paced traffic; its CPU per MB stays gated.
 - KrakenD is retired from routine runs; its result [above](#against-krakend) stands.
-- Missing parts (agent trace replay, a floor baseline, a separate Linux load machine) and the next competitors are planned in [roadmap.md](roadmap.md#m5-benchmarks-and-optimization).
+- Missing parts (agent trace replay, a floor baseline, a separate load machine) and the next competitors are planned in [roadmap.md](roadmap.md#m5-benchmarks-and-optimization).
 
 Why these competitors: KrakenD was the first reference (a mature general gateway), LiteLLM is the most-used open-source LLM gateway, Bifrost markets low overhead against LiteLLM (Wye's own claim), and agentgateway is the closest in kind.
 

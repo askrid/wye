@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Wye reference benchmark, deployed once per account (stack wye-bench-bootstrap):
+  a results bucket, the benchmark instance's role, and a monthly budget alarm.
+  Runs are separate short-lived stacks (run.yaml) started by hand with
+  bench/reference/run.sh; nothing here runs or costs anything on its own.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: run.sh -> run stack (1 EC2, no inbound) -> SSM Run Command -> results in this bucket -> copied into repo -> stack deleted
+    must:
+      - account used only for Wye benchmarks; the budget covers the whole account
+      - nothing here may start a run; runs only by hand (run.sh), never CI or a schedule
+    ref:
+      - at: docs/benchmarks.md
+        has: Reference environment section, how to reproduce, cost
+        scope: repo
+
+Parameters:
+  BudgetEmail:
+    Type: String
+    Description: Address that receives the budget alerts.
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    ConstraintDescription: an email address
+  MonthlyBudgetUsd:
+    Type: Number
+    Description: Monthly cost budget for the whole account, in USD.
+    Default: 20
+    MinValue: 1
+
+Resources:
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    # Results are copied into the repository (bench/reference/results/), so
+    # the bucket is scratch space: deleting the stack deletes it (once empty;
+    # cleanup.sh --all empties it first).
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: scratch for one run's results and SSM output, read once by run.sh; versioning off so cleanup.sh --all empties it with one recursive delete; 30-day expiry bounds what a failed download leaves behind
+        must:
+          - never public; TLS only
+          - instance role may write only runs/*
+        mutable: change-with-constraints
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-runs
+            Status: Enabled
+            ExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: Project
+          Value: wye-bench
+
+  ResultsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: deny any request not over TLS
+    Properties:
+      Bucket: !Ref ResultsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ResultsBucket.Arn
+              - !Sub "${ResultsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: the run instance is reached only through SSM (no SSH, no inbound rule) and writes results and SSM output to the bucket
+        must:
+          - least privilege, SSM core + s3:PutObject on runs/* + bucket encryption lookup (SSM agent needs it to write output to an encrypted bucket); no read, list, or delete
+        mutable: review-required
+    Properties:
+      Description: Wye reference benchmark instance (SSM managed; writes results)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: write-results
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteRunResults
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${ResultsBucket.Arn}/runs/*"
+              - Sid: ReadBucketEncryption
+                Effect: Allow
+                Action: s3:GetEncryptionConfiguration
+                Resource: !GetAtt ResultsBucket.Arn
+      Tags:
+        - Key: Project
+          Value: wye-bench
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: an alarm, not a cap; a forgotten run stack is bounded by the instance's own lifetime limit (run.yaml); this catches anything else billed in the account
+        must:
+          - no cost filter, since the account holds only Wye benchmark resources
+        mutable: free-to-tune
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetEmail
+      ResourceTags:
+        - Key: Project
+          Value: wye-bench
+
+Outputs:
+  ResultsBucket:
+    Description: Bucket run.sh downloads results from
+    Value: !Ref ResultsBucket
+  InstanceProfile:
+    Description: Instance profile each run stack's instance uses
+    Value: !Ref InstanceProfile

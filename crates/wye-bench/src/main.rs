@@ -4,8 +4,10 @@
 //! through a real `wye` binary, and reports what Wye adds: on a plain HTTP/1.1
 //! path (no metric prefix) and on TLS with HTTP/2 (`tls_`), plus the Wye
 //! variants, `--wye-alloc` allocation metrics (`alloc_`), and competitors
-//! (`--agentgateway`, `--bifrost`, `--litellm`, `--krakend`).
-//! `docs/development.md` lists each scenario and the `WYE_BENCH_*` knobs.
+//! (`--agentgateway`, `--bifrost`, `--litellm`, `--krakend`). `alternate` and
+//! `gate` run several builds in alternating rounds, each with its own
+//! `wye-bench` ([`rounds`]). `docs/development.md` lists each scenario and the
+//! `WYE_BENCH_*` knobs.
 //! Without arguments it prints its usage.
 
 // Development tool, not on the request path: panics abort a benchmark run.
@@ -25,11 +27,12 @@ mod gateway_process;
 mod load;
 mod measure;
 mod mock;
+mod rounds;
 mod run;
 mod scenarios;
 mod stats;
 
-use std::process::ExitCode;
+use std::{path::Path, process::ExitCode};
 
 use gateway_process::{Gateway, Variant};
 
@@ -94,6 +97,35 @@ fn main() -> ExitCode {
             };
             block_on(load::load(gateway, scenario, seconds))
         }
+        ["alternate", flags @ ..] => match rounds::Alternate::parse(flags) {
+            Some(plan) => {
+                plan.run();
+                ExitCode::SUCCESS
+            }
+            None => usage(),
+        },
+        [
+            "gate",
+            "--reference",
+            reference,
+            "--current",
+            current,
+            "--out",
+            out,
+            flags @ ..,
+        ] => {
+            // Checked here, so a typo fails before the rounds run; the
+            // flags go to each commit's own `compare` unchanged.
+            if compare_scope(flags).is_none() {
+                return usage();
+            }
+            rounds::gate(
+                Path::new(reference),
+                Path::new(current),
+                Path::new(out),
+                flags,
+            )
+        }
         ["median", out, runs @ ..] if !runs.is_empty() => {
             gate::median(out, runs);
             ExitCode::SUCCESS
@@ -145,6 +177,8 @@ fn usage() -> ExitCode {
     eprintln!(
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>] [--agentgateway <path>]\n  \
          wye-bench compare <reference.json> <results.json> [--only <pattern,...>] [--accept <pattern,...>] [--allow-new]\n  \
+         wye-bench alternate --side <name>=<wye-bench>,<wye>[,<alloc-stats wye>]... [--rounds N] [--repeat R] --out <dir>\n  \
+         wye-bench gate --reference <checkout> --current <checkout> --out <dir> [compare flags]\n  \
          wye-bench median <out.json> <results.json>...\n  \
          wye-bench diff <a.json> <b.json>\n  \
          wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"

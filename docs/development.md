@@ -11,11 +11,12 @@ One repository; the four crates are the members of one Cargo workspace.
 | `crates/gateway-core` | Decisions with no I/O: config, gateway tokens, model permissions, upstream selection, pricing, scanners |
 | `crates/wye` | The binary: server, upstream client, usage log and OTLP, CLI |
 | `crates/wye-testkit` | Test CA, mock upstream, signing keys, identity-provider tokens |
-| `crates/wye-bench` | The benchmark and its gate comparison, load and capacity runs, competitor runs |
+| `crates/wye-bench` | The benchmark, alternating rounds and the gate's decision, load and capacity runs, competitor runs |
 | `examples/` | `wye.toml` (the config reference); one directory per use: `developer/`, `team/`, `app/`, each a `wye.toml` and, for the last two, its `policy-tests/` |
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
+| `bench/reference/` | The [reference environment](benchmarks.md#reference-environment): CloudFormation templates, `run.sh` and `cleanup.sh` (run by hand), the instance's `remote.sh`, the LiteLLM lock file, and recorded results |
 | `scripts/check.sh` | The commit gate |
-| `scripts/bench.sh` | Two builds in alternating rounds: `gate <ref>` (this checkout against a commit, with one rerun), `ci <ref>` (the pull-request benchmark, gating what no machine changes), `ab <a> <b>` (two binaries, every metric, no verdict) |
+| `scripts/bench.sh` | Builds, then runs `wye-bench gate` or `alternate`: `gate <ref>` (this checkout against a commit, with one rerun), `ci <ref>` (the pull-request benchmark, gating what no machine changes), `ab <a> <b>` (two binaries, every metric, no verdict) |
 | `scripts/machine-lock.sh` | Runs a heavy job under one lock that every worktree shares, so the gate, A/B runs, and site builds take turns on one machine; `check.sh` and `bench.sh` take it themselves, CI skips it |
 | `scripts/upload-latency.sh` | Upload latency over HTTP/1.1 and HTTP/2 against the real API (needs an API key; not part of the gate) |
 | `Dockerfile`, `scripts/image-smoke.sh` | OCI image and its build-and-run smoke test (needs Docker; not part of the gate) |
@@ -41,7 +42,7 @@ The pre-commit hook runs it for every commit that touches more than docs and the
 git config core.hooksPath .githooks
 ```
 
-`scripts/bench.sh gate` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
+`scripts/bench.sh gate` builds the parent in a worktree (`target/reference`, kept between checks), and `wye-bench gate` runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
 
 - **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
@@ -60,7 +61,7 @@ The gate blocks about 100 µs of added latency per request, about 400 µs on SSE
 Why the parent in alternating rounds: a stored result carries the machine's state on the day it was recorded ([evidence](benchmarks.md#gate-tolerances)), while the two commits share the machine's state of the moment, and with nothing recorded first the gate runs on any machine. The method is the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order, at the price of a second build and twice the benchmark time. Rejected alternatives:
 
 - Both commits at once ([duet benchmarking](https://arxiv.org/abs/2001.05811)): the paced and stress scenarios load every core, so two runs at once would measure each other.
-- A cloud VM as the gate machine: instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). A dedicated machine stays the option for published numbers.
+- A cloud VM as the gate machine: instances of one type differ between hosts and over time, and a VM cannot fix the clock ([Leitner and Cito](https://arxiv.org/abs/1411.2429), [Laaber et al.](https://peerj.com/preprints/3507v1.pdf)). Published numbers come from one, the [reference environment](benchmarks.md#reference-environment), which runs every gateway in one session and measures host variance across runs; it gates nothing.
 - The parent's results from its own gate run: halves the benchmark but brings the time gap back.
 - A fixed reference commit: catches regressions that add up across commits, but a metric the benchmark adds stays ungated until the reference moves, and each move needs approval. `WYE_GATE_AGAINST` runs that check on demand (above).
 
@@ -103,6 +104,13 @@ Failed requests and streams are gated at zero:
 
 The cancellation release times have a fixed limit of one second, whatever the parent reads. `--agentgateway <path>`, `--bifrost <path>`, `--litellm <path>`, and `--krakend <path>` run the same scenarios through those gateways ([comparison runs](benchmarks.md#comparison-runs)).
 
+Two subcommands run several builds in alternating rounds, each side through its own `wye-bench`, as a child process:
+
+- `wye-bench alternate --side <name>=<wye-bench>,<wye>[,<alloc-stats wye>] ... --rounds N --repeat R --out <dir>`: each side's `run --repeat R` once per round, the order reversed every other round, then `<dir>/<name>.json`, the median of its rounds (failure counts: the worst). `scripts/bench.sh ab` is this and `wye-bench diff`.
+- `wye-bench gate --reference <checkout> --current <checkout> --out <dir> [compare flags]`: three rounds of each checkout's `target/release` and `target/alloc/release` builds, compared by both commits' `wye-bench compare`, with the rerun rule of the [commit gate](#commit-gate).
+
+The [reference environment](benchmarks.md#reference-environment) (`bench/reference/run.sh`) runs only when someone starts it by hand.
+
 CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `ps` rounds to whole seconds), in 10 ms steps either way; each CPU scenario runs long enough to make the step negligible.
 
 `--wye-alloc <path>` adds `alloc_` metrics from a `--features alloc-stats` build, whose global allocator counts every heap allocation and serves the counters at `GET /debug/alloc` (benchmarks only; never ship it): allocations and bytes per request, per streamed event, and per stream; live heap per idle stream, also after a 512 KB request and on TLS, and per stalled stream on TLS; allocations per 1 MiB upload. Counts barely vary ([spread](benchmarks.md#current-harness-and-baseline)), so the gate catches one extra allocation per request, stream, or event, which CPU timing cannot resolve.
@@ -124,6 +132,7 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 | `WYE_GATE_AGAINST` | `scripts/check.sh` | The commit to compare with, instead of the parent |
 | `WYE_BENCH_GATEWAY_LOG` | `wye-bench` | Keep each gateway's output next to its config |
 | `WYE_BENCH_GATEWAY_THREADS` | `wye-bench`, `capacity` | Tokio workers (default 1) |
+| `WYE_BENCH_GATEWAY_CPUS` | `wye-bench` | Linux only: a cpu list (`0-3,8-11`) every gateway runs on, through `taskset`; LiteLLM gets one worker per CPU in it |
 | `WYE_BENCH_EVENT_BYTES` | `wye-bench`, `events` | Event payload size |
 | `WYE_BENCH_UPSTREAM` | `wye-bench` | Extra lines in the upstream entry, for tuning experiments |
 | `WYE_BENCH_BIFROST_POOLS` | `wye-bench` | `default` keeps Bifrost's default pools |

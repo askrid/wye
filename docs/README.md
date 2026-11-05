@@ -14,7 +14,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 
 ## Trust it
 
-- [benchmarks.md](benchmarks.md): Wye's overhead, the method, competitors, the gate's evidence.
+- [benchmarks.md](benchmarks.md): Wye's overhead, the method, competitors, the reference environment, the gate's evidence.
 - [policy.md](policy.md): what Wye authorizes and enforces, what it cannot enforce without shared state, security requirements.
 - [SECURITY.md](../SECURITY.md): reporting a vulnerability, what a running gateway holds and reaches, how a release is built and how to verify one.
 - [architecture.md](architecture.md): how a request flows: components, runtime, forwarding, upstream selection and failover, providers, streaming, configuration, invariants, open design decisions.

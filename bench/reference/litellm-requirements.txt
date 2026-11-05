@@ -1,0 +1,511 @@
+# LiteLLM for the reference benchmark (bench/reference/remote.sh): the
+# version docs/benchmarks.md compared against, with every dependency pinned
+# by hash, for CPython 3.12 (Ubuntu 24.04) on x86_64 manylinux. Installed
+# with `pip install --require-hashes --only-binary=:all: --no-deps`.
+# Resolved as of 2026-10-15, the comparison's date, with
+#   uv pip compile --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-manylinux_2_28 --exclude-newer 2026-10-15T00:00:00Z
+# from `litellm[proxy]==1.105.0`, then cut to the hashes of the wheels that
+# platform can install.
+--index-url https://pypi.org/simple
+
+aiohappyeyeballs==2.7.1 \
+    --hash=sha256:9243213661e29250eb41368e5daa826fc017156c3b8a11440826b2e3ed376472
+    # via aiohttp
+aiohttp==3.14.5 \
+    --hash=sha256:20f085697d7e911f1f73c43ed03fafbed1e7121797e2eb5428efa80398060584 \
+    --hash=sha256:efc21a454892828368b11c2c780de0ff8bc991f73f6b99c6b66e56205470929b
+    # via litellm
+aiosignal==1.4.0 \
+    --hash=sha256:053243f8b92b990551949e63930a839ff0cf0b0ebbe0597b0f3fb19e1a0fe82e
+    # via aiohttp
+annotated-doc==0.0.5 \
+    --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101
+    # via fastapi
+annotated-types==0.8.0 \
+    --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
+    # via pydantic
+anyio==4.15.1 \
+    --hash=sha256:6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101
+    # via
+    #   httpx
+    #   httpx2
+    #   mcp
+    #   openai
+    #   sse-starlette
+    #   starlette
+apscheduler==3.11.3 \
+    --hash=sha256:bbeb2ec02d23d3c06a6c07ed7f0f3939ada6680eb121fae809a69bb42c537a30
+    # via litellm
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+    # via
+    #   aiohttp
+    #   jsonschema
+    #   referencing
+azure-core==1.41.0 \
+    --hash=sha256:522b4011e8180b1a3dcd2024396a4e7fe9ac37fb8597db47163d230b5efe892d
+    # via
+    #   azure-identity
+    #   azure-storage-blob
+azure-identity==1.26.0 \
+    --hash=sha256:3c60d9682b3ac01507388d474cb5a5ffbe54152a96b6cdcaa7013da9315cf186
+    # via litellm
+azure-storage-blob==12.31.0 \
+    --hash=sha256:0c0cb601d3462491d09ea96023cd791bb9dd4b173bf950daf3cff34ff47ba5b5
+    # via litellm
+backoff==2.2.1 \
+    --hash=sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8
+    # via litellm
+boto3==1.43.114 \
+    --hash=sha256:d9cac2eb921ce674970cef1c9ad750f85ee3a846aedcf188d18368fb9eb6da23
+    # via litellm
+botocore==1.43.114 \
+    --hash=sha256:d1c441a22e93e158de5b1e026205f5d6d67a4545d10540c5090c62dccb3a9eca
+    # via
+    #   boto3
+    #   s3transfer
+certifi==2026.7.22 \
+    --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
+cffi==2.1.1 \
+    --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
+    # via
+    #   cryptography
+    #   pynacl
+    #   pyroscope-io
+    #   soundfile
+charset-normalizer==3.5.2 \
+    --hash=sha256:1c50fe28bbc2ced33386f298650d91218076c05420e6cbd790b913adc41659e7 \
+    --hash=sha256:3d31298449090ab8d47b7b1b2a555ff73cac7ed438a08b7ac160980c7ebed649 \
+    --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685
+    # via requests
+click==8.5.0 \
+    --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+    # via
+    #   granian
+    #   huggingface-hub
+    #   litellm
+    #   rq
+    #   uvicorn
+croniter==6.2.4 \
+    --hash=sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d
+    # via rq
+cryptography==50.0.2 \
+    --hash=sha256:1981f1db4630889b9ef7803fadef12b056f428cb6b85c27ba57b774793b6093c \
+    --hash=sha256:4061c0079120205fb760c58acab6443e217307dcf05e3702cf970e0689972856 \
+    --hash=sha256:630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2 \
+    --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079 \
+    --hash=sha256:ee247f5c245c9a2fe7c8e2214e295918838e44e00a45a6718451e4004219e767 \
+    --hash=sha256:f21e8a22c8605750c7af886bab299a363721264061b4ac0a30efb73cfd58efc5
+    # via
+    #   azure-identity
+    #   azure-storage-blob
+    #   litellm
+    #   msal
+    #   pyjwt
+distro==1.9.0 \
+    --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
+    # via openai
+dnspython==2.9.0 \
+    --hash=sha256:9a4aedb833c3c1b49214d04d44d3032ab7a9135f7c1d29a549b4ff78fd82fda9
+    # via email-validator
+email-validator==2.3.0 \
+    --hash=sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4
+    # via pydantic
+expression==5.7.0 \
+    --hash=sha256:d8d903cb9ddcb252dbd64612e329bd86f09d770c7812eaf8f9cc0b9f8e6480bd
+    # via litellm
+fastapi==0.143.1 \
+    --hash=sha256:687beb445804e4c4dbe2a76fd83c25e9b973ac48c267defb86f791e099baecc4
+    # via
+    #   fastapi-sso
+    #   litellm
+fastapi-sso==0.23.0 \
+    --hash=sha256:7dd537adc836142e8b64def86a901fead21c9d42d4001872a18e6f9316bc4ec0
+    # via litellm
+fastuuid==0.14.0 \
+    --hash=sha256:808527f2407f58a76c916d6aa15d58692a4a019fdf8d4c32ac7ff303b7d7af09
+    # via litellm
+filelock==3.32.7 \
+    --hash=sha256:65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52
+    # via
+    #   huggingface-hub
+    #   litellm
+frozenlist==1.8.0 \
+    --hash=sha256:0c18a16eab41e82c295618a77502e17b195883241c563b00f0aa5106fc4eaa0d \
+    --hash=sha256:494a5952b1c597ba44e0e78113a7266e656b9794eec897b19ead706bd7074383
+    # via
+    #   aiohttp
+    #   aiosignal
+fsspec==2026.9.0 \
+    --hash=sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f
+    # via huggingface-hub
+granian==2.8.4 \
+    --hash=sha256:18037cc4a5fbaebedcf333ae29ce2f742158e2a73195f6948d2f26cd9e689636
+    # via litellm
+gunicorn==23.0.0 \
+    --hash=sha256:ec400d38950de4dfd418cff8328b2c8faed0edb0d517d3394e457c317908ca4d
+    # via litellm
+h11==0.16.0 \
+    --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
+    # via
+    #   httpcore
+    #   httpcore2
+    #   uvicorn
+h2==4.4.1 \
+    --hash=sha256:0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6
+    # via httpx
+hf-xet==1.7.0 \
+    --hash=sha256:2814a6e999d13464c4d679b788cc5d784eb5a4edfc638a31f10e9a11ab531ef8
+    # via huggingface-hub
+hiredis==3.4.2 \
+    --hash=sha256:018fdee902038f74b21e18a6d2fe7819bb63bdaec878d9d5f27280005b778ad7
+    # via litellm
+hpack==4.2.0 \
+    --hash=sha256:858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986
+    # via h2
+httpcore==1.0.9 \
+    --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
+    # via httpx
+httpcore2==2.13.1 \
+    --hash=sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a
+    # via httpx2
+httpx==0.28.1 \
+    --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
+    # via
+    #   fastapi-sso
+    #   huggingface-hub
+    #   litellm
+    #   openai
+httpx2==2.13.1 \
+    --hash=sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4
+    # via
+    #   litellm
+    #   mcp
+huggingface-hub==1.33.0 \
+    --hash=sha256:04e434b06e100eddbce9a6e817d72693a7884b10a79bd67ab48080d5c07eb899
+    # via
+    #   litellm
+    #   tokenizers
+hyperframe==6.1.0 \
+    --hash=sha256:b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5
+    # via h2
+idna==3.20 \
+    --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+    # via
+    #   anyio
+    #   email-validator
+    #   httpx
+    #   httpx2
+    #   requests
+    #   yarl
+importlib-metadata==8.9.0 \
+    --hash=sha256:e0f761b6ea91ced3b0844c14c9d955224d538105921f8e6754c00f6ca79fba7f
+    # via litellm
+inquirerpy==0.3.4 \
+    --hash=sha256:c65fdfbac1fa00e3ee4fb10679f4d3ed7a012abf4833910e63c295827fe2a7d4
+    # via litellm
+isodate==0.7.2 \
+    --hash=sha256:28009937d8031054830160fce6d409ed342816b543597cece116d966c6d99e15
+    # via azure-storage-blob
+jinja2==3.1.6 \
+    --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+    # via litellm
+jiter==0.17.0 \
+    --hash=sha256:8c21265b251d99bbb40080d178a8953e35601d3a1564e05c4de4c0d2ca616797
+    # via openai
+jmespath==1.1.0 \
+    --hash=sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64
+    # via
+    #   boto3
+    #   botocore
+jsonschema==4.26.0 \
+    --hash=sha256:d489f15263b8d200f8387e64b4c3a75f06629559fb73deb8fdfb525f2dab50ce
+    # via
+    #   litellm
+    #   mcp
+jsonschema-specifications==2025.9.1 \
+    --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe
+    # via jsonschema
+litellm==1.105.0 \
+    --hash=sha256:52b13819212d4beb0fcfaec9cfbd8bd616fade930a3a399acdfb7d959ba4df2b
+    # the requested package
+litellm-enterprise==0.1.73 \
+    --hash=sha256:8af439ddf65fb2dba5a90e72125303fa17caba1e6e98ee60c931a6b339ccf247
+    # via litellm
+litellm-proxy-extras==0.4.105 \
+    --hash=sha256:84644bd5bcc4d8fcc638c3225c9bcc1a5df28950325e28e6801662f3f13b6e48
+    # via litellm
+markdown-it-py==4.2.0 \
+    --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+    # via rich
+markupsafe==3.0.4 \
+    --hash=sha256:8e124f974786f831d6043728e38296969d3579db8896fe004682f5758e613581
+    # via jinja2
+mcp==2.3.0 \
+    --hash=sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377
+    # via litellm
+mcp-types==2.3.0 \
+    --hash=sha256:968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d
+    # via mcp
+mdurl==0.1.2 \
+    --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+    # via markdown-it-py
+msal==1.39.0 \
+    --hash=sha256:2d2577886906cd7293850dffa2da29119966c213bfc6ec0cecf8bf7621e1ca77
+    # via
+    #   azure-identity
+    #   msal-extensions
+msal-extensions==1.3.1 \
+    --hash=sha256:96d3de4d034504e969ac5e85bae8106c8373b5c6568e4c8fa7af2eca9dbe6bca
+    # via azure-identity
+multidict==7.1.0 \
+    --hash=sha256:d9ef29cfd98e17085b4f91bba8fa1570bec6787d5c52ce653ed33a58785585d0 \
+    --hash=sha256:fed6b7705d49dd07e5e0dd5f5c873fc44047e92d714299b13245b5fecac49d01
+    # via
+    #   aiohttp
+    #   yarl
+numpy==2.5.4 \
+    --hash=sha256:fbde6962867ee75b48b0ee29b2b9372ec5d617799dbaf38e82dc0596f2f7738a
+    # via soundfile
+oauthlib==4.0.0 \
+    --hash=sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd
+    # via fastapi-sso
+openai==2.54.0 \
+    --hash=sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b
+    # via litellm
+opentelemetry-api==1.45.1 \
+    --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
+    # via
+    #   fastapi
+    #   mcp
+orjson==3.13.0 \
+    --hash=sha256:bceadfd314bd238f584fc229a4bbaf0e573597e7a026dec5429fbf29fd66c641
+    # via litellm
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+    # via
+    #   gunicorn
+    #   huggingface-hub
+    #   litellm
+pfzy==0.3.4 \
+    --hash=sha256:5f50d5b2b3207fa72e7ec0ef08372ef652685470974a107d0d4999fc5a903a96
+    # via inquirerpy
+polars==1.44.2 \
+    --hash=sha256:1bb331f17a40d9d931101533dcd33637b66edc61eb377b07020dac16a0f0377b
+    # via litellm
+polars-runtime-32==1.44.2 \
+    --hash=sha256:a1bafb441e99199a62c63bf1bbdc0ea09ee9776dbac2bf31452b5000fb1df2f7
+    # via polars
+prompt-toolkit==3.0.53 \
+    --hash=sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2
+    # via inquirerpy
+propcache==0.5.4 \
+    --hash=sha256:2814ecd8e818f487bee4b0f921bc4d1c176cc5fc71ac0f072d0fa67eda4ac14b \
+    --hash=sha256:62c60aec739ed00124573cce1178138fd690c7676352d67a37328c1cf51d7468
+    # via
+    #   aiohttp
+    #   yarl
+psycopg==3.3.6 \
+    --hash=sha256:a1db9f7148b06a28606767efaca51fa6f9398c5c0a3810519be69d7000bdb631
+    # via litellm-proxy-extras
+psycopg-binary==3.3.6 \
+    --hash=sha256:1679a1cb93fbe5a6d1fd58d82cbddcc6fcb8c61446ba7cae6eb2a7b19bc585de
+    # via litellm-proxy-extras
+pycparser==3.11 \
+    --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80
+    # via cffi
+pydantic==2.14.1 \
+    --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
+    # via
+    #   fastapi
+    #   fastapi-sso
+    #   litellm
+    #   mcp
+    #   mcp-types
+    #   openai
+    #   pydantic-settings
+pydantic-core==2.50.1 \
+    --hash=sha256:93ba4e9d8210d941c200431a56b2c0400b131865947903937ed3ec5404307d2e
+    # via pydantic
+pydantic-settings==2.16.0 \
+    --hash=sha256:7e73acf7f61936a15e5a3b6eedaea29f133357faf7272f2607ba479b049dd7f2
+    # via litellm
+pygments==2.21.0 \
+    --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
+    # via rich
+pyjwt==2.15.1 \
+    --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193
+    # via
+    #   fastapi-sso
+    #   litellm
+    #   mcp
+    #   msal
+pynacl==1.6.2 \
+    --hash=sha256:22de65bb9010a725b0dac248f353bb072969c94fa8d6b1f34b87d7953cf7bbe4 \
+    --hash=sha256:8a66d6fb6ae7661c58995f9c6435bda2b1e68b54b598a6a10247bfcdadac996c \
+    --hash=sha256:c8a231e36ec2cab018c4ad4358c386e36eede0319a0c41fed24f840b1dac59f6
+    # via litellm
+pyroscope-io==0.8.16 \
+    --hash=sha256:6b91ce5b240f8de756c16a17022ca8e25ef8a4eed461c7d074b8a0841cf7b445
+    # via litellm
+python-dateutil==2.9.0.post0 \
+    --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+    # via
+    #   botocore
+    #   croniter
+python-dotenv==1.2.4 \
+    --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc
+    # via
+    #   litellm
+    #   pydantic-settings
+python-multipart==0.0.32 \
+    --hash=sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23
+    # via
+    #   litellm
+    #   mcp
+pyyaml==6.0.3 \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc
+    # via
+    #   huggingface-hub
+    #   litellm
+redis==8.1.0 \
+    --hash=sha256:a4fe1aac3d3b3cc791d4b3d5931c5a956045dc951ee74d1c913ee3ac4d2ee9fb
+    # via rq
+referencing==0.37.0 \
+    --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
+regex==2026.9.29 \
+    --hash=sha256:39ab5894d971f9ac68baa6eca5c50387db579cfcacf36ae8df3feceb1815e6d0
+    # via tiktoken
+requests==2.34.2 \
+    --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+    # via
+    #   azure-core
+    #   msal
+    #   tiktoken
+restrictedpython==8.5 \
+    --hash=sha256:6c70e0a3af13e830d37225788cdc8ab5804a8df4b500c135086eaef34b5c01e0
+    # via litellm
+rich==13.9.4 \
+    --hash=sha256:6049d5e6ec054bf2779ab3358186963bac2ea89175919d699e378b99738c2a90
+    # via litellm
+rpds-py==2026.9.1 \
+    --hash=sha256:addeda51556dac7c1a2f14cda62db8b621cd12afba3091d03a96c72932387eab
+    # via
+    #   jsonschema
+    #   referencing
+rq==2.12.0 \
+    --hash=sha256:97e349a00e9f2a18962102b3dca156cb5ce315d3ef38145e24ba9cabd16a9361
+    # via litellm
+s3transfer==0.19.2 \
+    --hash=sha256:d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25
+    # via boto3
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+    # via python-dateutil
+sniffio==1.3.1 \
+    --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
+    # via openai
+soundfile==0.14.0 \
+    --hash=sha256:1e38bac1853412871318e82a1ba69a8be677619b56025bbfcccdb41b6cafe82d \
+    --hash=sha256:8ba81ae3a89fd5ab3bef8a8eb481fbbe794e806309675a89b4df48b8d31908a8
+    # via litellm
+sse-starlette==3.5.0 \
+    --hash=sha256:3e6e1070df3f0f5d9cea81496de92dbb72f6721871d99748ece67441dd8b7997
+    # via mcp
+starlette==1.8.0 \
+    --hash=sha256:dfdd6b29c26483288088d990eee59631dedadd66ce20d203402a7ca8e3c4656f
+    # via
+    #   fastapi
+    #   litellm
+    #   mcp
+    #   sse-starlette
+tiktoken==0.14.0 \
+    --hash=sha256:7896eea257fe497a2b7134474d909156c6744ce8da35bce88011a960e008aa0d
+    # via litellm
+tokenizers==0.23.3 \
+    --hash=sha256:376851d22bcf9d650a5c3090bb83e6cf9e895fbf0595369fa4cd43c1f69b5f87
+    # via litellm
+tomlkit==0.15.1 \
+    --hash=sha256:177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304
+    # via litellm
+tqdm==4.70.1 \
+    --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73
+    # via
+    #   huggingface-hub
+    #   openai
+truststore==0.10.5 \
+    --hash=sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c
+    # via
+    #   httpcore2
+    #   httpx2
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+    # via
+    #   aiohttp
+    #   aiosignal
+    #   anyio
+    #   azure-core
+    #   azure-identity
+    #   azure-storage-blob
+    #   expression
+    #   fastapi
+    #   httpx2
+    #   huggingface-hub
+    #   mcp
+    #   mcp-types
+    #   openai
+    #   opentelemetry-api
+    #   psycopg
+    #   pydantic
+    #   pydantic-core
+    #   pydantic-settings
+    #   referencing
+    #   soundfile
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.4 \
+    --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
+    # via
+    #   fastapi
+    #   mcp
+    #   pydantic
+    #   pydantic-settings
+tzlocal==5.4.4 \
+    --hash=sha256:aae09f0126a8a86fa736be266eb4a471380d26a0de3bc14844e7821fee3e2a15
+    # via apscheduler
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
+    # via
+    #   botocore
+    #   requests
+uvicorn==0.54.0 \
+    --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf
+    # via
+    #   litellm
+    #   mcp
+uvloop==0.23.0 \
+    --hash=sha256:090865d8ce7a03986755a3ce711b7dd0d4b44eb14ab74368b717f3fad1180208
+    # via litellm
+wcwidth==0.9.2 \
+    --hash=sha256:751bef0ab404b6a1dc028b56b4b85d46486be1c55833f80da533e42dc691f389 \
+    --hash=sha256:89ca642c5bf0101157a09366be69fad0379db1f700ae39a920e103234573670e
+    # via prompt-toolkit
+websockets==15.0.1 \
+    --hash=sha256:64dee438fed052b52e4f98f76c5790513235efaa1ef7f3f2192c392cd7c91b65 \
+    --hash=sha256:f7a866fbc1e97b5c617ee4116daaa09b722101d4a3c170c787450ba409f9736f
+    # via litellm
+yarl==1.25.1 \
+    --hash=sha256:681c758b0490f9e96b78e5fa8e8dc6e648e9185bb6eaebe73183c33ea0c445f3 \
+    --hash=sha256:c6f117789d22dce188e5754e8bc65b7e6ebf8cb73963b9fa761f672a5883769d
+    # via aiohttp
+zipp==4.1.1 \
+    --hash=sha256:8979f52d874162f485ff2981e3891f3a3317b7a3dd43ff1e1775b9304f307a9c
+    # via importlib-metadata

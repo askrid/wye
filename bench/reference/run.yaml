@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  One Wye reference benchmark run (stack wye-bench-run-<id>): a single
+  dedicated-for-the-run EC2 instance, reached only through SSM, that builds and
+  benchmarks one commit, then is deleted by run.sh. A lifetime limit powers it
+  off and terminates it even if run.sh never deletes the stack.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: created and deleted by bench/reference/run.sh, one stack per run; needs the wye-bench-bootstrap stack (instance profile, results bucket)
+    must:
+      - no inbound access of any kind; SSM only
+      - the instance must stop costing money after MaxLifetimeMinutes without any outside action
+    ref:
+      - at: docs/benchmarks.md
+        has: Reference environment section, how to reproduce, cost
+        scope: repo
+
+Parameters:
+  RunId:
+    Type: String
+    Description: Identifies the run in tags (run.sh sets it).
+    AllowedPattern: "^[a-z0-9][a-z0-9-]{0,62}$"
+  Commit:
+    Type: String
+    Description: The commit benchmarked, for the tags.
+    AllowedPattern: "^[0-9a-f]{40}$"
+  InstanceType:
+    Type: String
+    Description: c7i (Sapphire Rapids, fixed-performance, not burstable); 4xlarge is the reference.
+    Default: c7i.4xlarge
+    AllowedValues:
+      - c7i.2xlarge
+      - c7i.4xlarge
+      - c7i.8xlarge
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: Ubuntu 24.04 LTS amd64 AMI, resolved by run.sh from Canonical's public SSM parameter and recorded with the results.
+  InstanceProfile:
+    Type: String
+    Description: The wye-bench-bootstrap stack's InstanceProfile output.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The account's default VPC.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: A default subnet of that VPC in a zone that offers the instance type.
+  MaxLifetimeMinutes:
+    Type: Number
+    Description: The instance powers off, and so terminates, this long after boot.
+    Default: 180
+    MinValue: 30
+    MaxValue: 720
+  VolumeSizeGiB:
+    Type: Number
+    Description: Root volume size; holds two Rust release builds and the competitors.
+    Default: 40
+    MinValue: 20
+    MaxValue: 200
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: no ingress at all (shell access is SSM, over the agent's outbound connection); egress only to what a run fetches (HTTPS for SSM, S3, GitHub, crates, PyPI, releases; HTTP for Ubuntu's apt mirrors). VPC DNS and the instance metadata service are not filtered by security groups.
+        must:
+          - never add an ingress rule
+        mutable: review-required
+    Properties:
+      GroupDescription: Wye reference benchmark run, no inbound
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: HTTPS (SSM, S3, GitHub, crates.io, PyPI, release downloads)
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP (Ubuntu apt mirrors)
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: wye-bench
+        - Key: Run
+          Value: !Ref RunId
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: one fixed-performance c7i host per run, so published numbers come from a pinned, reproducible machine instead of a laptop or a burstable instance; a public IP only for outbound traffic (default VPC has no NAT); IMDSv2 only
+        must:
+          - InstanceInitiatedShutdownBehavior terminate + the user-data lifetime limit together bound the cost of a forgotten stack
+          - IMDSv2 required
+          - root volume encrypted and deleted with the instance
+        mutable: change-with-constraints
+        mutability:
+          InstanceType: free-to-tune
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      InstanceInitiatedShutdownBehavior: terminate
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+        InstanceMetadataTags: disabled
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !Ref SubnetId
+          GroupSet:
+            - !Ref SecurityGroup
+          AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref VolumeSizeGiB
+            Encrypted: true
+            DeleteOnTermination: true
+      PropagateTagsToVolumeOnCreation: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Lifetime limit: power off (and, by the shutdown behavior,
+          # terminate) after ${MaxLifetimeMinutes} minutes, whatever happens to
+          # run.sh. A timer at an absolute time also fires after a reboot,
+          # which clears the scheduled shutdown.
+          shutdown -P +${MaxLifetimeMinutes} "wye-bench: lifetime limit reached"
+          deadline=$(date -u -d "+${MaxLifetimeMinutes} minutes" '+%Y-%m-%d %H:%M:%S UTC')
+          printf '[Service]\nType=oneshot\nExecStart=/usr/bin/systemctl poweroff\n' \
+            > /etc/systemd/system/wye-bench-lifetime.service
+          printf '[Timer]\nOnCalendar=%s\nPersistent=true\n[Install]\nWantedBy=timers.target\n' \
+            "$deadline" > /etc/systemd/system/wye-bench-lifetime.timer
+          systemctl daemon-reload
+          systemctl enable --now wye-bench-lifetime.timer
+      Tags:
+        - Key: Name
+          Value: !Sub "wye-bench-${RunId}"
+        - Key: Project
+          Value: wye-bench
+        - Key: Run
+          Value: !Ref RunId
+        - Key: Commit
+          Value: !Ref Commit
+
+Outputs:
+  InstanceId:
+    Description: The run's instance, the target of the SSM command
+    Value: !Ref Instance
+  AvailabilityZone:
+    Description: Where it ran, recorded with the results
+    Value: !GetAtt Instance.AvailabilityZone

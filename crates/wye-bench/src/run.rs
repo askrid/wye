@@ -215,20 +215,40 @@ fn print_versus(metrics: &Value, other: Gateway<'_>) {
     }
 }
 
+/// What the run ran on. `cpus` counts the CPUs this process may use, and
+/// `gateway_cpus` is `WYE_BENCH_GATEWAY_CPUS`, when the gateway is pinned.
 fn machine() -> Value {
-    let sysctl = |key: &str| {
-        std::process::Command::new("sysctl")
-            .args(["-n", key])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_owned())
-            .unwrap_or_default()
-    };
-    json!({
+    let mut machine = json!({
         "os": std::env::consts::OS,
         "arch": std::env::consts::ARCH,
-        "cpu": sysctl("machdep.cpu.brand_string"),
+        "cpu": cpu_model(),
         "cpus": std::thread::available_parallelism().map_or(0, |n| n.get()),
-    })
+    });
+    if let Ok(cpus) = std::env::var("WYE_BENCH_GATEWAY_CPUS")
+        && !cpus.is_empty()
+    {
+        machine["gateway_cpus"] = cpus.into();
+    }
+    machine
+}
+
+#[cfg(target_os = "linux")]
+fn cpu_model() -> String {
+    std::fs::read_to_string("/proc/cpuinfo")
+        .unwrap_or_default()
+        .lines()
+        .find_map(|line| line.strip_prefix("model name")?.split_once(':'))
+        .map(|(_, model)| model.trim().to_owned())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cpu_model() -> String {
+    std::process::Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default()
 }

@@ -69,6 +69,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 ## Development
 
 - **Commit gate**: `scripts/check.sh`, run before each commit that changes code: formatting, lints, tests, builds, and a benchmark against the parent commit in alternating rounds ([development.md](development.md#commit-gate)). Not: benchmark gate, regression gate.
+- **Reference environment**: the pinned cloud instance the published benchmark numbers come from, started by hand with `bench/reference/run.sh` ([benchmarks.md](benchmarks.md#reference-environment)). Not the **reference** of a gate run, which is the commit compared against. Not: benchmark server, cloud gate.
 
 ## Planned
 
