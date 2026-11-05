@@ -8,7 +8,7 @@ Open questions, ideas, and experiments; nothing here is a product promise. Measu
 - How much does cache-affine selection raise cache hit rate and lower billed cost on real agent workloads?
 - Which results hold only against the mock?
 
-A proxy adds a hop and cannot beat direct access on latency. Real-provider experiments are opt-in and record model, usage, cache behavior, pricing, and billed cost.
+A gateway adds a hop and cannot beat direct access on latency. Real-provider experiments are opt-in and record model, usage, cache behavior, pricing, and billed cost.
 
 ## Verification needed
 
@@ -20,7 +20,7 @@ Provider facts a feature depends on; each is confirmed, with a source, before th
 - **Responses cost**: OpenAI `input_tokens` include `cached_tokens`; reasoning tokens are part of `output_tokens`. Check: OpenAI API reference; one recorded response with a cache hit.
 - **`include_usage` default**: which SDKs tolerate the extra empty-`choices` usage chunk. Check: SDK conformance tests.
 - **Bedrock provider** (built with `x-api-key`): Bedrock's Messages endpoint takes its API key in `x-api-key` (Anthropic's page) or `Authorization: Bearer` (AWS's page), and its `anthropic.`-prefixed ids for every current model. Check: one request with each header and a recorded stream.
-- **Signing streamed bodies** ([M4](architecture.md#claude-across-providers-and-upstreams)): Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD`. Check: one signed request per endpoint.
+- **Signing streamed bodies** ([M4](architecture.md#claude-across-providers)): Bedrock's Messages endpoint and Claude Platform on AWS accept SigV4 with `UNSIGNED-PAYLOAD`. Check: one signed request per endpoint.
 - **M4**: Vertex's streaming URL and framing; `count_tokens` and `anthropic-beta` on each Claude provider. Check: platform docs; one recorded stream per provider.
 - **Codex for one developer without an OpenAI key**: Codex on a ChatGPT login can go through a loopback gateway: its endpoint, request encoding, and terms of use. Check: Codex's source; OpenAI's terms; one session through a loopback gateway.
 - **Failover without duplicate billing**: `429`/`529` from each Claude provider means the request was not processed. Check: provider docs; billing records.
@@ -97,10 +97,10 @@ Built: what Claude Code tells a gateway without exposing prompts ([contract](arc
 
 ### Visibility for one developer
 
-Research (2026-10-30): what only a gateway can add for a solo developer, without state between requests; today's tools: [positioning](product.md#positioning). Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or a per-prompt bill; the first two are the [M2c](roadmap.md#m2c-fewer-expensive-tokens) waste report. Ideas beyond it, in the log writer task or an offline CLI, never on the request path:
+Research (2026-10-30): what only a gateway can add for a solo developer, without state between requests; today's tools: [positioning](product.md#positioning). Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or a per-prompt bill; the first two are the [M2c](roadmap.md#m2c-fewer-expensive-tokens) waste report. Ideas beyond it, in the usage writer task or an offline CLI, never on the request path:
 
-- **A per-prompt bill with labels.** Main, subagent, and auxiliary requests rolled up per prompt, labeled with the prompt's first line by joining Claude Code's local transcripts (which carry `promptId`) in the CLI, so prompt text never enters the log.
-- **`wye statusline`.** Reads the end of the log for the status line's session and prompt: this prompt's cost with its subagents and retries, the last cache rebuild, the costliest carried tool. The delivery channel for the waste report and the per-prompt bill.
+- **A per-prompt bill with labels.** Main, subagent, and auxiliary requests rolled up per prompt, labeled with the prompt's first line by joining Claude Code's local transcripts (which carry `promptId`) in the CLI, so prompt text never enters the usage log.
+- **`wye statusline`.** Reads the end of the usage log for the status line's session and prompt: this prompt's cost with its subagents and retries, the last cache rebuild, the costliest carried tool. The delivery channel for the waste report and the per-prompt bill.
 - **Complete API-equivalent spend.** Subscription value at API prices, including what transcripts miss; prices applied at report time would price old logs too (a log written without `[pricing]` has no `cost_usd`).
 - **Failure summary.** 429, 529, and 5xx answers, cancellations, and time lost, with the expected session-start probe separated out.
 
@@ -108,7 +108,7 @@ Not worth building: live 5h/7d headroom, which Claude Code already reads from th
 
 ### Where the tokens go
 
-Measured on 2026-11-01 from one developer's log, the evidence behind [M2c](roadmap.md#m2c-fewer-expensive-tokens): 595 Claude Code requests in 3 sessions, all on Opus 5.5 through a claude.ai subscription. Spend is in units of the input price at Opus 5.5's [ratios](https://platform.claude.com/docs/en/about-claude/pricing): output 5, cache read 0.05, cache write 2 on the main conversation (Claude Code's 1-hour TTL on a subscription, [caching](https://code.claude.com/docs/en/prompt-caching)) and 1.25 elsewhere (5 minutes); the log does not split writes by TTL, so those follow Claude Code's defaults. One developer and one model: the shares will differ by workload.
+Measured on 2026-11-01 from one developer's usage log, the evidence behind [M2c](roadmap.md#m2c-fewer-expensive-tokens): 595 Claude Code requests in 3 sessions, all on Opus 5.5 through a claude.ai subscription. Spend is in units of the input price at Opus 5.5's [ratios](https://platform.claude.com/docs/en/about-claude/pricing): output 5, cache read 0.05, cache write 2 on the main conversation (Claude Code's 1-hour TTL on a subscription, [caching](https://code.claude.com/docs/en/prompt-caching)) and 1.25 elsewhere (5 minutes); the usage log does not split writes by TTL, so those follow Claude Code's defaults. One developer and one model: the shares will differ by workload.
 
 | Spend | Share |
 |---|---|

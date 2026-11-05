@@ -1,5 +1,5 @@
 //! Model aliases: a stable name a client asks for, resolved by config to the
-//! model that runs, optionally per credential subject for staged rollouts.
+//! model that runs, optionally per subject, for canaries.
 //!
 //! Resolution is one step: an alias names a model, never another alias, so a
 //! config change moves exactly the traffic it says.
@@ -20,7 +20,7 @@ pub struct Alias {
     when: Box<[Rule]>,
 }
 
-/// A rollout rule: credentials whose subject matches get `model`.
+/// A `when` rule: gateway tokens whose subject matches get `model`.
 #[derive(Debug, Clone)]
 struct Rule {
     subjects: Box<[ModelPattern]>,
@@ -93,7 +93,7 @@ impl Alias {
     }
 
     /// The model for a caller: the first rule whose subjects match, else the
-    /// alias's model. Callers without a credential get the alias's model.
+    /// alias's model. Callers without a gateway token get the alias's model.
     pub fn model_for(&self, subject: Option<&str>) -> &Arc<str> {
         subject
             .and_then(|subject| {
@@ -189,7 +189,7 @@ mod tests {
         let aliases = Aliases::new(vec![a.clone()]).unwrap();
         assert!(aliases.get("a").is_some());
         assert!(aliases.get("m").is_none());
-        // A chain, in its model or a rollout rule's.
+        // A chain, in its model or a `when` rule's.
         let to_a = Alias::new("b", "a", []).unwrap();
         assert!(Aliases::new(vec![a.clone(), to_a]).is_err());
         let rule_to_a = Alias::new("b", "m", [rule(&["x"], "a")]).unwrap();

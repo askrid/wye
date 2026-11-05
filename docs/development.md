@@ -179,7 +179,7 @@ The rules the design principles do not already state.
 - Tokio's multi-thread runtime. A worker never blocks: no blocking I/O, and CPU work longer than about 100 µs goes to `spawn_blocking`.
 - No locks on the request path; shared state is immutable behind `Arc`. Where a lock is unavoidable, a synchronous `Mutex`, never held across `.await` (denied by lint).
 - Every spawned task has an owner that awaits or aborts it: a `JoinSet`, or a `JoinHandle` its starter keeps. No detached tasks.
-- Backpressure comes from polling the body; a channel, where one is needed, is bounded. Telemetry never slows the data path: a full queue drops and counts.
+- Backpressure comes from polling the body; a channel, where one is needed, is bounded. Usage records never slow the data path: a full queue drops and counts.
 - Every `select!` documents its branches' cancel safety. `Relaxed` atomics are for statistics counters only; any other ordering says why.
 
 **Unsafe and dependencies**

@@ -50,7 +50,7 @@ wye claude            # Claude Code through the gateway, signed in as usual
 wye report            # what it recorded
 ```
 
-This default setup forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases). The [guide](docs/guide.md) covers the other setups: a gateway that holds a provider key, a shared gateway behind HTTPS for a team or an app's services, upgrades, and troubleshooting.
+Passthrough, the default setup, forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases). The [guide](docs/guide.md) covers the other setups: a gateway that holds a provider key, a shared gateway behind HTTPS for a team or an app's services, upgrades, and troubleshooting.
 
 After a short Claude Code session:
 
@@ -68,13 +68,13 @@ By request class
 
 ## What it does
 
-- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss comes with its cause (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#telemetry), [prices](docs/policy.md#price-table))
+- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss comes with its cause (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
 - **Gives a team scoped access.** Gateway tokens instead of the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and its output-token ceiling; anything else is refused before the provider gets the whole request. With `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker shows only those models. ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), split by weight, with failover between them. Each key or account is an [upstream](docs/glossary.md#requests-and-where-they-go). ([several keys or providers](docs/guide.md#several-keys-or-providers))
-- **Changes models in one place.** Aliases map a name to a model, per team or token. Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
+- **Changes models in one place.** Aliases map a name to a model, per gateway-token subject. Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
 - **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` run in CI and fail when a change widens access. `wye doctor` checks secrets, files, and upstreams, and bills nothing. ([commands](docs/operations.md#commands))
 - **Works with existing clients.** Point Claude Code, Codex, or any app on the official Anthropic or OpenAI SDK at it by base URL; `wye claude` and `wye codex` do it for you. Messages, Responses, and Chat Completions go through untranslated, except a model id your config maps. Streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
-- **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. For more traffic, run more replicas behind any load balancer. They share no state and never talk to each other, and every replica sends a session to the same upstream (hashed from its session id), so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment-modes))
+- **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. For more traffic, run more replicas behind any load balancer. They share no state and never talk to each other, and every replica sends a session to the same upstream (hashed from its session id), so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment))
 
 ## Who it's for
 
@@ -90,7 +90,7 @@ What teams usually expect from an LLM gateway, and what Wye does. Two choices ex
 |---|---|
 | Spend by team, user, and app | Yes. Down to the agent session, subagent, and tool, with prompt-cache misses explained |
 | Scoped keys instead of the provider key | Yes. A signed gateway token per developer, CI job, or app, from Wye or your identity provider |
-| Spend caps and rate limits | Partly. Per-request output-token ceilings, and the provider's own limits; Wye keeps no counters. Spend caps per team, held by the provider, are [planned](docs/roadmap.md#m2-cost-policy-for-claude) |
+| Spend caps and rate limits | Partly. Per-request output-token ceilings, and the provider's own limits; Wye keeps no counters. Provider-held budgets per team are [planned](docs/roadmap.md#m2-cost-policy-for-claude) |
 | Failover and load across keys | Yes. Shared by weight, with failover before any output ([configuration](#configuration)) |
 | Logs, metrics, and traces | Yes. In your OpenTelemetry backend, one trace per Claude Code session |
 | Switching models centrally | Yes. Aliases, and upgrade checks report which Messages requests a newer model would reject before the switch |
@@ -196,7 +196,7 @@ Built and covered by tests: everything under [What it does](#what-it-does). I've
 
 Tested only against mocks so far: Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS. `wye service` hasn't run under systemd on a real Linux machine.
 
-Next: a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests. Then spend caps per team, held by the provider. Not built: a published container image, Vertex AI, AWS SigV4. Details in [docs/roadmap.md](docs/roadmap.md#status).
+Next: a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests. Then provider-held budgets per team. Not built: a published container image, Vertex AI, AWS SigV4. Details in [docs/roadmap.md](docs/roadmap.md#status).
 
 ## What Wye will not do
 

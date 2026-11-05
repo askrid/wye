@@ -84,7 +84,7 @@ Exit: a team moves a model alias for all its services by one reviewed config cha
 
 Not started. In agent traffic most prompt tokens are already cache reads; the spend that can be cut is context carried from turn to turn, cache rebuilds, and large models on small background work ([evidence](research.md#where-the-tokens-go)). Wye never shortens or compresses a prompt, since a changed byte in a cached prefix turns cheap cache reads into cache writes.
 
-- **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the log:
+- **Waste report.** `wye report` names the expensive tokens and prices a fix for each, offline, from the usage log:
   - Context carried past a threshold, and what clearing or compacting earlier would have cost.
   - Context each tool's output added, from the tool-time hint: the prompt's growth between two requests times the requests that re-read it until compaction, at the cache-read price ("Bash output re-read 180 times cost $41").
   - Cache rebuilds with their cause, from cache diagnostics.
@@ -119,7 +119,7 @@ Exit: a team runs Claude Code and Codex through one Wye, under one policy, and s
 
 ### M4: Claude across providers and accounts
 
-Built: routes with several [upstreams](glossary.md#requests-and-where-they-go), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([architecture.md](architecture.md#claude-across-providers-and-upstreams)).
+Built: routes with several [upstreams](glossary.md#requests-and-where-they-go), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([selection and failover](architecture.md#upstream-selection-and-failover), [providers](architecture.md#claude-across-providers)).
 
 Open (the auth questions are in [open design decisions](architecture.md#open-design-decisions)):
 

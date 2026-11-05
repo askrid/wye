@@ -1,4 +1,4 @@
-//! Request routing, forwarding, and gateway-generated responses.
+//! Admission, upstream selection, forwarding, and gateway-generated responses.
 
 use std::{
     collections::HashMap,
@@ -53,7 +53,7 @@ pub struct Gateway {
     verifier: Option<Verifier>,
     /// The configured routes, ready to forward.
     routes: Routes<ApiRoute>,
-    /// Models any credential may use; `None` allows every model.
+    /// Models any gateway token may use; `None` allows every model.
     models: Option<Vec<ModelPattern>>,
     /// Largest output-token maximum any request may ask for.
     max_output_tokens: Option<u64>,

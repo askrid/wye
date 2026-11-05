@@ -6,9 +6,10 @@
 //! is read in passing for model permissions and output-token ceilings, cache
 //! diagnostics, and upgrade checks, when those are on. Of the headers, only
 //! the URI, hop-by-hop headers, `accept-encoding` (always `identity`), the
-//! credential headers (in API-key mode, with `openai-organization` and
-//! `openai-project`), `anthropic-workspace-id` (Claude Platform on AWS), and
-//! `content-length` (after a `model` rewrite) are changed.
+//! credential headers (when Wye sends its provider key, with
+//! `openai-organization` and `openai-project`), `anthropic-workspace-id`
+//! (Claude Platform on AWS), and `content-length` (after a `model` rewrite)
+//! are changed.
 
 mod body;
 mod connect;

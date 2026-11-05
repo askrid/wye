@@ -20,7 +20,7 @@ App / Claude Code / Codex ──> ingress / Kubernetes Service
                     │                   │
             authenticate        authenticate
             request policy      request policy
-            route / proxy       route / proxy
+            select / forward    select / forward
             stream / cancel     stream / cancel
                     └─────────┬─────────┘
                               ▼
@@ -37,7 +37,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 
 1. Validate endpoint, framing, and request size.
 2. Verify the signed [gateway token](glossary.md#access) against a configured verification key.
-3. Enforce static model permissions and per-request limits ([policy.md](policy.md)).
+3. Enforce static model permissions and per-request ceilings ([policy.md](policy.md)).
 4. Resolve a model alias; select the route that serves this endpoint natively, and among its [upstreams](glossary.md#requests-and-where-they-go) the one policy picks (`cache_affine` or `ordered`).
 5. Apply allowlisted rewrites (the [served model](glossary.md#models), the provider's model id, [size-aware model routing](glossary.md#planned)).
 6. Forward upstream unchanged beyond the allowlist.
@@ -89,7 +89,7 @@ Claude Code documents what a gateway must do ([gateway compatibility guide](http
 - Forward `retry-after`, `x-should-retry`, and `anthropic-ratelimit-unified-*` response headers, and upstream error bodies unmodified; Claude Code's retry and capability-recovery logic matches upstream error wording.
 - Relay every SSE event, including `ping`. Claude Code aborts an idle stream and treats a stream that ends before `message_delta`/`message_stop` as dropped.
 - Forward the `system` array unchanged; its first block is an attribution block the Anthropic API strips by position.
-- Consume, never require, `x-claude-code-session-id`, `x-claude-code-agent-id`, `x-claude-code-parent-agent-id`, and the gateway hint headers (`x-claude-code-request-class`, `-agent-type`, `-compaction`, `-context-compacted`, `-prompt-id`, `-prev-tool-durations`) for telemetry attribution, [agent-native visibility](research.md#agent-native-directions), and, later, [agent-aware routing](research.md#1-agent-aware-routing). A custom base URL receives hint headers only when developers set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, as `wye claude` does. Values are client-supplied: bound and validate them before they become telemetry attributes, and never let them authorize anything.
+- Consume, never require, `x-claude-code-session-id`, `x-claude-code-agent-id`, `x-claude-code-parent-agent-id`, and the gateway hint headers (`x-claude-code-request-class`, `-agent-type`, `-compaction`, `-context-compacted`, `-prompt-id`, `-prev-tool-durations`) for attribution in usage records, [agent-native visibility](research.md#agent-native-directions), and, later, [agent-aware routing](research.md#1-agent-aware-routing). A custom base URL receives hint headers only when developers set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, as `wye claude` does. Values are client-supplied: bound and validate them before they become record fields, and never let them authorize anything.
 - Answer the best-effort `HEAD /api/hello` warm-up probe with an empty `200` before authentication; it carries no data and reaches no upstream.
 - `/v1/messages/count_tokens` is unbilled: it requires authentication and model permission but skips the output-token ceiling (and, once built, cost admission).
 - Gateway-generated errors use Anthropic's error JSON shape and status codes, so Claude Code's retry and recovery logic reads them as it reads upstream errors. Wye's own `529 overloaded_error` (concurrency or held-bytes limit, always before any upstream contact) carries `retry-after: 1` and `x-should-retry: true`: integer seconds at most 60, or Claude Code stops retrying.
@@ -154,7 +154,7 @@ The caller never selects the upstream destination (no open proxy or SSRF surface
 
 **Backpressure and cancellation.** Downstream body polling applies backpressure. No unbounded queues or detached readers. Client disconnect releases or cancels upstream work, verified by integration tests. Already generated tokens may still be billed.
 
-**Errors.** Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded by whose it is: a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with `connect`, `timeout`, or `reset`), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`). After headers are sent, an upstream failure terminates the stream (`truncated`); it cannot become a new JSON error response.
+**Errors.** Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded by whose it is: a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with `connect`, `timeout`, or `reset`), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#usage-records-and-telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`). After headers are sent, an upstream failure terminates the stream (`truncated`); it cannot become a new JSON error response.
 
 **Timeouts.** Four on the upstream and client sides, two on a held body, and no total request timeout, which would kill valid generations:
 
@@ -166,11 +166,42 @@ The caller never selects the upstream destination (no open proxy or SSRF surface
 
 Shutdown: [operations.md](operations.md#health-and-shutdown).
 
-## Failover
+## Upstream selection and failover
+
+Upstreams are configured per route (`[[routes.claude.upstreams]]` or `[[routes.openai.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affinity) by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares; or `ordered`, the first upstream in config, the rest only on failover. Not built: excluding an upstream by the request's model or a feature it is known not to support. No health state is shared or remembered between requests. Each upstream keeps its own connection lanes and provider key; `forward_caller_credential` works only with a single `[upstream]`.
+
+### Cache affinity
+
+Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Upstream selection that spreads one conversation across accounts or providers forfeits that discount.
+
+When a route has several upstreams, Wye chooses by weighted rendezvous hashing (`gateway-core/src/route.rs`), keyed by the client's session id (Claude Code's or Codex's), otherwise the token subject, otherwise nothing (without `[auth]` Wye serves one loopback user, so every such request picks the same upstream).
+
+Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key seeded by the upstream's id; the highest score wins, so a key lands on an upstream with probability proportional to its weight. The same session reaches the same upstream from any replica, with no shared state. It moves only when its upstream leaves the route or the weights change; adding an upstream moves only the keys it now wins, and reordering the config moves nothing. A test pins the choice for fixed keys, since a change of hash or scoring would move every session during a rolling update.
+
+Hashing a stable request prefix for SDK callers without a session id is not implemented: it would need the body before choosing. The cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
+
+Pure [cache affinity](glossary.md#requests-and-where-they-go) can overload one upstream when a few keys dominate traffic, a capacity loss recent serving research reports ([related work](research.md#related-work)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one heavy session still stays on one upstream. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
+
+### Upstream-held state
+
+Some requests reference state stored by a specific provider account: Responses `previous_response_id` (with `store=true`), stored conversations, uploaded file IDs, and provider cache entries. Wye stores none of it, but [upstream selection](glossary.md#requests-and-where-they-go) must respect it:
+
+- A request that references upstream-held state is pinned to the upstream that can resolve it, or refused with an explicit error. It is never sent to another upstream.
+- Determining that upstream must be stateless: from the route configuration (a route with a single eligible upstream) or the gateway token. If neither identifies it, refuse.
+
+A route with one upstream resolves every stored response. With several OpenAI upstreams, [`cache_affine`](#cache-affinity) already sends every request of a session (or, without a session id, of a token subject) to the same upstream, so a `previous_response_id` reaches the upstream that stored the response as long as the route's upstreams and weights do not change; after a change, a moved session's next reference fails with OpenAI's own `404`, not a misrouted success. Response ids do not name their upstream, so Wye cannot refuse such a request itself. Codex over HTTP sends no `previous_response_id` (it replays the input; [Codex integration](#codex-integration)).
+
+### Failover
 
 Wye does not retry an ambiguous failure or fail over after output: an ambiguous failure may already have incurred charges, and switching providers after output starts cannot preserve the response. It does not retry the same provider either: clients retry on their own, guided by the `x-should-retry` and `retry-after` headers Wye forwards, and gateway retries would multiply attempts and risk duplicate billing.
 
-The one exception is [failover](#claude-across-providers-and-upstreams) to a route's next upstream, on `[routes.claude]` and `[routes.openai]` alike, after a [rejection](glossary.md#requests-and-where-they-go) that proves the request was not processed (`429`, `529`, a connection refused or cut before the body was delivered whole), before any response byte was sent. Do not claim exactly-once execution.
+The one exception is failover to a route's next upstream, on `[routes.claude]` and `[routes.openai]` alike, after a [rejection](glossary.md#requests-and-where-they-go) that proves the request was not processed, and only before any response byte reached the client, so it cannot duplicate billing. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover, and config refuses any other reason. Do not claim exactly-once execution.
+
+Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `server.max_total_kept_bytes` across the process (default 256 MiB, separate from `server.max_total_held_bytes`, so kept bodies never starve the hold that reads `model`).
+
+A dropped attempt hands back its sent chunks plus the unread rest of the client's body through a oneshot channel, so a rejection that arrives mid-upload moves on too: the next upstream gets the sent bytes, then the rest as the client sends it. A body over either bound, or an attempt still holding its body 100 ms after the rejection (hyper still writing), is answered as it is, never refused and never partly resent.
+
+Records carry `failovers` (`[{"upstream":"a","reason":"429"}]`), OTLP logs `wye.failovers`, and the `wye.failovers` metric counts rejected attempts by the rejecting upstream (`wye.failover.upstream`) and reason. Claude Code retries on its own, so failover improves latency and availability but is not needed for correctness. A failover costs that turn its prompt-cache discount at the new provider; cache affinity brings the next turn back.
 
 ## Providers
 
@@ -188,27 +219,6 @@ Streams on a lane share its HTTP/2 connection window. With hyper's default (5 Mi
 
 On the client side, each connection's kernel send buffer is fixed at 128 KiB (`server.rs`; Linux doubles the value, so 256 KiB there) instead of autotuning to as much as 4 MiB. The worst case, every in-flight request stalled at once, is `max_concurrent_requests` × (a stalled stream's memory plus this buffer).
 
-### Upstream-held state
-
-Some requests reference state stored by a specific provider account: Responses `previous_response_id` (with `store=true`), stored conversations, uploaded file IDs, and provider cache entries. Wye stores none of it, but [upstream selection](glossary.md#requests-and-where-they-go) must respect it:
-
-- A request that references upstream-held state is pinned to the upstream that can resolve it, or refused with an explicit error. It is never sent to another upstream.
-- Determining that upstream must be stateless: from the route configuration (a route with a single eligible upstream) or the gateway token. If neither identifies it, refuse.
-
-A route with one upstream resolves every stored response. With several OpenAI upstreams, [`cache_affine`](#cache-affinity) already sends every request of a session (or, without a session id, of a token subject) to the same upstream, so a `previous_response_id` reaches the upstream that stored the response as long as the route's upstreams and weights do not change; after a change, a moved session's next reference fails with OpenAI's own `404`, not a misrouted success. Response ids do not name their upstream, so Wye cannot refuse such a request itself. Codex over HTTP sends no `previous_response_id` (it replays the input; [Codex integration](#codex-integration)).
-
-### Cache affinity
-
-Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Cost routing that spreads one conversation across accounts or providers forfeits that discount.
-
-When a route has several upstreams, Wye chooses by weighted rendezvous hashing (`gateway-core/src/route.rs`), keyed by the client's session id (Claude Code's or Codex's), otherwise the token subject, otherwise nothing (without `[auth]` Wye serves one loopback user, so every such request picks the same upstream).
-
-Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key seeded by the upstream's id; the highest score wins, so a key lands on an upstream with probability proportional to its weight. The same session reaches the same upstream from any replica, with no shared state. It moves only when its upstream leaves the route or the weights change; adding an upstream moves only the keys it now wins, and reordering the config moves nothing. A test pins the choice for fixed keys, since a change of hash or scoring would move every session during a rolling update.
-
-Hashing a stable request prefix for SDK callers without a session id is not implemented: it would need the body before choosing. The cost benefit is a hypothesis to measure ([research.md](research.md#questions-to-test)).
-
-Pure [cache affinity](glossary.md#requests-and-where-they-go) can overload one upstream when a few keys dominate traffic, a capacity loss recent serving research reports ([related work](research.md#related-work)). The load bound must stay stateless. Implemented: a static share per upstream in config (`weight`), which spreads sessions, not tokens, so one heavy session still stays on one upstream. Open: a placement plan fitted offline from telemetry and committed to config. Every replica still computes the same choice.
-
 ### Model aliases and upgrade checks
 
 #### Aliases
@@ -219,16 +229,16 @@ A client asks for a stable name and config decides the model:
 [[aliases]]
 name = "coding-default"
 model = "claude-opus-5-5"
-# Staged rollout: tokens whose subject matches get another model first.
+# Canary: tokens whose subject matches get another model first.
 when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 ```
 
 - Resolution reads the top-level `model` with the existing [policy scanner](policy.md#gateway-tokens) hold (Claude Code and the SDKs send `model` first; configuring `[[aliases]]` makes the hold apply to every request) and splices the served model's name in place of the alias: the held chunks are sliced around the value, so only the new name is allocated, every other byte is unchanged, and `content-length` is adjusted by the difference. Names that are not aliases pass through untouched, so aliases are opt-in per request.
-- Rollout: `when` rules match the token's subject (exact or a prefix ending in `*`, as in model permissions); the first match wins, and callers without a token get the alias's `model`. Resolution is one step: an alias names a model, never another alias.
+- Canary: `when` rules match the token's subject (exact or a prefix ending in `*`, as in model permissions); the first match wins, and callers without a token get the alias's `model`. Resolution is one step: an alias names a model, never another alias.
 - Policy applies to the model that runs: model permissions apply to the served model, and pricing to the model the provider reports, which is the served one. `GET /v1/models` lists aliases after the catalog's models, each when the model it resolves to for that caller is permitted. Claude Code's model picker keeps only ids containing `claude` or `anthropic`, so aliases meant for it are named accordingly (`claude-coding`).
-- Visibility: `requested_model` in records ([operations.md](operations.md#telemetry)); `wye explain` prints the resolution, and a policy test can pin the served model, so a rollout is reviewed like any policy change.
+- Visibility: `requested_model` in records ([operations.md](operations.md#usage-records-and-telemetry)); `wye explain` prints the resolution, and a policy test can pin the served model, so a rollout is reviewed like any policy change.
 - Overhead: with aliases alone the rest of the body is not lexed; one or two allocations per request, CPU within noise ([benchmarks.md](benchmarks.md#current-harness-and-baseline)).
-- An alias names one model. Mapping one name to several providers of that model is [a route](#claude-across-providers-and-upstreams), not a second alias mechanism.
+- An alias names one model. Mapping one name to several providers of that model is [a route](#upstream-selection-and-failover), not a second alias mechanism.
 
 #### Upgrade checks
 
@@ -263,7 +273,7 @@ sample_percent = 10
 
 ### Cache diagnostics
 
-Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a request's prompt sections that name which section changed before a [cache miss](glossary.md#usage-and-cost). Per request: hashes of `tools` and `system` with their counts, the message count, up to four `cache_control` breakpoints, and the last eight message-prefix hashes (`prompt_hashes` in [records](operations.md#telemetry)). The OpenTelemetry backend compares consecutive requests of a session in cache order (tools, system, messages); the first mismatch names the cause.
+Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a request's prompt sections that name which section changed before a [cache miss](glossary.md#usage-and-cost). Per request: hashes of `tools` and `system` with their counts, the message count, up to four `cache_control` breakpoints, and the last eight message-prefix hashes (`prompt_hashes` in [records](operations.md#usage-records-and-telemetry)). The OpenTelemetry backend compares consecutive requests of a session in cache order (tools, system, messages); the first mismatch names the cause.
 
 - One hash per section, not one cumulative hash: sections may arrive in any order, and cumulative hashing would need buffering.
 - `cache_control` members and whitespace outside strings are excluded: Claude Code moves the marker every turn.
@@ -271,9 +281,9 @@ Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a 
 - A constant-memory scanner; a body it cannot follow is recorded `unknown` and forwarded unchanged. Property tests cover random bodies, whitespace, and chunkings.
 - Sampled per session (`sample_percent`), by a hash of the session id, so every replica agrees. Sampling, not a faster scanner, bounds the overhead ([benchmarks.md](benchmarks.md#current-harness-and-baseline), [the SIMD verdict](research.md#performance-techniques)).
 
-### Claude across providers and upstreams
+### Claude across providers
 
-Status: several upstreams, `cache_affine` and `ordered` selection, failover before output, and Claude Platform on AWS and Bedrock with API keys are implemented; Vertex, SigV4, and excluding an upstream by model or feature are planned.
+Status: Claude Platform on AWS and Bedrock with API keys are implemented; Vertex and SigV4 are planned. [Upstream selection and failover](#upstream-selection-and-failover) work the same across providers.
 
 The same Claude models are sold by four providers. Wye can serve one Claude Code fleet from several of them, choosing per request and failing over, because all four speak the Anthropic Messages API with small, known differences. Wye only chooses among them: no request is translated or sent to another model family.
 
@@ -286,16 +296,6 @@ Each provider's endpoint, request, stream, auth, and model id:
 
 Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on AWS (read 2026-10-22). The legacy Bedrock `InvokeModel` path streams AWS event-stream frames, not SSE, so it would need re-framing per event and is excluded. Partner platforms lack some first-party features (Files API, URL sources, some server tools, `fallbacks`); a request that uses one fails at that provider with the provider's own error, and Wye does not hide the difference.
 
-**Selection** (implemented; OpenAI upstreams too). Upstreams are configured per route (`[[routes.claude.upstreams]]`, all serving the same models). Wye picks deterministically, from any replica alike: [`cache_affine`](#cache-affinity) by session id (prompt caches are per provider and account, so a session stays on one), weighted by configured shares; or `ordered`, the first upstream in config, the rest only on failover. Not built: excluding an upstream by the request's model or a feature it is known not to support. No health state is shared or remembered between requests. Each upstream keeps its own connection lanes and provider key; `forward_caller_credential` stays a single-`[upstream]` mode.
-
-**Failover within a request** (implemented, on `[routes.openai]` too) happens only where it cannot duplicate billing, and only before any response byte reached the client. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover ([retries](#failover)), and config refuses any other reason.
-
-Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `server.max_total_kept_bytes` across the process (default 256 MiB, separate from `server.max_total_held_bytes`, so kept bodies never starve the hold that reads `model`).
-
-A dropped attempt hands back its sent chunks plus the unread rest of the client's body through a oneshot channel, so a rejection that arrives mid-upload moves on too: the next upstream gets the sent bytes, then the rest as the client sends it. A body over either bound, or an attempt still holding its body 100 ms after the rejection (hyper still writing), is answered as it is, never refused and never partly resent.
-
-Records carry `failovers` (`[{"upstream":"a","reason":"429"}]`), OTLP logs `wye.failovers`, and the `wye.failovers` metric counts rejected attempts by the rejecting upstream (`wye.failover.upstream`) and reason. Claude Code retries on its own, so failover improves latency and availability but is not needed for correctness. A failover costs that turn its prompt-cache discount at the new provider; cache affinity brings the next turn back.
-
 **Claude Platform on AWS** (implemented, API keys only): `provider = "claude-platform-aws"` with `base_url = "https://aws-external-anthropic.{region}.api.aws"` and the required `workspace_id`; Wye sends the key as `Authorization: Bearer` and `anthropic-workspace-id` on every request. Requests, responses, and model ids are the first-party API's, so nothing else changes (platform.claude.com, "Claude Platform on AWS", read 2026-10-26). Its short-term API keys last at most 12 hours and Wye reads keys at startup, so a deployment on them restarts (or rolls) within that window until a key refresher lands; SigV4 (service `aws-external-anthropic`) is the open decision below.
 
 **Amazon Bedrock** (implemented with API keys, [not yet checked against the live service](roadmap.md#status)): `provider = "bedrock"` with `base_url = "https://bedrock-mantle.{region}.api.aws/anthropic"`.
@@ -307,19 +307,19 @@ Records carry `failovers` (`[{"upstream":"a","reason":"429"}]`), OTLP logs `wye.
 
 **Auth without state** (planned for SigV4 and Vertex): see [open decisions](#open-design-decisions).
 
-**Telemetry and cost** (implemented). Records, OTLP, and `wye report` split by the upstream's `id`, which names the account; config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
+**Usage and cost** (implemented). Records, OTLP, and `wye report` split by the upstream's `id`, which names the account; config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
 
 ## Configuration
 
 One TOML file, loaded at startup, is the source of truth for routes and their providers, token verification, limits, aliases, and prices. Secrets are referenced by environment variable or file, never stored in Git, images, or IaC state.
 
-The runtime resolves them; the core validates configuration without resolving secrets. Refuse unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing credentials, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
+The runtime resolves them; the core validates configuration without resolving secrets. Refuse unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing provider keys, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
 
 No hot reload; changes require a restart (or rolling deploy). A config snapshot stays consistent within a request. Recording the config version, to diagnose rollout skew, is [planned](roadmap.md#m1b-agent-aware-visibility).
 
 ### Schema
 
-[`examples/wye.toml`](../examples/wye.toml) is the reference: every field with its default, its limits, and what it does, kept valid by a test that parses it with every section enabled. Only `listen`, `base_url`, and one credential are required. `[upstream]` is the short form of a `[routes.claude]` with one upstream, and the only form that can forward the caller's credential; `[routes.openai]` adds OpenAI, and at least one route is required.
+[`examples/wye.toml`](../examples/wye.toml) is the reference: every field with its default, its limits, and what it does, kept valid by a test that parses it with every section enabled. Only `listen`, `base_url`, and a provider key (or `forward_caller_credential`) are required. `[upstream]` is the short form of a `[routes.claude]` with one upstream, and the only form that can forward the caller's credential; `[routes.openai]` adds OpenAI, and at least one route is required.
 
 Config defaults are the `DEFAULT_*` constants in `gateway-core/src/config.rs`; the limits a config may set (16 upstreams per route, 256 aliases, ...) are `MAX_*` constants beside their types, and `examples/wye.toml` states those an operator sets (validation errors name the rest, such as the format of an upstream id).
 

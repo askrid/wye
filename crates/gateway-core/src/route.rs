@@ -4,7 +4,7 @@
 //! config, so every replica and `wye explain` make the same one with no
 //! shared state. Prompt caches are per provider account, so a session stays
 //! on one upstream: weighted rendezvous hashing keyed by the session id (or
-//! the credential subject) sends a key to the upstream with the highest
+//! the gateway token's subject) sends a key to the upstream with the highest
 //! score, and a key moves only when its upstream leaves the route. With
 //! failover, the rest of the ranking is the order of the next attempts, the
 //! same on every replica too.
@@ -126,11 +126,11 @@ impl Ranking {
     }
 }
 
-/// The key a request is routed and sampled by: the client's session id,
-/// else the credential subject. Every replica computes the same key, so a
-/// session keeps its upstream across them. Without either (no `[auth]`: one
-/// loopback user), [`Route::rank`] takes the empty key, and sampling takes
-/// such requests only at 100%.
+/// The key that picks a request's upstream and its sampling: the client's
+/// session id, else the gateway token's subject. Every replica computes the
+/// same key, so a session keeps its upstream across them. Without either (no
+/// `[auth]`: one loopback user), [`Route::rank`] takes the empty key, and
+/// sampling takes such requests only at 100%.
 pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> Option<&'k [u8]> {
     session.or(subject.map(str::as_bytes))
 }
@@ -218,7 +218,7 @@ impl Route {
     }
 
     /// The index of the upstream for a request with affinity `key` (the
-    /// session id, else the credential subject, else empty).
+    /// session id, else the gateway token's subject, else empty).
     ///
     /// Each upstream scores `weight / -ln(u)`, with `u` uniform in (0, 1)
     /// from a hash of the key seeded by the upstream's id; the highest score

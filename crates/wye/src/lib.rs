@@ -1,4 +1,4 @@
-//! Wye runtime: startup resolution, HTTP server, routing, and upstream
+//! Wye runtime: startup resolution, HTTP server, upstream selection, and
 //! forwarding.
 
 #[cfg(feature = "alloc-stats")]

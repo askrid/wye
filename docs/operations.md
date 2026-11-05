@@ -1,6 +1,6 @@
 # Operations
 
-Distribution, CLI, deployment, telemetry, and failure behavior. The gateway binary is an ordinary inference server: IaC, DNS, certificates, infrastructure secrets, scheduling, and autoscaling are not implemented inside it.
+Distribution, CLI, deployment, usage records and telemetry, and failure behavior. The gateway binary is an ordinary inference server: IaC, DNS, certificates, infrastructure secrets, scheduling, and autoscaling are not implemented inside it.
 
 ## Distribution
 
@@ -170,14 +170,14 @@ GitHub does not document the token lifetime (its example token is valid for five
 
 Developers use the same setting with a helper that prints a token from an issuer Wye trusts: the team's IdP (an `[[auth.identity_providers]]` entry), or an internal service that authenticates the developer by SSO and mints a short-lived gateway token with `wye token issue` (the signing key stays in that service). Offboarding then happens at the IdP: the next renewal fails, and the last token expires on its own ([revocation](policy.md#revocation)).
 
-## Deployment modes
+## Deployment
 
-| User | Topology | Integration |
+| Setup | Topology | Integration |
 |---|---|---|
-| Solo developer | Native binary, as a user service | `wye service install`, then `wye claude` |
-| Team or app backend | Containers or VMs behind HTTPS | SDK base URL + gateway token |
+| This machine: passthrough or provider key (`wye init`, `wye init --provider-key`) | Native binary, as a user service | `wye service install`, then `wye claude` |
+| Shared (`wye init --shared`): a team, or an app's services | Containers or VMs behind HTTPS | SDK base URL + gateway token |
 
-Other shapes, such as a sidecar per pod, Kubernetes across regions, or a serverless platform, are untested.
+A sidecar beside an app ([guide](guide.md#using-it-from-apps)) is the provider-key setup on loopback in the app's host or pod; it has not yet run in production. Other shapes, such as Kubernetes across regions or a serverless platform, are untested.
 
 Wye itself speaks plain HTTP, so a gateway beyond one machine goes behind something that terminates TLS: a platform's load balancer, an ingress, or a proxy on the same host; `wye claude` and `wye codex` [refuse](#agent-wrapper) a remote gateway over plain http. With [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy), which gets a certificate on its own and flushes event streams as they arrive (not yet run against Wye):
 
@@ -212,7 +212,7 @@ wye service uninstall   # stops it and removes the file; the config and logs sta
 
 Replacing a running service waits for its gateway to finish its requests, up to the stop timeout: the config's drain delay and shutdown grace plus 5 s (35 s by default). New connections are refused until then. Open streams end after that grace; Claude Code retries them.
 
-On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`). The log grows without limit: rotate it, or truncate it after `wye report`.
+On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`). The usage log grows without limit: rotate it, or truncate it after `wye report`.
 
 ### Without Kubernetes
 
@@ -230,9 +230,9 @@ Wye does not lower a stream's tokens per second. It adds a roughly constant dela
 
 One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms of added p99. Latency, not CPU, sets the limit, so size by streams per core ([measurements](benchmarks.md#current-harness-and-baseline)).
 
-## Telemetry
+## Usage records and telemetry
 
-One usage record per proxied request, written as a JSON line to stdout and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Telemetry is not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
+One usage record per request, written as a JSON line to stdout and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
 The usage record, field by field:
 
@@ -249,7 +249,7 @@ The usage record, field by field:
 - `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
 - `duration_ms`, `response_headers_ms`: milliseconds; `response_headers_ms` = time to response headers.
 - `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
-- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md#requests-and-where-they-go) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
+- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md#requests-and-where-they-go) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#failover)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (below).
 

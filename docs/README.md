@@ -10,13 +10,13 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 
 ## Run it
 
-- [operations.md](operations.md): distribution, CLI, deployment topologies, telemetry, health, shutdown, failure behavior.
+- [operations.md](operations.md): distribution, CLI, deployment topologies, usage records and telemetry, health, shutdown, failure behavior.
 
 ## Trust it
 
 - [benchmarks.md](benchmarks.md): Wye's overhead, the method, competitors, the gate's evidence.
 - [policy.md](policy.md): what Wye authorizes and enforces, what it cannot enforce without shared state, security requirements.
-- [architecture.md](architecture.md): how a request flows: components, runtime, forwarding, providers, streaming, configuration, invariants, open design decisions.
+- [architecture.md](architecture.md): how a request flows: components, runtime, forwarding, upstream selection and failover, providers, streaming, configuration, invariants, open design decisions.
 
 ## Change it
 

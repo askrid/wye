@@ -4,7 +4,7 @@ What Wye authorizes and enforces per request, what it cannot enforce without sha
 
 ## Gateway tokens
 
-[Provider keys](glossary.md#requests-and-where-they-go) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md#access). Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every proxied request must carry a valid token.
+[Provider keys](glossary.md#requests-and-where-they-go) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md#access). Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every request to an API endpoint must carry a valid gateway token.
 
 Claims of Wye tokens (identity-provider tokens are below):
 
@@ -66,11 +66,11 @@ Short lifetimes need automatic renewal: [token renewal](operations.md#token-rene
 
 ### Caller-credential passthrough
 
-`forward_caller_credential = true`, which `wye init` writes by default, is for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
+`forward_caller_credential = true`, which `wye init` writes by default, is the passthrough setup, for one developer: each caller's own credential goes upstream, whether Claude Code's claude.ai login or an API key. Claude Code supports a login behind a gateway when only `ANTHROPIC_BASE_URL` is set; Wye forwards it together with the OAuth capability in `anthropic-beta`.
 
 - Loopback bind only; startup fails when it is combined with a non-loopback listener.
 - No gateway token, so no identity or model permissions. A login's usage counts against the caller's plan; an API key's bills the API.
-- No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which this mode excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
+- No per-request ceilings beyond the [local resource bounds](#local-resource-bounds): output-token ceilings are configured in `[auth]`, which passthrough excludes, and a cost ceiling would not apply to a plan, which is not billed per token.
 - Usage records and telemetry are still attributed by `x-claude-code-session-id` and the agent headers. [`examples/developer/wye.toml`](../examples/developer/wye.toml) is a complete config.
 
 ## Per-request ceilings
@@ -140,7 +140,7 @@ Which price applies:
 - **Fields**: `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config.
 - **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - **Matching**: by the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
-- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers-and-upstreams)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
+- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 
 How cost is computed:
 
@@ -160,7 +160,7 @@ OpenAI Responses and Chat Completions:
 - OpenAI's `input_tokens` (Chat: `prompt_tokens`) include cached tokens; Wye records the cached share (`input_tokens_details.cached_tokens`, Chat: `prompt_tokens_details.cached_tokens`) as `cache_read_input_tokens` and the rest as `input_tokens`, so `cache_read` prices the cached share and records mean the same as on Messages. Reasoning tokens are part of `output_tokens`, as OpenAI bills them.
 - Hosted tools billed per call (`web_search`, `file_search`, `code_interpreter`, `image_generation`) and a `service_tier` other than `default` make the cost `partial`. A stream cut before its terminal event has no usage (OpenAI reports it only there), so its cost is `unknown`.
 
-With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP carries them too, and the `wye.cost` metric is in USD, a double: the export is display ([telemetry](operations.md#telemetry)).
+With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP carries them too, and the `wye.cost` metric is in USD, a double: the export is display ([telemetry](operations.md#usage-records-and-telemetry)).
 
 ## State boundary
 
@@ -190,7 +190,7 @@ Per-process limits that protect the process are allowed. They answer "can this p
 - `server.max_request_body_bytes`: a body past it gets `413`.
 - A 32 KiB read buffer per client connection, which also bounds request headers: larger headers get `431`.
 - `server.client_write_timeout_secs`: a client that accepts no response bytes that long is disconnected, releasing its permit and buffers.
-- The bounded usage-log and OTLP queues ([operations.md](operations.md#telemetry)).
+- The bounded usage-log and OTLP queues ([operations.md](operations.md#usage-records-and-telemetry)).
 
 Defaults: [`examples/wye.toml`](../examples/wye.toml).
 
@@ -206,7 +206,7 @@ Planned next after [fewer expensive tokens](roadmap.md#m2c-fewer-expensive-token
 - Upstream URLs come only from trusted config.
 - Bound inbound headers, JSON bodies, parsed SSE event sizes, outbound buffering, redirects, and timeouts.
 - Protect key material; prefer public-key verification so signing keys stay out of the data plane.
-- Errors and telemetry never leak prompts or secrets by default.
+- Errors, usage records, and telemetry never leak prompts or secrets by default.
 - Public applications supply their own abuse prevention and global limits.
 - Insecure local-development auth settings never apply to a non-loopback bind.
 

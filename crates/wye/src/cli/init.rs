@@ -234,7 +234,7 @@ impl InitOptions {
                 format!("wye token issue alice{c} --out alice.token"),
             ));
             steps.push((
-                format!("Deploy it: {REPO_AT_RELEASE}/docs/operations.md#deployment-modes"),
+                format!("Deploy it: {REPO_AT_RELEASE}/docs/operations.md#deployment"),
                 String::new(),
             ));
         } else {
@@ -480,9 +480,7 @@ mod tests {
         let shared = options(Setup::Shared, false, Path::new("/h/wye.toml"));
         let steps = shared.next_steps(|p| p.display().to_string());
         assert!(
-            steps.contains(&format!(
-                "{REPO_AT_RELEASE}/docs/operations.md#deployment-modes"
-            )),
+            steps.contains(&format!("{REPO_AT_RELEASE}/docs/operations.md#deployment")),
             "{steps}"
         );
     }
