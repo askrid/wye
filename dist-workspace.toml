@@ -20,3 +20,14 @@ hosting = "github"
 install-updater = false
 # Signed build provenance for every artifact (`gh attestation verify`).
 github-attestations = true
+# Actions by commit, not by tag: a moved tag cannot change what a release
+# runs. The `# vX.Y.Z` after each SHA lands in release.yml as a comment.
+# Bump by hand with a dist upgrade: dist's defaults are actions/checkout v6,
+# upload-artifact v7, download-artifact v8, attest v4.
+github-action-commits = { "actions/checkout" = "d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0", "actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2", "actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2", "actions/attest" = "1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2" }
+# Publish only a commit that passed ci on main (.github/workflows/release-checks.yml).
+# A local-artifacts job, not a plan job: the host job's condition counts local
+# jobs but not plan jobs, so a failed plan job would skip the builds and still
+# create the release.
+local-artifacts-jobs = ["./release-checks"]
+github-custom-job-permissions = { "release-checks" = { contents = "read", actions = "read" } }

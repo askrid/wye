@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Security: the install command in the README and the guide builds the latest release tag (`--tag v0.1.0-rc.2`) instead of `main`, and both show how to check a release archive with `gh attestation verify <archive> --repo askrid/wye`.
+- Security: a version tag publishes a release only if `ci` passed on that commit on `main`; a tag on a red or unmerged commit publishes nothing.
+- Security: the release workflow pins every action to a commit SHA, like the other workflows, and the `Dockerfile` pins its base images by digest.
+- Security: `cargo deny check advisories` runs weekly, so an advisory against a locked dependency is caught between changes.
 ## 0.1.0-rc.2
 
 Names settle: config fields, record values, metrics, and CLI flags now use the glossary's terms, and the Claude route has one form. Many changes are breaking (marked below); a 0.1.0-rc.1 config needs the renames listed under "Breaking, config". `wye init` writes sample policy tests, and every command run with no arguments says what to run next.

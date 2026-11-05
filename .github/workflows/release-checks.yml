@@ -1,0 +1,54 @@
+# Called by release.yml (dist's `local-artifacts-jobs`) on a version tag:
+# fails the release unless the tagged commit passed ci.yml on a push to main,
+# so a tag on a red or unmerged commit publishes nothing. It waits while that
+# run is in progress. Read-only: release.yml grants this job `contents: read`
+# and `actions: read` (dist-workspace.toml's github-custom-job-permissions).
+
+name: release-checks
+
+on:
+  workflow_call:
+    inputs:
+      # dist passes its plan to every custom job; unused here.
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ci-passed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require a green ci run on main for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          while :; do
+            # The newest ci.yml run for this commit pushed to main.
+            run=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&branch=main&event=push&per_page=1" \
+              --jq '.workflow_runs[0] // empty | "\(.status) \(.conclusion) \(.html_url)"')
+            if [ -z "$run" ]; then
+              echo "::error::No ci run on main for $SHA. Push the commit to main and let ci pass before tagging."
+              exit 1
+            fi
+            read -r status conclusion url <<<"$run"
+            if [ "$status" = completed ]; then
+              if [ "$conclusion" = success ]; then
+                echo "ci passed on $SHA: $url"
+                exit 0
+              fi
+              echo "::error::ci on $SHA ended '$conclusion': $url. Fix it, or rerun it and then this workflow's failed jobs."
+              exit 1
+            fi
+            echo "ci on $SHA is $status: $url; waiting"
+            sleep 30
+          done

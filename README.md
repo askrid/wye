@@ -40,7 +40,7 @@ Every commit that changes code is benchmarked against its parent, in alternating
 > **Status:** prerelease (`0.1.0-rc.2`), tested and benchmarked on one machine. [Status](#status) says what is not yet verified against live providers.
 
 ```bash
-cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.99+
+cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked   # Rust 1.99+
 
 wye init              # writes ~/.wye/wye.toml; needs no key
 wye service install   # shows what it sets up and asks; runs the gateway in the background
@@ -48,7 +48,7 @@ wye claude            # Claude Code through the gateway, signed in as usual
 wye report            # what it recorded
 ```
 
-Passthrough, the default setup, forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases). The [guide](docs/guide.md) covers the other setups: a gateway that holds a provider key, a shared gateway behind HTTPS for a team or an app's services, upgrades, and troubleshooting.
+Passthrough, the default setup, forwards the caller's own claude.ai login or API key, listens on this machine only, and holds no secret. Prebuilt archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases); `gh attestation verify <archive> --repo askrid/wye` checks that this repository's release workflow built one. The [guide](docs/guide.md) covers the other setups: a gateway that holds a provider key, a shared gateway behind HTTPS for a team or an app's services, upgrades, and troubleshooting.
 
 After a short Claude Code session:
 

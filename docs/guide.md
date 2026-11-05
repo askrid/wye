@@ -15,7 +15,7 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 
 ## Choosing a setup
 
-Install with `cargo install --git https://github.com/askrid/wye wye --locked` (Rust 1.99 or later). Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases).
+Install the latest release with `cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked` (Rust 1.99 or later); without `--tag` it builds the unreleased `main`. Prerelease archives for Linux and macOS are on the [releases page](https://github.com/askrid/wye/releases): `gh attestation verify <archive> --repo askrid/wye` checks that this repository's release workflow built one, from which tag and commit ([SECURITY.md](../SECURITY.md#releases)).
 
 `wye init` writes a config, and next to it `policy-tests/` with sample requests that `wye policy-test` checks against it ([what they cover](operations.md#commands)). It never writes over an existing file, and prints the next steps. Its [setup](glossary.md#the-product) answers two questions: who can reach the gateway, and whose credential pays the provider.
 
