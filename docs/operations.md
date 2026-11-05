@@ -252,6 +252,36 @@ Give the platform a stop timeout (Kubernetes: `terminationGracePeriodSeconds`) a
 
 One usage record per request, written as a JSON line to the usage log (stdout) and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
+An example, from a Claude Code session that failed over:
+
+```json
+{
+  "event": "request",
+  "unix_ms": 1793178637975,
+  "path": "/v1/messages",
+  "status": 200,
+  "outcome": "completed",
+  "duration_ms": 4100.42,
+  "response_headers_ms": 651.8,
+  "upstream": "bedrock-us",
+  "subject": "alice",
+  "session_id": "7f2c4a10-8e1b-4d3a-9c55-2b6e0d1f9a33",
+  "request_class": "main",
+  "requested_model": "claude-coding",
+  "model": "claude-opus-5-5",
+  "usage_status": "complete",
+  "input_tokens": 12,
+  "output_tokens": 38,
+  "cache_creation_input_tokens": 1530,
+  "cache_read_input_tokens": 48210,
+  "cost_usd": "0.0181",
+  "cost_status": "complete",
+  "pricing_version": "anthropic-2026-11-01",
+  "tool_calls": { "Bash": 1 },
+  "failovers": [{ "upstream": "anthropic", "reason": "429" }]
+}
+```
+
 Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
 
 `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
