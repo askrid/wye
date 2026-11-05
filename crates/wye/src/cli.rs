@@ -24,7 +24,16 @@ pub use policy_test::policy_test;
 pub(crate) use probe::health_url;
 pub use probe::{blocking as probe_blocking, probe};
 pub use report::run as run_report;
-pub use wrapper::{Agent, gateway_url, run as run_agent};
+pub use wrapper::{Agent, gateway_url, no_gateway, run as run_agent};
+
+/// The repository's files at this build's release tag, for every link the
+/// CLI prints or writes: a link to `main` would describe another version's
+/// config keys and commands.
+pub const REPO_AT_RELEASE: &str = concat!(
+    env!("CARGO_PKG_REPOSITORY"),
+    "/blob/v",
+    env!("CARGO_PKG_VERSION")
+);
 
 /// A runtime for a command that makes a request or two.
 pub fn current_thread() -> std::io::Result<tokio::runtime::Runtime> {

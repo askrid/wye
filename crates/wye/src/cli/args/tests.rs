@@ -54,7 +54,6 @@ fn mistakes_are_named() {
         usage("token issue", &["a", "--models", "x", "--models=y"]),
         "--models given more than once"
     );
-    assert_eq!(usage("policy-diff", &["old.toml"]), "missing <old> <new>");
     assert_eq!(
         command("serve").parse(&["-c", "x", "--help"]),
         Err(ArgsError::Help)
@@ -142,6 +141,29 @@ fn a_typo_gets_the_closest_command() {
         unknown_command("-c"),
         "options go after the command: `wye <command> -c`"
     );
+}
+
+#[test]
+fn a_missing_argument_is_one_line_that_says_what_to_run() {
+    assert_eq!(
+        command("token issue").parse(&[]),
+        Err(ArgsError::Missing(
+            "missing <subject>: who the token is for, as in \
+             `wye token issue alice --out alice.token`"
+                .into()
+        ))
+    );
+    let Err(ArgsError::Missing(diff)) = command("policy-diff").parse(&["old.toml"]) else {
+        panic!("policy-diff takes two configs");
+    };
+    assert!(
+        diff.starts_with("missing <old> <new>: ") && diff.contains("`wye policy-diff "),
+        "{diff}"
+    );
+    // Every command that requires an argument says what it is.
+    for command in COMMANDS.iter().filter(|c| c.arity.0 > 0) {
+        assert!(command.missing.contains("`wye "), "{}", command.name);
+    }
 }
 
 #[test]

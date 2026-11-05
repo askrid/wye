@@ -4,8 +4,8 @@ fn service(dir: &str) -> Service {
     Service {
         program: format!("{dir}/.cargo/bin/wye").into(),
         config: format!("{dir}/.wye/wye.toml").into(),
-        log: format!("{dir}/.wye/usage.jsonl").into(),
-        errors: format!("{dir}/.wye/wye.log").into(),
+        usage_log: format!("{dir}/.wye/usage.jsonl").into(),
+        messages: format!("{dir}/.wye/wye.log").into(),
         stop_secs: 35,
     }
 }
@@ -87,12 +87,12 @@ fn the_plan_says_what_changes_and_how_to_undo_it() {
         "{text}"
     );
     for line in [
-        "  Replace  ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
-        "  Run      ~/.cargo/bin/wye serve --config ~/.wye/wye.toml\n",
-        "  Log      ~/.wye/usage.jsonl (appended)\n",
-        "  Errors   ~/.wye/wye.log (appended)\n",
-        "  Then     launchctl bootout gui/501/dev.wye.gateway\n",
-        "           launchctl bootstrap gui/501 ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
+        "  Replace   ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
+        "  Run       ~/.cargo/bin/wye serve --config ~/.wye/wye.toml\n",
+        "  Usage log ~/.wye/usage.jsonl (appended)\n",
+        "  Messages  ~/.wye/wye.log (appended)\n",
+        "  Then      launchctl bootout gui/501/dev.wye.gateway\n",
+        "            launchctl bootstrap gui/501 ~/Library/LaunchAgents/dev.wye.gateway.plist\n",
         "Undo with `wye service uninstall`.",
     ] {
         assert!(text.contains(line), "{line}\n---\n{text}");

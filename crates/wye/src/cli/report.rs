@@ -222,7 +222,8 @@ impl Summary {
         if let Some(error) = &r.upstream_error {
             *self.upstream_errors.entry(error.clone()).or_default() += 1;
         }
-        let class = r.request_class.as_deref().unwrap_or("(no hint)");
+        // No request-class hint: an SDK caller, or an agent without them.
+        let class = r.request_class.as_deref().unwrap_or("(unclassified)");
         self.classes.entry(class.to_owned()).or_default().add(&r);
         if let Some(upstream) = &r.upstream {
             self.upstreams.entry(upstream.clone()).or_default().add(&r);
@@ -302,7 +303,8 @@ struct Starts {
     subagents: u64,
 }
 
-/// `wye report`: the log it was given, or the one in the home directory.
+/// `wye report`: the usage log it was given, or the one in the home
+/// directory.
 pub fn run(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
@@ -317,12 +319,12 @@ pub fn run(
         Some(&"-") => report(std::io::stdin().lock(), paint),
         Some(path) => report(open(Path::new(path))?, paint),
         None => {
-            let path = files::in_home(USAGE_LOG_FILE, "pass a log file", env)?;
+            let path = files::in_home(USAGE_LOG_FILE, "pass a usage log", env)?;
             if !path.exists() {
                 let log = files::tilde(&path, env);
                 return Err(format!(
-                    "no usage log at {log}. `wye service install` keeps one, as does \
-                     `wye serve >> {log}`; or pass a file, or - for standard input"
+                    "no usage log at {log}: `wye service install` keeps one, as does \
+                     `wye serve >> {log}`; or pass a usage log, or - for standard input"
                 ));
             }
             report(open(&path)?, paint)

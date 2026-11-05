@@ -63,10 +63,11 @@ pub(super) fn retry(
     }
 }
 
-/// Waits up to `wait` for the gateway to answer, and says so.
+/// Waits up to `wait` for the gateway to answer, and says so; when it does
+/// not, the end of the message log `messages` may say why.
 pub(super) fn wait_for(
     url: &str,
-    errors: &Path,
+    messages: &Path,
     show: &dyn Fn(&Path) -> String,
     wait: Duration,
 ) -> Result<(), String> {
@@ -80,7 +81,7 @@ pub(super) fn wait_for(
     }
     Err(format!(
         "nothing answers at {url} yet; the end of {} may say why",
-        show(errors)
+        show(messages)
     ))
 }
 

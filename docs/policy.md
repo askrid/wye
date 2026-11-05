@@ -6,7 +6,7 @@ What Wye authorizes and enforces per request, what it cannot enforce without sha
 
 [Provider keys](glossary.md#requests-and-where-they-go) authenticate Wye to providers; they do not authenticate callers to Wye. Callers present signed [gateway tokens](glossary.md#access). Without an `[auth]` section Wye listens on loopback only; with one it may listen on any address, and every proxied request must carry a valid token.
 
-Claims of Wye's own tokens (identity-provider tokens are below):
+Claims of Wye tokens (identity-provider tokens are below):
 
 ```json
 {
@@ -29,7 +29,7 @@ Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 - Cached per connection: a request repeating the last verified token skips signature verification, compares the bytes in constant time, and rechecks expiry. The cache holds one verified token and dies with the connection; keys are fixed for the process lifetime, so its answers equal a fresh check.
 - On a reused connection, authenticated requests have the same overhead as unauthenticated ones; a full verification's: `auth_` in [benchmarks.md](benchmarks.md#current-harness-and-baseline).
 
-The key fixes the algorithm; the token never chooses it: Ed25519 for Wye's own tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
+The key fixes the algorithm; the token never chooses it: Ed25519 for Wye tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
 
 Model permissions: `[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md#models).
 
@@ -48,12 +48,12 @@ When the token and the config (`[auth]`) both set a limit, the stricter value ap
 
 Identity-provider tokens: Wye also accepts JWTs issued directly by a trusted OIDC identity provider, so teams need no token-minting service: GitHub Actions or another workload identity for CI, and the team's IdP (through `apiKeyHelper`) for developers.
 
-Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). Wye's own `issuer`, `audience`, and `[[auth.signing_keys]]` become optional: a deployment can trust only its IdP.
+Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). The `issuer`, `audience`, and `[[auth.signing_keys]]` of Wye tokens become optional: a deployment can trust only its IdP.
 
 - **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.signing_keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
-- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye's own tokens (`max_gateway_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
+- **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye tokens (`max_gateway_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
 - **Grants**: `[[auth.identity_providers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
-- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config; the per-connection cache applies as to Wye's own tokens.
+- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config; the per-connection cache applies as to Wye tokens.
 - **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
 
 A token can assert a maximum per request, never the cumulative amount spent; deriving a narrower token without the issuer is research ([narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms)). Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.

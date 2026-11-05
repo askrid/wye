@@ -17,7 +17,8 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    files::{self, ERRORS_FILE, USAGE_LOG_FILE},
+    REPO_AT_RELEASE,
+    files::{self, MESSAGE_LOG_FILE, USAGE_LOG_FILE},
     paint::Paint,
     probe_blocking as probe, say,
 };
@@ -31,7 +32,9 @@ use run::retry;
 use run::{run_all, uid, wait_for, write_atomically};
 #[cfg(test)]
 use unit::UNIT;
-use unit::{Commands, plan, restart_commands, shell, start_commands, stop_commands, systemctl};
+use unit::{
+    Commands, LABEL_WIDTH, plan, restart_commands, shell, start_commands, stop_commands, systemctl,
+};
 pub use unit::{Manager, Service};
 
 /// How long the gateway may take to answer once started.
@@ -55,7 +58,8 @@ fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> 
              provider keys from files instead (provider_key_file = \"anthropic.key\", next to \
              the config, readable only by you), as `wye init` writes them; for the cache \
              diagnostics key and OTLP headers, run `wye serve` under a service definition \
-             of your own (docs/operations.md#running-as-a-service). Another config: -c <path>"
+             of your own ({REPO_AT_RELEASE}/docs/operations.md#running-as-a-service). \
+             Another config: -c <path>"
         )));
     }
     crate::startup::Resources::resolve(&config, files::config_dir(path))
@@ -152,8 +156,8 @@ pub fn install(
     let service = Service {
         program,
         config: config_path,
-        log: context.wye_home.join(USAGE_LOG_FILE),
-        errors: context.wye_home.join(ERRORS_FILE),
+        usage_log: context.wye_home.join(USAGE_LOG_FILE),
+        messages: context.wye_home.join(MESSAGE_LOG_FILE),
         stop_secs: stop_secs(&config),
     };
     let definition = service.definition(context.manager)?;
@@ -206,7 +210,7 @@ pub fn install(
         );
     }
     run_all(&commands, show, stopping(&service))?;
-    wait_for(&url, &service.errors, show, START_WAIT)
+    wait_for(&url, &service.messages, show, START_WAIT)
 }
 
 /// Asks before installing; `[s]how` prints the file and asks again.
@@ -252,18 +256,21 @@ pub fn status(context: &Context) -> Result<bool, String> {
             return Ok(false);
         }
     };
-    let log_size = std::fs::metadata(&service.log)
+    let log_size = std::fs::metadata(&service.usage_log)
         .map(|m| format!(" ({})", file_size(m.len())))
         .unwrap_or_default();
     say!(
-        "{:<9} {}\n{:<9} {} serve --config {}\n{:<9} {}{log_size}",
+        "{:<LABEL_WIDTH$} {}\n{:<LABEL_WIDTH$} {} serve --config {}\n\
+         {:<LABEL_WIDTH$} {}{log_size}\n{:<LABEL_WIDTH$} {}",
         "Installed",
         show(&context.file()),
         "Runs",
         show(&service.program),
         show(&service.config),
-        "Log",
-        show(&service.log),
+        "Usage log",
+        show(&service.usage_log),
+        "Messages",
+        show(&service.messages),
     );
     let answering = files::load(&service.config)
         .ok()
@@ -272,7 +279,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
     match answering {
         Some((true, url)) => {
             say!(
-                "{:<9} {} at {url}",
+                "{:<LABEL_WIDTH$} {} at {url}",
                 "State",
                 Paint::stdout().green("answering")
             );
@@ -280,16 +287,15 @@ pub fn status(context: &Context) -> Result<bool, String> {
         }
         Some((false, url)) => {
             say!(
-                "{:<9} {} at {url}; the end of {} may say why",
+                "{:<LABEL_WIDTH$} {} at {url}; the end of the message log may say why",
                 "State",
                 Paint::stdout().red("not answering"),
-                show(&service.errors)
             );
             Ok(false)
         }
         None => {
             say!(
-                "{:<9} its config does not parse; `wye validate -c {}`",
+                "{:<LABEL_WIDTH$} its config does not parse; `wye validate -c {}`",
                 "State",
                 show(&service.config)
             );
@@ -326,7 +332,7 @@ pub fn restart(context: &Context) -> Result<(), String> {
     run_all(&commands, show, wait)?;
     wait_for(
         &local_url(config.server.listen),
-        &service.errors,
+        &service.messages,
         show,
         wait + START_WAIT,
     )
@@ -373,9 +379,10 @@ pub fn uninstall(context: &Context) -> Result<(), String> {
         )?;
     }
     say!(
-        "The config {} and the log {} stay.",
+        "The config {}, the usage log {}, and the message log {} stay.",
         show(&service.config),
-        show(&service.log)
+        show(&service.usage_log),
+        show(&service.messages)
     );
     Ok(())
 }

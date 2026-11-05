@@ -9,11 +9,14 @@ use super::args::Parsed;
 /// The config, in the home directory.
 pub const CONFIG_FILE: &str = "wye.toml";
 /// The key `wye token issue` signs with, in the home directory.
-pub const SIGNING_KEY_FILE: &str = "issuer.key";
-/// Where `wye service` keeps usage records and `wye report` reads them.
+pub const SIGNING_KEY_FILE: &str = "signing.key";
+/// The usage log: where `wye service` keeps usage records and `wye report`
+/// reads them.
 pub const USAGE_LOG_FILE: &str = "usage.jsonl";
-/// Where `wye service` keeps the gateway's messages.
-pub const ERRORS_FILE: &str = "wye.log";
+/// The message log: where `wye service` keeps the gateway's own messages.
+pub const MESSAGE_LOG_FILE: &str = "wye.log";
+/// Where `wye policy-test` looks for cases, next to the config.
+pub const POLICY_TESTS_DIR: &str = "policy-tests";
 
 /// Where a user's files live: `$WYE_HOME`, else `~/.wye`.
 pub fn home(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {

@@ -33,7 +33,7 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 
 ### M1: team-ready Claude Code
 
-Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `upstream.provider_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
+Built: Wye tokens and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `upstream.provider_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
 
 Open:
 

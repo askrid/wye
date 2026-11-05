@@ -17,7 +17,7 @@ use wye::{
     cli::{
         Agent,
         args::{self, ArgsError, Command, Id},
-        current_thread, emit, files, gateway_url,
+        current_thread, emit, files, gateway_url, no_gateway,
         paint::Paint,
         probe_blocking, run_agent, run_explain, run_init, run_report,
         service::{self, Context},
@@ -69,6 +69,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             emit(&Paint::stdout().style(&command.help()));
             return Ok(0);
         }
+        Err(ArgsError::Missing(why)) => return Err(why.into()),
         Err(ArgsError::Usage(why)) => {
             return Err(format!(
                 "{why}\nusage: {}\nmore: wye {} --help",
@@ -151,7 +152,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             let config = files::load(&path)?;
             let dir = match parsed.positional.first() {
                 Some(dir) => PathBuf::from(dir),
-                None => files::config_dir(&path).join("policy-tests"),
+                None => files::config_dir(&path).join(files::POLICY_TESTS_DIR),
             };
             let (report, passed) = wye::policy_test(&config, &dir, unix_secs()?)?;
             let shown = files::tilde(&path, &env);
@@ -173,8 +174,12 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             Ok(verdicts(&diff.report(), !diff.widens()))
         }
         Id::Probe => {
-            let url = gateway_url(parsed.positional.first().copied(), &env);
-            let checked = probe_blocking(&url)?;
+            let given = parsed.positional.first().copied();
+            let url = gateway_url(given, &env);
+            let checked = probe_blocking(&url).map_err(|why| match given {
+                Some(_) => why,
+                None => no_gateway(&url, &why, "`wye probe <url>`", &env),
+            })?;
             emit(&format!("{checked}: {}\n", Paint::stdout().green("ok")));
             Ok(0)
         }

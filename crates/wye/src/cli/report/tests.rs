@@ -47,7 +47,29 @@ fn summarizes_sessions_classes_and_cache_misses() {
     assert_eq!(row("all")[1..6], ["4", "40", "450", "6.0K", "5.8K"]);
     assert_eq!(row("all")[6], "50.7%");
     assert_eq!(row("compaction")[1], "1");
-    assert_eq!(row("(no")[2], "1", "the request without hints");
+    assert_eq!(row("(unclassified)")[1], "1", "the request without hints");
+    // "cache" and "time" over the columns they qualify.
+    let header: Vec<&str> = out
+        .lines()
+        .skip_while(|l| !l.starts_with("By request class"))
+        .skip(1)
+        .take(2)
+        .collect();
+    assert_eq!(
+        header.iter().map(|l| flat(l)).collect::<Vec<_>>(),
+        [
+            "cache cache time time",
+            "class reqs input output read write hit model tools"
+        ],
+        "{out}"
+    );
+    // Each ends where the column it qualifies ends.
+    let end = |line: &str, word: &str| line.find(word).map(|i| i + word.len());
+    assert_eq!(end(header[0], "cache"), end(header[1], " read"));
+    assert_eq!(
+        header[0].rfind("time").map(|i| i + 4),
+        end(header[1], " tools")
+    );
     assert_eq!(row("Bash")[1..], ["2", "1", "0.7s"]);
     assert_eq!(row("Grep")[1..], ["1", "0", "-"]);
     // The subject on a line of its own, under the session's row.

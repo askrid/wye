@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 const LABEL: &str = "dev.wye.gateway";
 /// The systemd unit.
 pub(super) const UNIT: &str = "wye.service";
+/// Width of the labels in the plan `install` shows and in `status`:
+/// "Installed", "Usage log".
+pub(super) const LABEL_WIDTH: usize = 9;
 /// The service manager of this operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Manager {
@@ -69,10 +72,11 @@ impl Manager {
 pub struct Service {
     pub program: PathBuf,
     pub config: PathBuf,
-    /// Where the gateway's stdout, the usage log, is appended.
-    pub log: PathBuf,
-    /// Where its stderr is appended: why it failed to start or stopped.
-    pub errors: PathBuf,
+    /// The usage log: where the gateway's stdout is appended.
+    pub usage_log: PathBuf,
+    /// The message log: where its stderr is appended, such as why it failed
+    /// to start or stopped.
+    pub messages: PathBuf,
     /// How long the manager waits for it to stop: the config's drain delay
     /// and shutdown grace, and a margin.
     pub stop_secs: u64,
@@ -87,7 +91,7 @@ impl Service {
                 .ok_or_else(|| format!("{} is not valid UTF-8", path.display()))
         };
         let (program, config) = (text(&self.program)?, text(&self.config)?);
-        let (log, errors) = (text(&self.log)?, text(&self.errors)?);
+        let (log, messages) = (text(&self.usage_log)?, text(&self.messages)?);
         Ok(match manager {
             Manager::Launchd => format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
@@ -107,11 +111,11 @@ impl Service {
                 xml(&program),
                 xml(&config),
                 xml(&log),
-                xml(&errors),
+                xml(&messages),
                 self.stop_secs
             ),
             Manager::Systemd => {
-                for path in [&program, &config, &log, &errors] {
+                for path in [&program, &config, &log, &messages] {
                     if path.contains(|c: char| c.is_whitespace() || "\"'\\$".contains(c)) {
                         return Err(format!(
                             "{path}: a path with spaces, quotes, or $; systemd needs one without"
@@ -129,7 +133,7 @@ impl Service {
                     escape(&program),
                     escape(&config),
                     escape(&log),
-                    escape(&errors),
+                    escape(&messages),
                     self.stop_secs
                 )
             }
@@ -146,7 +150,8 @@ impl Service {
                     .skip(1)
                     .filter_map(|s| s.split_once("</string>").map(|(v, _)| unxml(v)))
                     .collect();
-                let [label, program, serve, flag, config, log, errors] = strings.as_slice() else {
+                let [label, program, serve, flag, config, log, messages] = strings.as_slice()
+                else {
                     return None;
                 };
                 if label != LABEL || serve != "serve" || flag != "--config" {
@@ -162,8 +167,8 @@ impl Service {
                 Some(Self {
                     program: program.into(),
                     config: config.into(),
-                    log: log.into(),
-                    errors: errors.into(),
+                    usage_log: log.into(),
+                    messages: messages.into(),
                     stop_secs,
                 })
             }
@@ -183,8 +188,8 @@ impl Service {
                 Some(Self {
                     program: program.into(),
                     config: config.into(),
-                    log: line("StandardOutput=append:")?.into(),
-                    errors: line("StandardError=append:")?.into(),
+                    usage_log: line("StandardOutput=append:")?.into(),
+                    messages: line("StandardError=append:")?.into(),
                     stop_secs: line("TimeoutStopSec=")?.parse().ok()?,
                 })
             }
@@ -285,19 +290,23 @@ pub(super) fn plan(
     );
     let verb = if replacing { "Replace" } else { "Write" };
     out.push_str(&format!(
-        "\n  {verb:<8} {}\n  {:<8} {} serve --config {}\n  {:<8} {} (appended)\n  {:<8} {} (appended)\n",
+        "\n  {verb:<LABEL_WIDTH$} {}\n  {:<LABEL_WIDTH$} {} serve --config {}\n  \
+         {:<LABEL_WIDTH$} {} (appended)\n  {:<LABEL_WIDTH$} {} (appended)\n",
         show(file),
         "Run",
         show(&service.program),
         show(&service.config),
-        "Log",
-        show(&service.log),
-        "Errors",
-        show(&service.errors),
+        "Usage log",
+        show(&service.usage_log),
+        "Messages",
+        show(&service.messages),
     ));
     for (i, command) in commands.iter().enumerate() {
         let label = if i == 0 { "Then" } else { "" };
-        out.push_str(&format!("  {label:<8} {}\n", shell(command, show)));
+        out.push_str(&format!(
+            "  {label:<LABEL_WIDTH$} {}\n",
+            shell(command, show)
+        ));
     }
     out.push_str("\nUndo with `wye service uninstall`.\n");
     out

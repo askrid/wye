@@ -7,7 +7,7 @@ use std::path::Path;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use gateway_core::{
-    config::Config,
+    config::{Auth, Config, OwnIssuer},
     policy::ModelPattern,
     token::{self, NewToken},
 };
@@ -64,23 +64,47 @@ pub fn run_keygen(
 ) -> Result<String, String> {
     let out = match parsed.value("out") {
         Some(out) => out.into(),
-        None => files::in_home(SIGNING_KEY_FILE, "pass --out", env)?,
+        None => {
+            let out = files::in_home(SIGNING_KEY_FILE, "pass --out", env)?;
+            if out.symlink_metadata().is_ok() {
+                return Err(format!(
+                    "{} exists, and `wye token issue` signs with it; for another key, \
+                     as when rotating, pass --out <path>",
+                    files::tilde(&out, env)
+                ));
+            }
+            out
+        }
     };
     let key = new_key(&out)?;
     Ok(format!(
         "wrote {} (keep it secret, outside the gateway)\n\n\
          Add to wye.toml, under [auth]:\n[[auth.signing_keys]]\nid = \"<a new id>\"\n\
          ed25519_public_key = \"{}\"\n",
-        out.display(),
+        files::tilde(&out, env),
         public_key(&key),
     ))
 }
 
 /// `wye token issue`, from its options.
 pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<(), String> {
-    let key = match parsed.value("key") {
+    // The config first: one that takes no tokens of Wye's needs no key.
+    let path = files::config_path(parsed, env)?;
+    let config = files::load(&path)?;
+    files::named(&path, issuer(&config))?;
+    let key = match parsed.value("signing-key") {
         Some(key) => key.into(),
-        None => files::in_home(SIGNING_KEY_FILE, "pass --key", env)?,
+        None => {
+            let key = files::in_home(SIGNING_KEY_FILE, "pass --signing-key", env)?;
+            if key.symlink_metadata().is_err() {
+                return Err(format!(
+                    "no signing key at {}: pass --signing-key <path>, or make one with \
+                     `wye token keygen` and add its public half to [[auth.signing_keys]]",
+                    files::tilde(&key, env)
+                ));
+            }
+            key
+        }
     };
     let ttl_secs = parsed
         .value("ttl")
@@ -95,8 +119,6 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
         max_output_tokens: parsed.value("max-output-tokens"),
     };
     let key = read_key(&key)?;
-    let path = files::config_path(parsed, env)?;
-    let config = files::load(&path)?;
     let issued = files::named(&path, issue(&request, &key, &config, super::unix_secs()?))?;
     match parsed.value("out") {
         Some(out) => {
@@ -142,14 +164,7 @@ pub fn issue(
             _ => Err("--max-output-tokens must be a positive number"),
         })
         .transpose()?;
-    let auth = config
-        .auth
-        .as_ref()
-        .ok_or("it has no [auth], so its gateway takes no tokens; name another with -c")?;
-    let own = auth
-        .own
-        .as_ref()
-        .ok_or("its [auth] has no issuer and keys of its own; name another with -c")?;
+    let (auth, own) = issuer(config)?;
     let public = key.public_key().as_ref();
     let kid = own
         .keys
@@ -184,6 +199,20 @@ pub fn issue(
             max_output_tokens,
         },
     ))
+}
+
+/// The config's `[auth]` and its own issuer, which signs Wye tokens; errors
+/// say why the config takes none.
+fn issuer(config: &Config) -> Result<(&Auth, &OwnIssuer), &'static str> {
+    let auth = config.auth.as_ref().ok_or(
+        "it has no [auth], so its gateway takes no gateway tokens; name another config \
+         with -c, or write one with `wye init --shared`",
+    )?;
+    let own = auth.own.as_ref().ok_or(
+        "its [auth] trusts only identity providers, so it takes no Wye tokens; name \
+         another config with -c",
+    )?;
+    Ok((auth, own))
 }
 
 /// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.

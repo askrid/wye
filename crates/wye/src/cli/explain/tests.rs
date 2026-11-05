@@ -60,7 +60,10 @@ fn explains_forwarding_and_each_refusal() {
     );
     assert!(ok.refused.is_none(), "{}", ok.report());
     let report = ok.report();
-    assert!(report.contains("subject alice"), "{report}");
+    assert!(
+        report.contains("\ngateway token: valid; subject alice, key id k1, expires at "),
+        "{report}"
+    );
     assert!(report.contains("by token: claude-haiku-*"), "{report}");
     assert!(
         report.contains("upstream: POST https://api.anthropic.com/v1/messages"),
@@ -120,6 +123,19 @@ fn explains_forwarding_and_each_refusal() {
             &[]
         )),
         Some((404, "not_found_error"))
+    );
+    let other = explain(
+        &config,
+        "/v1/other",
+        CallerToken::None,
+        None,
+        haiku,
+        NOW,
+        &[],
+    );
+    assert_eq!(
+        other.refused.map(|(_, _, message)| message).as_deref(),
+        Some("/v1/other is not an endpoint Wye serves")
     );
     let mut limited = config.clone();
     limited.auth.as_mut().unwrap().max_output_tokens = Some(100);
@@ -234,7 +250,7 @@ fn shows_the_upstream_a_session_goes_to() {
         let report = out.report();
         assert!(
             report.contains(&format!(
-                "route: upstream {id} of 2 (cache_affine by session id)"
+                "selection: upstream {id} of 2 (cache_affine by session id)"
             )),
             "{report}"
         );
@@ -440,4 +456,23 @@ fn chat_completions_carries_no_session_to_route_by() {
         report.contains("cache_affine by nothing: no session id or token"),
         "{report}"
     );
+}
+
+#[test]
+fn a_passthrough_names_the_callers_credential() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+    )
+    .unwrap();
+    let report = explain_messages(&config, CallerToken::None, b"{}").report();
+    assert!(
+        report.contains("\ngateway token: not required (no [auth])\n"),
+        "{report}"
+    );
+    assert!(
+        report.contains("\ncredential: the caller's own (passthrough)\n"),
+        "{report}"
+    );
+    assert!(report.ends_with("decision: forward\n"), "{report}");
 }

@@ -8,9 +8,9 @@
 
 use std::{ffi::OsString, process::Command};
 
-use gateway_core::config::is_cleartext_remote;
+use gateway_core::config::{is_cleartext_remote, is_loopback_host};
 
-use super::args::Parsed;
+use super::{args::Parsed, files};
 
 /// Gateway URL when neither `--url` nor `WYE_URL` is set.
 const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
@@ -40,6 +40,14 @@ impl Agent {
         std::env::var_os(self.program_variable())
             .filter(|program| !program.is_empty())
             .unwrap_or_else(|| default.into())
+    }
+
+    /// The agent's name, for what to install.
+    fn product(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+        }
     }
 
     /// The variable that names another path to the program.
@@ -182,15 +190,10 @@ pub fn run(
         parsed.value("url"),
         parsed.value("token-file"),
         &parsed.positional,
-        env,
+        &env,
     )?;
-    super::probe_blocking(&super::health_url(&launch.gateway)).map_err(|e| {
-        format!(
-            "no gateway at {} ({e}); start one with `wye service install` or \
-                 `wye serve`, or name another with --url",
-            launch.gateway
-        )
-    })?;
+    super::probe_blocking(&super::health_url(&launch.gateway))
+        .map_err(|why| no_gateway(&launch.gateway, &why, "--url", &env))?;
     let program = agent.program();
     let name = program.to_string_lossy().into_owned();
     let mut command = launch.command(agent, program);
@@ -207,10 +210,44 @@ pub fn run(
     }
 }
 
+/// Why nothing answered at `gateway`, and what to run: a gateway on this
+/// machine is started, after `wye init` when there is no config to start it
+/// with; another is named with `another`.
+pub fn no_gateway(
+    gateway: &str,
+    why: &str,
+    another: &str,
+    env: &impl Fn(&str) -> Option<String>,
+) -> String {
+    let local = gateway
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(is_loopback_host))
+        .unwrap_or(false);
+    // No config at all: not one in the home, nor a ./wye.toml to name.
+    let unconfigured = files::find_config(None, env, std::path::Path::exists).is_err()
+        && !std::path::Path::new(files::CONFIG_FILE).exists();
+    let next = if !local {
+        format!("name another with {another}")
+    } else if unconfigured {
+        format!(
+            "set one up with `wye init`, then `wye service install`; or name another \
+             with {another}"
+        )
+    } else {
+        format!(
+            "start one with `wye service install` or `wye serve`, or name another with \
+             {another}"
+        )
+    };
+    format!("no gateway at {gateway} ({why}); {next}")
+}
+
 fn cannot_run(agent: Agent, name: &str, error: &std::io::Error) -> String {
     if error.kind() == std::io::ErrorKind::NotFound {
         format!(
-            "cannot run {name}: not found; install it, or set {} to its path",
+            "cannot run {name}: not found; install {}, or set {} to its path",
+            agent.product(),
             agent.program_variable()
         )
     } else {
@@ -259,6 +296,16 @@ mod tests {
                 .hint_headers,
             "0"
         );
+    }
+
+    #[test]
+    fn a_missing_agent_says_what_to_install() {
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(
+            cannot_run(Agent::Claude, "claude", &missing),
+            "cannot run claude: not found; install Claude Code, or set WYE_CLAUDE_BIN to its path"
+        );
+        assert!(cannot_run(Agent::Codex, "codex", &missing).contains("install Codex,"));
     }
 
     #[test]

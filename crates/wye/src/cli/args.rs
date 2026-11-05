@@ -86,7 +86,7 @@ pub struct Command {
     /// As typed after `wye`: `serve`, `token issue`.
     pub name: &'static str,
     pub summary: &'static str,
-    /// Positional arguments as help shows them: `<dir>`, `[<log>]`.
+    /// Positional arguments as help shows them: `<dir>`, `[<usage-log>]`.
     pub args: &'static str,
     /// Fewest and most positional arguments.
     pub arity: (usize, usize),
@@ -96,6 +96,9 @@ pub struct Command {
     pub passthrough: bool,
     /// Help text after the options.
     pub notes: &'static str,
+    /// What the required arguments are, with a command to copy: the whole
+    /// error when they are missing.
+    pub missing: &'static str,
 }
 
 /// What a command was given.
@@ -136,6 +139,8 @@ pub enum ArgsError {
     Help,
     /// The arguments do not fit; the message names what is wrong.
     Usage(String),
+    /// A required argument is missing; the message says what to run.
+    Missing(String),
 }
 
 impl Command {
@@ -223,7 +228,10 @@ impl Command {
         let (fewest, most) = self.arity;
         let n = parsed.positional.len();
         if n < fewest {
-            return Err(ArgsError::Usage(format!("missing {}", self.args)));
+            return Err(ArgsError::Missing(format!(
+                "missing {}: {}",
+                self.args, self.missing
+            )));
         }
         if n > most {
             let extra = parsed.positional.get(most).copied().unwrap_or_default();

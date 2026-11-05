@@ -10,7 +10,7 @@
 //! error = "permission_error" # optional
 //! model = "claude-opus-5-5"  # optional: the model it runs on, after aliases
 //! upstream = "team-a"        # optional: the route upstream it goes to
-//! path = "/v1/messages"      # optional, the default
+//! endpoint = "/v1/messages"  # optional, the default
 //! session = "s-1"            # optional client session id
 //!
 //! [token]               # optional; claims taken as verified
@@ -39,7 +39,7 @@ struct Expect {
     error: Option<String>,
     model: Option<String>,
     upstream: Option<String>,
-    path: Option<String>,
+    endpoint: Option<String>,
     session: Option<String>,
     token: Option<Claims>,
 }
@@ -62,15 +62,22 @@ struct Claims {
 /// Runs every case in `dir` at Unix time `now`; returns the report and
 /// whether all cases passed.
 pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, bool), String> {
-    let mut cases: Vec<_> = std::fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|p| p.extension().is_some_and(|e| e == "json"))
-        .collect();
+    let mut cases: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
     cases.sort();
     if cases.is_empty() {
-        return Err(format!("{}: no *.json requests", dir.display()));
+        return Err(format!(
+            "no policy tests in {}: write <name>.json and <name>.expect.toml there \
+             (`wye init --out /tmp/wye/wye.toml` writes samples to copy)",
+            dir.display()
+        ));
     }
     let mut report = String::new();
     let mut failed = 0;
@@ -119,7 +126,7 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
                 .transpose()?,
         }),
     };
-    let path = expect.path.as_deref().unwrap_or("/v1/messages");
+    let path = expect.endpoint.as_deref().unwrap_or("/v1/messages");
     let result = explain(
         config,
         path,

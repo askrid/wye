@@ -106,7 +106,7 @@ fn ceilings_signers_and_exposure_widen() {
     let open = config("127.0.0.1:8080", None, "");
     let report = policy_diff(&old, &open).report();
     assert!(
-        report.contains("widens: [auth] removed: no token is required"),
+        report.contains("widens: [auth] removed: no gateway token is required"),
         "{report}"
     );
 }
@@ -147,7 +147,13 @@ fn identity_provider_grants_compare_per_claim_value() {
     }
     let ungranted = config("127.0.0.1:8080", Some(&issuer("")), "");
     let report = policy_diff(&old, &ungranted).report();
-    assert!(report.contains("grants removed"), "{report}");
+    assert!(
+        report.contains(
+            "widens: [[auth.identity_providers]] https://idp.example: grants removed, every \
+             gateway token may use the models in [auth] models"
+        ),
+        "{report}"
+    );
     let other = config(
         "127.0.0.1:8080",
         Some(&issuer("").replace("idp.example", "other.example")),
@@ -234,15 +240,13 @@ provider = \"openai\"
     let keyed = upstream("provider_key_env = \"K\"");
     let report = policy_diff(&forwarded, &keyed).report();
     assert!(
-        report.contains(
-            "widens: [upstream] sends the operator's key, where callers brought their own"
-        ),
+        report.contains("widens: [upstream] sends a provider key, where callers brought their own"),
         "{report}"
     );
     assert!(!policy_diff(&keyed, &forwarded).widens());
     let report = policy_diff(&keyed, &upstream("provider_key_env = \"OTHER\"")).report();
     assert!(
-        report.contains("changes: [upstream] key: $K -> $OTHER"),
+        report.contains("changes: [upstream] provider key: $K -> $OTHER"),
         "{report}"
     );
 }

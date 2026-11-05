@@ -22,6 +22,7 @@ const BASE: Command = Command {
     options: &[],
     passthrough: false,
     notes: "",
+    missing: "",
 };
 
 /// The commands, in the order help lists them.
@@ -70,7 +71,7 @@ pub const COMMANDS: &[Command] = &[
         id: Id::ServiceUninstall,
         name: "service uninstall",
         summary: "Stop the background gateway and remove it",
-        notes: "The config and the usage log stay.",
+        notes: "The config, the usage log, and the message log stay.",
         ..BASE
     },
     Command {
@@ -85,7 +86,7 @@ pub const COMMANDS: &[Command] = &[
     Command {
         id: Id::Doctor,
         name: "doctor",
-        summary: "Check a config's keys, files, and endpoints",
+        summary: "Check a config's secrets, files, and upstreams",
         options: &[CONFIG],
         ..BASE
     },
@@ -98,6 +99,7 @@ pub const COMMANDS: &[Command] = &[
         options: &WRAPPER,
         passthrough: true,
         notes: WRAPPER_NOTES,
+        missing: "",
     },
     Command {
         id: Id::Codex,
@@ -108,21 +110,22 @@ pub const COMMANDS: &[Command] = &[
         options: &WRAPPER,
         passthrough: true,
         notes: WRAPPER_NOTES,
+        missing: "",
     },
     Command {
         id: Id::Report,
         name: "report",
         summary: "Summarize a usage log",
-        args: "[<log>]",
+        args: "[<usage-log>]",
         arity: (0, 1),
-        notes: "Reads ~/.wye/usage.jsonl, the log `wye service install` keeps, unless \
-                given a file; `-` reads standard input.",
+        notes: "Reads ~/.wye/usage.jsonl, the usage log `wye service install` keeps, \
+                unless given another; `-` reads standard input.",
         ..BASE
     },
     Command {
         id: Id::Init,
         name: "init",
-        summary: "Write a starter config",
+        summary: "Write a starter config and policy tests",
         options: &[
             Opt::flag(
                 "provider-key",
@@ -142,8 +145,9 @@ pub const COMMANDS: &[Command] = &[
         notes: "Two choices: who can reach the gateway (this machine, or --shared) and \
                 whose credential pays (the caller's, or --provider-key). By default, \
                 for you on this machine: Claude Code's login, or any API key a caller \
-                sends, goes through, and the gateway holds no secret. Never overwrites \
-                a file.",
+                sends, goes through, and the gateway holds no secret. Sample policy tests \
+                go in policy-tests, next to the config, for `wye policy-test`. Never \
+                overwrites a file.",
         ..BASE
     },
     Command {
@@ -153,7 +157,7 @@ pub const COMMANDS: &[Command] = &[
         options: &[Opt::value(
             "out",
             "path",
-            "Where to write it (default: ~/.wye/issuer.key)",
+            "Where to write it (default: ~/.wye/signing.key)",
         )],
         notes: "Prints the public half for [[auth.signing_keys]]. `wye init --shared` makes \
                 the first key; this one is for rotation.",
@@ -167,7 +171,11 @@ pub const COMMANDS: &[Command] = &[
         arity: (1, 1),
         options: &[
             CONFIG,
-            Opt::value("key", "path", "Signing key (default: ~/.wye/issuer.key)"),
+            Opt::value(
+                "signing-key",
+                "path",
+                "The signing key (default: ~/.wye/signing.key)",
+            ),
             Opt::value(
                 "ttl",
                 "duration",
@@ -187,6 +195,7 @@ pub const COMMANDS: &[Command] = &[
         ],
         notes: "The issuer, audience, and key id come from the config's [auth], the key id \
                 found by the signing key's public half.",
+        missing: "who the token is for, as in `wye token issue alice --out alice.token`",
         ..BASE
     },
     Command {
@@ -194,12 +203,18 @@ pub const COMMANDS: &[Command] = &[
         name: "explain",
         summary: "Show what the gateway would do with one request",
         args: "<request.json>",
-        arity: (1, 1),
+        // A missing request is named by `explain` itself, which can point at a
+        // sample next to the config.
+        arity: (0, 1),
         options: &[
             CONFIG,
-            Opt::value("token-file", "path", "The caller's gateway token"),
+            Opt::value(
+                "token-file",
+                "path",
+                "Read the caller's gateway token from this file (default: none)",
+            ),
             Opt::value("session", "id", "The client's session id"),
-            Opt::value("path", "path", "The endpoint (default: /v1/messages)"),
+            Opt::value("endpoint", "path", "The endpoint (default: /v1/messages)"),
             Opt {
                 repeats: true,
                 ..Opt::value(
@@ -221,7 +236,8 @@ pub const COMMANDS: &[Command] = &[
         arity: (0, 1),
         options: &[CONFIG],
         notes: "Each <name>.json is a request and <name>.expect.toml its decision. The \
-                default directory is policy-tests, next to the config.",
+                default directory is policy-tests, next to the config, where `wye init` \
+                writes samples.",
         ..BASE
     },
     Command {
@@ -230,6 +246,9 @@ pub const COMMANDS: &[Command] = &[
         summary: "Show what a config change widens or narrows",
         args: "<old> <new>",
         arity: (2, 2),
+        missing: "the configs before and after a change, as in \
+                  `wye policy-diff ../base/wye.toml wye.toml` after \
+                  `git worktree add ../base main`",
         ..BASE
     },
     Command {
@@ -254,7 +273,7 @@ const WRAPPER: [Opt; 2] = [
     Opt::value(
         "token-file",
         "path",
-        "A file holding a gateway token (default: $WYE_TOKEN)",
+        "Read the gateway token from this file (default: the token in $WYE_TOKEN)",
     ),
 ];
 

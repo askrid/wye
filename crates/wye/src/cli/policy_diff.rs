@@ -109,10 +109,10 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
     match (&old.auth, &new.auth) {
         (Some(_), None) => diff
             .widens
-            .push("[auth] removed: no token is required".into()),
+            .push("[auth] removed: no gateway token is required".into()),
         (None, Some(_)) => diff
             .narrows
-            .push("[auth] added: a token is required".into()),
+            .push("[auth] added: a gateway token is required".into()),
         (Some(old), Some(new)) => auth(&mut diff, old, new),
         (None, None) => {}
     }
@@ -161,10 +161,10 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             .push(format!("[auth] max_gateway_token_ttl_secs: {a} -> {b}"));
     }
     match (&old.own, &new.own) {
-        (None, Some(_)) => diff.widens.push("[auth] Wye's own tokens accepted".into()),
+        (None, Some(_)) => diff.widens.push("[auth] Wye tokens accepted".into()),
         (Some(_), None) => diff
             .narrows
-            .push("[auth] Wye's own tokens no longer accepted".into()),
+            .push("[auth] Wye tokens no longer accepted".into()),
         (Some(old), Some(new)) => {
             if (&old.issuer, &old.audience) != (&new.issuer, &new.audience) {
                 diff.widens.push(format!(
@@ -240,10 +240,10 @@ fn issuer_change(diff: &mut PolicyDiff, old: &IdentityProvider, new: &IdentityPr
         ));
     }
     match (old.grants.is_empty(), new.grants.is_empty()) {
-        // No grants: every token gets the [auth] models ceiling.
+        // No grants: every token gets `[auth] models`.
         (false, true) => diff.widens.push(format!(
-            "[[auth.identity_providers]] {name}: grants removed, every token gets the \
-             [auth] models ceiling"
+            "[[auth.identity_providers]] {name}: grants removed, every gateway token may \
+             use the models in [auth] models"
         )),
         (true, false) => diff.narrows.push(format!(
             "[[auth.identity_providers]] {name}: grants added, a token matching none \
@@ -310,9 +310,9 @@ fn models(
 }
 
 /// Where requests go. A route for an API that had none widens, and so does
-/// an upstream that starts sending the operator's key where callers
-/// brought their own; other changes are listed for review, since where
-/// requests go is not who may send them.
+/// an upstream that starts sending a provider key where callers brought
+/// their own; other changes are listed for review, since where requests go
+/// is not who may send them.
 fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Route>) {
     match (old, new) {
         (None, Some(_)) => diff.widens.push(format!(
@@ -355,12 +355,12 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
         match (was_credential, credential) {
             (ProviderKey::ForwardCaller, ProviderKey::ForwardCaller) => {}
             (ProviderKey::ForwardCaller, _) => diff.widens.push(format!(
-                "{at} sends the operator's key, where callers brought their own"
+                "{at} sends a provider key, where callers brought their own"
             )),
             (_, ProviderKey::ForwardCaller) => diff
                 .narrows
                 .push(format!("{at} forwards each caller's own credential")),
-            (a, b) if a != b => diff.changes.push(format!("{at} key: {a} -> {b}")),
+            (a, b) if a != b => diff.changes.push(format!("{at} provider key: {a} -> {b}")),
             _ => {}
         }
     }

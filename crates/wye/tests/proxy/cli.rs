@@ -337,11 +337,12 @@ fn review_commands_exit_3_on_what_they_report() {
             .status
             .code()
     };
-    // The operator's key where callers brought their own widens access.
+    // A provider key where callers brought their own widens access.
     assert_eq!(status(&["policy-diff", &loopback, &keyed]), Some(3));
     assert_eq!(status(&["policy-diff", &keyed, &loopback]), Some(0));
     // explain: a path no route serves is a refusal; the key is not read.
-    let explain = |path: &str| status(&["explain", "--config", &keyed, "--path", path, &request]);
+    let explain =
+        |path: &str| status(&["explain", "--config", &keyed, "--endpoint", path, &request]);
     assert_eq!(explain("/v1/messages"), Some(0));
     assert_eq!(explain("/v1/unknown"), Some(3));
     // policy-test: a case whose expectation is wrong fails.
@@ -363,34 +364,97 @@ fn review_commands_exit_3_on_what_they_report() {
 fn the_defaults_work_on_a_fresh_home() {
     let setup = Setup::new();
     std::fs::remove_dir_all(setup.home.join(".wye")).unwrap();
+    // Everything the commands print or write, checked at the end.
+    let printed = std::cell::RefCell::new(String::new());
+    let run = |args: &[&str]| {
+        let output = setup.run(args);
+        printed.borrow_mut().push_str(&out(&output));
+        printed.borrow_mut().push_str(&err(&output));
+        output
+    };
     // keygen's default path is in a home nothing has made yet.
-    let keygen = setup.run(&["token", "keygen"]);
+    let keygen = run(&["token", "keygen"]);
     assert!(keygen.status.success(), "{}", err(&keygen));
-    std::fs::remove_file(setup.home.join(".wye/issuer.key")).unwrap();
+    assert!(
+        out(&keygen).starts_with("wrote ~/.wye/signing.key "),
+        "{}",
+        out(&keygen)
+    );
+    // A second would replace the key `token issue` signs with.
+    let again = err(&run(&["token", "keygen"]));
+    assert_eq!(
+        again,
+        "wye: ~/.wye/signing.key exists, and `wye token issue` signs with it; for another \
+         key, as when rotating, pass --out <path>\n"
+    );
+    std::fs::remove_file(setup.home.join(".wye/signing.key")).unwrap();
 
     // `init` is for you on this machine, and needs no key.
-    let init = setup.run(&["init"]);
+    let init = run(&["init"]);
     assert!(init.status.success(), "{}", err(&init));
+    assert!(
+        out(&init).starts_with(
+            "wrote ~/.wye/wye.toml\n\
+             wrote 1 policy test in ~/.wye/policy-tests, for `wye policy-test`\n"
+        ),
+        "{}",
+        out(&init)
+    );
     let config = std::fs::read_to_string(setup.home.join(".wye/wye.toml")).unwrap();
     assert!(
         config.contains("forward_caller_credential = true"),
         "{config}"
     );
-    assert!(setup.run(&["validate"]).status.success());
+    assert!(
+        config.contains(&format!(
+            "# {}/examples/wye.toml\n",
+            wye::cli::REPO_AT_RELEASE
+        )),
+        "{config}"
+    );
+    printed.borrow_mut().push_str(&config);
+    assert!(run(&["validate"]).status.success());
+    // Its policy tests pass with no argument.
+    let tested = run(&["policy-test"]);
+    assert!(tested.status.success(), "{}{}", out(&tested), err(&tested));
+    assert!(
+        out(&tested).ends_with("1 passed, 0 failed\n"),
+        "{}",
+        out(&tested)
+    );
     // `service status` when not installed is a state a script can test.
-    assert_eq!(setup.run(&["service", "status"]).status.code(), Some(3));
+    assert_eq!(run(&["service", "status"]).status.code(), Some(3));
     // The next steps' `wye report` has nothing yet, and says how to get it.
-    let report = err(&setup.run(&["report"]));
+    let report = err(&run(&["report"]));
     assert!(report.contains("wye service install"), "{report}");
+    // A config without [auth] takes no tokens, whatever the key.
+    let issue = err(&run(&["token", "issue", "alice"]));
+    assert!(issue.contains("it has no [auth]"), "{issue}");
+    assert!(issue.contains("`wye init --shared`"), "{issue}");
 
     // `init --shared` writes where its reviewers see it, and keeps the key out.
     std::fs::remove_file(setup.repo.join("wye.toml")).unwrap();
-    assert!(setup.run(&["init", "--shared"]).status.success());
+    let shared = run(&["init", "--shared"]);
+    assert!(shared.status.success(), "{}", err(&shared));
+    assert!(
+        out(&shared).contains(
+            "\nwrote 2 policy tests in policy-tests, for `wye policy-test -c wye.toml`\n"
+        ),
+        "{}",
+        out(&shared)
+    );
     assert!(setup.repo.join("wye.toml").exists());
-    assert!(setup.home.join(".wye/issuer.key").exists());
-    let issued = setup.run(&["token", "issue", "alice", "-c", "wye.toml"]);
+    assert!(setup.home.join(".wye/signing.key").exists());
+    let tested = run(&["policy-test", "-c", "wye.toml"]);
+    assert!(tested.status.success(), "{}{}", out(&tested), err(&tested));
+    assert!(
+        out(&tested).ends_with("2 passed, 0 failed\n"),
+        "{}",
+        out(&tested)
+    );
+    let issued = run(&["token", "issue", "alice", "-c", "wye.toml"]);
     assert!(out(&issued).starts_with("eyJ"), "{}", err(&issued));
-    let written = setup.run(&[
+    let written = run(&[
         "token",
         "issue",
         "bob",
@@ -414,17 +478,97 @@ fn the_defaults_work_on_a_fresh_home() {
         assert_eq!(mode & 0o077, 0, "{mode:o}");
     }
     // A bad signing key is not the config's fault.
-    let no_key = err(&setup.run(&["token", "issue", "a", "-c", "wye.toml", "--key", "nokey"]));
+    let no_key = err(&run(&[
+        "token",
+        "issue",
+        "a",
+        "-c",
+        "wye.toml",
+        "--signing-key",
+        "nokey",
+    ]));
     assert!(no_key.starts_with("wye: cannot read nokey"), "{no_key}");
+    // Without the default key, how to get one.
+    std::fs::remove_file(setup.home.join(".wye/signing.key")).unwrap();
+    let no_key = err(&run(&["token", "issue", "a", "-c", "wye.toml"]));
+    assert_eq!(
+        no_key,
+        "wye: no signing key at ~/.wye/signing.key: pass --signing-key <path>, or make one \
+         with `wye token keygen` and add its public half to [[auth.signing_keys]]\n"
+    );
+    let printed = printed.into_inner();
+    assert!(!printed.contains("/blob/main/"), "{printed}");
+}
 
-    // `policy-test` looks next to the config.
-    let cases = setup.repo.join("policy-tests");
-    std::fs::create_dir_all(&cases).unwrap();
-    std::fs::write(cases.join("a.json"), r#"{"model":"m","max_tokens":1}"#).unwrap();
-    std::fs::write(cases.join("a.expect.toml"), "decision = \"refuse\"\n").unwrap();
-    let tested = setup.run(&["policy-test", "-c", "wye.toml"]);
-    assert!(tested.status.success(), "{}", err(&tested));
-    assert!(out(&tested).contains("1 passed"), "{}", out(&tested));
+/// Run with no argument, a command either does what its name says or fails
+/// with one line that says what to run next.
+#[test]
+fn a_command_without_its_arguments_says_what_to_run() {
+    let setup = Setup::new();
+    let line = |args: &[&str]| {
+        let output = setup.run(args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {}", out(&output));
+        let message = err(&output);
+        assert_eq!(message.lines().count(), 1, "{args:?}: {message}");
+        message
+    };
+    assert_eq!(
+        line(&["token", "issue"]),
+        "wye: missing <subject>: who the token is for, as in \
+         `wye token issue alice --out alice.token`\n"
+    );
+    assert!(
+        line(&["policy-diff"]).contains("`wye policy-diff ../base/wye.toml wye.toml`"),
+        "policy-diff"
+    );
+    // explain names a sample next to the config, when there is one.
+    assert_eq!(
+        line(&["explain", "-c", "wye.toml"]),
+        "wye: missing <request.json>: a request body to explain, in a file, or - for \
+         standard input\n"
+    );
+    assert_eq!(
+        line(&["policy-test", "-c", "wye.toml"]),
+        "wye: no policy tests in policy-tests: write <name>.json and <name>.expect.toml \
+         there (`wye init --out /tmp/wye/wye.toml` writes samples to copy)\n"
+    );
+    std::fs::create_dir_all(setup.repo.join("policy-tests")).unwrap();
+    std::fs::write(setup.repo.join("policy-tests/a.json"), "{}").unwrap();
+    assert_eq!(
+        line(&["explain", "-c", "wye.toml"]),
+        "wye: missing <request.json>: a request body to explain, as in \
+         `wye explain -c wye.toml policy-tests/a.json`; - reads standard input\n"
+    );
+    // Nothing listens on port 9; with no config either, `wye init` comes first.
+    std::fs::remove_file(setup.repo.join("wye.toml")).unwrap();
+    let mut probe = setup.wye(&["probe"]);
+    probe.env("WYE_URL", "http://127.0.0.1:9");
+    let probe = err(&probe.output().unwrap());
+    assert!(
+        probe.starts_with("wye: no gateway at http://127.0.0.1:9 (")
+            && probe.ends_with(
+                "); set one up with `wye init`, then `wye service install`; or name \
+                 another with `wye probe <url>`\n"
+            ),
+        "{probe}"
+    );
+    let claude = err(&setup.run(&["claude", "--url", "http://127.0.0.1:9"]));
+    assert!(claude.contains("set one up with `wye init`"), "{claude}");
+    // With a config, the gateway is to be started.
+    let subscribed = Setup::with_subscription();
+    let claude = err(&subscribed.run(&["claude", "--url", "http://127.0.0.1:9"]));
+    assert!(
+        claude.ends_with(
+            "start one with `wye service install` or `wye serve`, or name another with --url\n"
+        ),
+        "{claude}"
+    );
+    // A URL given is probed as given.
+    let given = err(&setup.run(&["probe", "http://127.0.0.1:9/readyz"]));
+    assert!(
+        given.starts_with("wye: http://127.0.0.1:9/readyz: "),
+        "{given}"
+    );
 }
 
 #[test]
@@ -449,7 +593,7 @@ fn help_answers_the_usual_ways_of_asking() {
         &["doctor", "--help"][..],
     ] {
         assert!(
-            out(&setup.run(args)).starts_with("Check a config's keys"),
+            out(&setup.run(args)).starts_with("Check a config's secrets, files, and upstreams"),
             "{args:?}"
         );
     }

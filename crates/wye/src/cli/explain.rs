@@ -2,9 +2,11 @@
 //!
 //! The checks call the same functions the gateway uses (token
 //! verification, the policy scanner, body admission's [`BodyChecks`], session
-//! sampling) in the server's order, and make no network calls. Routing is a
-//! pure function of request, gateway token, and config, so the answer is what
-//! every replica would do.
+//! sampling) in the server's order, and make no network calls. Upstream
+//! selection is a pure function of request, gateway token, and config, so the
+//! answer is what every replica would do.
+
+use std::path::Path;
 
 use super::{args::Parsed, files};
 use gateway_core::{
@@ -58,7 +60,7 @@ pub fn run(
             body
         }
         Some(file) => std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?,
-        None => Vec::new(),
+        None => return Err(missing_request(parsed.value("config"), &path, env)),
     };
     let caller = match (token.as_deref(), &verifier) {
         (Some(token), Some(verifier)) => CallerToken::Token(token, verifier),
@@ -66,7 +68,7 @@ pub fn run(
     };
     let explanation = explain(
         &config,
-        parsed.value("path").unwrap_or("/v1/messages"),
+        parsed.value("endpoint").unwrap_or("/v1/messages"),
         caller,
         parsed.value("session"),
         &body,
@@ -82,6 +84,35 @@ pub fn run(
         ),
         forwarded,
     ))
+}
+
+/// The error for `wye explain` without a request: a command to copy, with a
+/// sample `wye init` wrote next to the config when there is one.
+fn missing_request(
+    flag: Option<&str>,
+    config: &Path,
+    env: &impl Fn(&str) -> Option<String>,
+) -> String {
+    let samples = files::config_dir(config).join(files::POLICY_TESTS_DIR);
+    let sample = std::fs::read_dir(&samples)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| path.extension().is_some_and(|e| e == "json"))
+        .min();
+    match sample {
+        Some(sample) => {
+            let c = flag.map_or(String::new(), |path| format!(" -c {path}"));
+            format!(
+                "missing <request.json>: a request body to explain, as in \
+                 `wye explain{c} {}`; - reads standard input",
+                files::tilde(&sample, env)
+            )
+        }
+        None => "missing <request.json>: a request body to explain, in a file, or - for \
+                 standard input"
+            .to_owned(),
+    }
 }
 
 /// The decision and the steps that led to it.
@@ -133,7 +164,10 @@ impl Explanation {
     /// The endpoint `path` names and the route serving it.
     fn endpoint<'c>(&mut self, config: &'c Config, path: &str) -> Stage<(Endpoint, &'c Route)> {
         let Some(endpoint) = api::endpoint(path) else {
-            return Err(self.refuse_as(&Refusal::NotProxied, format!("{path} is not proxied")));
+            return Err(self.refuse_as(
+                &Refusal::NotProxied,
+                format!("{path} is not an endpoint Wye serves"),
+            ));
         };
         let Some(route) = config.routes.get(endpoint.api) else {
             return Err(self.refuse_policy(&Refusal::NoRoute {
@@ -153,7 +187,7 @@ impl Explanation {
         now: u64,
     ) -> Stage<Option<Identity>> {
         if config.auth.is_none() {
-            self.step("token: not required (no [auth])".into());
+            self.step("gateway token: not required (no [auth])".into());
             return Ok(None);
         }
         match caller {
@@ -163,7 +197,7 @@ impl Explanation {
             CallerToken::Token(token, verifier) => match verifier.verify(token, now) {
                 Ok(verified) => {
                     self.step(format!(
-                        "token: valid; subject {}, key {}, expires at {}",
+                        "gateway token: valid; subject {}, key id {}, expires at {}",
                         verified.subject, verified.key_id, verified.expires_at
                     ));
                     Ok(Some(verified))
@@ -172,7 +206,7 @@ impl Explanation {
             },
             CallerToken::Trusted(claims) => {
                 self.step(format!(
-                    "token: taken as verified (signature not checked); subject {}",
+                    "gateway token: taken as verified (signature not checked); subject {}",
                     claims.subject
                 ));
                 Ok(Some(claims))
@@ -279,9 +313,9 @@ impl Explanation {
         Ok(())
     }
 
-    /// The upstream the route picks for this request, and the order
-    /// failover would follow.
-    fn route<'r>(
+    /// The upstream the route picks for this request (upstream selection),
+    /// and the order failover would follow.
+    fn selection<'r>(
         &mut self,
         route: &'r Route,
         session: Option<&str>,
@@ -306,7 +340,7 @@ impl Explanation {
                 }
             };
             self.step(format!(
-                "route: upstream {id} of {} ({how})",
+                "selection: upstream {id} of {} ({how})",
                 upstreams.len()
             ));
         }
@@ -327,7 +361,7 @@ impl Explanation {
         upstream
     }
 
-    /// Where the request goes and the key it carries.
+    /// Where the request goes and the credential it carries.
     fn upstream(&mut self, upstream: &Upstream, path: &str) {
         self.step(format!("upstream: POST {}{path}", upstream.base_url()));
         if let Some(workspace) = &upstream.workspace_id {
@@ -337,7 +371,7 @@ impl Explanation {
         }
         let header = upstream.provider.key_header();
         self.step(match &upstream.provider_key {
-            ProviderKey::ForwardCaller => "provider key: the caller's own".into(),
+            ProviderKey::ForwardCaller => "credential: the caller's own (passthrough)".into(),
             source => format!("provider key: {header} from {source}"),
         });
     }
@@ -475,7 +509,7 @@ pub fn explain(
             route.prefixes_model_ids(),
         );
         out.policy(config, api, &checks, identity.as_ref(), body)?;
-        let upstream = out.route(route, session, identity.as_ref());
+        let upstream = out.selection(route, session, identity.as_ref());
         out.upstream(upstream, path);
         out.model_and_price(config, upstream, api, checks.output_ceiling, body);
         if api == Api::Messages {

@@ -49,7 +49,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Policy**: the rules in config that decide a request: model permissions, output-token ceilings, aliases, upstream selection, failover. Not: the whole config, retry policy.
 - **Decision**: what Wye does with one request: **forward** it, or **refuse** it with an error the client reads. Not: reject (that is the upstream's).
 - **Refusal**: Wye's own error answer, in the endpoint's error shape: `400`, `401`, `403`, `404`, `408`, `413`, or `415`, or `529`/`503` when it is overloaded.
-- **Checks**: the offline commands that show or test what the gateway would do: `wye explain` (one request's decision), `wye policy-test` (expected decisions in CI), `wye policy-diff` (whether a config change widens access), `wye doctor` (secrets, files, and endpoints), `wye validate`.
+- **Checks**: the offline commands that show or test what the gateway would do: `wye explain` (one request's decision), `wye policy-test` (expected decisions in CI), `wye policy-diff` (whether a config change widens access), `wye doctor` (secrets, files, and upstreams), `wye validate`.
 
 ## Usage and cost
 

@@ -23,9 +23,10 @@ A user's files live in `~/.wye`, or `$WYE_HOME`:
 | File | What it is | Written by | Read by |
 |---|---|---|---|
 | `wye.toml` | The config | `wye init` | every command that takes `-c` |
-| `usage.jsonl` | Usage records | `wye service`, or your redirect | `wye report` |
-| `wye.log` | The background gateway's messages | `wye service` | you, when it does not answer |
-| `issuer.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
+| `policy-tests/` | Sample requests and the decisions they expect, next to the config | `wye init` | `wye policy-test`, `wye explain` |
+| `usage.jsonl` | The usage log: usage records | `wye service`, or your redirect | `wye report` |
+| `wye.log` | The message log: the background gateway's messages | `wye service` | you, when it does not answer |
+| `signing.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
 | `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
 
 A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.
@@ -70,7 +71,9 @@ Clients read their own: the SDKs' `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `OP
 
 What `--help` does not say.
 
-**`wye init`**: [choosing a setup](guide.md#choosing-a-setup).
+Run with no argument, every command does what its name says on the config it finds, or fails with one line that says what to run next: `wye explain` names a sample from `policy-tests/`, `wye claude` and `wye probe` say to run `wye init` when nothing answers and there is no config, and `wye token keygen` refuses to replace the key `wye token issue` signs with.
+
+**`wye init`**: [choosing a setup](guide.md#choosing-a-setup). Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They pass against the config it wrote, so `wye policy-test` passes right after `wye init`, and fails once a config change alters one of those decisions. A case whose request or expectation exists is kept as it is.
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
 
@@ -83,15 +86,15 @@ Not checked yet: model availability per upstream.
 
 **`wye validate`** parses the config and reads the identity providers' key sets, without starting the gateway or resolving secrets, so CI can run it without credentials. `wye doctor` checks the rest.
 
-**`wye explain`** prints each check `serve` would make for one request, offline, calling the same functions in the same order: endpoint, token (verified at the current time), body size, alias, model permission, output-token ceiling, the route's upstream and failover order, upstream URL and provider key (by name, never value), the provider's model id, the price, whether cache diagnostics would hash it, and, with `--target-model` or `[upgrade_check]`, what each target would reject, the fix, and the source.
+**`wye explain`** prints each check `serve` would make for one request, offline, calling the same functions in the same order: endpoint (`--endpoint`, default `/v1/messages`), gateway token (verified at the current time; `--token-file`, never `$WYE_TOKEN`), body size, alias, model permission, output-token ceiling, [upstream selection](glossary.md#requests-and-where-they-go) and failover order, upstream URL and the credential (a provider key by name, never value, or the caller's own under passthrough), the provider's model id, the price, whether cache diagnostics would hash it, and, with `--target-model` or `[upgrade_check]`, what each target would reject, the fix, and the source.
 
 A refusal prints the status and error the gateway would send. The body is read as the gateway reads it: up to its `model`, then the rest when permissions or a ceiling apply. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the gateway answers a compressed or non-UTF-8 body under a policy with `415`).
 
-**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models), after aliases), `upstream`, `path`, `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
+**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models), after aliases), `upstream`, `endpoint` (default `/v1/messages`), `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. Without `<dir>`, the cases are in `policy-tests/` next to the config, where `wye init` writes samples. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
-- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_gateway_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye's own tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
+- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_gateway_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
 - Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows; output-token ceilings and trusted issuers compare by value.
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
@@ -190,7 +193,7 @@ Whatever sits in front must not buffer event streams (nginx: `proxy_buffering of
 
 On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops (on Linux, if it fails), through the operating system's own service manager, as you. It needs no sudo and changes nothing outside your home directory.
 
-It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config>` with stdout appended to `usage.jsonl` and stderr to `wye.log`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
+It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config>` with stdout appended to the usage log `usage.jsonl` and stderr to the message log `wye.log`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
 
 Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment.
 
@@ -200,9 +203,9 @@ Before installing, the config is checked as the service will start it: it parses
 - Under systemd, it refuses paths containing spaces, quotes, `$`, or a backslash.
 
 ```bash
-wye service status      # installed? what it runs, the log's size, whether it answers
+wye service status      # installed? what it runs, its logs, whether it answers
 wye service restart     # after a config edit or a new wye; checks the config first
-wye service uninstall   # stops it and removes the file; the config and the log stay
+wye service uninstall   # stops it and removes the file; the config and logs stay
 ```
 
 `restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.

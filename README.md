@@ -59,8 +59,8 @@ $ wye report
 3 requests in 1 session (0 other lines skipped); outcomes: completed 3
 
 By request class
-                                      cache  cache
-  class           reqs  input output   read  write    hit      cost  time tools
+                                      cache  cache                   time  time
+  class           reqs  input output   read  write    hit      cost model tools
   all                3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
   main               3     36    114   149K   4.6K  97.0%   $0.0553   14s  1.8s
 ...
@@ -72,7 +72,7 @@ By request class
 - **Gives a team scoped access.** Gateway tokens instead of the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and its output-token ceiling; anything else is refused before the provider gets the whole request. With `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker shows only those models. ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), split by weight, with failover between them. Each key or account is an [upstream](docs/glossary.md#requests-and-where-they-go). ([several keys or providers](docs/guide.md#several-keys-or-providers))
 - **Changes models in one place.** Aliases map a name to a model, per team or token. Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
-- **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` run in CI and fail when a change widens access. `wye doctor` checks provider keys, files, and endpoints, and bills nothing. ([commands](docs/operations.md#commands))
+- **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` run in CI and fail when a change widens access. `wye doctor` checks secrets, files, and upstreams, and bills nothing. ([commands](docs/operations.md#commands))
 - **Works with existing clients.** Point Claude Code, Codex, or any app on the official Anthropic or OpenAI SDK at it by base URL; `wye claude` and `wye codex` do it for you. Messages, Responses, and Chat Completions go through untranslated, except a model id your config maps. Streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. For more traffic, run more replicas behind any load balancer. They share no state and never talk to each other, and every replica sends a session to the same upstream (hashed from its session id), so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment-modes))
 
@@ -178,10 +178,10 @@ Costs are exact decimal strings, computed in integers. A model with no price is 
 $ wye explain -c wye.toml --session session-a request.json
 config: wye.toml
 endpoint: POST /v1/messages
-token: not required (no [auth])
+gateway token: not required (no [auth])
 body: 88 bytes (limit 32 MiB)
 model: claude-opus-5-5; allowed by config: any; by token: any
-route: upstream bedrock-us of 2 (cache_affine by session id)
+selection: upstream bedrock-us of 2 (cache_affine by session id)
 failover: on 429, 529, connect to anthropic in that order, for bodies up to 8 MiB
 upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages
 provider key: x-api-key from $BEDROCK_API_KEY

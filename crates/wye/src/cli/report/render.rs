@@ -202,14 +202,18 @@ impl Columns {
         let _ = writeln!(out, "\n{}", self.paint.bold(title));
     }
 
-    /// Two header lines: "cache" over the prompt-cache columns, then the
-    /// column names.
+    /// Two header lines: "cache" over the prompt-cache columns and "time"
+    /// over the time columns, then the column names.
     fn header(&self, out: &mut String, first: &str) {
-        let _ = writeln!(
+        let _ = write!(
             out,
-            "  {:NAME$} {:5} {:6} {:6} {:>6} {:>6}",
-            "", "", "", "", "cache", "cache"
+            "  {:NAME$} {:5} {:6} {:6} {:>6} {:>6} {:6}",
+            "", "", "", "", "cache", "cache", ""
         );
+        if self.cost {
+            let _ = write!(out, " {:9}", "");
+        }
+        let _ = writeln!(out, " {:>5} {:>5}", "time", "time");
         let _ = write!(
             out,
             "  {first:<NAME$} {:>5} {:>6} {:>6} {:>6} {:>6} {:>6}",
@@ -218,7 +222,7 @@ impl Columns {
         if self.cost {
             let _ = write!(out, " {:>9}", "cost");
         }
-        let _ = writeln!(out, " {:>5} {:>5}", "time", "tools");
+        let _ = writeln!(out, " {:>5} {:>5}", "model", "tools");
     }
 
     fn row(&self, out: &mut String, name: &str, g: &Group) {
