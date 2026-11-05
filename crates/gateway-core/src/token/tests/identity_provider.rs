@@ -7,13 +7,13 @@ use ring::signature::KeyPair;
 use wye_testkit::jwt::{IdpKey, jwks};
 
 use super::super::*;
-use crate::config::{Grant, Issuer, OwnIssuer, PublicKey};
+use crate::config::{Grant, IdentityProvider, OwnIssuer, PublicKey};
 
 const NOW: u64 = 1_800_000_000;
 const ISS: &str = "https://idp.example.com";
 
-fn issuer(algorithm: Algorithm, grants: Vec<Grant>) -> Issuer {
-    Issuer {
+fn issuer(algorithm: Algorithm, grants: Vec<Grant>) -> IdentityProvider {
+    IdentityProvider {
         issuer: ISS.into(),
         audience: "wye-prod".into(),
         algorithm,
@@ -23,11 +23,11 @@ fn issuer(algorithm: Algorithm, grants: Vec<Grant>) -> Issuer {
     }
 }
 
-fn auth(issuers: Vec<Issuer>) -> Auth {
+fn auth(identity_providers: Vec<IdentityProvider>) -> Auth {
     Auth {
         own: None,
-        issuers,
-        max_token_ttl: Duration::from_secs(86_400),
+        identity_providers,
+        max_gateway_token_ttl: Duration::from_secs(86_400),
         models: None,
         max_output_tokens: None,
     }
@@ -42,7 +42,7 @@ fn grant(claim: &str, value: &str, models: &[&str]) -> Grant {
 }
 
 /// A verifier trusting `key` (kid `idp-1`) for `issuer`.
-fn verifier_for(key: &IdpKey, issuer: Issuer) -> Verifier {
+fn verifier_for(key: &IdpKey, issuer: IdentityProvider) -> Verifier {
     let set = IssuerKeys::parse(jwks(&[(key, "idp-1")]).as_bytes(), issuer.algorithm).unwrap();
     Verifier::new(&auth(vec![issuer]), vec![set]).unwrap()
 }

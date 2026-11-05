@@ -31,7 +31,7 @@ pub use startup::{Resources, UpstreamAuth, UpstreamResources, verifier};
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// A value one side sets once and the other reads after: a body's scan
-/// result or an upstream refusal, set by the request body in hyper's client
+/// result or a policy refusal, set by the request body in hyper's client
 /// and read by the request's own task. An error or a dropped body leaves it
 /// empty.
 pub(crate) type Slot<T> = std::sync::Arc<std::sync::OnceLock<T>>;

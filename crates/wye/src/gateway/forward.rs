@@ -126,7 +126,8 @@ impl Gateway {
         }
         let (mut body, mut handback) = match &failover {
             Some(f) => {
-                let (body, handback) = FailoverBody::kept(body, &self.failover_kept, bounds(f));
+                let (body, handback) =
+                    FailoverBody::kept(body, &self.failover_kept, self.bounds(f));
                 (body, Some(handback))
             }
             None => (FailoverBody::once(body), None),
@@ -177,11 +178,20 @@ impl Gateway {
                         upstream: upstream.id.clone(),
                         reason,
                     });
-                    (body, *handback) = FailoverBody::resume(resend, bounds(f));
+                    (body, *handback) = FailoverBody::resume(resend, self.bounds(f));
                     continue;
                 }
             }
             return result;
+        }
+    }
+
+    /// The bounds a body kept for `failover` stays within: the route's
+    /// per-request bound and the process-wide one.
+    fn bounds(&self, failover: &route::Failover) -> Bounds {
+        Bounds {
+            max_body: usize::try_from(failover.max_body_bytes).unwrap_or(usize::MAX),
+            max_kept: self.max_total_kept_bytes,
         }
     }
 
@@ -221,7 +231,7 @@ fn rejection(
         Err(ForwardError::Connect | ForwardError::Upstream) => FailoverReason::Connect,
         Err(_) => return None,
     };
-    failover?.retries(reason).then_some(reason)
+    failover?.fails_over_on(reason).then_some(reason)
 }
 
 /// The body a rejected attempt hands back: the bytes it sent plus the unread
@@ -267,13 +277,6 @@ fn with_model_id(
                 resend
             })
         }
-    }
-}
-
-fn bounds(failover: &route::Failover) -> Bounds {
-    Bounds {
-        max_body: usize::try_from(failover.max_body_bytes).unwrap_or(usize::MAX),
-        max_kept: usize::try_from(failover.max_kept_bytes).unwrap_or(usize::MAX),
     }
 }
 

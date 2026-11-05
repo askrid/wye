@@ -101,7 +101,7 @@ pub(super) struct Line<'a> {
     /// For a checked request, the target models that would reject it and why.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upgrade_issues: Option<UpgradeIssues<'a>>,
-    /// Upstreams that refused the request before `upstream` answered.
+    /// Upstreams that rejected the request before `upstream` answered.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub(super) failovers: &'a [RejectedAttempt],
 }

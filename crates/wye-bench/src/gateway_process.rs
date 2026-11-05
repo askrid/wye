@@ -43,9 +43,9 @@ pub enum Variant {
     /// A Claude route of two accounts and failover: every request body is
     /// kept for resending until the response arrives.
     Failover,
-    /// [`Self::Failover`] whose first account (tried first) refuses every
-    /// fourth request with `429` before reading it: each refused request
-    /// moves to the second account.
+    /// [`Self::Failover`] whose first upstream (tried first) rejects every
+    /// fourth request with `429` before reading it: each rejected request
+    /// moves to the second upstream.
     Refused,
 }
 

@@ -8,7 +8,7 @@ fn parse_route(route: &str) -> Result<Config, ConfigError> {
     ))
 }
 
-const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
 
 #[test]
 fn route_upstreams_parse_with_ids_and_weights() {
@@ -16,7 +16,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
         "select = \"cache_affine\"\n\
          [[routes.claude.upstreams]]\nid = \"team-a\"\nweight = 3\n{ACCOUNT}\
          [[routes.claude.upstreams]]\nid = \"team-b\"\nprovider = \"anthropic\"\n\
-         base_url = \"https://api.anthropic.com\"\napi_key_file = \"b.key\"\n"
+         base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"b.key\"\n"
     ))
     .unwrap();
     let upstreams = claude(&config).upstreams();
@@ -25,10 +25,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
     assert_eq!(upstreams[0].weight, 3);
     assert_eq!(upstreams[1].id.as_deref(), Some("team-b"));
     assert_eq!(upstreams[1].weight, 1);
-    assert_eq!(
-        upstreams[1].provider_key,
-        ProviderKey::ApiKeyFile("b.key".into())
-    );
+    assert_eq!(upstreams[1].provider_key, ProviderKey::File("b.key".into()));
     // The single [upstream] has no id.
     let single = parse(ACCOUNT).unwrap();
     assert_eq!(claude(&single).upstreams()[0].id, None);
@@ -39,15 +36,21 @@ fn route_upstreams_are_validated() {
     let entry = |extra: &str| format!("[[routes.claude.upstreams]]\n{extra}\n{ACCOUNT}");
     let rejected = [
         (String::new(), "missing field `upstreams`"),
-        ("upstreams = []".into(), "between 1 and 16"),
-        (entry(""), "needs an id"),
+        (
+            "upstreams = []".into(),
+            "routes.claude.upstreams must have between 1 and 16 entries",
+        ),
+        (
+            entry(""),
+            "routes.claude.upstreams: every entry needs an id",
+        ),
         (entry("id = \"a b\""), "letters, digits"),
         (entry("id = \"\""), "letters, digits"),
         (entry("id = \"a\"") + &entry("id = \"a\""), "used twice"),
         (
             entry("id = \"a\"")
                 + "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"a\"\n\
-                   base_url = \"https://api.openai.com\"\napi_key_env = \"O\"\n",
+                   base_url = \"https://api.openai.com\"\nprovider_key_env = \"O\"\n",
             "routes.openai.upstreams \"a\": id is used by routes.claude too",
         ),
         (entry("id = \"a\"\nweight = 0"), "between 1 and 1000"),
@@ -55,7 +58,7 @@ fn route_upstreams_are_validated() {
         (entry("id = \"a\"\nprovider = \"vertex\""), "provider"),
         (
             format!("select = \"random\"\n{}", entry("id = \"a\"")),
-            "cache_affine",
+            "routes.claude.select must be \"cache_affine\" or \"ordered\"",
         ),
         (
             "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\n\
@@ -64,8 +67,24 @@ fn route_upstreams_are_validated() {
             "single [upstream]",
         ),
         (
-            entry("id = \"a\"").replace("api_key_env = \"K\"", "api_key_env = \"1K\""),
-            "routes.claude.upstreams \"a\": upstream.api_key_env",
+            entry("id = \"a\"").replace("provider_key_env = \"K\"", "provider_key_env = \"1K\""),
+            "routes.claude.upstreams \"a\": provider_key_env: \"1K\" is not a valid",
+        ),
+        (
+            entry("id = \"a\"").replace("https://api.anthropic.com", "http://x.example"),
+            "routes.claude.upstreams \"a\": base_url \"http://x.example\": plain http",
+        ),
+        (
+            entry("id = \"a\"\nprovider_key_file = \"k\""),
+            "routes.claude.upstreams \"a\": set only one of provider_key_env and provider_key_file",
+        ),
+        (
+            "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://x.example\"\n".into(),
+            "routes.claude.upstreams \"a\": set provider_key_env or provider_key_file",
+        ),
+        (
+            entry("id = \"a\"\nconnect_timeout_secs = 0"),
+            "routes.claude.upstreams \"a\": connect_timeout_secs must be greater than zero",
         ),
     ];
     for (route, expected) in rejected {
@@ -96,7 +115,7 @@ fn upstream_and_routes_are_exclusive() {
 #[test]
 fn openai_route_alone_or_beside_claude() {
     let openai = "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
-                  base_url = \"https://api.openai.com\"\napi_key_env = \"OPENAI_API_KEY\"\n";
+                  base_url = \"https://api.openai.com\"\nprovider_key_env = \"OPENAI_API_KEY\"\n";
     let alone =
         Config::from_toml_str(&format!("[server]\nlisten = \"127.0.0.1:8080\"\n{openai}")).unwrap();
     assert!(alone.routes.claude.is_none());
@@ -135,10 +154,17 @@ fn base_url_ending_in_v1_is_refused() {
         "https://api.openai.com/v1",
         "https://gw.example.com/anthropic/v1/",
     ] {
-        let err = parse(&format!("base_url = \"{url}\"\napi_key_env = \"K\"")).unwrap_err();
-        assert!(err.to_string().contains("drop the trailing /v1"), "{err}");
+        let err = parse(&format!("base_url = \"{url}\"\nprovider_key_env = \"K\"")).unwrap_err();
+        assert!(
+            err.to_string().starts_with(&format!(
+                "upstream.base_url \"{url}\": drop the trailing /v1"
+            )),
+            "{err}"
+        );
     }
-    assert!(parse("base_url = \"https://gw.example.com/v1beta\"\napi_key_env = \"K\"").is_ok());
+    assert!(
+        parse("base_url = \"https://gw.example.com/v1beta\"\nprovider_key_env = \"K\"").is_ok()
+    );
 }
 
 #[test]
@@ -146,7 +172,7 @@ fn claude_platform_on_aws_needs_a_workspace() {
     let entry = |extra: &str| {
         format!(
             "[[routes.claude.upstreams]]\nid = \"aws\"\n{extra}\n\
-             base_url = \"https://aws-external-anthropic.us-west-2.api.aws\"\napi_key_env = \"K\"\n"
+             base_url = \"https://aws-external-anthropic.us-west-2.api.aws\"\nprovider_key_env = \"K\"\n"
         )
     };
     let ok = parse_route(&entry(
@@ -185,7 +211,7 @@ fn claude_platform_on_aws_needs_a_workspace() {
 fn bedrock_takes_an_api_key_and_prefixes_model_ids() {
     let route = parse_route(
         "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
-         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"K\"\n",
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key_env = \"K\"\n",
     )
     .unwrap();
     let upstream = &claude(&route).upstreams()[0];
@@ -199,7 +225,7 @@ fn bedrock_takes_an_api_key_and_prefixes_model_ids() {
 fn pricing_scoped_to_upstreams_names_route_upstreams() {
     let route = format!(
         "[[routes.claude.upstreams]]\nid = \"aws-east\"\n{ACCOUNT}\
-         [pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"claude-*\"]\n\
+         [pricing]\nversion = \"v\"\n[[pricing.prices]]\nmodels = [\"claude-*\"]\n\
          input = \"1\"\noutput = \"2\"\nupstreams = [\"UPSTREAM\"]\n"
     );
     let ok = parse_route(&route.replace("UPSTREAM", "aws-east")).unwrap();

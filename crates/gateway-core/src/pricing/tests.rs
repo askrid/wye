@@ -15,7 +15,7 @@ fn prices(input: &str, output: &str) -> Prices {
 fn table(entry_prices: Prices, tiers: Vec<Tier>) -> Pricing {
     Pricing {
         version: "test".into(),
-        entries: vec![PricedModels {
+        entries: vec![PriceEntry {
             models: vec![ModelPattern::parse("claude-opus-*").unwrap()].into(),
             upstreams: Box::new([]),
             prices: entry_prices,
@@ -234,7 +234,7 @@ proptest! {
 
 #[test]
 fn an_entry_scoped_to_upstreams_prices_only_their_requests() {
-    let entry = |upstreams: &[&str], input: &str| PricedModels {
+    let entry = |upstreams: &[&str], input: &str| PriceEntry {
         models: vec![ModelPattern::parse("claude-opus-*").unwrap()].into(),
         upstreams: upstreams.iter().map(|u| Box::from(*u)).collect(),
         prices: prices(input, "0"),

@@ -121,7 +121,7 @@ Each endpoint forwards to the corresponding upstream endpoint without converting
 
 **Bodies.** Preserve request JSON, unknown fields, tool definitions, and provider-native options. The request body streams upstream unchanged beyond the allowlist below and is never re-serialized.
 
-`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#gateway-tokens), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within `server.max_held_request_bytes`.
+`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#gateway-tokens), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within `server.max_total_held_bytes`.
 
 Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
@@ -290,7 +290,7 @@ Sources: Anthropic's platform pages for Bedrock, Vertex, and Claude Platform on 
 
 **Failover within a request** (implemented, on `[routes.openai]` too) happens only where it cannot duplicate billing, and only before any response byte reached the client. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover ([retries](#failover)), and config refuses any other reason.
 
-Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `failover_max_kept_bytes` across the process (default 256 MiB, separate from `server.max_held_request_bytes`, so kept bodies never starve the hold that reads `model`).
+Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `server.max_total_kept_bytes` across the process (default 256 MiB, separate from `server.max_total_held_bytes`, so kept bodies never starve the hold that reads `model`).
 
 A dropped attempt hands back its sent chunks plus the unread rest of the client's body through a oneshot channel, so a rejection that arrives mid-upload moves on too: the next upstream gets the sent bytes, then the rest as the client sends it. A body over either bound, or an attempt still holding its body 100 ms after the rejection (hyper still writing), is answered as it is, never refused and never partly resent.
 
@@ -334,7 +334,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MAX_CONNECTION_BUFFER` | `wye/src/server.rs` | A client connection's read buffer, request headers included |
 | `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer |
 | `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | A rejected attempt's hand-back of its body for failover |
-| `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_held_request_bytes` and `failover_max_kept_bytes` (1 KiB), so tiny chunks cannot pin more than those say |
+| `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_total_held_bytes` and `max_total_kept_bytes` (1 KiB), so tiny chunks cannot pin more than those say |
 | `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | A held body's longest silence (60 s) and total time to `model` (5 minutes); then `408` |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer; more are dropped and counted |
 | `WRITE_BATCH` | `wye/src/usage_log/writer.rs` | Records formatted into one write, which bounds the write buffer (below) |

@@ -10,10 +10,10 @@ pub struct Auth {
     /// providers are trusted.
     pub own: Option<OwnIssuer>,
     /// Identity providers whose tokens are accepted directly.
-    pub issuers: Vec<Issuer>,
+    pub identity_providers: Vec<IdentityProvider>,
     /// Longest accepted `exp - iat`: without a revocation list, offboarding
     /// takes effect when the person's last token expires.
-    pub max_token_ttl: Duration,
+    pub max_gateway_token_ttl: Duration,
     /// Models any token may use; `None` allows every model. A token's
     /// `models` claim, or an issuer's grants, narrow this, never widen it.
     pub models: Option<Vec<ModelPattern>>,
@@ -39,10 +39,10 @@ pub struct PublicKey {
     pub ed25519_public_key: [u8; 32],
 }
 
-/// An identity provider (`[[auth.issuers]]`) whose JWTs Wye verifies
+/// An identity provider (`[[auth.identity_providers]]`) whose JWTs Wye verifies
 /// directly, with keys pinned in config: no runtime key fetching.
 #[derive(Debug, Clone)]
-pub struct Issuer {
+pub struct IdentityProvider {
     /// Required `iss` claim.
     pub issuer: String,
     /// Required `aud` claim (one of them, if a list).

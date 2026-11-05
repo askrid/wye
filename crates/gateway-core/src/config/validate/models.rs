@@ -5,7 +5,7 @@ use serde::Deserialize;
 use super::*;
 use crate::{
     alias::{Alias, AliasError},
-    pricing::{MAX_PRICED_MODELS, MAX_TIERS, PricedModels, Prices, Pricing, Tier, parse_price},
+    pricing::{MAX_PRICE_ENTRIES, MAX_TIERS, PriceEntry, Prices, Pricing, Tier, parse_price},
 };
 
 #[derive(Deserialize)]
@@ -19,12 +19,12 @@ pub(crate) struct RawUpgradeCheck {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawPricing {
     pub(crate) version: String,
-    pub(crate) models: Vec<RawPricedModels>,
+    pub(crate) prices: Vec<RawPriceEntry>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawPricedModels {
+pub(crate) struct RawPriceEntry {
     pub(crate) models: Vec<String>,
     #[serde(default)]
     pub(crate) upstreams: Vec<String>,
@@ -76,9 +76,9 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
             "pricing.version must be 1-128 printable characters",
         ));
     }
-    if raw.models.is_empty() || raw.models.len() > MAX_PRICED_MODELS {
+    if raw.prices.is_empty() || raw.prices.len() > MAX_PRICE_ENTRIES {
         return Err(ConfigError::Invalid(
-            "pricing.models: 1-256 entries; omit [pricing] to record no cost",
+            "pricing.prices: 1-256 entries; omit [pricing] to record no cost",
         ));
     }
     let price = |text: &str| {
@@ -87,11 +87,11 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
         ))
     };
     let optional = |text: Option<String>| text.as_deref().map(price).transpose();
-    let mut entries = Vec::with_capacity(raw.models.len());
-    for entry in raw.models {
+    let mut entries = Vec::with_capacity(raw.prices.len());
+    for entry in raw.prices {
         if entry.models.is_empty() {
             return Err(ConfigError::Invalid(
-                "pricing.models: models must not be empty",
+                "pricing.prices: models must not be empty",
             ));
         }
         let models = entry
@@ -100,11 +100,11 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
             .map(|m| ModelPattern::parse(m))
             .collect::<Option<Box<[_]>>>()
             .ok_or(ConfigError::Invalid(
-                "pricing.models: a model is a name or a prefix ending in *",
+                "pricing.prices: a model is a name or a prefix ending in *",
             ))?;
         if entry.tiers.len() > MAX_TIERS {
             return Err(ConfigError::Invalid(
-                "pricing.models.tiers: at most 8 tiers",
+                "pricing.prices.tiers: at most 8 tiers",
             ));
         }
         let mut tiers = entry
@@ -126,10 +126,10 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
             w.first().map(|t| t.above_prompt_tokens) == w.get(1).map(|t| t.above_prompt_tokens)
         }) {
             return Err(ConfigError::Invalid(
-                "pricing.models.tiers: duplicate above_prompt_tokens",
+                "pricing.prices.tiers: duplicate above_prompt_tokens",
             ));
         }
-        entries.push(PricedModels {
+        entries.push(PriceEntry {
             models,
             upstreams: entry.upstreams.into_iter().map(Into::into).collect(),
             prices: Prices {

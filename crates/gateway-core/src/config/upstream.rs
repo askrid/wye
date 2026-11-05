@@ -93,10 +93,10 @@ pub enum UpstreamHttpVersion {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderKey {
     /// Provider API key read from this environment variable at startup.
-    ApiKeyEnv(String),
+    Env(String),
     /// Provider API key read from this file at startup (a mounted secret);
     /// relative to the config file.
-    ApiKeyFile(PathBuf),
+    File(PathBuf),
     /// Forward the caller's own credential (loopback only).
     ForwardCaller,
 }
@@ -105,8 +105,8 @@ pub enum ProviderKey {
 impl fmt::Display for ProviderKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ApiKeyEnv(name) => write!(f, "${name}"),
-            Self::ApiKeyFile(path) => write!(f, "{}", path.display()),
+            Self::Env(name) => write!(f, "${name}"),
+            Self::File(path) => write!(f, "{}", path.display()),
             Self::ForwardCaller => f.write_str("the caller's own"),
         }
     }

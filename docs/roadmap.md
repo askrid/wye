@@ -33,7 +33,7 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 
 ### M1: team-ready Claude Code
 
-Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `upstream.api_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
+Built: Wye's own and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `upstream.provider_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
 
 Open:
 
@@ -127,7 +127,7 @@ Open (the auth questions are in [open design decisions](architecture.md#open-des
 - An opt-in smoke test per provider against the real service, for SDK compatibility; it does not replace the deterministic protocol tests.
 - SigV4 for Bedrock and Claude Platform on AWS.
 - Google Vertex AI: model in the URL, the `anthropic_version` splice (property-tested: every other byte unchanged), access tokens.
-- Re-reading an `api_key_file` when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
+- Re-reading a `provider_key_file` when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
 - Excluding an upstream for a model or feature it does not serve.
 
 Exit: a team serves Claude Code from at least two providers, keeps prompt-cache hit rates within a few points of a single provider, rides out one provider's overload without failed turns, and sees cost per provider.

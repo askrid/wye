@@ -1,4 +1,4 @@
-//! Failover within a route: refusals that prove a request was not processed
+//! Failover within a route: rejections that prove a request was not processed
 //! move it to the next upstream, with the same bytes; nothing else does.
 
 use super::harness::*;
@@ -21,16 +21,16 @@ async fn upstream(status: StatusCode) -> (SocketAddr, mpsc::Receiver<Bytes>) {
     counted(status, &Arc::default()).await
 }
 
-/// An upstream that refuses every request at once, without reading its body.
-async fn refusing(tls: Option<&TestCa>) -> SocketAddr {
-    let refuse = |_req: Request<Incoming>| async {
+/// An upstream that rejects every request at once, without reading its body.
+async fn rejecting(tls: Option<&TestCa>) -> SocketAddr {
+    let reject = |_req: Request<Incoming>| async {
         let mut res = Response::new(Full::new(Bytes::from_static(
             br#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#,
         )));
         *res.status_mut() = StatusCode::TOO_MANY_REQUESTS;
         res
     };
-    wye_testkit::spawn_upstream(refuse, tls, None).await
+    wye_testkit::spawn_upstream(reject, tls, None).await
 }
 
 fn base_url(addr: SocketAddr) -> String {
@@ -42,8 +42,8 @@ fn config(max_body: usize, route: &str, a: &str, b: &str) -> String {
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = {max_body}\n\
          [routes.claude]\nselect = \"ordered\"\n{route}\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\n{a}\napi_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\n{b}\napi_key_env = \"UNUSED\"\n"
+         [[routes.claude.upstreams]]\nid = \"a\"\n{a}\nprovider_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nid = \"b\"\n{b}\nprovider_key_env = \"UNUSED\"\n"
     )
 }
 
@@ -175,9 +175,9 @@ async fn other_failures_and_large_bodies_are_answered_as_they_are() {
 async fn failover_sends_each_provider_its_own_model_id() {
     let bedrock_body = BODY.replace("claude-opus-5-5", "anthropic.claude-opus-5-5");
     for (providers, expect) in [
-        // Anthropic refuses: Bedrock gets its own model id.
+        // Anthropic rejects: Bedrock gets its own model id.
         (("anthropic", "bedrock"), (BODY, bedrock_body.as_str())),
-        // Bedrock refuses: Anthropic gets the id the client sent.
+        // Bedrock rejects: Anthropic gets the id the client sent.
         (("bedrock", "anthropic"), (bedrock_body.as_str(), BODY)),
     ] {
         let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS).await;
@@ -202,7 +202,7 @@ async fn failover_sends_each_provider_its_own_model_id() {
 /// Past its bound a body stops being kept, which only shows once it has
 /// started: a body without a declared length.
 #[tokio::test]
-async fn a_chunked_body_too_large_to_keep_answers_the_refusal() {
+async fn a_chunked_body_too_large_to_keep_answers_the_rejection() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let hits = Arc::new(AtomicUsize::new(0));
@@ -229,14 +229,14 @@ async fn a_chunked_body_too_large_to_keep_answers_the_refusal() {
 }
 
 #[tokio::test]
-async fn a_refusal_during_the_upload_resends_the_whole_body() {
+async fn a_rejection_during_the_upload_resends_the_whole_body() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let a = refusing(None).await;
+    let a = rejecting(None).await;
     let (b, mut seen_b) = upstream(StatusCode::OK).await;
     let h = gateway("failover = [\"429\"]", a, b).await;
 
-    // The refusal arrives while the client is still uploading: hyper drops
+    // The rejection arrives while the client is still uploading: hyper drops
     // the attempt's body, which hands back the bytes sent and the unread
     // rest, so the next upstream gets the whole body as the client finishes.
     let body = format!(
@@ -276,7 +276,7 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
     use tokio::io::AsyncReadExt;
 
     // Reads the request head and a little of the body, then resets the
-    // connection, like a provider that refuses early and closes: the body
+    // connection, like a provider that rejects early and closes: the body
     // was not delivered whole, so the request cannot have been processed.
     let cutting = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let cut_addr = cutting.local_addr().unwrap();
@@ -314,11 +314,11 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn early_refusals_over_http2_move_concurrent_uploads_on() {
-    // The production shape: TLS and HTTP/2 to the provider, which refuses
+async fn early_rejections_over_http2_move_concurrent_uploads_on() {
+    // The production shape: TLS and HTTP/2 to the provider, which rejects
     // each upload before reading it.
     let ca = TestCa::generate();
-    let a = refusing(Some(&ca)).await;
+    let a = rejecting(Some(&ca)).await;
     let (b, mut seen_b) = upstream(StatusCode::OK).await;
     let config = config(
         4 << 20,
@@ -393,7 +393,7 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
 }
 
 #[tokio::test]
-async fn when_every_upstream_refuses_the_last_refusal_is_the_answer() {
+async fn when_every_upstream_rejects_the_last_rejection_is_the_answer() {
     let (a, _seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS).await;
     let last: Handler = Arc::new(|_| {
         Box::pin(async {

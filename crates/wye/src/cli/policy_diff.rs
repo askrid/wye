@@ -10,7 +10,7 @@ use std::path::Path;
 
 use gateway_core::{
     api::RouteId,
-    config::{Auth, Config, Issuer, ProviderKey},
+    config::{Auth, Config, IdentityProvider, ProviderKey},
     policy::ModelPattern,
     route::Route,
 };
@@ -66,20 +66,25 @@ impl PolicyDiff {
         let (Some(old), Some(new)) = (&old.auth, &new.auth) else {
             return Ok(());
         };
-        for issuer in &new.issuers {
+        for issuer in &new.identity_providers {
             // A new identity provider is reported with its config.
-            let Some(before) = old.issuers.iter().find(|i| i.issuer == issuer.issuer) else {
+            let Some(before) = old
+                .identity_providers
+                .iter()
+                .find(|i| i.issuer == issuer.issuer)
+            else {
                 continue;
             };
             let (was, now) = (key_set(before, old_dir)?, key_set(issuer, new_dir)?);
             let name = &issuer.issuer;
             for kid in now.added_since(&was) {
-                self.widens
-                    .push(format!("[[auth.issuers]] {name}: key {kid} newly trusted"));
+                self.widens.push(format!(
+                    "[[auth.identity_providers]] {name}: key {kid} newly trusted"
+                ));
             }
             for kid in was.added_since(&now) {
                 self.narrows.push(format!(
-                    "[[auth.issuers]] {name}: key {kid} no longer trusted"
+                    "[[auth.identity_providers]] {name}: key {kid} no longer trusted"
                 ));
             }
         }
@@ -144,13 +149,16 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             .push(format!("[auth] max_output_tokens: no ceiling -> {b}")),
         _ => {}
     }
-    let (a, b) = (old.max_token_ttl.as_secs(), new.max_token_ttl.as_secs());
+    let (a, b) = (
+        old.max_gateway_token_ttl.as_secs(),
+        new.max_gateway_token_ttl.as_secs(),
+    );
     if b > a {
         diff.widens
-            .push(format!("[auth] max_token_ttl_secs: {a} -> {b}"));
+            .push(format!("[auth] max_gateway_token_ttl_secs: {a} -> {b}"));
     } else if b < a {
         diff.narrows
-            .push(format!("[auth] max_token_ttl_secs: {a} -> {b}"));
+            .push(format!("[auth] max_gateway_token_ttl_secs: {a} -> {b}"));
     }
     match (&old.own, &new.own) {
         (None, Some(_)) => diff.widens.push("[auth] Wye's own tokens accepted".into()),
@@ -171,7 +179,7 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
                     .any(|k| k.ed25519_public_key == key.ed25519_public_key)
                 {
                     diff.widens.push(format!(
-                        "[[auth.keys]] {}: a new signing key is trusted",
+                        "[[auth.signing_keys]] {}: a new signing key is trusted",
                         key.id
                     ));
                 }
@@ -182,26 +190,36 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
                     .iter()
                     .any(|k| k.ed25519_public_key == key.ed25519_public_key)
                 {
-                    diff.narrows
-                        .push(format!("[[auth.keys]] {}: no longer trusted", key.id));
+                    diff.narrows.push(format!(
+                        "[[auth.signing_keys]] {}: no longer trusted",
+                        key.id
+                    ));
                 }
             }
         }
         (None, None) => {}
     }
-    for issuer in &new.issuers {
-        match old.issuers.iter().find(|i| i.issuer == issuer.issuer) {
+    for issuer in &new.identity_providers {
+        match old
+            .identity_providers
+            .iter()
+            .find(|i| i.issuer == issuer.issuer)
+        {
             None => diff.widens.push(format!(
-                "[[auth.issuers]] {}: tokens from this identity provider accepted",
+                "[[auth.identity_providers]] {}: tokens from this identity provider accepted",
                 issuer.issuer
             )),
             Some(before) => issuer_change(diff, before, issuer),
         }
     }
-    for issuer in &old.issuers {
-        if !new.issuers.iter().any(|i| i.issuer == issuer.issuer) {
+    for issuer in &old.identity_providers {
+        if !new
+            .identity_providers
+            .iter()
+            .any(|i| i.issuer == issuer.issuer)
+        {
             diff.narrows.push(format!(
-                "[[auth.issuers]] {}: no longer accepted",
+                "[[auth.identity_providers]] {}: no longer accepted",
                 issuer.issuer
             ));
         }
@@ -209,7 +227,7 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
 }
 
 /// The same identity provider in both configs.
-fn issuer_change(diff: &mut PolicyDiff, old: &Issuer, new: &Issuer) {
+fn issuer_change(diff: &mut PolicyDiff, old: &IdentityProvider, new: &IdentityProvider) {
     let name = &new.issuer;
     // Which tokens verify, and whose subject they carry: review each change.
     // The key set's keys compare in `PolicyDiff::key_sets`.
@@ -218,22 +236,23 @@ fn issuer_change(diff: &mut PolicyDiff, old: &Issuer, new: &Issuer) {
         || old.subject_claim != new.subject_claim
     {
         diff.widens.push(format!(
-            "[[auth.issuers]] {name}: audience, algorithm, or subject claim changed"
+            "[[auth.identity_providers]] {name}: audience, algorithm, or subject claim changed"
         ));
     }
     match (old.grants.is_empty(), new.grants.is_empty()) {
         // No grants: every token gets the [auth] models ceiling.
         (false, true) => diff.widens.push(format!(
-            "[[auth.issuers]] {name}: grants removed, every token gets the [auth] models ceiling"
+            "[[auth.identity_providers]] {name}: grants removed, every token gets the \
+             [auth] models ceiling"
         )),
         (true, false) => diff.narrows.push(format!(
-            "[[auth.issuers]] {name}: grants added, a token matching none may use no model"
+            "[[auth.identity_providers]] {name}: grants added, a token matching none \
+             may use no model"
         )),
         (true, true) => {}
         (false, false) => {
-            let granted = |issuer: &Issuer, claim: &str, value: &str| -> Vec<ModelPattern> {
-                issuer
-                    .grants
+            let granted = |idp: &IdentityProvider, claim: &str, value: &str| -> Vec<ModelPattern> {
+                idp.grants
                     .iter()
                     .filter(|g| g.claim == claim && g.value == value)
                     .flat_map(|g| g.models.iter().cloned())
@@ -249,7 +268,10 @@ fn issuer_change(diff: &mut PolicyDiff, old: &Issuer, new: &Issuer) {
                 let (before, after) = (granted(old, key.0, key.1), granted(new, key.0, key.1));
                 models(
                     diff,
-                    &format!("[[auth.issuers]] {name} grant {}={}", key.0, key.1),
+                    &format!(
+                        "[[auth.identity_providers]] {name} grant {}={}",
+                        key.0, key.1
+                    ),
                     Some(&before),
                     Some(&after),
                 );

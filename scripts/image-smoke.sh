@@ -29,12 +29,12 @@ listen = "0.0.0.0:8080"
 
 [upstream]
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_API_KEY"
+provider_key_env = "ANTHROPIC_API_KEY"
 
 [auth]
 issuer = "wye"
 audience = "wye-smoke"
-[[auth.keys]]
+[[auth.signing_keys]]
 id = "k1"
 $(cat "$work/key.toml")
 TOML

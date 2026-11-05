@@ -130,8 +130,8 @@ mod tests {
                     ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
                 }],
             }),
-            issuers: Vec::new(),
-            max_token_ttl: Duration::from_secs(86_400),
+            identity_providers: Vec::new(),
+            max_gateway_token_ttl: Duration::from_secs(86_400),
         };
         Verifier::new(&auth, Vec::new()).unwrap()
     }

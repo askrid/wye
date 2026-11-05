@@ -47,7 +47,7 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
     }
     if config.auth.is_some() {
         checks.push(match verifier(config, config_dir) {
-            Ok(_) => Ok("auth: issuers' key sets read".to_owned()),
+            Ok(_) => Ok("auth: identity providers' key sets read".to_owned()),
             Err(e) => Err(format!("auth: {e}")),
         });
     }
@@ -118,8 +118,8 @@ fn provider_key(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
     let header = upstream.provider.key_header();
     upstream_auth(upstream, config_dir).map_err(|e| format!("{name}: {e}"))?;
     Ok(match &upstream.provider_key {
-        ProviderKey::ApiKeyEnv(var) => format!("{name}: ${var} set (sent as {header})"),
-        ProviderKey::ApiKeyFile(path) => {
+        ProviderKey::Env(var) => format!("{name}: ${var} set (sent as {header})"),
+        ProviderKey::File(path) => {
             format!("{name}: {} read (sent as {header})", path.display())
         }
         ProviderKey::ForwardCaller => {

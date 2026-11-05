@@ -148,7 +148,7 @@ data: {\"type\":\"response.completed\",\"response\":{\"model\":\"gpt-5.5-codex\"
 async fn responses_usage_and_cost_are_recorded() {
     let h = gateway(
         answering(|| sse(full(StatusCode::OK, COMPLETED))),
-        "[pricing]\nversion = \"openai-test\"\n[[pricing.models]]\nmodels = [\"gpt-5.5-*\"]\n\
+        "[pricing]\nversion = \"openai-test\"\n[[pricing.prices]]\nmodels = [\"gpt-5.5-*\"]\n\
          input = \"1.25\"\noutput = \"10.00\"\ncache_read = \"0.125\"\n",
     )
     .await;

@@ -138,7 +138,7 @@ impl Metrics {
             &times,
             "wye.failovers",
             "{request}",
-            "Requests moved to the route's next upstream, by the upstream that refused and why",
+            "Requests moved to the route's next upstream, by the upstream that rejected them and why",
             &self.failovers,
             |s| {
                 (

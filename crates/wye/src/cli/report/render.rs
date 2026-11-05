@@ -43,7 +43,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         ),
         0,
     ));
-    // A refusal (429, 529) or a client error is an answer like any other,
+    // An upstream rejection (429, 529) or a client error is an answer like any other,
     // so its outcome reads completed.
     if !s.errors.is_empty() {
         let _ = writeln!(out, "error statuses: {}", pairs(&s.errors));
@@ -70,7 +70,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     if !s.failovers.is_empty() {
         columns.title(
             &mut out,
-            "Failovers: refusals that moved a request to the next upstream",
+            "Failovers: rejections that moved a request to the next upstream",
         );
         let _ = writeln!(
             out,

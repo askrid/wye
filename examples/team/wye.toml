@@ -35,12 +35,12 @@ failover = ["429", "529", "connect"]
 [[routes.claude.upstreams]]
 id = "anthropic-a"
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_KEY_A"
+provider_key_env = "ANTHROPIC_KEY_A"
 
 [[routes.claude.upstreams]]
 id = "anthropic-b"
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_KEY_B"
+provider_key_env = "ANTHROPIC_KEY_B"
 
 [auth]
 # Every model anyone may use; each identity provider's grants narrow it.
@@ -49,7 +49,7 @@ max_output_tokens = 64000
 
 # Developers, through the company's SSO. The subject is the email, so usage
 # records and `wye report` show who used what.
-[[auth.issuers]]
+[[auth.identity_providers]]
 issuer = "https://acme.okta.com/oauth2/default"
 audience = "wye"
 algorithm = "RS256"
@@ -58,26 +58,26 @@ subject_claim = "email"
 
 # Engineers get every model; contractors no Opus. A token in neither group
 # may use no model.
-[[auth.issuers.grants]]
+[[auth.identity_providers.grants]]
 claim = "groups"
 value = "engineering"
 models = ["claude-opus-*", "claude-sonnet-*", "claude-haiku-*"]
 
-[[auth.issuers.grants]]
+[[auth.identity_providers.grants]]
 claim = "groups"
 value = "contractors"
 models = ["claude-sonnet-*", "claude-haiku-*"]
 
 # CI: a GitHub Actions job's OIDC token, so repositories hold no secret. The
 # subject is the repository; jobs outside the acme organization get nothing.
-[[auth.issuers]]
+[[auth.identity_providers]]
 issuer = "https://token.actions.githubusercontent.com"
 audience = "wye"
 algorithm = "RS256"
 jwks_file = "github.jwks"
 subject_claim = "repository"
 
-[[auth.issuers.grants]]
+[[auth.identity_providers.grants]]
 claim = "repository_owner"
 value = "acme"
 models = ["claude-sonnet-*", "claude-haiku-*"]
@@ -96,7 +96,7 @@ models = [
 [pricing]
 version = "anthropic-2026-11-01"
 
-[[pricing.models]]
+[[pricing.prices]]
 models = ["claude-opus-5-5"]
 input = "4.00"
 output = "20.00"
@@ -104,7 +104,7 @@ cache_read = "0.20"
 cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 
-[[pricing.models]]
+[[pricing.prices]]
 models = ["claude-sonnet-5-5"]
 input = "2.00"
 output = "10.00"
@@ -112,7 +112,7 @@ cache_read = "0.10"
 cache_write_5m = "2.50"
 cache_write_1h = "4.00"
 
-[[pricing.models]]
+[[pricing.prices]]
 models = ["claude-haiku-5-5"]
 input = "0.10"
 output = "0.50"

@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::{Config, DEFAULT_FAILOVER_MAX_BODY_BYTES, DEFAULT_FAILOVER_MAX_KEPT_BYTES};
+use crate::config::{Config, DEFAULT_FAILOVER_MAX_BODY_BYTES};
 
 /// A route with one upstream per `(id, weight)`.
 fn route(upstreams: &[(&str, u32)]) -> Route {
@@ -7,7 +7,7 @@ fn route(upstreams: &[(&str, u32)]) -> Route {
     for (id, weight) in upstreams {
         toml.push_str(&format!(
             "[[routes.claude.upstreams]]\nid = \"{id}\"\nweight = {weight}\n\
-             base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n"
+             base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n"
         ));
     }
     Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
@@ -102,7 +102,7 @@ fn route_with(extra: &str, upstreams: &[&str]) -> Route {
     for id in upstreams {
         toml.push_str(&format!(
             "[[routes.claude.upstreams]]\nid = \"{id}\"\n\
-             base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n"
+             base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n"
         ));
     }
     Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
@@ -152,16 +152,18 @@ fn ordered_selection_goes_in_config_order() {
 fn failover_settings_are_validated() {
     let ok = route_with("failover = [\"429\", \"connect\"]", &["a", "b"]);
     let f = ok.failover().unwrap();
-    assert!(f.retries(FailoverReason::RateLimited) && !f.retries(FailoverReason::Overloaded));
-    assert!(f.retries(FailoverReason::Connect));
+    assert!(
+        f.fails_over_on(FailoverReason::RateLimited)
+            && !f.fails_over_on(FailoverReason::Overloaded)
+    );
+    assert!(f.fails_over_on(FailoverReason::Connect));
     assert_eq!(FailoverReason::of_status(500), None);
     assert_eq!(f.max_body_bytes, DEFAULT_FAILOVER_MAX_BODY_BYTES);
-    assert_eq!(f.max_kept_bytes, DEFAULT_FAILOVER_MAX_KEPT_BYTES);
     let parse = |extra: &str, ids: &[&str]| {
         let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
         for id in ids {
             toml.push_str(&format!(
-                "[[routes.claude.upstreams]]\nid = \"{id}\"\nbase_url = \"https://x.example\"\napi_key_env = \"K\"\n"
+                "[[routes.claude.upstreams]]\nid = \"{id}\"\nbase_url = \"https://x.example\"\nprovider_key_env = \"K\"\n"
             ));
         }
         Config::from_toml_str(&toml)
@@ -169,18 +171,41 @@ fn failover_settings_are_validated() {
             .unwrap_err()
             .to_string()
     };
-    assert!(parse("failover = [\"500\"]", &["a", "b"]).contains("may already have been processed"));
-    assert!(parse("failover = [\"429\"]", &["a"]).contains("at least two upstreams"));
-    assert!(parse("failover = []", &["a", "b"]).contains("at least one reason"));
-    assert!(parse("failover_max_body_bytes = 10", &["a", "b"]).contains("need failover"));
+    assert!(
+        parse("failover = [\"500\"]", &["a", "b"])
+            .starts_with("routes.claude.failover takes \"429\"")
+    );
+    assert_eq!(
+        parse("failover = [\"429\"]", &["a"]),
+        "routes.claude.failover needs at least two upstreams"
+    );
+    assert_eq!(
+        parse("failover = []", &["a", "b"]),
+        "routes.claude.failover must name at least one reason"
+    );
+    assert_eq!(
+        parse("failover_max_body_bytes = 10", &["a", "b"]),
+        "routes.claude.failover_max_body_bytes needs failover"
+    );
+    assert_eq!(
+        parse(
+            "failover = [\"429\"]\nfailover_max_body_bytes = 0",
+            &["a", "b"]
+        ),
+        "routes.claude.failover_max_body_bytes must be greater than zero"
+    );
+    // The process-wide bound is a [server] option, not a route's.
     assert!(
         parse(
-            "failover = [\"429\"]\nfailover_max_kept_bytes = 0",
+            "failover = [\"429\"]\nfailover_max_kept_bytes = 1",
             &["a", "b"]
         )
-        .contains("greater than zero")
+        .contains("unknown field")
     );
-    assert!(parse("select = \"random\"", &["a", "b"]).contains("ordered"));
+    assert_eq!(
+        parse("select = \"random\"", &["a", "b"]),
+        "routes.claude.select must be \"cache_affine\" or \"ordered\""
+    );
 }
 
 #[test]

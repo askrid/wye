@@ -71,7 +71,7 @@ impl Gateway {
             &mut body,
             api,
             &self.held_bytes,
-            self.max_held_request_bytes,
+            self.max_total_held_bytes,
             checks.output_ceiling,
         )
         .await

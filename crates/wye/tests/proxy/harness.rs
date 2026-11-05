@@ -107,7 +107,7 @@ impl Harness {
     ) -> Self {
         let (upstream, hits) = spawn_counted(handler).await;
         let base_url = format!("http://{upstream}");
-        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
+        let extra = format!("provider_key_env = \"UNUSED\"\n{upstream_extra}");
         Self::launch(&base_url, server_extra, &extra, resources, hits).await
     }
 
@@ -160,7 +160,7 @@ impl Harness {
             },
         }]);
         let base_url = format!("https://{upstream}");
-        let extra = format!("api_key_env = \"UNUSED\"\n{upstream_extra}");
+        let extra = format!("provider_key_env = \"UNUSED\"\n{upstream_extra}");
         Self::launch(&base_url, "", &extra, resources, hits).await
     }
 
@@ -177,7 +177,7 @@ impl Harness {
         let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
              [routes.{route}]\n[[routes.{route}.upstreams]]\n{upstream_lines}\n\
-             base_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n"
+             base_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n"
         );
         let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
         Self::launch_config(&config, resources, hits).await
@@ -551,7 +551,7 @@ pub(crate) fn token(
 pub(crate) fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
     format!(
         "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
+         [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
         token::encode_public_key(key.public_key().as_ref())
     )
 }

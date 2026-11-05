@@ -115,14 +115,14 @@ fn the_plan_says_what_changes_and_how_to_undo_it() {
 fn secrets_from_the_environment_are_named() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n\
          [cache_diagnostics]\nhash_key_env = \"WYE_HASH_KEY\"\n",
     )
     .unwrap();
     assert_eq!(env_secrets(&config), ["ANTHROPIC_API_KEY", "WYE_HASH_KEY"]);
     let file = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_file = \"anthropic.key\"\n",
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_file = \"anthropic.key\"\n",
     )
     .unwrap();
     assert!(env_secrets(&file).is_empty());
@@ -183,7 +183,7 @@ fn a_restart_brings_the_stop_timeout_up_to_the_config() {
     let installed = service("/Users/a");
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\ndrain_delay_secs = 10\nshutdown_grace_secs = 60\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n",
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n",
     )
     .unwrap();
     let refreshed = refreshed(&installed, &config);

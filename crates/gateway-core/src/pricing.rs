@@ -12,8 +12,8 @@ use crate::{policy::ModelPattern, usage::Usage};
 /// Pico-USD (10^-12 USD) per token, or a cost in pico-USD.
 pub type Pico = u64;
 
-/// Most `[[pricing.models]]` entries.
-pub const MAX_PRICED_MODELS: usize = 256;
+/// Most `[[pricing.prices]]` entries.
+pub const MAX_PRICE_ENTRIES: usize = 256;
 /// Most tiers per entry.
 pub const MAX_TIERS: usize = 8;
 
@@ -39,9 +39,9 @@ pub struct Tier {
     pub cache_write_1h: Option<Pico>,
 }
 
-/// One `[[pricing.models]]` entry.
+/// One `[[pricing.prices]]` entry.
 #[derive(Debug, Clone)]
-pub struct PricedModels {
+pub struct PriceEntry {
     pub models: Box<[ModelPattern]>,
     /// Route upstream ids the entry is limited to; empty: every upstream.
     /// Providers and regions can price the same model differently.
@@ -55,7 +55,7 @@ pub struct PricedModels {
 #[derive(Debug, Clone)]
 pub struct Pricing {
     pub version: Box<str>,
-    pub entries: Box<[PricedModels]>,
+    pub entries: Box<[PriceEntry]>,
 }
 
 /// How much of a request's cost the table covers.
@@ -98,8 +98,8 @@ impl Pricing {
     /// The entry that prices `model` served by `upstream` (a route
     /// upstream's id): one scoped to the upstream before any unscoped one;
     /// within each, the first match.
-    pub fn entry(&self, model: &str, upstream: Option<&str>) -> Option<&PricedModels> {
-        let for_model = |e: &&PricedModels| e.models.iter().any(|p| p.matches(model));
+    pub fn entry(&self, model: &str, upstream: Option<&str>) -> Option<&PriceEntry> {
+        let for_model = |e: &&PriceEntry| e.models.iter().any(|p| p.matches(model));
         let scoped = self
             .entries
             .iter()
@@ -174,7 +174,7 @@ impl Pricing {
     }
 }
 
-impl PricedModels {
+impl PriceEntry {
     /// The base prices with the highest tier the prompt reaches applied.
     fn prices_for(&self, prompt: u64) -> Prices {
         let mut p = self.prices;

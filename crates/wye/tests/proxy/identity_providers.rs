@@ -20,9 +20,9 @@ async fn harness(key: &IdpKey) -> (Harness, mpsc::Receiver<HeaderMap>) {
     let (handler, rx) = recording(|seen| seen.headers);
     let auth = format!(
         "\n[auth]\n\
-         [[auth.issuers]]\nissuer = \"{ISS}\"\naudience = \"wye-prod\"\nalgorithm = \"{}\"\n\
+         [[auth.identity_providers]]\nissuer = \"{ISS}\"\naudience = \"wye-prod\"\nalgorithm = \"{}\"\n\
          jwks_file = \"{}\"\nsubject_claim = \"repository\"\n\
-         [[auth.issuers.grants]]\nclaim = \"repository_owner\"\nvalue = \"acme\"\n\
+         [[auth.identity_providers.grants]]\nclaim = \"repository_owner\"\nvalue = \"acme\"\n\
          models = [\"claude-haiku-*\"]",
         key.alg(),
         jwks_file.display()

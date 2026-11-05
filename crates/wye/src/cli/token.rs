@@ -52,7 +52,7 @@ pub fn read_key(path: &Path) -> Result<Ed25519KeyPair, String> {
     Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| format!("{shown}: not an Ed25519 key"))
 }
 
-/// The key's public half as `[[auth.keys]]` takes it.
+/// The key's public half as `[[auth.signing_keys]]` takes it.
 pub fn public_key(key: &Ed25519KeyPair) -> String {
     token::encode_public_key(key.public_key().as_ref())
 }
@@ -69,7 +69,7 @@ pub fn run_keygen(
     let key = new_key(&out)?;
     Ok(format!(
         "wrote {} (keep it secret, outside the gateway)\n\n\
-         Add to wye.toml, under [auth]:\n[[auth.keys]]\nid = \"<a new id>\"\n\
+         Add to wye.toml, under [auth]:\n[[auth.signing_keys]]\nid = \"<a new id>\"\n\
          ed25519_public_key = \"{}\"\n",
         out.display(),
         public_key(&key),
@@ -158,15 +158,15 @@ pub fn issue(
         .map(|k| k.id.as_str())
         .ok_or_else(|| {
             format!(
-                "the signing key is not among its [[auth.keys]]; add its public half: {}",
+                "the signing key is not among its [[auth.signing_keys]]; add its public half: {}",
                 public_key(key)
             )
         })?;
-    let longest = auth.max_token_ttl.as_secs();
+    let longest = auth.max_gateway_token_ttl.as_secs();
     let ttl = issue.ttl_secs.unwrap_or(longest);
     if ttl > longest {
         return Err(format!(
-            "--ttl {} is longer than it accepts ({}, max_token_ttl_secs)",
+            "--ttl {} is longer than it accepts ({}, max_gateway_token_ttl_secs)",
             show_duration(ttl),
             show_duration(longest)
         ));
@@ -222,10 +222,10 @@ mod tests {
     fn config(extra: &str, public: &str) -> Config {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"0.0.0.0:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
              [auth]\nissuer = \"wye\"\naudience = \"team\"\n{extra}\n\
-             [[auth.keys]]\nid = \"old\"\ned25519_public_key = \"{}\"\n\
-             [[auth.keys]]\nid = \"now\"\ned25519_public_key = \"{public}\"\n",
+             [[auth.signing_keys]]\nid = \"old\"\ned25519_public_key = \"{}\"\n\
+             [[auth.signing_keys]]\nid = \"now\"\ned25519_public_key = \"{public}\"\n",
             "A".repeat(43),
         ))
         .unwrap()
@@ -245,7 +245,7 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o077, 0, "{mode:o}");
         }
-        let config = config("max_token_ttl_secs = 3600", &public_key(&key));
+        let config = config("max_gateway_token_ttl_secs = 3600", &public_key(&key));
         let alice = Issue {
             subject: "alice",
             ..Issue::default()
@@ -267,7 +267,7 @@ mod tests {
         };
         assert_eq!(
             issue(&long, &key, &config, 0).unwrap_err(),
-            "--ttl 2h is longer than it accepts (1h, max_token_ttl_secs)"
+            "--ttl 2h is longer than it accepts (1h, max_gateway_token_ttl_secs)"
         );
         let bad = Issue {
             models: Some("claude-*,a*b"),

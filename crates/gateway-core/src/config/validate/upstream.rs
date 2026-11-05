@@ -20,7 +20,6 @@ pub(crate) struct RawRoute {
     pub(crate) select: Option<String>,
     pub(crate) failover: Option<Vec<String>>,
     pub(crate) failover_max_body_bytes: Option<u64>,
-    pub(crate) failover_max_kept_bytes: Option<u64>,
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
@@ -34,8 +33,8 @@ pub(crate) struct RawUpstream {
     pub(crate) weight: Option<u32>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) base_url: String,
-    pub(crate) api_key_env: Option<String>,
-    pub(crate) api_key_file: Option<PathBuf>,
+    pub(crate) provider_key_env: Option<String>,
+    pub(crate) provider_key_file: Option<PathBuf>,
     #[serde(default)]
     pub(crate) forward_caller_credential: bool,
     pub(crate) ca_file: Option<PathBuf>,
@@ -65,7 +64,7 @@ pub(crate) fn validate_routes(
                 ));
             }
             Some(Route::new(
-                vec![validate_upstream(raw, Provider::Anthropic)?],
+                vec![validate_upstream(raw, Provider::Anthropic, true)?],
                 Select::CacheAffine,
                 None,
             ))
@@ -107,21 +106,22 @@ pub(crate) fn validate_routes(
 
 /// One `[routes.<route>]`: its upstreams, selection, and failover.
 fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
+    let in_route = in_route(id);
     let select = match raw.select.as_deref() {
         None | Some("cache_affine") => Select::CacheAffine,
         Some("ordered") => Select::Ordered,
         Some(_) => {
-            return Err(ConfigError::Invalid(
-                "routes select must be \"cache_affine\" or \"ordered\"",
-            ));
+            return Err(in_route(ConfigError::Invalid(
+                "select must be \"cache_affine\" or \"ordered\"",
+            )));
         }
     };
     let failover = match raw.failover {
         None => {
-            if raw.failover_max_body_bytes.is_some() || raw.failover_max_kept_bytes.is_some() {
-                return Err(ConfigError::Invalid(
-                    "failover_max_body_bytes and failover_max_kept_bytes need failover",
-                ));
+            if raw.failover_max_body_bytes.is_some() {
+                return Err(in_route(ConfigError::Invalid(
+                    "failover_max_body_bytes needs failover",
+                )));
             }
             None
         }
@@ -132,39 +132,43 @@ fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
                     raw.failover_max_body_bytes
                         .unwrap_or(DEFAULT_FAILOVER_MAX_BODY_BYTES),
                     "failover_max_body_bytes",
-                )?,
-                max_kept_bytes: nonzero(
-                    raw.failover_max_kept_bytes
-                        .unwrap_or(DEFAULT_FAILOVER_MAX_KEPT_BYTES),
-                    "failover_max_kept_bytes",
-                )?,
+                )
+                .map_err(in_route)?,
             };
             for reason in &on {
-                // Only refusals that prove the request was not processed:
+                // Only rejections that prove the request was not processed:
                 // an ambiguous 5xx may already be billed.
                 let Some(reason) = FailoverReason::parse(reason) else {
-                    return Err(ConfigError::Invalid(
+                    return Err(in_route(ConfigError::Invalid(
                         "failover takes \"429\", \"529\", and \"connect\" only: other \
                          failures may already have been processed and billed",
-                    ));
+                    )));
                 };
                 failover.enable(reason);
             }
             if on.is_empty() {
-                return Err(ConfigError::Invalid(
+                return Err(in_route(ConfigError::Invalid(
                     "failover must name at least one reason",
-                ));
+                )));
             }
             if raw.upstreams.len() < 2 {
-                return Err(ConfigError::Invalid(
+                return Err(in_route(ConfigError::Invalid(
                     "failover needs at least two upstreams",
-                ));
+                )));
             }
             Some(failover)
         }
     };
     let upstreams = validate_route_upstreams(raw.upstreams, id)?;
     Ok(Route::new(upstreams, select, failover))
+}
+
+/// Puts an error about one of route `id`'s own fields under its name.
+fn in_route(id: RouteId) -> impl Fn(ConfigError) -> ConfigError + Copy {
+    move |error| ConfigError::Route {
+        route: id.name(),
+        error: Box::new(error),
+    }
 }
 
 fn validate_route_upstreams(
@@ -177,16 +181,16 @@ fn validate_route_upstreams(
         RouteId::OpenAi => (id.name(), Provider::OpenAi),
     };
     if raw_upstreams.is_empty() || raw_upstreams.len() > MAX_UPSTREAMS {
-        return Err(ConfigError::Invalid(
-            "a route's upstreams must have between 1 and 16 entries",
-        ));
+        return Err(in_route(id)(ConfigError::Invalid(
+            "upstreams must have between 1 and 16 entries",
+        )));
     }
     let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw_upstreams.len());
     for mut entry in raw_upstreams {
         let Some(id) = entry.id.take() else {
-            return Err(ConfigError::Invalid(
-                "every [[routes.<route>.upstreams]] entry needs an id",
-            ));
+            return Err(in_route(id)(ConfigError::Invalid(
+                "upstreams: every entry needs an id",
+            )));
         };
         let in_entry = |error| ConfigError::RouteUpstream {
             route,
@@ -248,12 +252,12 @@ fn validate_route_upstreams(
             }
         };
         if entry.forward_caller_credential {
-            return Err(in_entry(ConfigError::ProviderKey(
+            return Err(in_entry(ConfigError::Invalid(
                 "forward_caller_credential needs a single [upstream]: a route's upstreams use \
                  their own provider keys",
             )));
         }
-        let mut upstream = validate_upstream(entry, provider).map_err(in_entry)?;
+        let mut upstream = validate_upstream(entry, provider, false).map_err(in_entry)?;
         upstream.id = Some(id.into());
         upstream.weight = weight;
         upstream.workspace_id = workspace_id;
@@ -277,34 +281,58 @@ fn is_upstream_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, ConfigError> {
+/// A field's path as the user wrote it: `upstream.<name>` in the single
+/// `[upstream]`, bare in a route entry, whose error names the entry.
+macro_rules! field {
+    ($single:expr, $name:literal) => {
+        if $single {
+            concat!("upstream.", $name)
+        } else {
+            $name
+        }
+    };
+}
+
+/// One upstream: the single `[upstream]` (`single`) or a route entry.
+fn validate_upstream(
+    raw: RawUpstream,
+    provider: Provider,
+    single: bool,
+) -> Result<Upstream, ConfigError> {
     let provider_key = match (
-        raw.api_key_env,
-        raw.api_key_file,
+        raw.provider_key_env,
+        raw.provider_key_file,
         raw.forward_caller_credential,
     ) {
         (Some(name), None, false) => {
-            ProviderKey::ApiKeyEnv(env_name(name, "upstream.api_key_env")?)
+            ProviderKey::Env(env_name(name, field!(single, "provider_key_env"))?)
         }
         (None, Some(path), false) => {
             if path.as_os_str().is_empty() {
-                return Err(ConfigError::EmptyPath("upstream.api_key_file"));
+                return Err(ConfigError::Empty(field!(single, "provider_key_file")));
             }
-            ProviderKey::ApiKeyFile(path)
+            ProviderKey::File(path)
         }
         (None, None, true) => ProviderKey::ForwardCaller,
         (None, None, false) => {
-            return Err(ConfigError::ProviderKey(
-                "set api_key_env, api_key_file, or forward_caller_credential = true",
-            ));
+            return Err(ConfigError::Invalid(if single {
+                "upstream: set provider_key_env, provider_key_file, or \
+                 forward_caller_credential = true"
+            } else {
+                "set provider_key_env or provider_key_file"
+            }));
         }
         _ => {
-            return Err(ConfigError::ProviderKey(
-                "set only one of api_key_env, api_key_file, and forward_caller_credential",
-            ));
+            return Err(ConfigError::Invalid(if single {
+                "upstream: set only one of provider_key_env, provider_key_file, and \
+                 forward_caller_credential"
+            } else {
+                "set only one of provider_key_env and provider_key_file"
+            }));
         }
     };
-    let (scheme, authority, path_prefix) = parse_base_url(&raw.base_url)?;
+    let (scheme, authority, path_prefix) =
+        parse_base_url(field!(single, "base_url"), &raw.base_url)?;
     Ok(Upstream {
         id: None,
         weight: 1,
@@ -316,45 +344,49 @@ fn validate_upstream(raw: RawUpstream, provider: Provider) -> Result<Upstream, C
         provider_key,
         ca_file: match raw.ca_file {
             Some(path) if path.as_os_str().is_empty() => {
-                return Err(ConfigError::EmptyPath("upstream.ca_file"));
+                return Err(ConfigError::Empty(field!(single, "ca_file")));
             }
             path => path,
         },
         connect_timeout: running_timer(
             raw.connect_timeout_secs
                 .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
-            "upstream.connect_timeout_secs",
+            field!(single, "connect_timeout_secs"),
         )?,
         response_header_timeout: running_timer(
             raw.response_header_timeout_secs
                 .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
-            "upstream.response_header_timeout_secs",
+            field!(single, "response_header_timeout_secs"),
         )?,
         http_version: match raw.http_version.as_deref() {
             None | Some("auto") => UpstreamHttpVersion::Auto,
             Some("1.1") => UpstreamHttpVersion::Http1,
             Some(_) => {
-                return Err(ConfigError::Invalid(
-                    "upstream.http_version must be \"auto\" or \"1.1\"",
-                ));
+                return Err(ConfigError::Invalid(field!(
+                    single,
+                    "http_version must be \"auto\" or \"1.1\""
+                )));
             }
         },
         stream_idle_timeout: running_timer(
             raw.stream_idle_timeout_secs
                 .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
-            "upstream.stream_idle_timeout_secs",
+            field!(single, "stream_idle_timeout_secs"),
         )?,
     })
 }
 
-fn parse_base_url(url: &str) -> Result<(Scheme, Authority, String), ConfigError> {
-    const FIELD: &str = "upstream.base_url";
+/// `field` names the base URL in errors.
+fn parse_base_url(
+    field: &'static str,
+    url: &str,
+) -> Result<(Scheme, Authority, String), ConfigError> {
     let invalid = |reason| ConfigError::InvalidUrl {
-        field: FIELD,
+        field,
         url: url.to_owned(),
         reason,
     };
-    let (scheme, authority, path_prefix) = parse_url(FIELD, url)?;
+    let (scheme, authority, path_prefix) = parse_url(field, url)?;
     if scheme == Scheme::HTTP && !is_loopback_host(authority.host()) {
         return Err(invalid("plain http is allowed only for loopback hosts"));
     }

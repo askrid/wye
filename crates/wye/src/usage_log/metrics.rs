@@ -56,7 +56,7 @@ struct UpgradeKey {
 }
 
 struct FailoverKey {
-    /// The upstream that refused.
+    /// The upstream that rejected it.
     upstream: Option<Box<str>>,
     reason: FailoverReason,
 }
@@ -72,7 +72,7 @@ pub(super) struct Metrics {
     costs: Vec<Counted<ModelKey>>,
     /// Checked requests a target model would reject.
     upgrades: Vec<Counted<UpgradeKey>>,
-    /// Refusals that moved a request to the route's next upstream.
+    /// Rejections that moved a request to the route's next upstream.
     failovers: Vec<Counted<FailoverKey>>,
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<Counted<Box<str>>>,

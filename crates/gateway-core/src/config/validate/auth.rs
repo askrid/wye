@@ -1,4 +1,4 @@
-//! `[auth]`: Wye's own credential issuer and the identity providers.
+//! `[auth]`: Wye's own issuer and the identity providers.
 
 use std::path::PathBuf;
 
@@ -11,11 +11,11 @@ use super::*;
 pub(crate) struct RawAuth {
     pub(crate) issuer: Option<String>,
     pub(crate) audience: Option<String>,
-    pub(crate) max_token_ttl_secs: Option<u64>,
+    pub(crate) max_gateway_token_ttl_secs: Option<u64>,
     #[serde(default)]
-    pub(crate) keys: Vec<RawPublicKey>,
+    pub(crate) signing_keys: Vec<RawPublicKey>,
     #[serde(default)]
-    pub(crate) issuers: Vec<RawIssuer>,
+    pub(crate) identity_providers: Vec<RawIdentityProvider>,
     pub(crate) models: Option<Vec<String>>,
     pub(crate) max_output_tokens: Option<u64>,
 }
@@ -29,7 +29,7 @@ pub(crate) struct RawPublicKey {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawIssuer {
+pub(crate) struct RawIdentityProvider {
     pub(crate) issuer: String,
     pub(crate) audience: String,
     pub(crate) algorithm: String,
@@ -49,32 +49,43 @@ pub(crate) struct RawGrant {
 
 pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     let err = |msg: String| ConfigError::Auth(msg);
-    let own = match (raw.issuer, raw.audience, raw.keys.is_empty()) {
+    let own = match (raw.issuer, raw.audience, raw.signing_keys.is_empty()) {
         (None, None, true) => None,
-        (Some(issuer), Some(audience), false) => Some(validate_own(issuer, audience, raw.keys)?),
-        (Some(_), Some(_), true) => return Err(err("at least one key is required".into())),
+        (Some(issuer), Some(audience), false) => {
+            Some(validate_own(issuer, audience, raw.signing_keys)?)
+        }
+        (Some(_), Some(_), true) => {
+            return Err(err(
+                "issuer and audience need at least one [[auth.signing_keys]] entry".into(),
+            ));
+        }
         _ => {
             return Err(err(
-                "issuer, audience, and [[auth.keys]] go together; omit all three to trust only \
-                 [[auth.issuers]]"
+                "issuer, audience, and [[auth.signing_keys]] go together; omit all three to \
+                 trust only [[auth.identity_providers]]"
                     .into(),
             ));
         }
     };
-    if own.is_none() && raw.issuers.is_empty() {
+    if own.is_none() && raw.identity_providers.is_empty() {
         return Err(err(
-            "set issuer, audience, and [[auth.keys]], or at least one [[auth.issuers]]".into(),
+            "set issuer, audience, and [[auth.signing_keys]], or at least one \
+             [[auth.identity_providers]]"
+                .into(),
         ));
     }
-    let mut issuers: Vec<Issuer> = Vec::with_capacity(raw.issuers.len());
-    for (i, issuer) in raw.issuers.into_iter().enumerate() {
-        let issuer = validate_issuer(issuer, i)?;
-        let taken = own.as_ref().is_some_and(|o| o.issuer == issuer.issuer)
-            || issuers.iter().any(|other| other.issuer == issuer.issuer);
+    let mut identity_providers: Vec<IdentityProvider> =
+        Vec::with_capacity(raw.identity_providers.len());
+    for (i, raw_idp) in raw.identity_providers.into_iter().enumerate() {
+        let idp = validate_identity_provider(raw_idp, i)?;
+        let taken = own.as_ref().is_some_and(|o| o.issuer == idp.issuer)
+            || identity_providers
+                .iter()
+                .any(|other| other.issuer == idp.issuer);
         if taken {
-            return Err(err(format!("duplicate issuer {:?}", issuer.issuer)));
+            return Err(err(format!("duplicate issuer {:?}", idp.issuer)));
         }
-        issuers.push(issuer);
+        identity_providers.push(idp);
     }
     let models = match raw.models {
         Some(list) if list.is_empty() => {
@@ -87,15 +98,16 @@ pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     };
     Ok(Auth {
         own,
-        issuers,
+        identity_providers,
         models,
         max_output_tokens: raw
             .max_output_tokens
             .map(|n| nonzero(n, "auth.max_output_tokens"))
             .transpose()?,
-        max_token_ttl: nonzero(
-            raw.max_token_ttl_secs.unwrap_or(DEFAULT_MAX_TOKEN_TTL_SECS),
-            "auth.max_token_ttl_secs",
+        max_gateway_token_ttl: nonzero(
+            raw.max_gateway_token_ttl_secs
+                .unwrap_or(DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS),
+            "auth.max_gateway_token_ttl_secs",
         )
         .map(Duration::from_secs)?,
     })
@@ -136,8 +148,11 @@ fn validate_own(
     })
 }
 
-fn validate_issuer(raw: RawIssuer, index: usize) -> Result<Issuer, ConfigError> {
-    let err = |msg: String| ConfigError::Auth(format!("issuers[{index}]: {msg}"));
+fn validate_identity_provider(
+    raw: RawIdentityProvider,
+    index: usize,
+) -> Result<IdentityProvider, ConfigError> {
+    let err = |msg: String| ConfigError::Auth(format!("identity_providers[{index}]: {msg}"));
     if raw.issuer.is_empty() || raw.audience.is_empty() {
         return Err(err("issuer and audience must not be empty".into()));
     }
@@ -171,7 +186,7 @@ fn validate_issuer(raw: RawIssuer, index: usize) -> Result<Issuer, ConfigError> 
             value: grant.value,
         });
     }
-    Ok(Issuer {
+    Ok(IdentityProvider {
         issuer: raw.issuer,
         audience: raw.audience,
         algorithm,

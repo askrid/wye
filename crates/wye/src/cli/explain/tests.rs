@@ -13,9 +13,9 @@ fn explain_messages(config: &Config, caller: CallerToken<'_>, body: &[u8]) -> Ex
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\nmax_request_body_bytes = 200\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"ANTHROPIC_API_KEY\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n\
          [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra_auth}\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n\
+         [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n\
          [cache_diagnostics]\nhash_key_env = \"K\"",
         token::encode_public_key(key.public_key().as_ref())
     ))
@@ -159,7 +159,7 @@ fn explains_forwarding_and_each_refusal() {
 fn explains_alias_resolution_before_permissions() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -176,7 +176,7 @@ fn explains_alias_resolution_before_permissions() {
 fn explains_upgrade_issues_per_target_without_refusing() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [upgrade_check]\ntargets = [\"claude-opus-4-7\"]\n",
     )
     .unwrap();
@@ -214,8 +214,8 @@ fn explains_upgrade_issues_per_target_without_refusing() {
 fn shows_the_upstream_a_session_goes_to() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://a.example\"\napi_key_env = \"A\"\n\
-         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://b.example\"\napi_key_env = \"B\"\n",
+         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://a.example\"\nprovider_key_env = \"A\"\n\
+         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://b.example\"\nprovider_key_env = \"B\"\n",
     )
     .unwrap();
     for session in ["s-1", "s-2", "s-3", "s-4"] {
@@ -257,7 +257,7 @@ fn shows_the_providers_own_model_id() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
          [[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
-         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"B\"\n",
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key_env = \"B\"\n",
     )
     .unwrap();
     for (body, step) in [
@@ -288,9 +288,9 @@ fn explains_responses_on_the_openai_route() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\n\
          max_output_tokens = 1000\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"\n\
+         [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"\n\
          [routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
-         base_url = \"https://api.openai.com\"\napi_key_env = \"OPENAI_API_KEY\"\n",
+         base_url = \"https://api.openai.com\"\nprovider_key_env = \"OPENAI_API_KEY\"\n",
     )
     .unwrap();
     let dev = || {
@@ -343,12 +343,12 @@ fn explains_responses_on_the_openai_route() {
 fn shows_the_price_that_applies_at_the_upstream() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\nselect = \"ordered\"\n\
-         [[routes.claude.upstreams]]\nid = \"aws\"\nbase_url = \"https://a.example\"\napi_key_env = \"A\"\n\
-         [[routes.claude.upstreams]]\nid = \"direct\"\nbase_url = \"https://b.example\"\napi_key_env = \"B\"\n\
+         [[routes.claude.upstreams]]\nid = \"aws\"\nbase_url = \"https://a.example\"\nprovider_key_env = \"A\"\n\
+         [[routes.claude.upstreams]]\nid = \"direct\"\nbase_url = \"https://b.example\"\nprovider_key_env = \"B\"\n\
          [pricing]\nversion = \"v1\"\n\
-         [[pricing.models]]\nmodels = [\"claude-opus-*\"]\nupstreams = [\"aws\"]\n\
+         [[pricing.prices]]\nmodels = [\"claude-opus-*\"]\nupstreams = [\"aws\"]\n\
          input = \"5.50\"\noutput = \"27.50\"\n\
-         [[pricing.models]]\nmodels = [\"claude-opus-*\"]\ninput = \"5.00\"\noutput = \"25.00\"\n\
+         [[pricing.prices]]\nmodels = [\"claude-opus-*\"]\ninput = \"5.00\"\noutput = \"25.00\"\n\
          cache_read = \"0.50\"\n",
     )
     .unwrap();
@@ -372,7 +372,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
 fn reads_the_body_in_the_servers_order() {
     let aliased = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -422,8 +422,8 @@ fn reads_the_body_in_the_servers_order() {
 fn chat_completions_carries_no_session_to_route_by() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.openai]\n\
-         [[routes.openai.upstreams]]\nid = \"a\"\nbase_url = \"https://api.openai.com\"\napi_key_env = \"A\"\n\
-         [[routes.openai.upstreams]]\nid = \"b\"\nbase_url = \"https://api.openai.com\"\napi_key_env = \"B\"\n",
+         [[routes.openai.upstreams]]\nid = \"a\"\nbase_url = \"https://api.openai.com\"\nprovider_key_env = \"A\"\n\
+         [[routes.openai.upstreams]]\nid = \"b\"\nbase_url = \"https://api.openai.com\"\nprovider_key_env = \"B\"\n",
     )
     .unwrap();
     let report = explain(

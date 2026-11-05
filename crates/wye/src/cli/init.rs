@@ -57,18 +57,18 @@ impl InitOptions {
                 "# Each caller's own credential goes through, whether Claude Code's\n\
                  # login or an API key: this machine only, no [auth].\n\
                  forward_caller_credential = true",
-                "api_key_file = \"openai.key\"",
+                "provider_key_file = \"openai.key\"",
             ),
             Mode::ProviderKey => (
                 "127.0.0.1:8080",
                 "# Read at startup from this file, next to this config:\n\
-                 api_key_file = \"anthropic.key\"",
-                "api_key_file = \"openai.key\"",
+                 provider_key_file = \"anthropic.key\"",
+                "provider_key_file = \"openai.key\"",
             ),
             Mode::Shared => (
                 "0.0.0.0:8080",
-                "api_key_env = \"ANTHROPIC_API_KEY\"",
-                "api_key_env = \"OPENAI_API_KEY\"",
+                "provider_key_env = \"ANTHROPIC_API_KEY\"",
+                "provider_key_env = \"OPENAI_API_KEY\"",
             ),
         };
         let mut text = format!(
@@ -89,7 +89,7 @@ impl InitOptions {
                 "\n# Gateway tokens: `wye token issue <name>` signs one with the key whose\n\
                  # public half is below. Give each gateway its own audience.\n\
                  [auth]\nissuer = \"wye\"\naudience = \"wye\"\n\n\
-                 [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{public_key}\"\n"
+                 [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{public_key}\"\n"
             ));
         }
         Config::from_toml_str(&text).map_err(|e| e.to_string())?;

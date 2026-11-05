@@ -469,7 +469,7 @@ async fn usage_records_are_exported_as_otlp_logs() {
 async fn priced_records_carry_cost_status_and_version() {
     let handler = answering(|| sse(full(StatusCode::OK, USAGE_STREAM)));
     let pricing = "\n[pricing]\nversion = \"test-1\"\n\
-                   [[pricing.models]]\nmodels = [\"claude-test\"]\ninput = \"1.00\"\noutput = \"10.00\"\n\
+                   [[pricing.prices]]\nmodels = [\"claude-test\"]\ninput = \"1.00\"\noutput = \"10.00\"\n\
                    cache_read = \"0.10\"\n";
     let h = Harness::keyed(handler, pricing).await;
     read_body(h.send(messages(), "{}").await).await;

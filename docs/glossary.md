@@ -22,16 +22,16 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Rejection**: an upstream's answer that the request was not processed: `429`, `529`, or a connection that failed before the body was delivered. Not: refusal (that is Wye's).
 - **Failover**: resending a rejected request to the route's next upstream, before any output, when the route has `failover` on. The rejection's kind is the **failover reason** (`429`, `529`, `connect`). Not: retry, fallback.
 - **The hold**: Wye reading a request body until its top-level `model` is known, before it forwards anything, when a feature needs the model: model permissions, an output-token ceiling, an alias, a provider's own model id. Not: buffering.
-- **Kept body**: the bytes of an upload Wye keeps so failover can resend them, up to `failover_max_body_bytes`. Not: held (that is the hold).
+- **Kept body**: the bytes of an upload Wye keeps so failover can resend them, up to the route's `failover_max_body_bytes` per request and `server.max_total_kept_bytes` across the process. Not: held (that is the hold).
 - **Agent wrapper**: `wye claude` or `wye codex`, which start the agent pointed at the gateway. Not: client wrapper.
 
 ## Access
 
 - **Gateway token**: what a caller presents to Wye instead of a provider key: a signed JWT, either a **Wye token** (from `wye token issue`) or an **identity-provider token** (from GitHub Actions, or SSO through `apiKeyHelper`). Wye replaces it with the provider key. Not: credential, scoped key. In a paragraph that also counts model tokens, always "gateway token".
 - **Issuer**: who signs gateway tokens: Wye (with its **signing key**) or an identity provider. Not: signer, token service.
-- **Identity provider (IdP)**: an external issuer configured in `[[auth.issuers]]`, whose keys Wye pins in config. Not: bare "provider".
+- **Identity provider (IdP)**: an external issuer configured in `[[auth.identity_providers]]`, whose keys Wye pins in config. Not: bare "provider".
 - **Subject**: the identity a gateway token names (`sub`, or the issuer's `subject_claim`). Aliases roll out per subject, and cache affinity falls back to it.
-- **Grant**: an `[[auth.issuers.grants]]` rule that gives an identity-provider token its models by the value of one of its claims.
+- **Grant**: an `[[auth.identity_providers.grants]]` rule that gives an identity-provider token its models by the value of one of its claims.
 - **Model permissions**: the models a request may use: the config's model list (`[auth] models`), narrowed by the token's `models` claim or by grants. Wye refuses any other model before upstream work. Not: allowlist, ceiling (for models).
 - **Output-token ceiling**: the largest output-token value a request may ask for: the stricter of `[auth] max_output_tokens` and the token's claim. Not: limit, cap.
 - **Caller credential**: the caller's own claude.ai login or provider API key. **Caller-credential passthrough**: Wye forwards it unchanged instead of a provider key (loopback only; the passthrough setup).

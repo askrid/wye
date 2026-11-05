@@ -15,7 +15,7 @@ mod auth;
 mod upstream;
 mod validate;
 
-pub use auth::{Algorithm, Auth, Grant, Issuer, OwnIssuer, PublicKey};
+pub use auth::{Algorithm, Auth, Grant, IdentityProvider, OwnIssuer, PublicKey};
 pub use upstream::{Provider, ProviderKey, Upstream, UpstreamHttpVersion};
 
 use crate::{
@@ -30,7 +30,7 @@ use validate::{
     validate_pricing, validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
 };
 
-const DEFAULT_MAX_HELD_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_HELD_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
@@ -45,11 +45,11 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 /// Local use needs no drain; behind a load balancer, set it above the
 /// health-check interval.
 const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
-const DEFAULT_MAX_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
+const DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
 /// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
 pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
-/// Default `failover_max_kept_bytes`, across all requests of a process.
-pub(crate) const DEFAULT_FAILOVER_MAX_KEPT_BYTES: u64 = 256 * 1024 * 1024;
+/// Default `server.max_total_kept_bytes`, across all requests of a process.
+pub(crate) const DEFAULT_MAX_TOTAL_KEPT_BYTES: u64 = 256 * 1024 * 1024;
 /// Default `sample_percent` of cache diagnostics and upgrade checks: every
 /// session.
 pub const DEFAULT_SAMPLE_PERCENT: u8 = 100;
@@ -196,7 +196,10 @@ pub struct Server {
     pub max_request_body_bytes: u64,
     /// Request bytes held across all requests while reading `model`; beyond
     /// it, requests are answered with an overload error.
-    pub max_held_request_bytes: u64,
+    pub max_total_held_bytes: u64,
+    /// Request bytes kept for failover across all requests; beyond it,
+    /// requests are forwarded without failover, never refused.
+    pub max_total_kept_bytes: u64,
     /// Proxied requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
     pub max_concurrent_requests: usize,
@@ -223,12 +226,11 @@ pub enum ConfigError {
         url: String,
         reason: &'static str,
     },
-    ProviderKey(&'static str),
     InvalidEnvName {
         field: &'static str,
         name: String,
     },
-    EmptyPath(&'static str),
+    Empty(&'static str),
     Zero(&'static str),
     /// A timer longer than `max` seconds.
     TooLong {
@@ -237,6 +239,12 @@ pub enum ConfigError {
     },
     Percent(&'static str),
     Invalid(&'static str),
+    /// A problem with a field of `[routes.<route>]` itself; the error
+    /// starts with the field's name.
+    Route {
+        route: &'static str,
+        error: Box<ConfigError>,
+    },
     /// A problem in one `[[routes.<route>.upstreams]]` entry.
     RouteUpstream {
         route: &'static str,
@@ -258,18 +266,18 @@ impl fmt::Display for ConfigError {
             ),
             Self::Auth(msg) => write!(f, "auth: {msg}"),
             Self::InvalidUrl { field, url, reason } => write!(f, "{field} {url:?}: {reason}"),
-            Self::ProviderKey(msg) => write!(f, "upstream: {msg}"),
             Self::InvalidEnvName { field, name } => {
                 write!(
                     f,
                     "{field}: {name:?} is not a valid environment variable name"
                 )
             }
-            Self::EmptyPath(field) => write!(f, "{field} must not be empty"),
+            Self::Empty(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
             Self::TooLong { field, max } => write!(f, "{field} must be at most {max} seconds"),
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
+            Self::Route { route, error } => write!(f, "routes.{route}.{error}"),
             Self::RouteUpstream { route, id, error } => {
                 write!(f, "routes.{route}.upstreams {id:?}: {error}")
             }
@@ -338,7 +346,7 @@ impl Config {
                 .any(|id| !routes.upstreams().any(|u| u.id.as_deref() == Some(&**id)))
         {
             return Err(ConfigError::Invalid(
-                "pricing.models.upstreams: every id must name a route upstream",
+                "pricing.prices.upstreams: every id must name a route upstream",
             ));
         }
         let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;

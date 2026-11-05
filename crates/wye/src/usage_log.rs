@@ -90,12 +90,12 @@ pub(crate) struct RequestInfo {
     pub upgrade: Option<UpgradeSlot>,
     /// The route upstream the request went to, when the route names them.
     pub upstream: Option<Arc<str>>,
-    /// Upstreams that refused the request before the one that answered.
+    /// Upstreams that rejected the request before the one that answered.
     pub failovers: Vec<RejectedAttempt>,
     pub started: Instant,
 }
 
-/// An upstream that refused a request, which then went to the next one.
+/// An upstream that rejected a request, which then went to the next one.
 pub(crate) struct RejectedAttempt {
     pub upstream: Option<Arc<str>>,
     pub reason: FailoverReason,

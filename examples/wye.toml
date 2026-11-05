@@ -23,7 +23,11 @@ max_request_body_bytes = 33554432      # Anthropic's request size limit
 # client that sends nothing for 60 s while held, or has not reached its model
 # after 5 minutes, gets 408. At least max_request_body_bytes, since one body
 # may be held whole:
-max_held_request_bytes = 67108864
+max_total_held_bytes = 67108864
+# Request bytes kept so that failover can resend them (routes with
+# `failover`), all requests together; beyond it, a request goes without
+# failover, never refused. A chunk counts at least 1 KiB:
+max_total_kept_bytes = 268435456
 # Requests in flight before new ones get an overload error (529 on the
 # Messages API, 503 on the OpenAI APIs):
 max_concurrent_requests = 10000
@@ -41,10 +45,10 @@ client_write_timeout_secs = 60
 # [routes.claude] below instead.
 [upstream]
 base_url = "https://api.anthropic.com" # without /v1; http only for loopback hosts
-api_key_env = "ANTHROPIC_API_KEY"
+provider_key_env = "ANTHROPIC_API_KEY"
 # Or read the provider key from a mounted secret file (Docker or Kubernetes
 # secrets, systemd credentials):
-# api_key_file = "/run/secrets/anthropic_api_key"
+# provider_key_file = "/run/secrets/anthropic_api_key"
 # Or forward each caller's own credential: a claude.ai login, or an API key,
 # which bills the API (loopback only, no [auth]; `wye init` writes this, and
 # examples/developer/wye.toml is a complete config):
@@ -72,7 +76,6 @@ http_version = "auto"
 # upstream in the same turn; never after a response byte:
 # failover = ["429", "529", "connect"]
 # failover_max_body_bytes = 8388608    # larger bodies go without failover
-# failover_max_kept_bytes = 268435456  # bodies kept for resending, across the process (a chunk counts at least 1 KiB)
 #
 # Up to 16 upstreams. Each takes every [upstream] field above except
 # forward_caller_credential.
@@ -81,20 +84,20 @@ http_version = "auto"
 # provider = "anthropic"               # the default
 # weight = 2                           # share of sessions, 1 to 1000; default 1
 # base_url = "https://api.anthropic.com"
-# api_key_env = "ANTHROPIC_KEY_TEAM_A"
+# provider_key_env = "ANTHROPIC_KEY_TEAM_A"
 #
 # [[routes.claude.upstreams]]
 # id = "aws-us-west-2"
 # provider = "claude-platform-aws"     # the provider key goes as a bearer token
 # workspace_id = "wrkspc_01AbCdEf23GhIj"   # required for this provider
 # base_url = "https://aws-external-anthropic.us-west-2.api.aws"
-# api_key_env = "CLAUDE_PLATFORM_AWS_KEY"
+# provider_key_env = "CLAUDE_PLATFORM_AWS_KEY"
 #
 # [[routes.claude.upstreams]]
 # id = "bedrock-us-east-1"
 # provider = "bedrock"                 # model ids go upstream as anthropic.<model>
 # base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
-# api_key_env = "BEDROCK_API_KEY"
+# provider_key_env = "BEDROCK_API_KEY"
 
 # OpenAI Responses and Chat Completions, for Codex (`wye codex`) and the
 # OpenAI SDKs, beside or instead of the Claude route. Clients use base URL
@@ -106,7 +109,7 @@ http_version = "auto"
 # id = "openai"
 # provider = "openai"                  # the default here
 # base_url = "https://api.openai.com"  # without /v1
-# api_key_env = "OPENAI_API_KEY"
+# provider_key_env = "OPENAI_API_KEY"
 
 # Gateway tokens. Required to listen beyond loopback; incompatible with
 # forward_caller_credential. `wye init --shared` writes this section and a
@@ -117,7 +120,7 @@ http_version = "auto"
 # [auth]
 # issuer = "wye"
 # audience = "wye-prod"
-# max_token_ttl_secs = 604800     # longest accepted exp - iat: one week
+# max_gateway_token_ttl_secs = 604800  # longest accepted exp - iat: one week
 # Model permissions: the models any gateway token may use (exact names, or
 # prefixes ending in *); a gateway token issued with --models narrows this
 # further. Omit to allow all:
@@ -128,7 +131,7 @@ http_version = "auto"
 # max_output_tokens = 32000
 # Below the [auth] fields: in TOML, every key after a table header belongs
 # to that table.
-# [[auth.keys]]
+# [[auth.signing_keys]]
 # id = "k1"
 # ed25519_public_key = "<printed by wye token keygen>"
 #
@@ -136,9 +139,10 @@ http_version = "auto"
 # team's IdP (through Claude Code's apiKeyHelper). Commit the identity
 # provider's JWKS next to this file (for GitHub Actions:
 # https://token.actions.githubusercontent.com/.well-known/jwks) and update it
-# when the identity provider rotates keys; Wye never fetches it. With issuers,
-# the issuer, audience, and [[auth.keys]] above are optional.
-# [[auth.issuers]]
+# when the identity provider rotates keys; Wye never fetches it. With identity
+# providers, the issuer, audience, and [[auth.signing_keys]] above are
+# optional.
+# [[auth.identity_providers]]
 # issuer = "https://token.actions.githubusercontent.com"
 # audience = "wye-prod"
 # algorithm = "RS256"                  # or ES256, EdDSA; pinned, never read from the token
@@ -147,7 +151,7 @@ http_version = "auto"
 # Models by claim value (a string claim equal to value, or a list containing
 # it). An identity-provider token matching no grant may use no model; omit
 # grants to leave [auth] models in charge.
-# [[auth.issuers.grants]]
+# [[auth.identity_providers.grants]]
 # claim = "repository_owner"
 # value = "acme"
 # models = ["claude-haiku-*"]
@@ -198,10 +202,10 @@ http_version = "auto"
 # million tokens as decimal strings, at most 6 decimals. Up to 256 entries,
 # matched by the model the provider reported: entries scoped to the serving
 # upstream first, then the first unscoped match. Unknown prices are
-# "unknown", never $0 (rules: docs/policy.md, "Pricing metadata").
+# "unknown", never $0 (rules: docs/policy.md, "Price table").
 # [pricing]
 # version = "anthropic-2026-11-01"     # recorded with every cost
-# [[pricing.models]]
+# [[pricing.prices]]
 # models = ["claude-opus-5-5"]
 # upstreams = ["aws-us-west-2"]        # only for these route upstreams (partner or regional prices)
 # input = "4.00"
@@ -210,13 +214,13 @@ http_version = "auto"
 # cache_write_5m = "5.00"
 # cache_write_1h = "8.00"
 #
-# [[pricing.models]]
+# [[pricing.prices]]
 # models = ["claude-haiku-5-5"]
 # input = "0.10"
 # output = "0.50"
 # Up to 8 tiers per entry: prices above a prompt length (input plus cache
 # reads and writes), the rest inherited from the entry:
-# [[pricing.models.tiers]]
+# [[pricing.prices.tiers]]
 # above_prompt_tokens = 100000
 # input = "0.50"
 # output = "2.50"

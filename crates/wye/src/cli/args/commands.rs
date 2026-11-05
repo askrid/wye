@@ -155,8 +155,8 @@ pub const COMMANDS: &[Command] = &[
             "path",
             "Where to write it (default: ~/.wye/issuer.key)",
         )],
-        notes: "Prints the public half for [[auth.keys]]. `wye init --shared` makes the first \
-                key; this one is for rotation.",
+        notes: "Prints the public half for [[auth.signing_keys]]. `wye init --shared` makes \
+                the first key; this one is for rotation.",
         ..BASE
     },
     Command {

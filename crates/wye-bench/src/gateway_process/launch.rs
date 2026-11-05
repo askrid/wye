@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-/// [`Variant::Refused`]'s first account refuses one request in this many.
+/// [`Variant::Refused`]'s first upstream rejects one request in this many.
 const REFUSE_EVERY: u64 = 4;
 
 /// How to launch one gateway in front of an upstream.

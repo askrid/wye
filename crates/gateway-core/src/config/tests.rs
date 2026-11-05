@@ -26,7 +26,7 @@ fn server(lines: &str) -> Result<Config, ConfigError> {
 #[test]
 fn minimal_config_gets_defaults() {
     let config =
-        parse("base_url = \"https://api.anthropic.com\"\napi_key_env = \"ANTHROPIC_API_KEY\"")
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"")
             .unwrap();
     assert_eq!(
         config.server.max_request_body_bytes,
@@ -38,7 +38,7 @@ fn minimal_config_gets_defaults() {
     assert_eq!(upstream.path_prefix, "");
     assert_eq!(
         upstream.provider_key,
-        ProviderKey::ApiKeyEnv("ANTHROPIC_API_KEY".into())
+        ProviderKey::Env("ANTHROPIC_API_KEY".into())
     );
     assert_eq!(upstream.response_header_timeout, Duration::from_secs(600));
 }
@@ -70,28 +70,35 @@ fn auth_allows_network_listen_and_validates_keys() {
              {upstream}\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth}"
         ))
     };
-    let keys = format!("[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
-    let config = with_auth("0.0.0.0:8080", "api_key_env = \"K\"", &keys).unwrap();
+    let keys = format!("[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
+    let config = with_auth("0.0.0.0:8080", "provider_key_env = \"K\"", &keys).unwrap();
     let auth = config.auth.unwrap();
     assert_eq!(auth.own.unwrap().keys.len(), 1);
-    assert_eq!(auth.max_token_ttl, Duration::from_secs(7 * 24 * 3600));
+    assert_eq!(
+        auth.max_gateway_token_ttl,
+        Duration::from_secs(7 * 24 * 3600)
+    );
 
     assert!(matches!(
         with_auth("0.0.0.0:8080", "forward_caller_credential = true", &keys),
         Err(ConfigError::Auth(_))
     ));
     assert!(matches!(
-        with_auth("127.0.0.1:8080", "api_key_env = \"K\"", "keys = []"),
+        with_auth(
+            "127.0.0.1:8080",
+            "provider_key_env = \"K\"",
+            "signing_keys = []"
+        ),
         Err(ConfigError::Auth(_))
     ));
-    let bad = "[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"not-a-key\"";
+    let bad = "[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"not-a-key\"";
     assert!(matches!(
-        with_auth("127.0.0.1:8080", "api_key_env = \"K\"", bad),
+        with_auth("127.0.0.1:8080", "provider_key_env = \"K\"", bad),
         Err(ConfigError::Auth(_))
     ));
     let twice = format!("{keys}\n{keys}");
     assert!(matches!(
-        with_auth("127.0.0.1:8080", "api_key_env = \"K\"", &twice),
+        with_auth("127.0.0.1:8080", "provider_key_env = \"K\"", &twice),
         Err(ConfigError::Auth(_))
     ));
 }
@@ -101,8 +108,8 @@ fn auth_models_are_validated_patterns() {
     let with_models = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
-             api_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n\
-             [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
+             provider_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n\
+             [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
         ))
     };
     assert!(with_models("").unwrap().auth.unwrap().models.is_none());
@@ -136,7 +143,7 @@ fn auth_models_are_validated_patterns() {
 #[test]
 fn rejects_unknown_fields() {
     let err = parse(
-        "base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\napi_key = \"sk-secret\"",
+        "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\napi_key = \"sk-secret\"",
     )
     .unwrap_err();
     assert!(matches!(err, ConfigError::Parse(_)));
@@ -144,18 +151,23 @@ fn rejects_unknown_fields() {
 
 #[test]
 fn credential_must_be_exactly_one() {
-    assert!(matches!(
-        parse("base_url = \"https://api.anthropic.com\""),
-        Err(ConfigError::ProviderKey(_))
-    ));
-    assert!(matches!(
+    assert_eq!(
+        parse("base_url = \"https://api.anthropic.com\"")
+            .unwrap_err()
+            .to_string(),
+        "upstream: set provider_key_env, provider_key_file, or forward_caller_credential = true"
+    );
+    assert_eq!(
         parse(
-            "base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\nforward_caller_credential = true"
-        ),
-        Err(ConfigError::ProviderKey(_))
-    ));
+            "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\nforward_caller_credential = true"
+        )
+        .unwrap_err()
+        .to_string(),
+        "upstream: set only one of provider_key_env, provider_key_file, and \
+         forward_caller_credential"
+    );
     assert!(matches!(
-        parse("base_url = \"https://api.anthropic.com\"\napi_key_env = \"1BAD\""),
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"1BAD\""),
         Err(ConfigError::InvalidEnvName { .. })
     ));
 }
@@ -192,7 +204,7 @@ fn ca_file_is_kept_as_written() {
     );
     assert_eq!(
         parse(&format!("{FORWARDING}ca_file = \"\"")).unwrap_err(),
-        ConfigError::EmptyPath("upstream.ca_file")
+        ConfigError::Empty("upstream.ca_file")
     );
 }
 
@@ -202,8 +214,12 @@ fn lifecycle_defaults_and_zero_limits_rejected() {
     assert_eq!(config.server.max_concurrent_requests, 10_000);
     assert_eq!(config.server.drain_delay, Duration::ZERO);
     assert_eq!(
-        config.server.max_held_request_bytes,
-        DEFAULT_MAX_HELD_REQUEST_BYTES
+        config.server.max_total_held_bytes,
+        DEFAULT_MAX_TOTAL_HELD_BYTES
+    );
+    assert_eq!(
+        config.server.max_total_kept_bytes,
+        DEFAULT_MAX_TOTAL_KEPT_BYTES
     );
     assert_eq!(config.server.client_write_timeout, Duration::from_secs(60));
     assert_eq!(
@@ -214,12 +230,23 @@ fn lifecycle_defaults_and_zero_limits_rejected() {
         server("client_write_timeout_secs = 0").unwrap_err(),
         ConfigError::Zero("server.client_write_timeout_secs")
     );
+    assert_eq!(
+        server("max_total_kept_bytes = 0").unwrap_err(),
+        ConfigError::Zero("server.max_total_kept_bytes")
+    );
+    assert_eq!(
+        server("max_total_kept_bytes = 1024")
+            .unwrap()
+            .server
+            .max_total_kept_bytes,
+        1024
+    );
 }
 
 #[test]
 fn cache_diagnostics_require_a_key_variable() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n\
-                base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+                base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
     assert!(
         Config::from_toml_str(base)
             .unwrap()
@@ -293,16 +320,16 @@ fn rejects_zero_timeouts_and_timers_past_a_day() {
 #[test]
 fn the_hold_budget_fits_one_whole_body() {
     assert!(matches!(
-        server("max_held_request_bytes = 1048576"),
+        server("max_total_held_bytes = 1048576"),
         Err(ConfigError::Invalid(_))
     ));
-    assert!(server("max_held_request_bytes = 1048576\nmax_request_body_bytes = 1048576").is_ok());
+    assert!(server("max_total_held_bytes = 1048576\nmax_request_body_bytes = 1048576").is_ok());
 }
 
 #[test]
 fn telemetry_endpoint_gets_the_logs_path() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[upstream]\n\
-                base_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n";
+                base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
     let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
     let telemetry = with("otlp_endpoint = \"http://collector:4318\"")
         .unwrap()
@@ -343,25 +370,26 @@ fn telemetry_endpoint_gets_the_logs_path() {
 }
 
 #[test]
-fn api_key_file_is_a_third_exclusive_credential_mode() {
+fn provider_key_file_is_a_third_exclusive_credential_mode() {
     let config =
-        parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"secrets/key\"").unwrap();
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"secrets/key\"")
+            .unwrap();
     assert_eq!(
         claude(&config).upstreams()[0].provider_key,
-        ProviderKey::ApiKeyFile(PathBuf::from("secrets/key"))
+        ProviderKey::File(PathBuf::from("secrets/key"))
     );
     for both in [
-        "api_key_file = \"k\"\napi_key_env = \"K\"",
-        "api_key_file = \"k\"\nforward_caller_credential = true",
+        "provider_key_file = \"k\"\nprovider_key_env = \"K\"",
+        "provider_key_file = \"k\"\nforward_caller_credential = true",
     ] {
-        assert!(matches!(
-            parse(&format!("base_url = \"https://api.anthropic.com\"\n{both}")),
-            Err(ConfigError::ProviderKey(_))
-        ));
+        let err = parse(&format!("base_url = \"https://api.anthropic.com\"\n{both}"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.starts_with("upstream: set only one of"), "{err}");
     }
     assert_eq!(
-        parse("base_url = \"https://api.anthropic.com\"\napi_key_file = \"\"").unwrap_err(),
-        ConfigError::EmptyPath("upstream.api_key_file")
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"\"").unwrap_err(),
+        ConfigError::Empty("upstream.provider_key_file")
     );
 }
 
@@ -387,7 +415,7 @@ fn discovery_lists_unique_model_names() {
     let with = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+             [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
              [discovery]\nmodels = [{models}]"
         ))
     };
@@ -420,38 +448,38 @@ fn identity_provider_issuers_are_validated() {
     let parse_auth = |auth: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"0.0.0.0:8080\"\n[upstream]\nbase_url = \"https://api.anthropic.com\"\n\
-             api_key_env = \"K\"\n[auth]\n{auth}"
+             provider_key_env = \"K\"\n[auth]\n{auth}"
         ))
     };
-    let idp = "[[auth.issuers]]\nissuer = \"https://token.actions.githubusercontent.com\"\n\
+    let idp = "[[auth.identity_providers]]\nissuer = \"https://token.actions.githubusercontent.com\"\n\
                audience = \"wye-prod\"\nalgorithm = \"RS256\"\njwks_file = \"github.jwks\"\n";
     // Issuers alone are enough: Wye's own keys are optional.
     let auth = parse_auth(idp).unwrap().auth.unwrap();
     assert!(auth.own.is_none());
-    let issuer = &auth.issuers[0];
+    let issuer = &auth.identity_providers[0];
     assert_eq!(issuer.algorithm, Algorithm::Rs256);
     assert_eq!(issuer.subject_claim, "sub");
     assert!(issuer.grants.is_empty());
 
     let grants = format!(
-        "{idp}subject_claim = \"repository\"\n[[auth.issuers.grants]]\nclaim = \"repository_owner\"\n\
+        "{idp}subject_claim = \"repository\"\n[[auth.identity_providers.grants]]\nclaim = \"repository_owner\"\n\
          value = \"acme\"\nmodels = [\"claude-haiku-*\"]\n"
     );
     let auth = parse_auth(&grants).unwrap().auth.unwrap();
-    assert_eq!(auth.issuers[0].subject_claim, "repository");
+    assert_eq!(auth.identity_providers[0].subject_claim, "repository");
     assert_eq!(
-        auth.issuers[0].grants[0].models[0].to_string(),
+        auth.identity_providers[0].grants[0].models[0].to_string(),
         "claude-haiku-*"
     );
 
     let own = format!(
-        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"\n"
+        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"\n"
     );
     let auth = parse_auth(&format!("{own}{idp}")).unwrap().auth.unwrap();
-    assert!(auth.own.is_some() && auth.issuers.len() == 1);
+    assert!(auth.own.is_some() && auth.identity_providers.len() == 1);
 
     for bad in [
-        String::new(),                   // neither own keys nor issuers
+        String::new(),                   // neither own keys nor identity providers
         "issuer = \"wye\"\n".to_owned(), // own issuer without keys or audience
         idp.replace("RS256", "HS256"),   // HMAC is never accepted
         idp.replace("RS256", "none"),
@@ -462,9 +490,15 @@ fn identity_provider_issuers_are_validated() {
             idp.replace("https://token.actions.githubusercontent.com", "wye")
         ),
         format!("{idp}subject_claim = \"\"\n"),
-        format!("{idp}[[auth.issuers.grants]]\nclaim = \"groups\"\nvalue = \"x\"\nmodels = []\n"),
-        format!("{idp}[[auth.issuers.grants]]\nclaim = \"\"\nvalue = \"x\"\nmodels = [\"a\"]\n"),
-        format!("{idp}[[auth.issuers.grants]]\nclaim = \"g\"\nvalue = \"x\"\nmodels = [\"a*b\"]\n"),
+        format!(
+            "{idp}[[auth.identity_providers.grants]]\nclaim = \"groups\"\nvalue = \"x\"\nmodels = []\n"
+        ),
+        format!(
+            "{idp}[[auth.identity_providers.grants]]\nclaim = \"\"\nvalue = \"x\"\nmodels = [\"a\"]\n"
+        ),
+        format!(
+            "{idp}[[auth.identity_providers.grants]]\nclaim = \"g\"\nvalue = \"x\"\nmodels = [\"a*b\"]\n"
+        ),
         format!("{idp}jwks_url = \"https://example.com\"\n"), // no runtime fetching
     ] {
         assert!(parse_auth(&bad).is_err(), "accepted:\n{bad}");
@@ -518,7 +552,7 @@ fn documented_pricing_example_parses() {
 
     let one = |extra: &str| {
         parse(&format!(
-            "{FORWARDING}[pricing]\nversion = \"v\"\n[[pricing.models]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
+            "{FORWARDING}[pricing]\nversion = \"v\"\n[[pricing.prices]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
         ))
     };
     assert!(one("").is_ok());
@@ -526,7 +560,7 @@ fn documented_pricing_example_parses() {
     assert!(one("cache_read = \"-1\"").is_err());
     assert!(one("upstreams = [\"x\"]").is_err());
     assert!(
-        one("[[pricing.models.tiers]]\nabove_prompt_tokens = 5\n[[pricing.models.tiers]]\nabove_prompt_tokens = 5\n")
+        one("[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n")
             .is_err()
     );
 }

@@ -12,7 +12,7 @@ use gateway_core::{
     api::{self, Api, Endpoint},
     config::{Config, ProviderKey, Upstream},
     policy,
-    pricing::{Pico, PricedModels, Usd},
+    pricing::{Pico, PriceEntry, Usd},
     prompt,
     route::{self, FailoverReason, Route, Select},
     token::{Identity, Verifier},
@@ -504,7 +504,7 @@ mod tests;
 
 /// An entry's prices per million tokens, exact and with at least two
 /// decimals, as `[pricing]` writes them.
-fn prices(entry: &PricedModels) -> String {
+fn prices(entry: &PriceEntry) -> String {
     let per_mtok = |p: Pico| {
         let usd = Usd(p.saturating_mul(1_000_000)).to_string();
         match usd.split_once('.').map(|(_, decimals)| decimals.len()) {

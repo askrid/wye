@@ -51,8 +51,8 @@ async fn requests_beyond_the_hold_budget_get_an_overload_error() {
     let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         max_held_request_bytes = 1024\n\
-         [upstream]\nbase_url = \"http://{upstream}\"\napi_key_env = \"UNUSED\"\n\
+         max_total_held_bytes = 1024\n\
+         [upstream]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n"
     );
     let h = Harness::launch_config(&config, keyed_resources(), hits).await;

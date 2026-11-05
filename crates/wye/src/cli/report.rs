@@ -188,7 +188,7 @@ struct Summary {
     classes: HashMap<String, Group>,
     /// Route upstreams, when the log names them.
     upstreams: HashMap<String, Group>,
-    /// Refusals that moved requests on, by (upstream, reason).
+    /// Rejections that moved requests on, by (upstream, reason).
     failovers: HashMap<(String, String), u64>,
     sessions: HashMap<String, Session>,
     /// Time and cache-miss label of each conversation's first cache write.

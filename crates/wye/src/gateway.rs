@@ -65,10 +65,10 @@ pub struct Gateway {
     alias_models: HashMap<Arc<str>, Bytes>,
     /// Request bytes held while reading `model`, across all requests.
     held_bytes: Gauge,
-    /// Request bytes kept for failover, across all requests; bounded per
-    /// route by its `failover_max_kept_bytes`.
+    /// Request bytes kept for failover, across all requests.
     failover_kept: Gauge,
-    max_held_request_bytes: usize,
+    max_total_held_bytes: usize,
+    max_total_kept_bytes: usize,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
     prompt_key: Option<Arc<HashKey>>,
     /// Percentage of sessions whose requests are diagnosed.
@@ -143,7 +143,9 @@ impl Gateway {
                 .collect(),
             held_bytes: Gauge::default(),
             failover_kept: Gauge::default(),
-            max_held_request_bytes: usize::try_from(config.server.max_held_request_bytes)
+            max_total_held_bytes: usize::try_from(config.server.max_total_held_bytes)
+                .unwrap_or(usize::MAX),
+            max_total_kept_bytes: usize::try_from(config.server.max_total_kept_bytes)
                 .unwrap_or(usize::MAX),
             otlp: config
                 .telemetry

@@ -94,7 +94,7 @@ pub(crate) fn wye_config(
         || options.bedrock
         || options.failover
     {
-        format!("api_key_env = \"{BENCH_PROVIDER_KEY_ENV}\"")
+        format!("provider_key_env = \"{BENCH_PROVIDER_KEY_ENV}\"")
     } else {
         "forward_caller_credential = true".to_owned()
     };
@@ -131,7 +131,7 @@ pub(crate) fn wye_config(
     if let Some(key) = options.auth_public_key {
         config.push_str(&format!(
             "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n{}\n\
-             [[auth.keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n",
+             [[auth.signing_keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n",
             options
                 .auth_models
                 .map_or(String::new(), |list| format!("models = {list}"))

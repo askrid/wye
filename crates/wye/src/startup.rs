@@ -7,7 +7,8 @@ use std::{
 };
 
 use gateway_core::{
-    config::{Config, Issuer, ProviderKey, Upstream},
+    api::RouteId,
+    config::{Config, IdentityProvider, ProviderKey, Upstream},
     prompt::HashKey,
     token::{IssuerKeys, KeySetError, Verifier},
 };
@@ -25,7 +26,7 @@ pub enum StartupError {
     HashKeyTooShort(String),
     /// A file the configuration names, by the setting that names it.
     File {
-        what: &'static str,
+        what: String,
         path: PathBuf,
         reason: String,
     },
@@ -75,6 +76,24 @@ impl fmt::Display for StartupError {
 
 impl std::error::Error for StartupError {}
 
+impl StartupError {
+    /// A file error of `upstream` (in `route`) with its setting named by
+    /// its place in the config, as validation errors name it.
+    fn in_upstream(self, route: RouteId, upstream: &Upstream) -> Self {
+        match self {
+            Self::File { what, path, reason } => Self::File {
+                what: match &upstream.id {
+                    None => format!("upstream.{what}"),
+                    Some(id) => format!("routes.{}.upstreams {id:?}: {what}", route.name()),
+                },
+                path,
+                reason,
+            },
+            other => other,
+        }
+    }
+}
+
 /// Secrets and files the configuration references, loaded at startup.
 #[derive(Debug)]
 pub struct Resources {
@@ -111,9 +130,14 @@ impl Resources {
     /// Loads what `config` references. Relative paths resolve against `config_dir`.
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
         let mut upstreams = Vec::with_capacity(config.routes.upstreams().count());
-        for upstream in config.routes.upstreams() {
-            let auth = upstream_auth(upstream, config_dir)?;
-            let extra_roots = upstream_roots(upstream, config_dir)?;
+        for (route, upstream) in config
+            .routes
+            .iter()
+            .flat_map(|(id, route)| route.upstreams().iter().map(move |u| (id, u)))
+        {
+            let located = |e: StartupError| e.in_upstream(route, upstream);
+            let auth = upstream_auth(upstream, config_dir).map_err(located)?;
+            let extra_roots = upstream_roots(upstream, config_dir).map_err(located)?;
             upstreams.push(UpstreamResources { auth, extra_roots });
         }
         let prompt_key = config
@@ -157,7 +181,7 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
         return Ok(None);
     };
     let sets = auth
-        .issuers
+        .identity_providers
         .iter()
         .map(|issuer| key_set(issuer, config_dir))
         .collect::<Result<_, _>>()?;
@@ -168,9 +192,12 @@ pub fn verifier(config: &Config, config_dir: &Path) -> Result<Option<Verifier>, 
 
 /// An identity provider's key set, read from its `jwks_file` (relative to
 /// `config_dir`).
-pub(crate) fn key_set(issuer: &Issuer, config_dir: &Path) -> Result<IssuerKeys, StartupError> {
+pub(crate) fn key_set(
+    issuer: &IdentityProvider,
+    config_dir: &Path,
+) -> Result<IssuerKeys, StartupError> {
     let path = config_dir.join(&issuer.jwks_file);
-    let error = file_error("auth.issuers jwks_file", &path);
+    let error = file_error("auth.identity_providers.jwks_file", &path);
     let jwks = std::fs::read(&path).map_err(|e| error(e.to_string()))?;
     IssuerKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
@@ -183,7 +210,7 @@ pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
         .routes
         .upstreams()
         .filter_map(|u| match &u.provider_key {
-            ProviderKey::ApiKeyEnv(name) => Some(name.clone()),
+            ProviderKey::Env(name) => Some(name.clone()),
             _ => None,
         })
         .collect();
@@ -208,14 +235,15 @@ pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
 // will do with it.
 
 /// The credential Wye presents to `upstream`: its key from the environment
-/// or a file (relative to `config_dir`), or the caller's own.
+/// or a file (relative to `config_dir`), or the caller's own. A file error
+/// names the setting relative to the upstream.
 pub(crate) fn upstream_auth(
     upstream: &Upstream,
     config_dir: &Path,
 ) -> Result<UpstreamAuth, StartupError> {
     let key = match &upstream.provider_key {
-        ProviderKey::ApiKeyEnv(name) => Some(env_secret(name)?),
-        ProviderKey::ApiKeyFile(path) => Some(read_secret(&config_dir.join(path))?),
+        ProviderKey::Env(name) => Some(env_secret(name)?),
+        ProviderKey::File(path) => Some(read_secret(&config_dir.join(path))?),
         ProviderKey::ForwardCaller => None,
     };
     match key {
@@ -249,7 +277,7 @@ fn env_secret(name: &str) -> Result<String, StartupError> {
 /// A secret file's contents without surrounding whitespace (mounted secrets
 /// often end in a newline).
 fn read_secret(path: &Path) -> Result<String, StartupError> {
-    let error = file_error("upstream.api_key_file", path);
+    let error = file_error("provider_key_file", path);
     let contents = std::fs::read_to_string(path).map_err(|e| error(e.to_string()))?;
     let secret = contents.trim();
     if secret.is_empty() {
@@ -274,7 +302,7 @@ pub(crate) fn upstream_roots(
 }
 
 fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, StartupError> {
-    let error = file_error("upstream.ca_file", path);
+    let error = file_error("ca_file", path);
     let certs = CertificateDer::pem_file_iter(path)
         .and_then(Iterator::collect::<Result<Vec<_>, _>>)
         .map_err(|e| error(e.to_string()))?;
@@ -286,7 +314,7 @@ fn load_certificates(path: &Path) -> Result<Vec<CertificateDer<'static>>, Startu
 
 fn file_error(what: &'static str, path: &Path) -> impl Fn(String) -> StartupError {
     move |reason| StartupError::File {
-        what,
+        what: what.to_owned(),
         path: path.to_owned(),
         reason,
     }
@@ -356,6 +384,33 @@ mod tests {
         assert_eq!(headers["x-team"], "research");
         assert!(parse_headers("no-equals-sign").is_none());
         assert!(parse_headers("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_file_error_names_the_setting_where_config_has_it() {
+        let error = |upstream: &str| {
+            let config = Config::from_toml_str(&format!(
+                "[server]\nlisten = \"127.0.0.1:8080\"\n{upstream}\
+                 base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"missing.key\"\n"
+            ))
+            .unwrap();
+            Resources::resolve(&config, Path::new("/nonexistent-wye-dir"))
+                .unwrap_err()
+                .to_string()
+        };
+        let single = error("[upstream]\n");
+        assert!(
+            single.starts_with("upstream.provider_key_file /nonexistent-wye-dir/missing.key: "),
+            "{single}"
+        );
+        let entry = error("[routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n");
+        assert!(
+            entry.starts_with(
+                "routes.claude.upstreams \"a\": provider_key_file \
+                 /nonexistent-wye-dir/missing.key: "
+            ),
+            "{entry}"
+        );
     }
 
     #[test]

@@ -117,17 +117,17 @@ failover = ["429", "529", "connect"]
 id = "anthropic"
 weight = 2         # twice the sessions of the other
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_API_KEY"
+provider_key_env = "ANTHROPIC_API_KEY"
 
 [[routes.claude.upstreams]]
 id = "bedrock-us"
 provider = "bedrock"
 base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
-api_key_env = "BEDROCK_API_KEY"
+provider_key_env = "BEDROCK_API_KEY"
 
 [pricing]
 version = "anthropic-2026-11-01"
-[[pricing.models]]
+[[pricing.prices]]
 models = ["claude-opus-5-5"]
 input = "4.00"     # USD per million tokens
 output = "20.00"

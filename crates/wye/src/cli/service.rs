@@ -52,7 +52,7 @@ fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> 
             .join(", ");
         return Err(named(format!(
             "a service starts outside your shell, so it would not see {list}. Read \
-             provider keys from files instead (api_key_file = \"anthropic.key\", next to \
+             provider keys from files instead (provider_key_file = \"anthropic.key\", next to \
              the config, readable only by you), as `wye init` writes them; for the cache \
              diagnostics key and OTLP headers, run `wye serve` under a service definition \
              of your own (docs/operations.md#running-as-a-service). Another config: -c <path>"

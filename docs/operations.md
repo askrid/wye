@@ -49,7 +49,7 @@ Named by the config, read once at startup; the names are yours to choose, and th
 
 | Field | Usual variable | Holds |
 |---|---|---|
-| `api_key_env` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A provider key |
+| `provider_key_env` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A provider key |
 | `cache_diagnostics.hash_key_env` | `WYE_CACHE_HASH_KEY` | The key for prompt-section hashes |
 | `telemetry.otlp_headers_env` | | Headers for OTLP export |
 
@@ -91,7 +91,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
-- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye's own tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
+- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_gateway_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye's own tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
 - Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows; output-token ceilings and trusted issuers compare by value.
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
@@ -100,7 +100,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 
 **`wye probe [<url>]`** sends one `GET` and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway and asks its `/healthz` (the gateway's `/` serves nothing). A path is asked as given, such as `/readyz` for a load balancer's view.
 
-**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
+**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.signing_keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
 
 ### Agent wrapper
 
@@ -123,17 +123,17 @@ Short-lived tokens need a command that fetches a fresh one, so nobody pastes tok
 
 `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY` take precedence over the helper, so leave both unset (and run `wye claude` without `--token-file` or `WYE_TOKEN`). The helper can be distributed through managed settings. Each new token takes one full verification per connection, then the [per-connection cache](policy.md#gateway-tokens) applies.
 
-In GitHub Actions, the job's [identity-provider token](glossary.md#access) (GitHub's OIDC token) is the gateway token, so the repository holds no secret. Wye trusts the issuer ([`[[auth.issuers]]`](policy.md#gateway-tokens)):
+In GitHub Actions, the job's [identity-provider token](glossary.md#access) (GitHub's OIDC token) is the gateway token, so the repository holds no secret. Wye trusts the issuer ([`[[auth.identity_providers]]`](policy.md#gateway-tokens)):
 
 ```toml
-[[auth.issuers]]
+[[auth.identity_providers]]
 issuer = "https://token.actions.githubusercontent.com"
 audience = "wye-prod"
 algorithm = "RS256"
 # from https://token.actions.githubusercontent.com/.well-known/jwks
 jwks_file = "github.jwks"
 subject_claim = "repository"       # usage per repository
-[[auth.issuers.grants]]
+[[auth.identity_providers.grants]]
 claim = "repository_owner"
 value = "acme"
 models = ["claude-sonnet-*", "claude-haiku-*"]
@@ -163,9 +163,9 @@ steps:
       CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "240000"   # refresh within the token's lifetime
 ```
 
-GitHub does not document the token lifetime (its example token is valid for five minutes), so keep the helper's cache lifetime below it; Wye refuses an expired token with `401`, and `max_token_ttl_secs` bounds what it accepts.
+GitHub does not document the token lifetime (its example token is valid for five minutes), so keep the helper's cache lifetime below it; Wye refuses an expired token with `401`, and `max_gateway_token_ttl_secs` bounds what it accepts.
 
-Developers use the same setting with a helper that prints a token from an issuer Wye trusts: the team's IdP (an `[[auth.issuers]]` entry), or an internal service that authenticates the developer by SSO and mints a short-lived gateway token with `wye token issue` (the signing key stays in that service). Offboarding then happens at the IdP: the next renewal fails, and the last token expires on its own ([revocation](policy.md#revocation)).
+Developers use the same setting with a helper that prints a token from an issuer Wye trusts: the team's IdP (an `[[auth.identity_providers]]` entry), or an internal service that authenticates the developer by SSO and mints a short-lived gateway token with `wye token issue` (the signing key stays in that service). Offboarding then happens at the IdP: the next renewal fails, and the last token expires on its own ([revocation](policy.md#revocation)).
 
 ## Deployment modes
 
@@ -194,7 +194,7 @@ It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macO
 
 Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment.
 
-- Provider keys go in files next to the config (`api_key_file = "anthropic.key"`, readable only by you), which is how `wye init` writes them.
+- Provider keys go in files next to the config (`provider_key_file = "anthropic.key"`, readable only by you), which is how `wye init` writes them.
 - The cache-diagnostics hash key and OTLP headers come only from the environment for now, so a config that uses them runs `wye serve` under a service definition of your own. Start from what `--dry-run` prints for a config without them.
 - If another gateway already answers on the config's port, such as `wye serve` in a terminal, the install stops.
 - Under systemd, it refuses paths containing spaces, quotes, `$`, or a backslash.
@@ -217,7 +217,7 @@ Because Wye keeps no state and has no peer discovery, every multi-node setup has
 
 For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`.
 
-For container platforms, `upstream.api_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-keys-or-providers).
+For container platforms, `upstream.provider_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-keys-or-providers).
 
 ### Sizing (estimate)
 

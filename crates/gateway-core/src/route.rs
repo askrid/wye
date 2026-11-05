@@ -28,7 +28,7 @@ pub enum Select {
     Ordered,
 }
 
-/// A refusal that proves a request was not processed, so it may go to the
+/// A rejection that proves a request was not processed, so it may go to the
 /// next upstream: an ambiguous `5xx` may already be billed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailoverReason {
@@ -76,8 +76,8 @@ impl FailoverReason {
     }
 }
 
-/// Retrying another upstream when one refused a request before it was
-/// processed ([`FailoverReason`]).
+/// Sending a request to another upstream when one rejected it before it
+/// was processed ([`FailoverReason`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Failover {
     /// The reasons config enabled, one bit per [`FailoverReason`].
@@ -85,20 +85,19 @@ pub struct Failover {
     /// Larger request bodies are forwarded without failover: resending needs
     /// the bytes already sent.
     pub max_body_bytes: u64,
-    /// Request bytes kept for resending across the process; beyond it,
-    /// requests are forwarded without failover, never refused.
-    pub max_kept_bytes: u64,
 }
 
 impl Failover {
     /// Whether `reason` moves a request on.
-    pub fn retries(&self, reason: FailoverReason) -> bool {
+    pub fn fails_over_on(&self, reason: FailoverReason) -> bool {
         self.on & reason.bit() != 0
     }
 
     /// The reasons that move a request on, in [`FailoverReason::ALL`] order.
     pub fn reasons(&self) -> impl Iterator<Item = FailoverReason> + '_ {
-        FailoverReason::ALL.into_iter().filter(|&r| self.retries(r))
+        FailoverReason::ALL
+            .into_iter()
+            .filter(|&r| self.fails_over_on(r))
     }
 
     pub(crate) fn enable(&mut self, reason: FailoverReason) {

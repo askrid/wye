@@ -197,12 +197,12 @@ impl fmt::Debug for Verifier {
 }
 
 impl Verifier {
-    /// `issuer_keys` holds each `auth.issuers` entry's parsed key set, in
+    /// `issuer_keys` holds each `auth.identity_providers` entry's parsed key set, in
     /// order; an issuer without one accepts no token. A key id used twice,
     /// in any two sets, is an error: a token's `kid` must name one key.
     pub fn new(auth: &Auth, issuer_keys: Vec<IssuerKeys>) -> Result<Self, KeySetError> {
         let mut verifier = Self {
-            max_ttl_secs: auth.max_token_ttl.as_secs(),
+            max_ttl_secs: auth.max_gateway_token_ttl.as_secs(),
             keys: HashMap::new(),
             sources: Vec::new(),
         };
@@ -212,7 +212,7 @@ impl Verifier {
                 verifier.add_key(&key.id, VerifyKey::ed25519(key.ed25519_public_key), index)?;
             }
         }
-        for (issuer, set) in auth.issuers.iter().zip(issuer_keys) {
+        for (issuer, set) in auth.identity_providers.iter().zip(issuer_keys) {
             let kind = SourceKind::IdentityProvider {
                 algorithm: issuer.algorithm,
                 subject_claim: issuer.subject_claim.as_str().into(),

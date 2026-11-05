@@ -8,7 +8,7 @@ fn config(listen: &str, auth: Option<&str>, rest: &str) -> Config {
     let auth = auth.map_or(String::new(), |auth| format!("[auth]\n{auth}\n"));
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"{listen}\"\n\
-         [upstream]\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"K\"\n\
+         [upstream]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
          {auth}{rest}"
     ))
     .unwrap()
@@ -17,7 +17,7 @@ fn config(listen: &str, auth: Option<&str>, rest: &str) -> Config {
 fn own(models: &str, extra: &str) -> String {
     format!(
         "issuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n{extra}\n\
-         [[auth.keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n",
+         [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"\n",
         token::encode_public_key(&[7; 32])
     )
 }
@@ -73,15 +73,18 @@ fn ceilings_signers_and_exposure_widen() {
         "127.0.0.1:8080",
         Some(&own(
             "",
-            "max_output_tokens = 32000\nmax_token_ttl_secs = 86400",
+            "max_output_tokens = 32000\nmax_gateway_token_ttl_secs = 86400",
         )),
         "",
     );
     let new = config(
         "0.0.0.0:8080",
         Some(&format!(
-            "{}[[auth.keys]]\nid = \"k2\"\ned25519_public_key = \"{}\"\n",
-            own("", "max_output_tokens = 64000\nmax_token_ttl_secs = 604800"),
+            "{}[[auth.signing_keys]]\nid = \"k2\"\ned25519_public_key = \"{}\"\n",
+            own(
+                "",
+                "max_output_tokens = 64000\nmax_gateway_token_ttl_secs = 604800"
+            ),
             token::encode_public_key(&[8; 32])
         )),
         "",
@@ -90,14 +93,14 @@ fn ceilings_signers_and_exposure_widen() {
     for line in [
         "widens: server.listen: 127.0.0.1:8080 -> 0.0.0.0:8080, reachable beyond this machine",
         "widens: [auth] max_output_tokens: 32000 -> 64000",
-        "widens: [auth] max_token_ttl_secs: 86400 -> 604800",
-        "widens: [[auth.keys]] k2: a new signing key is trusted",
+        "widens: [auth] max_gateway_token_ttl_secs: 86400 -> 604800",
+        "widens: [[auth.signing_keys]] k2: a new signing key is trusted",
         "result: access widened (4)",
     ] {
         assert!(report.contains(line), "{line}\n{report}");
     }
     let report = policy_diff(&new, &old).report();
-    assert!(report.contains("narrows: [[auth.keys]] k2: no longer trusted"));
+    assert!(report.contains("narrows: [[auth.signing_keys]] k2: no longer trusted"));
     assert!(report.contains("result: no access widened"), "{report}");
 
     let open = config("127.0.0.1:8080", None, "");
@@ -112,13 +115,13 @@ fn ceilings_signers_and_exposure_widen() {
 fn identity_provider_grants_compare_per_claim_value() {
     let issuer = |grants: &str| {
         format!(
-            "[[auth.issuers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
+            "[[auth.identity_providers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
              algorithm = \"EdDSA\"\njwks_file = \"idp.jwks\"\n{grants}"
         )
     };
     let grant = |value: &str, models: &str| {
         format!(
-            "[[auth.issuers.grants]]\nclaim = \"groups\"\nvalue = \"{value}\"\nmodels = {models}\n"
+            "[[auth.identity_providers.grants]]\nclaim = \"groups\"\nvalue = \"{value}\"\nmodels = {models}\n"
         )
     };
     let old = config(
@@ -137,8 +140,8 @@ fn identity_provider_grants_compare_per_claim_value() {
     );
     let report = policy_diff(&old, &new).report();
     for line in [
-        "widens: [[auth.issuers]] https://idp.example grant groups=eng: claude-opus-* newly allowed",
-        "widens: [[auth.issuers]] https://idp.example grant groups=ops: claude-haiku-* newly allowed",
+        "widens: [[auth.identity_providers]] https://idp.example grant groups=eng: claude-opus-* newly allowed",
+        "widens: [[auth.identity_providers]] https://idp.example grant groups=ops: claude-haiku-* newly allowed",
     ] {
         assert!(report.contains(line), "{line}\n{report}");
     }
@@ -152,7 +155,7 @@ fn identity_provider_grants_compare_per_claim_value() {
     );
     let report = policy_diff(&old, &other).report();
     assert!(
-        report.contains("widens: [[auth.issuers]] https://other.example: tokens from this identity provider accepted"),
+        report.contains("widens: [[auth.identity_providers]] https://other.example: tokens from this identity provider accepted"),
         "{report}"
     );
 }
@@ -162,14 +165,14 @@ fn routes_are_reported_without_widening() {
     let route = |extra: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\napi_key_env = \"A\"\n{extra}"
+             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"A\"\n{extra}"
         ))
         .unwrap()
     };
     let old = route("");
     let new = route(
         "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
-         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\napi_key_env = \"B\"\n",
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key_env = \"B\"\n",
     );
     let diff = policy_diff(&old, &new);
     assert!(!diff.widens());
@@ -207,7 +210,7 @@ fn exposure_new_routes_and_the_operators_key_widen() {
 id = \"openai\"
 provider = \"openai\"
 \
-         base_url = \"https://api.openai.com\"\napi_key_env = \"O\"\n",
+         base_url = \"https://api.openai.com\"\nprovider_key_env = \"O\"\n",
     );
     let report = policy_diff(&claude, &both).report();
     assert!(
@@ -228,7 +231,7 @@ provider = \"openai\"
         .unwrap()
     };
     let forwarded = upstream("forward_caller_credential = true");
-    let keyed = upstream("api_key_env = \"K\"");
+    let keyed = upstream("provider_key_env = \"K\"");
     let report = policy_diff(&forwarded, &keyed).report();
     assert!(
         report.contains(
@@ -237,7 +240,7 @@ provider = \"openai\"
         "{report}"
     );
     assert!(!policy_diff(&keyed, &forwarded).widens());
-    let report = policy_diff(&keyed, &upstream("api_key_env = \"OTHER\"")).report();
+    let report = policy_diff(&keyed, &upstream("provider_key_env = \"OTHER\"")).report();
     assert!(
         report.contains("changes: [upstream] key: $K -> $OTHER"),
         "{report}"
@@ -256,7 +259,7 @@ fn a_key_set_compares_by_its_keys() {
         std::fs::write(at.join("idp.jwks"), jwks(keys)).unwrap();
         at
     };
-    let issuer = "[[auth.issuers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
+    let issuer = "[[auth.identity_providers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
                   algorithm = \"EdDSA\"\njwks_file = \"idp.jwks\"\n";
     let config = config("127.0.0.1:8080", Some(issuer), "");
     let old = side("old", &[(&a, "a")]);
@@ -266,8 +269,9 @@ fn a_key_set_compares_by_its_keys() {
     let mut diff = policy_diff(&config, &config);
     diff.key_sets(&config, &old, &config, &added).unwrap();
     assert!(
-        diff.report()
-            .contains("widens: [[auth.issuers]] https://idp.example: key b newly trusted"),
+        diff.report().contains(
+            "widens: [[auth.identity_providers]] https://idp.example: key b newly trusted"
+        ),
         "{}",
         diff.report()
     );
@@ -276,7 +280,9 @@ fn a_key_set_compares_by_its_keys() {
     let report = diff.report();
     assert!(report.contains("key a newly trusted"), "{report}");
     assert!(
-        report.contains("narrows: [[auth.issuers]] https://idp.example: key a no longer trusted"),
+        report.contains(
+            "narrows: [[auth.identity_providers]] https://idp.example: key a no longer trusted"
+        ),
         "{report}"
     );
     let mut diff = policy_diff(&config, &config);

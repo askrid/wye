@@ -128,12 +128,12 @@ failover = ["429", "529", "connect"]
 id = "key-a"
 weight = 2                     # twice the sessions of key-b
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_KEY_A"
+provider_key_env = "ANTHROPIC_KEY_A"
 
 [[routes.claude.upstreams]]
 id = "key-b"
 base_url = "https://api.anthropic.com"
-api_key_env = "ANTHROPIC_KEY_B"
+provider_key_env = "ANTHROPIC_KEY_B"
 ```
 
 - Each session stays on one upstream, chosen from its session id (SDK callers without one: from the gateway token's subject), so its prompt cache keeps hitting ([cache affinity](architecture.md#cache-affinity)). Without either, as for a local app with no gateway token, every request goes to the same upstream.
@@ -141,7 +141,7 @@ api_key_env = "ANTHROPIC_KEY_B"
 - With `failover`, a request rejected with `429` or `529`, or a connection that fails before the body was delivered, goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#claude-across-providers-and-upstreams)). Without it, a `429` goes back to the client, whose retry reaches the same upstream.
 - `select = "ordered"` makes the first upstream primary and the others standby.
 - Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI upstreams the same way.
-- A route holds its own provider keys, so it does not combine with the default `wye init`, where each caller's credential goes through. Under `wye service`, give each provider key with `api_key_file` instead of `api_key_env` ([why](operations.md#running-as-a-service)).
+- A route holds its own provider keys, so it does not combine with the default `wye init`, where each caller's credential goes through. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
 - `wye explain --session <id>` shows which upstream a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Seeing costs
@@ -205,7 +205,7 @@ What you may see, what it means, and what to do:
 - `404 no route serves ...`: no route for that API. Add the section it names, such as `[routes.openai]`.
 - `408 request body stalled`: while Wye read `model`, the client sent nothing for 60 s, or had not reached it after 5 minutes. Check the client's network.
 - `415 the request body must...`: a compressed or non-UTF-8 body under a policy that reads it (permissions, ceilings, aliases, Bedrock). Send plain UTF-8 JSON.
-- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_held_request_bytes`. Otherwise it comes from the provider. Clients retry on their own; raise the limit if it persists.
+- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_total_held_bytes`. Otherwise it comes from the provider. Clients retry on their own; raise the limit if it persists.
 - One `429` at each session start: Claude Code's probe on a claude.ai login; Anthropic answers it with or without Wye. Nothing to do.
 
 [Failure behavior](operations.md#failure-behavior) lists the rest.

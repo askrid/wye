@@ -72,7 +72,8 @@ pub(super) struct RawCacheDiagnostics {
 pub(super) struct RawServer {
     pub(super) listen: String,
     pub(super) max_request_body_bytes: Option<u64>,
-    pub(super) max_held_request_bytes: Option<u64>,
+    pub(super) max_total_held_bytes: Option<u64>,
+    pub(super) max_total_kept_bytes: Option<u64>,
     pub(super) max_concurrent_requests: Option<usize>,
     pub(super) drain_delay_secs: Option<u64>,
     pub(super) shutdown_grace_secs: Option<u64>,
@@ -92,22 +93,27 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
         "server.max_request_body_bytes",
     )?;
-    let max_held_request_bytes = nonzero(
-        raw.max_held_request_bytes
-            .unwrap_or(DEFAULT_MAX_HELD_REQUEST_BYTES),
-        "server.max_held_request_bytes",
+    let max_total_held_bytes = nonzero(
+        raw.max_total_held_bytes
+            .unwrap_or(DEFAULT_MAX_TOTAL_HELD_BYTES),
+        "server.max_total_held_bytes",
     )?;
     // A body that names its model last is held whole; with a smaller budget
     // it would be refused as an overload, and retried, forever.
-    if max_held_request_bytes < max_request_body_bytes {
+    if max_total_held_bytes < max_request_body_bytes {
         return Err(ConfigError::Invalid(
-            "server.max_held_request_bytes must be at least server.max_request_body_bytes",
+            "server.max_total_held_bytes must be at least server.max_request_body_bytes",
         ));
     }
     Ok(Server {
         listen,
         max_request_body_bytes,
-        max_held_request_bytes,
+        max_total_held_bytes,
+        max_total_kept_bytes: nonzero(
+            raw.max_total_kept_bytes
+                .unwrap_or(DEFAULT_MAX_TOTAL_KEPT_BYTES),
+            "server.max_total_kept_bytes",
+        )?,
         max_concurrent_requests: match raw.max_concurrent_requests {
             Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
             value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
@@ -188,7 +194,7 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
             .transpose()?,
         service_name: match raw.service_name {
             Some(name) if name.is_empty() => {
-                return Err(ConfigError::EmptyPath("telemetry.service_name"));
+                return Err(ConfigError::Empty("telemetry.service_name"));
             }
             name => name.unwrap_or_else(|| "wye".to_owned()),
         },

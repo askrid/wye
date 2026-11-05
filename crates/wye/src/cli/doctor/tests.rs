@@ -14,9 +14,9 @@ async fn reports_each_problem_and_what_works() {
     // key, a surely unset name for a missing one.
     let config = Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"up\"\nbase_url = \"http://{upstream}\"\napi_key_env = \"PATH\"\n\
+         [[routes.claude.upstreams]]\nid = \"up\"\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"PATH\"\n\
          [[routes.claude.upstreams]]\nid = \"down\"\nbase_url = \"http://127.0.0.1:1\"\n\
-         api_key_env = \"WYE_DOCTOR_SURELY_UNSET\"\n"
+         provider_key_env = \"WYE_DOCTOR_SURELY_UNSET\"\n"
     ))
     .unwrap();
     let (report, ok) = doctor(&config, Path::new(".")).await;
@@ -48,9 +48,9 @@ async fn a_bedrock_upstream_needs_the_anthropic_path() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
          [[routes.claude.upstreams]]\nid = \"right\"\nprovider = \"bedrock\"\n\
-         base_url = \"http://127.0.0.1:1/anthropic\"\napi_key_env = \"PATH\"\n\
+         base_url = \"http://127.0.0.1:1/anthropic\"\nprovider_key_env = \"PATH\"\n\
          [[routes.claude.upstreams]]\nid = \"wrong\"\nprovider = \"bedrock\"\n\
-         base_url = \"http://127.0.0.1:1\"\napi_key_env = \"PATH\"\n",
+         base_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"PATH\"\n",
     )
     .unwrap();
     let (report, _) = doctor(&config, Path::new(".")).await;
@@ -101,7 +101,7 @@ async fn a_key_serve_would_refuse_fails_the_check() {
     std::fs::write(dir.join("key"), "sk-\u{1}broken\n").unwrap();
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [upstream]\nbase_url = \"http://127.0.0.1:1\"\napi_key_file = \"key\"\n",
+         [upstream]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_file = \"key\"\n",
     )
     .unwrap();
     let (report, ok) = doctor(&config, &dir).await;
