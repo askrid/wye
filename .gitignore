@@ -1,3 +1,4 @@
 /target
 *.jsonl
 /wye.toml
+.DS_Store
