@@ -1,20 +1,12 @@
-<div align="center">
-
-<h1><img src="site/assets/icon-fork.svg" alt="" width="44" align="absmiddle"> Wye</h1>
+# <img src="site/assets/icon-fork.svg" alt="" width="36" align="absmiddle"> Wye
 
 **LLM gateway without bloat.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases) [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
-
-[Quick start](#quick-start) · [Guide](docs/guide.md) · [Configuration](examples/wye.toml) · [Benchmarks](docs/benchmarks.md) · [Website](https://askrid.github.io/wye/)
-
-</div>
-
-- **Fast.** Adds under a millisecond per request ([p50, lab](#performance)).
-- **Stateless.** Scale by running more replicas.
-- **Fails over.** A rejected request can be resent to another upstream before any output.
-- **One binary, one TOML file.** No database, no dashboard.
+- **Sees agent sessions.** Cost per Claude Code or Codex session, subagent, and tool, with the reason for each prompt-cache miss.
+- **Fast.** Adds under a millisecond per request, less than the four other gateways measured ([p50, lab](#performance)).
 - **Untranslated.** Native APIs pass through, so new features work the day they ship.
+- **One binary, one TOML file.** No database and no state between requests: scale by running more replicas.
+- **Plus the essentials.** Everything below, from access per caller to failover.
 
 ## Performance
 
