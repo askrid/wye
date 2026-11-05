@@ -6,11 +6,11 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives elsewhere: [operat
 - See what your agents used and spent: [reading `wye report`](#reading-wye-report)
 - Share one gateway with a team: [using it for a team](#using-it-for-a-team)
 - Connect your own apps: [using it from apps](#using-it-from-apps)
-- Spread load across API keys or providers: [several keys or providers](#several-keys-or-providers)
+- Spread load across accounts and providers: [several upstreams](#several-upstreams)
 - Put dollars on usage: [seeing costs](#seeing-costs)
 - Move to a new model safely: [model aliases and upgrades](#model-aliases-and-upgrades)
-- Send usage to Grafana, Datadog, or another OpenTelemetry backend: [sending usage to your OpenTelemetry backend](#sending-usage-to-your-opentelemetry-backend)
-- Change the config, a model, or Wye itself: [changing or upgrading](#changing-or-upgrading)
+- Send usage to Grafana, Datadog, or another [OpenTelemetry backend](#sending-usage-to-your-opentelemetry-backend)
+- Change the config or Wye itself: [changing or upgrading](#changing-or-upgrading)
 - Fix something: [troubleshooting](#troubleshooting)
 
 ## Choosing a setup
@@ -24,9 +24,9 @@ Install with `cargo install --git https://github.com/askrid/wye wye --locked` (R
 | **This machine only** (loopback) | `wye init`: you, with your claude.ai login or API key | `wye init --provider-key`: you with a company key, or a sidecar beside one app |
 | **Other machines** (gateway tokens) | not possible: a shared gateway cannot forward callers' credentials | `wye init --shared`: a team, or an app's services |
 
-- **Passthrough** (`wye init`): each caller's own credential goes through: Claude Code's claude.ai login, or an API key. The gateway holds no secret. Config: `~/.wye/wye.toml`.
-- **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`; for a sidecar, `--out` puts it in the app's repository.
-- **Shared** (`--shared`): callers present [gateway tokens](glossary.md#access), and the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `./wye.toml`, for the repository it is reviewed in.
+- **Passthrough** (`wye init`): the gateway holds no secret. Config: `~/.wye/wye.toml`.
+- **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`.
+- **Shared** (`--shared`): the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `./wye.toml`, for the repository it is reviewed in.
 
 `--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
 
@@ -39,7 +39,7 @@ In the background, as a LaunchAgent on macOS or a systemd user unit on Linux:
 ```bash
 wye service install     # shows what it sets up and asks
 wye service status
-wye service uninstall   # the config and the logs stay
+wye service uninstall   # the config, the usage log, and the message log stay
 ```
 
 A service does not inherit your shell's environment, so it refuses a config with secrets in environment variables; `wye init` and `wye init --provider-key` write none. [Running as a service](operations.md#running-as-a-service) has the detail.
@@ -56,9 +56,9 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 ## Reading `wye report`
 
-`wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OTel backend. The [README](../README.md) shows a sample.
+`wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OpenTelemetry backend. The [README](../README.md) shows a sample.
 
-- **First lines:** requests, sessions, outcomes, error statuses, and why upstreams gave no usable response (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed; Wye's own answers read `refused`, `upstream_error`, or `gateway_error` ([outcomes](operations.md#usage-records-and-telemetry)).
+- **First lines:** requests, sessions, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
 - **Cache misses:** a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
 - **Failovers, upgrade issues:** when records have them.
@@ -101,24 +101,24 @@ ANTHROPIC_BASE_URL=https://wye.example.com ANTHROPIC_API_KEY=<key> python app.py
 OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<key> node app.js
 ```
 
-Wye stands between your backend and the provider, never between your users and your backend: your users sign in to your backend, which keeps their authentication and quotas, and only the backend calls Wye. Two places to run it:
+Wye stands between your backend and the provider, never in front of your users: they sign in to your backend, which keeps their authentication and quotas, and only it calls Wye. Two places to run it:
 
 - **Beside the app** (`wye init --provider-key --out <path>`): a sidecar on the same host or pod, on loopback, holding the provider key. No tokens to manage; without `[auth]`, records name no subject, so there are no per-service model permissions, output-token ceilings, or canaries by subject. A sidecar has [not yet run in production](operations.md#deployment).
 - **One internal gateway for several services** (`wye init --shared`): each service gets its own gateway token, so permissions, ceilings, aliases, and usage are per service; deploy it as in [using it for a team](#using-it-for-a-team).
 
-What the app sends as its API key depends on the setup:
+The app's API key, by setup:
 
-- Shared (`wye init --shared`, or any config with `[auth]`): its gateway token, which Wye reads from `x-api-key` or `Authorization: Bearer`.
-- Passthrough (`wye init`): the app's own API key, which goes through.
-- Provider key (`wye init --provider-key`): any non-empty placeholder, since the SDKs refuse to send a request without one.
+- Shared, or any config with `[auth]`: its gateway token, which Wye reads from `x-api-key` or `Authorization: Bearer`.
+- Passthrough: the app's own API key, which goes through.
+- Provider key: any non-empty placeholder, since the SDKs refuse to send a request without one.
 
 Streamed chat completions report usage only with `stream_options={"include_usage": True}`, which Wye does not add.
 
 [examples/app/](../examples/app) is a complete config for a product's backend, with its policy tests: a gateway token per service, model aliases with a canary, Anthropic with Claude Platform on AWS as failover, OpenAI, an upgrade check, and prices.
 
-## Several keys or providers
+## Several upstreams
 
-When one API key's rate limits are not enough, or spend is split across accounts, list each key or account as an upstream under `[routes.claude]` instead of `[upstream]`:
+When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as an upstream under `[routes.claude]` instead of `[upstream]`:
 
 ```toml
 [routes.claude]
@@ -138,23 +138,22 @@ provider_key_env = "ANTHROPIC_KEY_B"
 
 - Each session stays on one upstream, chosen from its session id (SDK callers without one: from the gateway token's subject), so its prompt cache keeps hitting ([cache affinity](architecture.md#cache-affinity)). Without either, as for a local app with no gateway token, every request goes to the same upstream.
 - Weights share sessions, not tokens. Adding an upstream moves only the sessions it now wins; removing one moves only its own, and their next turn writes the cache again at the new upstream.
-- With `failover`, a request rejected with `429` or `529`, or a connection that fails before the body was delivered, goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). Without it, a `429` goes back to the client, whose retry reaches the same upstream.
+- With `failover`, a [rejected](glossary.md#requests-and-where-they-go) request goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). Without it, a `429` goes back to the client, whose retry reaches the same upstream.
 - `select = "ordered"` makes the first upstream primary and the others standby.
 - Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI upstreams the same way.
-- A route holds its own provider keys, so it does not combine with the passthrough setup (`wye init`), where each caller's credential goes through. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
+- A route holds its own provider keys, so it does not combine with passthrough. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
 - `wye explain --session <id>` shows which upstream a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Seeing costs
 
-Copy the `[pricing]` block from [policy.md](policy.md#price-table) into your config, check each price against the provider's pricing page, and restart. Every record then carries `cost_usd`, and `wye report` a cost column.
+`wye init` writes no prices: copy the `[pricing]` block from [policy.md](policy.md#price-table) into your config, check each price against the provider's pricing page, and restart. Every record then carries `cost_usd`, and `wye report` a cost column.
 
-- A model the price table does not name costs [`unknown`](glossary.md#usage-and-cost), and records written before the table stay unpriced; the report marks such totals with `+`.
 - On a claude.ai plan, the cost is what the same tokens would cost on the API, not what you pay.
 - Prices can differ per upstream (Bedrock, a region): an entry with `upstreams = [...]` applies only there.
 
 ## Model aliases and upgrades
 
-Clients ask for a name the config maps to a model, so moving every client to a new model is one reviewed change. Before you move, upgrade checks report which live Anthropic Messages requests the new model would reject:
+Clients send an [alias](glossary.md#models), so moving every client to a new model is one reviewed change. Before you move, upgrade checks report which live Anthropic Messages requests the new model would reject:
 
 ```toml
 [[aliases]]
@@ -170,7 +169,7 @@ targets = ["claude-sonnet-5-5"]
 2. Read `wye report`'s upgrade issues, or `wye explain --target-model claude-sonnet-5-5 request.json` for one request. Fix what they name in the client; Wye never changes a request to fit.
 3. Move a canary group first with `when` (it matches token subjects, so it needs `[auth]`), then everyone by changing `model`.
 
-Records show both the requested and the served model, and permissions apply to the model that runs. [How it works](architecture.md#model-aliases-and-upgrade-checks).
+Records show both the requested and the served model, and permissions apply to the served one. [How it works](architecture.md#model-aliases-and-upgrade-checks).
 
 ## Sending usage to your OpenTelemetry backend
 
@@ -182,29 +181,27 @@ otlp_endpoint = "http://localhost:4318"
 otlp_headers_env = "OTLP_HEADERS"     # "key=value,...": a hosted backend's API key
 ```
 
-Each request becomes a log record and a span carrying its subject, session, tokens, and cost, each Claude Code session one trace, and metrics count requests by endpoint, upstream, status, and outcome, and tokens and cost by model, request class, and upstream ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to stdout. Export headers under `wye service`: [running as a service](operations.md#running-as-a-service).
+Each request becomes a log record and a span, each Claude Code session one trace, and metrics count them ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to the usage log. Export headers under `wye service`: [running as a service](operations.md#running-as-a-service).
 
 ## Changing or upgrading
 
-Edit the config or install a new `wye`, run `wye doctor`, then `wye service restart`, or restart `wye serve` in a terminal. What a restart checks and how long it waits for open streams: [running as a service](operations.md#running-as-a-service). A model: [model aliases and upgrades](#model-aliases-and-upgrades).
+Edit the config or install a new `wye`, run `wye doctor`, then `wye service restart`, or restart `wye serve` in a terminal. What a restart checks and how long it waits for open streams: [running as a service](operations.md#running-as-a-service).
 
 ## Troubleshooting
 
 Run `wye doctor` first. It checks secrets, files, and upstreams, lists every problem, and bills nothing.
 
-**Where errors go.** Startup failures and the gateway's messages go to stderr: `~/.wye/wye.log` under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log, and `wye report` lists error statuses. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
+**Where errors go.** Startup failures and the gateway's messages go to stderr, the message log (`~/.wye/wye.log`) under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
 
 `wye explain request.json` shows what the gateway would do with one request, offline, and why it would refuse.
-
-What you may see, what it means, and what to do:
 
 - `no gateway at http://127.0.0.1:8080`: nothing answers `/healthz` there. Run `wye service status`, then read the end of `~/.wye/wye.log`; or start one with `wye serve`; or name another with `--url` or `WYE_URL`.
 - `cannot listen on ...: the port is in use`: another gateway, perhaps. Stop it, or change `server.listen` and set `WYE_URL`.
 - `401 invalid or missing gateway token`: one message for every gateway-token failure, on purpose. `wye explain --token-file <file> request.json` says which: expired, wrong audience, unknown key. Any other `401` is the provider's.
-- `403 permission_error`: the gateway token may not use that model, or the request asks for too many output tokens. Run `wye explain`; see [permissions](policy.md#gateway-tokens).
+- `403 permission_error`: the gateway token may not use that model, or the request asks for more than its output-token ceiling. Run `wye explain`; see [permissions](policy.md#gateway-tokens).
 - `404 no route serves ...`: no route for that API. Add the section it names, such as `[routes.openai]`.
 - `408 request body stalled`: while Wye read `model`, the client sent nothing for 60 s, or had not reached it after 5 minutes. Check the client's network.
-- `415 the request body must...`: a compressed or non-UTF-8 body under a policy that reads it (permissions, ceilings, aliases, Bedrock). Send plain UTF-8 JSON.
+- `415 the request body must...`: a compressed or non-UTF-8 body during [the hold](glossary.md#requests-and-where-they-go). Send plain UTF-8 JSON.
 - `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_total_held_bytes`. Otherwise it comes from the provider. Clients retry on their own; raise the limit if it persists.
 - One `429` at each session start: Claude Code's probe on a claude.ai login; Anthropic answers it with or without Wye. Nothing to do.
 
@@ -236,6 +233,3 @@ Yes, for Claude Code on a claude.ai plan (Pro or Max) with the passthrough setup
 
 Per request, with an output-token ceiling; across requests, not in Wye, which keeps no counters, and provider-held budgets are [planned](roadmap.md#m2-cost-policy-for-claude).
 
-### Why is there no cost column?
-
-`wye init` writes no prices: [seeing costs](#seeing-costs).

@@ -1,11 +1,11 @@
 # Operations
 
-Distribution, CLI, deployment, usage records and telemetry, and failure behavior. The gateway binary is an ordinary inference server: IaC, DNS, certificates, infrastructure secrets, scheduling, and autoscaling are not implemented inside it.
+Distribution, CLI, deployment, usage records and telemetry, and failure behavior. Wye is an ordinary process: IaC, DNS, certificates, infrastructure secrets, scheduling, and autoscaling are the deployment's.
 
 ## Distribution
 
 - Release archives: a `v*` tag publishes a GitHub Release with `.tar.xz` archives for x86_64 and arm64 Linux (glibc 2.35 or newer) and macOS, SHA-256 checksums, build provenance attestations (`gh attestation verify`), and a shell installer. No Windows build. How the release is built: [development.md](development.md#continuous-integration).
-- An OCI image, built locally only: publishing and signing are not set up yet. The `Dockerfile` builds a release binary into distroless `cc` (glibc, no shell, non-root), with a `HEALTHCHECK` that runs `wye probe` against `/readyz`. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`. `scripts/image-smoke.sh` checks that the image becomes healthy, answers `/readyz`, and refuses an unauthenticated request.
+- An OCI image, built locally only. The `Dockerfile` builds a release binary into distroless `cc` (glibc, no shell, non-root), with a `HEALTHCHECK` that runs `wye probe` against `/readyz`. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`. `scripts/image-smoke.sh` checks that the image becomes healthy, answers `/readyz`, and refuses an unauthenticated request.
 - Planned: a published image, a Docker Compose example, and a Helm chart ([roadmap](roadmap.md#m1-team-ready-claude-code)).
 
 ## CLI
@@ -14,7 +14,7 @@ Distribution, CLI, deployment, usage records and telemetry, and failure behavior
 
 **Exit status**: 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that is not installed or does not answer.
 
-**Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors; never elsewhere, or with `NO_COLOR` set or `TERM=dumb`.
+**Output.** Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors; never elsewhere.
 
 ### Files
 
@@ -86,11 +86,11 @@ Not checked yet: model availability per upstream.
 
 **`wye validate`** parses the config and reads the identity providers' key sets, without starting the gateway or resolving secrets, so CI can run it without credentials. `wye doctor` checks the rest.
 
-**`wye explain`** prints each check `serve` would make for one request, offline, calling the same functions in the same order: endpoint (`--endpoint`, default `/v1/messages`), gateway token (verified at the current time; `--token-file`, never `$WYE_TOKEN`), body size, alias, model permission, output-token ceiling, [upstream selection](glossary.md#requests-and-where-they-go) and failover order, upstream URL and the credential (a provider key by name, never value, or the caller's own under passthrough), the provider's model id, the price, whether cache diagnostics would hash it, and, with `--target-model` or `[upgrade_check]`, what each target would reject, the fix, and the source.
+**`wye explain`** prints each step `serve` would take for one request, offline, calling the same functions in the same order: endpoint (`--endpoint`, default `/v1/messages`), gateway token (verified at the current time; `--token-file`, never `$WYE_TOKEN`), body size, alias, model permission, output-token ceiling, [upstream selection](glossary.md#requests-and-where-they-go) and failover order, upstream URL and the credential (a provider key by name, never value, or the caller's own under passthrough), the provider's model id, the price, whether cache diagnostics would hash it, and, with `--target-model` or `[upgrade_check]`, what each target would reject, the fix, and the source.
 
 A refusal prints the status and error the gateway would send. The body is read as the gateway reads it: up to its `model`, then the rest when permissions or a ceiling apply. Not evaluated: run-time conditions (the concurrency limit, the held-bytes budget, upstream failures) and request headers (the gateway answers a compressed or non-UTF-8 body under a policy with `415`).
 
-**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models), after aliases), `upstream`, `endpoint` (default `/v1/messages`), `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. Without `<dir>`, the cases are in `policy-tests/` next to the config, where `wye init` writes samples. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
+**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models)), `upstream`, `endpoint` (default `/v1/messages`), `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. Without `<dir>`, the cases are in `policy-tests/` next to the config, where `wye init` writes samples. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
@@ -116,9 +116,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 - The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by its daemon, which does not inherit the wrapper's environment. The gateway token never goes that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#token-renewal).
 - `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
-The steps per setup are in the [guide](guide.md#running-it).
-
-**`wye codex`** takes the same options and environment. It runs `codex` with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it. Without a gateway token, `WYE_CODEX_TOKEN` is a placeholder, which a gateway without `[auth]` replaces with its OpenAI provider key. `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a gateway token without an output-token ceiling, since Codex does not set `max_output_tokens` ([policy.md](policy.md#per-request-ceilings)). What Codex sends: [architecture.md](architecture.md#codex-integration).
+**`wye codex`** takes the same options and environment. It runs `codex` with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it. Without a gateway token, `WYE_CODEX_TOKEN` is a placeholder, which a gateway without `[auth]` replaces with its OpenAI provider key. `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). The gateway needs `[routes.openai]`; with `[auth]`, use a gateway token without an [output-token ceiling](policy.md#per-request-ceilings). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
 ### Token renewal
 
@@ -204,8 +202,8 @@ Before installing, the config is checked as the service will start it: it parses
 
 ```bash
 wye service status      # installed? what it runs, its logs, whether it answers
-wye service restart     # after a config edit or a new wye; checks the config first
-wye service uninstall   # stops it and removes the file; the config and logs stay
+wye service restart     # after a config edit or a new wye
+wye service uninstall   # stops it and removes the file; the config, the usage log, and the message log stay
 ```
 
 `restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.
@@ -216,11 +214,9 @@ On Linux, a user service stops when you log out unless lingering is on (`loginct
 
 ### Without Kubernetes
 
-Because Wye keeps no state and has no peer discovery, every multi-node setup has the same shape: a load balancer in front of identical processes reading the same config, with its health check on [`/readyz`](#health-and-shutdown). An Auto Scaling group, ECS, Docker Swarm, Nomad, or VMs behind HAProxy all fit; none has run Wye yet.
+Because Wye keeps no state and has no peer discovery, every multi-node deployment has the same shape: a load balancer in front of identical processes reading the same config, with its health check on [`/readyz`](#health-and-shutdown). An Auto Scaling group, ECS, Docker Swarm, Nomad, or VMs behind HAProxy all fit; none has run Wye yet.
 
-For rolling updates without dropped streams, give the platform a stop timeout above `drain_delay_secs + shutdown_grace_secs`.
-
-For container platforms, `upstream.provider_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-keys-or-providers).
+For container platforms, `provider_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-upstreams).
 
 ### Sizing (estimate)
 
@@ -232,7 +228,7 @@ One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms o
 
 ## Usage records and telemetry
 
-One usage record per request, written as a JSON line to stdout and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
+One usage record per request, written as a JSON line to the usage log (stdout) and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
 The usage record, field by field:
 
@@ -243,20 +239,20 @@ The usage record, field by field:
   - `completed`: the upstream's response body ended.
   - `cancelled`: the client left first; one that leaves before the response headers has `status` `499`.
   - `truncated`: the upstream's response broke after its headers were sent, by the idle timeout or a reset.
-  - `refused`: Wye's [refusal](glossary.md#decisions) (`400`, `401`, `403`, `404`, `408`, `413`, `415`) or its own overload (`529`, `503` on the OpenAI APIs); no upstream response.
-  - `upstream_error`: no usable upstream response ([upstream error](glossary.md#requests-and-where-they-go)): `502` or `504`.
+  - `refused`: Wye's [refusal](glossary.md#decisions) , its overload included; no upstream response.
+  - `upstream_error`: no usable upstream response ([upstream error](glossary.md#requests-and-where-they-go)).
   - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
 - `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
-- `duration_ms`, `response_headers_ms`: milliseconds; `response_headers_ms` = time to response headers.
+- `duration_ms`, `response_headers_ms`: milliseconds, in all and to the response headers.
 - `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
-- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md#requests-and-where-they-go) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#failover)); absent when none.
+- `failovers`, such as `[{"upstream": "a", "reason": "429"}]`: attempts rejected before the one that answered, in order, each with its [failover reason](glossary.md#requests-and-where-they-go) ([failover](architecture.md#failover)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (below).
 
 **Model, usage, and cost.**
 
 - `requested_model`: the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named, only when an alias was resolved.
-- `model`, `usage_status`: the reported model; `complete` | `partial` | `unknown` | `none`. Streaming and non-streaming (JSON) responses are read; `none` means the response carries no usage: errors, `count_tokens`, or other content types.
+- `model`, `usage_status`: the [served model](glossary.md#models); `complete` | `partial` | `unknown` | `none`. Streaming and non-streaming (JSON) responses are read; `none` means the response carries no usage: errors, `count_tokens`, or other content types.
 - `upgrade_issues`: target model → rules it would reject, for checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none.
 - `cost_usd`, `cost_status`, `pricing_version`: an exact decimal string; `complete` | `partial` | `unknown`; `pricing.version`. With [`[pricing]`](policy.md#price-table); `cost_usd` only when a cost was computed.
 - `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`: counts, as the provider reports them, except that on the OpenAI APIs the cached share of `input_tokens` (Chat: `prompt_tokens`) is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on every API.
@@ -283,7 +279,7 @@ OTLP logs: each record becomes a log record at `{otlp_endpoint}/v1/logs`, resour
 - Then the agent fields of either client: `gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.after_compaction`.
 - `wye.*` for the rest: `wye.outcome`, `wye.upstream_error`, `wye.duration_ms`, `wye.response_headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
 
-OTLP metrics are cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the OTel backend.
+OTLP metrics are cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the OpenTelemetry backend.
 
 | Metric | Kind | Attributes |
 |---|---|---|
@@ -299,7 +295,7 @@ OTLP metrics are cumulative since process start, exported every 10 s and at shut
 | `wye.records.dropped` | sum | |
 
 - `wye.cost` counts complete and partial costs, with `[pricing]`.
-- `wye.requests` counts requests by endpoint (`http.route`), and `wye.outcome` takes the record's `outcome` values.
+- In `wye.requests`, `wye.outcome` takes the record's `outcome` values.
 - `wye.upgrade.issues` counts [upgrade issues](glossary.md#models): one per target model and rule a checked request breaks.
 - `wye.failovers` counts rejected attempts: `wye.failover.upstream` is the upstream that rejected one, and `wye.failover.reason` a status or `connect`.
 - `wye.records.dropped` counts records the usage log dropped, OTLP log records and spans dropped by full queues or failed exports (a request losing both counts twice), and records past the series cap.
@@ -313,20 +309,20 @@ OTLP traces have one server span per request (`POST` and the endpoint, such as `
 
 Each reported tool call becomes a sibling span `execute_tool <name>` (`gen_ai.operation.name` `execute_tool`, `gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
 
-Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count; `otlp_dropped` counts log records and spans together, so a request whose log record and span are both lost counts twice). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
+Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
 
 `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
 
 ## Health and shutdown
 
-`/healthz` says the process is up, and is what `wye probe`, `wye claude`, and `wye service` ask. `/readyz` also fails while draining, so it is the one for load balancers and container health checks. Neither depends on the OTel backend: a transient outage there does not block inference.
+`/healthz` says the process is up, and is what `wye probe`, `wye claude`, and `wye service` ask. `/readyz` also fails while draining, so it is the one for load balancers and container health checks. Neither depends on the OpenTelemetry backend: a transient outage there does not block inference.
 
 On SIGTERM, shutdown has two phases:
 
 1. Draining (`server.drain_delay_secs`, default 0): `/readyz` returns 503 while `/healthz` stays 200, and new connections and requests are still served, so a load balancer removes the replica before connections are refused. Set it to cover the load balancer's probe interval and endpoint propagation (in Kubernetes, typically 5-15 s) instead of a `preStop` sleep.
 2. Grace (`server.shutdown_grace_secs`, default 30): the listener closes, active requests may finish, and whatever remains is cancelled; cancelling a stream closes its upstream request.
 
-Set the pod's `terminationGracePeriodSeconds` above the sum of both.
+Give the platform a stop timeout (Kubernetes: `terminationGracePeriodSeconds`) above the sum of both.
 
 ## Failure behavior
 
@@ -337,7 +333,7 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 - **Client body breaks** (bad framing, cut off mid-upload): `400`, recorded as `refused`; the upstream request is aborted and not failed over.
 - **Client stops sending while its body is held**: `408` after 60 s without bytes, or 5 minutes without reaching its `model`; its held bytes and permit are released.
 - **Request body breaks the policy or the size limit mid-upload**: the upstream request is aborted before the provider sees the body whole; the client gets the refusal's own `400`, `403`, or `413`, from HTTP/1.1 and HTTP/2 upstreams alike.
-- **Upstream failure before downstream output**: `502` or `504`, recorded as `upstream_error` with its kind; with `failover` on the route, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
+- **Upstream error or rejection before output**: `502` or `504`, recorded as `upstream_error` with its kind; with `failover` on the route, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
 - **Partial stream failure**: terminate the stream; never silently replay output.
   - A successful Messages event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error.
   - A Responses stream in the same case just ends, which Codex and the OpenAI SDKs retry.

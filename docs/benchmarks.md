@@ -4,13 +4,13 @@ Wye's [overhead](glossary.md#usage-and-cost), how it is measured, and how it com
 
 ## Method
 
-`wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics), plus Wye variants and an allocation-counting build ([development.md](development.md#benchmark) lists them). `bench/baseline.json` records the numbers below; the [commit gate](development.md#commit-gate) does not read it, since it compares each commit with its parent ([its tolerances](#gate-tolerances)). Run-to-run noise: 10-15% on CPU per MB, ±25% on the TLS path, more on tails.
+`wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through a `wye` child process, and reports what Wye adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics), plus Wye variants and an allocation-counting build ([development.md](development.md#benchmark) lists them). Run-to-run noise: 10-15% on CPU per MB, ±25% on the TLS path, more on tails.
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
 ## Current harness and baseline
 
-From `bench/baseline.json` (recorded 2026-10-24 as a median of 7 on an idle machine, with the approved updates since; Intel i9-9880H, 8 cores, macOS):
+From `bench/baseline.json` (recorded 2026-10-24 as a median of 7 on an idle machine, with the approved updates since):
 
 | Metric | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
@@ -104,7 +104,7 @@ The busiest 30 s used a third of the [sizing estimate](operations.md#sizing-esti
 
 ## Against KrakenD
 
-KrakenD 3.0.1 CE in pass-through (`no-op` encoding) at its best case (no access log); Wye keeps its usage log. Single run, all 16 threads, 2026-10-15.
+KrakenD 3.0.1 CE in passthrough (`no-op` encoding) at its best case (no access log); Wye keeps its usage log. Single run, all 16 threads, 2026-10-15.
 
 KrakenD CE cannot stream SSE: `no-op` buffers the whole response (an event sent at 0 s arrived at 3 s); `sse` encoding is Enterprise-only.
 
@@ -123,7 +123,7 @@ KrakenD leads only bulk transfer and TLS uploads: it writes buffered responses i
 
 ## Against LiteLLM
 
-LiteLLM 1.105 (Python 3.14) at its leanest: byte-level pass-through (`pass_through_endpoints`; its own `/v1/messages` translates), no database, one worker per core; CPU and memory summed over the process tree. Single run, 2026-10-15, zero failures on both.
+LiteLLM 1.105 (Python 3.14) at its leanest: byte-level passthrough (`pass_through_endpoints`; its own `/v1/messages` translates), no database, one worker per core; CPU and memory summed over the process tree. Single run, 2026-10-15, zero failures on both.
 
 | Metric (TLS unless noted) | Wye | LiteLLM |
 |---|---|---|
@@ -136,7 +136,7 @@ LiteLLM 1.105 (Python 3.14) at its leanest: byte-level pass-through (`pass_throu
 | Claude Code-shaped upload, plain: CPU per MB | 1.49 ms | 190 ms |
 | Memory per idle stream; process at idle | 6.8 KB; 27 MB | 41 KB; 8.7 GB |
 
-Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its regular API path would add more overhead than pass-through. The comparison found four flaws in the harness, all fixed: invalid JSON in mock payloads, error responses counted as successes (now `*_failed_requests`, gated at zero), a test CA Python 3.13 rejects, and gateway workers outliving their run.
+Caveats: 16 LiteLLM workers compete with the load generator on one laptop; its regular API path would add more overhead than passthrough. The comparison found four flaws in the harness, all fixed: invalid JSON in mock payloads, error responses counted as successes (now `*_failed_requests`, gated at zero), a test CA Python 3.13 rejects, and gateway workers outliving their run.
 
 ## Against Bifrost
 
@@ -210,14 +210,12 @@ All runs send `"stream":true` on streaming requests and name the model `anthropi
 The suite measures the gateway's own overhead under agent-shaped load, and each part has to justify its run time ([gated scenarios](development.md#benchmark)).
 
 - Bulk throughput (MB/s) is reported only, being the least relevant to token-paced traffic; its CPU per MB stays gated.
-- KrakenD is retired from routine runs: it cannot stream SSE on CE, and the result [above](#against-krakend) stands.
+- KrakenD is retired from routine runs; its result [above](#against-krakend) stands.
 - Missing parts (agent trace replay, a floor baseline, a separate Linux load machine) and the next competitors are planned in [roadmap.md](roadmap.md#m5-benchmarks-and-optimization).
 
-Why these competitors: KrakenD was the first reference (a mature general gateway), LiteLLM is the most-used open-source LLM gateway, Bifrost markets low overhead against LiteLLM (Wye's own claim), and agentgateway is the closest in kind. Each runs in pass-through at its best case, with its configuration recorded here.
+Why these competitors: KrakenD was the first reference (a mature general gateway), LiteLLM is the most-used open-source LLM gateway, Bifrost markets low overhead against LiteLLM (Wye's own claim), and agentgateway is the closest in kind.
 
 ## Gate tolerances
-
-The evidence behind the [commit gate](development.md#commit-gate)'s method and tolerances.
 
 Until 2026-10-29 the gate compared each commit with a stored result. It then failed five times in a row on `sse_ttfb_added_p50_us` for code identical to a commit that had passed that morning: the binary that recorded the 205 µs stored baseline measured 406 µs on the same laptop after 11 days up, and 264-317 µs after a reboot. In the first run against the parent in alternating rounds, an A/A in effect, the median difference across 69 gated metrics was 3.8%, and allocations differed by at most 7% (uploads).
 

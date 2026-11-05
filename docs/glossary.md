@@ -5,7 +5,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 ## The product
 
 - **Wye**: the product. **The gateway**: a running Wye process. **Replica**: one of several identical gateways behind a load balancer. Not: the server, the proxy.
-- **Config**: the one TOML file a gateway reads at startup (`wye.toml`); every option, with its default: [examples/wye.toml](../examples/wye.toml). Not: policy (for the whole file).
+- **Config**: the one TOML file a gateway reads at startup (`wye.toml`); every field, with its default: [examples/wye.toml](../examples/wye.toml). Not: policy (for the whole file). A config **field** (`listen`, `[auth] models`) sits in a **section** (`[auth]`). Not: option (a command-line flag), key (a secret).
 - **Setup**: what `wye init` writes, from two choices: who can reach the gateway (this machine, or other machines with gateway tokens) and whose credential pays (the caller's, or a provider key Wye holds). Three setups result: **passthrough** (the default: this machine, the caller's own login or key, no secret in Wye), **provider key** (`--provider-key`: this machine, Wye holds the provider key), **shared** (`--shared`: gateway tokens, every interface, the provider key from the deployment's environment). A shared gateway cannot pass callers' credentials through. Not: team setup, api-key setup.
 
 ## Requests and where they go
@@ -19,8 +19,8 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Provider key**: the key Wye presents to an upstream, read from an environment variable or a file. Not: credential, the operator's key, bare "key".
 - **Upstream selection**: how a route picks the upstream for a request: `cache_affine` (the default) or `ordered`. Not: routing (for this).
 - **Cache affinity**: the `cache_affine` selection: each session, else each subject, stays on one upstream, so its prompt cache stays warm. Its input is the **affinity key** (the session id, else the subject). Not: session affinity, sticky.
-- **Rejection**: an upstream's answer that the request was not processed: `429`, `529`, or a connection that failed before the body was delivered. Not: refusal (that is Wye's).
-- **Upstream error**: no usable answer from an upstream, so Wye answers `502` or `504` itself; its kind is `connect` (no connection or TLS handshake), `timeout` (no response headers in time), or `reset` (the request failed after connecting). Not: rejection (that is an answer), refusal.
+- **Rejection**: an attempt's result that proves the upstream did not process the request: `429`, `529`, or a connection that failed before the body was delivered whole. Failover acts on it. Not: refusal (that is Wye's).
+- **Upstream error**: a request's outcome when no upstream gave a usable answer, so Wye answers `502` or `504` itself; its kind is `connect` (no connection or TLS handshake), `timeout` (no response headers in time), or `reset` (the request failed after connecting). A rejected connection that is not failed over ends as one. Not: refusal.
 - **Failover**: resending a rejected request to the route's next upstream, before any output, when the route has `failover` on. The rejection's kind is the **failover reason** (`429`, `529`, `connect`). Not: retry, fallback.
 - **The hold**: Wye reading a request body until its top-level `model` is known, before it forwards anything, when a feature needs the model: model permissions, an output-token ceiling, an alias, a provider's own model id. Not: buffering.
 - **Kept body**: the bytes of an upload Wye keeps so failover can resend them, up to the route's `failover_max_body_bytes` per request and `server.max_total_kept_bytes` across the process. Not: held (that is the hold).
@@ -31,7 +31,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Gateway token**: what a caller presents to Wye instead of a provider key: a signed JWT, either a **Wye token** (from `wye token issue`) or an **identity-provider token** (from GitHub Actions, or SSO through `apiKeyHelper`). Wye replaces it with the provider key. Not: credential, scoped key. In a paragraph that also counts model tokens, always "gateway token".
 - **Issuer**: who signs gateway tokens: Wye (with its **signing key**) or an identity provider. Not: signer, token service.
 - **Identity provider (IdP)**: an external issuer configured in `[[auth.identity_providers]]`, whose keys Wye pins in config. Not: bare "provider".
-- **Subject**: the identity a gateway token names (`sub`, or the issuer's `subject_claim`). Aliases roll out per subject, and cache affinity falls back to it.
+- **Subject**: the identity a gateway token names (`sub`, or the issuer's `subject_claim`).
 - **Grant**: an `[[auth.identity_providers.grants]]` rule that gives an identity-provider token its models by the value of one of its claims.
 - **Model permissions**: the models a request may use: the config's model list (`[auth] models`), narrowed by the token's `models` claim or by grants. Wye refuses any other model before upstream work. Not: allowlist, ceiling (for models).
 - **Output-token ceiling**: the largest output-token value a request may ask for: the stricter of `[auth] max_output_tokens` and the token's claim. Not: limit, cap.
@@ -64,7 +64,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Price table**: `[pricing]`: prices per model and upstream, with a version every record carries. A model the table does not name costs `unknown`, never $0. Not: pricing metadata.
 - **Cache miss**: a request that wrote the prompt cache and read nothing from it, recorded with its reason (`compaction`, `after_compaction`, `unexplained`); `wye report` counts session and subagent starts as expected.
 - **Cache diagnostics**: `[cache_diagnostics]`: keyed hashes of a request's prompt sections, sampled per session, that name which section changed before a cache miss.
-- **Telemetry**: OTLP export of usage records, metrics, and traces (`[telemetry]`), to your **OpenTelemetry backend**. Not: telemetry (for the usage log), observability backend.
+- **Telemetry**: OTLP export of usage records, metrics, and traces (`[telemetry]`), to your **OpenTelemetry backend**. Not: telemetry (for the usage log), observability backend, OTel backend.
 
 ## Development
 

@@ -18,7 +18,7 @@
 
 ## Performance
 
-Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provider. Not production. Each gateway ran in the same run as Wye, at its best configuration, and each cell is its number divided by Wye's (TLS; stream events with 2,000 token-paced streams). The runs are from 2026-10-15 (KrakenD, LiteLLM) to 2026-11-01 (agentgateway), so Wye's build differs between rows:
+Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provider. Not production. Each gateway was measured in the same run as Wye, at its best configuration, and each cell is its number divided by Wye's (TLS; stream events with 2,000 token-paced streams). The runs are from 2026-10-15 (KrakenD, LiteLLM) to 2026-11-01 (agentgateway), so Wye's build differs between rows:
 
 | Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
 |---|---|---|---|---|
@@ -27,9 +27,7 @@ Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provide
 | [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
 | [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
 
-Where others lead: agentgateway on paced-stream latency (1.0 vs 1.2 ms p50 in that run), event latency during uploads, cold connections, and memory next to stalled clients. KrakenD on bulk transfer and TLS uploads. Method, full tables, and configs: [docs/benchmarks.md](docs/benchmarks.md).
-
-What Wye itself adds:
+Where others lead: agentgateway on delay per event (1.0 vs 1.2 ms p50 in that run, and during uploads), cold connections, and memory next to stalled clients. KrakenD on bulk transfer and TLS uploads. Method, full tables, and configs: [docs/benchmarks.md](docs/benchmarks.md).
 
 | What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
@@ -39,7 +37,7 @@ What Wye itself adds:
 | 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
 | CPU per event and memory per open stream at that load | | 37 µs, 9.3 KB |
 
-A heavy Claude Code user (about five concurrent streams) takes about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The per-event delay doesn't add up over a stream, so tokens per second don't change. On my laptop, 35 hours of Claude Code sessions (2,562 requests) took 31 s of CPU and 25 MB of memory ([in use](docs/benchmarks.md#in-use)).
+A heavy Claude Code user (five concurrent streams) takes about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The delay per event doesn't add up over a stream, so tokens per second don't change. On my laptop, 35 hours of Claude Code sessions (2,562 requests) took 31 s of CPU and 25 MB of memory ([in use](docs/benchmarks.md#in-use)).
 
 Every commit that changes code is benchmarked against its parent, in alternating rounds on the same machine (`scripts/check.sh`). If it makes Wye slower or heavier beyond the commit gate's tolerances, it doesn't get in.
 
@@ -74,13 +72,13 @@ By request class
 
 ## What it does
 
-- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss comes with its cause (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
-- **Gives a team scoped access.** Gateway tokens instead of the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and its output-token ceiling; anything else is refused before the provider gets the whole request. With `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker shows only those models. ([teams](docs/guide.md#using-it-for-a-team), [tokens](docs/policy.md#gateway-tokens))
-- **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), split by weight, with failover between them. Each key or account is an [upstream](docs/glossary.md#requests-and-where-they-go). ([several keys or providers](docs/guide.md#several-keys-or-providers))
-- **Changes models in one place.** Aliases map a name to a model, per gateway-token subject. Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
+- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. OTLP sends logs, metrics, and one trace per Claude Code session to yours. Every prompt-cache miss is recorded with its reason (`compaction`, `after_compaction`, or `unexplained`), and `wye report` counts session and subagent starts as expected. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
+- **Gives each caller its own gateway token.** Instead of the provider key, signed by Wye or by your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and its output-token ceiling; anything else is refused before the provider gets the whole request. With `[discovery]` and `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code's model picker shows only those models. ([teams](docs/guide.md#using-it-for-a-team), [apps](docs/guide.md#using-it-from-apps), [tokens](docs/policy.md#gateway-tokens))
+- **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, and Bedrock behind one address (several OpenAI keys too), split by weight, with failover between them. Each key or account is an [upstream](docs/glossary.md#requests-and-where-they-go). ([several upstreams](docs/guide.md#several-upstreams))
+- **Changes models in one place.** Aliases map a name to a model, per gateway-token subject (a person, a repository, or a service). Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
 - **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` run in CI and fail when a change widens access. `wye doctor` checks secrets, files, and upstreams, and bills nothing. ([commands](docs/operations.md#commands))
 - **Works with existing clients.** Point Claude Code, Codex, or any app on the official Anthropic or OpenAI SDK at it by base URL; `wye claude` and `wye codex` do it for you. Messages, Responses, and Chat Completions go through untranslated, except a model id your config maps. Streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
-- **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. For more traffic, run more replicas behind any load balancer. They share no state and never talk to each other, and every replica sends a session to the same upstream (hashed from its session id), so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment))
+- **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. Replicas behind any load balancer never talk to each other, and each sends a session to the same upstream, so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment))
 
 ## Who it's for
 
@@ -90,21 +88,20 @@ By request class
 
 ## How it compares
 
-What teams usually expect from an LLM gateway, and what Wye does. Two choices explain most answers: every client keeps its provider's own API, and Wye keeps no state between requests.
+Two choices explain most answers: every client keeps its provider's own API, and Wye keeps no state between requests.
 
 | Teams usually want | Wye |
 |---|---|
 | Spend by team, user, and app | Yes. Down to the agent session, subagent, and tool, with prompt-cache misses explained |
-| Scoped keys instead of the provider key | Yes. A signed gateway token per developer, CI job, or app, from Wye or your identity provider |
+| Access per caller instead of the provider key | Yes. A gateway token per developer, CI job, or app |
 | Spend caps and rate limits | Partly. Per-request output-token ceilings, and the provider's own limits; Wye keeps no counters. Provider-held budgets per team are [planned](docs/roadmap.md#m2-cost-policy-for-claude) |
-| Failover and load across keys | Yes. Shared by weight, with failover before any output ([configuration](#configuration)) |
-| Logs, metrics, and traces | Yes. In your OpenTelemetry backend, one trace per Claude Code session |
-| Switching models centrally | Yes. Aliases, and upgrade checks report which Messages requests a newer model would reject before the switch |
+| Failover and load across keys | Yes. Split by weight ([configuration](#configuration)) |
+| Logs, metrics, and traces | Yes. In your OpenTelemetry backend |
+| Switching models centrally | Yes. Aliases and upgrade checks |
 | Policy you can review and test | Yes. One TOML file in Git, checked in CI by `wye policy-test` and `wye policy-diff` |
-| One API for every provider | No. Each client keeps its provider's API. For many providers behind one API, LiteLLM or OpenRouter fit better |
+| One API for every provider | No. For many providers behind one API, LiteLLM or OpenRouter fit better |
 | Guardrails, redaction, response caching | No. [What Wye will not do](#what-wye-will-not-do) says why |
-| Scale out by adding instances | Yes. Replicas share no state, so you add them behind any load balancer. The provider keys' rate limits are the ceiling; more keys raise it |
-| Little to operate | Yes. One binary, no database ([performance](#performance)) |
+| Scale out by adding replicas | Yes. Behind any load balancer. The provider keys' rate limits are the ceiling; more keys raise it |
 
 Why native APIs: provider APIs keep changing. Within one year on Anthropic's API, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates everything into one format is always catching up. Wye passes each native API through, so new features on the endpoints it serves work the day they ship ([what it changes](docs/architecture.md#forwarding-contract)).
 
@@ -142,11 +139,11 @@ cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 ```
 
-Each session stays on one upstream. A request rejected with `429` or `529` moves to the other before any output; two keys of one provider work the same way ([details](docs/guide.md#several-keys-or-providers)). Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every option with its default and limits, and a test keeps it valid.
+Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way ([details](docs/guide.md#several-upstreams)). Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
 
 ## Records and decisions
 
-Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP log record, a span, and metrics:
+One usage record per request, on stdout and, with `[telemetry]`, as an OTLP log record, a span, and metrics:
 
 ```json
 {
@@ -220,7 +217,7 @@ Tests run against local mock upstreams and never call a paid API. See [docs/deve
 
 ## Documentation
 
-[docs/README.md](docs/README.md) maps each question to the document that answers it, [docs/glossary.md](docs/glossary.md) defines the terms, and [examples/wye.toml](examples/wye.toml) lists every configuration option.
+[docs/README.md](docs/README.md) maps each question to the document that answers it, and [docs/glossary.md](docs/glossary.md) defines the terms.
 
 ## License
 

@@ -4,8 +4,8 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 
 ## Use it
 
-- [guide.md](guide.md): choosing a setup, running it, reading `wye report`, teams, apps, several keys or providers, costs, model aliases and upgrades, an OTel backend, troubleshooting, FAQ.
-- [examples/wye.toml](../examples/wye.toml): every configuration field, with its default, limits, and meaning (parsed by a test with every section enabled).
+- [guide.md](guide.md): choosing a setup, running it, reading `wye report`, teams, apps, several upstreams, costs, model aliases and upgrades, an OpenTelemetry backend, troubleshooting, FAQ.
+- [examples/wye.toml](../examples/wye.toml): every field, with its default, limits, and meaning (parsed by a test with every section enabled).
 - [CHANGELOG.md](../CHANGELOG.md): what each release contains and what it leaves unverified.
 
 ## Run it
@@ -24,7 +24,3 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 - [roadmap.md](roadmap.md): status, open work, exit criteria, open findings, release checklists.
 - [research.md](research.md): facts to verify, related work, feature directions (the cost bound among them), visibility for one developer, where the tokens go, rejected approaches, performance techniques.
 - [product.md](product.md): why Wye exists, its principles, its non-goals (linked), and where it stands among alternatives.
-
-## Terms
-
-[glossary.md](glossary.md) defines each term the docs, the CLI, and the code use, and the names retired for it.

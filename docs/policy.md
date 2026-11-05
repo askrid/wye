@@ -20,7 +20,7 @@ Claims of Wye tokens (identity-provider tokens are below):
 }
 ```
 
-The issuer signs tokens outside the runtime, with `wye token issue` (offline, from a private key file) or an external issuer producing the same format. Replicas hold verification keys only, selected by key ID so keys can rotate. All checks run before contacting upstream.
+The issuer signs tokens outside the runtime, with `wye token issue` (offline, from a private key file) or a service of your own producing the same format. Replicas hold verification keys only, selected by key ID so keys can rotate.
 
 Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 
@@ -34,7 +34,7 @@ The key fixes the algorithm; the token never chooses it: Ed25519 for Wye tokens,
 Model permissions: `[auth] models` lists the models any token may use; a token's `models` claim (`wye token issue --models claude-sonnet-*,claude-haiku-*`) narrows it, never widens it. An entry is an exact name or a prefix ending in `*`, which covers dated ids and Claude Code's background Haiku model. With [model aliases](architecture.md#model-aliases-and-upgrade-checks), permissions apply to the [served model](glossary.md#models).
 
 - **[The hold](glossary.md#requests-and-where-they-go)**: with either list, Wye holds the request body only until its top-level `model` is read (Claude Code sends it first, so usually one chunk). Without either list (or an alias, an output-token ceiling, or a provider with its own model ids), the body is not read.
-  - `server.max_total_held_bytes` bounds held bytes across all requests together (default 64 MiB), each chunk counting at least 1 KiB for the memory it pins. Beyond it: an overload error, or `413` when the request's own chunks alone would pass it, since no retry could succeed.
+  - `server.max_total_held_bytes` bounds held bytes across all requests, each chunk counting at least 1 KiB for the memory it pins ([local resource bounds](#local-resource-bounds)).
   - A client that stalls while held gets `408`, and its held bytes are released ([limits](operations.md#failure-behavior)).
 - **Refusals**, before upstream contact:
   - A forbidden model gets `403 permission_error`, naming the model as the client sent it (an alias, not what it maps to).
@@ -44,8 +44,6 @@ Model permissions: `[auth] models` lists the models any token may use; a token's
 - **Scope**: permissions read the top-level `model`. A model named inside the body, such as the `model` of a Responses `image_generation` tool, is not checked.
 - **The tail check**: JSON allows a repeated key, and a provider might honor a later `"model"`, so the rest of the body is lexed as it streams; a second top-level `model`, or an escaped top-level key, fails the body and aborts the upstream request. It adds CPU overhead per MB on structure-dense bodies ([benchmarks.md](benchmarks.md#current-harness-and-baseline)) and can go if the provider is verified to reject duplicate keys.
 
-When the token and the config (`[auth]`) both set a limit, the stricter value applies: a token can narrow configured policy but never widen it.
-
 Identity-provider tokens: Wye also accepts JWTs issued directly by a trusted OIDC identity provider, so teams need no token-minting service: GitHub Actions or another workload identity for CI, and the team's IdP (through `apiKeyHelper`) for developers.
 
 Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorithm` (`RS256`, `ES256`, or `EdDSA`; never HMAC, never read from the token), and `jwks_file`, the identity provider's published JSON Web Key Set committed next to the config and read at startup (keys of other types, curves, algorithms, or marked for encryption are skipped). The `issuer`, `audience`, and `[[auth.signing_keys]]` of Wye tokens become optional: a deployment can trust only its IdP.
@@ -53,16 +51,14 @@ Each `[[auth.identity_providers]]` entry pins `issuer`, `audience`, one `algorit
 - **Key selection**: a token's `kid` selects its key, and every key belongs to one issuer; a `kid` used by two issuers, or by an issuer and `[[auth.signing_keys]]`, fails startup. The header must name that issuer's algorithm, and after the signature verifies the claims must name that issuer, so claims are still parsed only after the signature. An identity provider's token headers may carry extra fields (`typ`, `x5t`), which are ignored; `crit` is refused.
 - **Claims**: `iss`, `aud`, `exp`, and `iat` are required, with the same rules as Wye tokens (`max_gateway_token_ttl_secs`, 60 s skew for `iat`/`nbf`). `subject_claim` (default `sub`; for example `email`, or `repository` for GitHub Actions) names the [subject](glossary.md#access) in the usage log and telemetry; a token without it is refused. An identity provider's `models` or `max_output_tokens` claims are ignored: limits come from config.
 - **Grants**: `[[auth.identity_providers.grants]] claim = "groups", value = "ml-team", models = ["claude-sonnet-*"]` grants models to tokens whose claim equals the value or is a list containing it. A token gets the union of its matching grants, still within `[auth] models`. With grants configured, a token matching none may use no model (`403 permission_error`); an issuer without grants leaves `[auth] models` in charge.
-- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format, so the algorithm is pinned per issuer and keys come only from config; the per-connection cache applies as to Wye tokens.
+- **Tradeoffs**: RSA and ECDSA verification and a generic claims object are a larger surface than the fixed Ed25519 format; the per-connection cache applies as to Wye tokens.
 - **Key rotation**: pinned keys need a config change when the IdP rotates them: commit the new set before the IdP starts signing with it (identity providers publish upcoming keys ahead of use). Fetching the JWKS at runtime would remove that step but adds network I/O and cached state; it stays a later, explicit option.
 
 A token can assert a maximum per request, never the cumulative amount spent; deriving a narrower token without the issuer is research ([narrowable tokens](research.md#3-narrowable-tokens-for-agent-swarms)). Short TTLs reduce exposure but do not make tokens single-use. Proof of possession helps against theft but not against an authorized client replaying calls.
 
 ### Revocation
 
-Without shared state or an admin API, immediate per-token revocation is not guaranteed. Use short lifetimes and key rotation; a deny list in config is [planned](roadmap.md#m1-team-ready-claude-code). A rolling deploy can briefly run mixed config versions; recording the config version in usage records ([planned](roadmap.md#m1b-agent-aware-visibility)) would show that window. Offboarding therefore takes effect when the person's last token expires: disable them at the issuer or IdP and rely on the configured maximum token lifetime (`max_gateway_token_ttl_secs`; longer-lived tokens are refused), not on revocation.
-
-Short lifetimes need automatic renewal: [token renewal](operations.md#token-renewal). Wye only verifies.
+Without shared state or an admin API, immediate per-token revocation is not guaranteed. Use short lifetimes and key rotation; a deny list in config is [planned](roadmap.md#m1-team-ready-claude-code). A rolling deploy can briefly run mixed config versions; recording the config version in usage records ([planned](roadmap.md#m1b-agent-aware-visibility)) would show that window. Offboarding therefore takes effect when the person's last token expires: disable them at the issuer or IdP and keep `max_gateway_token_ttl_secs` short, with automatic [token renewal](operations.md#token-renewal); Wye only verifies.
 
 ### Caller-credential passthrough
 
@@ -75,18 +71,18 @@ Short lifetimes need automatic renewal: [token renewal](operations.md#token-rene
 
 ## Per-request ceilings
 
-Admission refuses requests that violate model permissions, payload or token bounds, or (planned) a monetary ceiling that can be computed conservatively.
+Admission refuses requests that break model permissions, size limits, or output-token ceilings, or (planned) a cost ceiling.
 
-Output-token ceilings are implemented. `[auth] max_output_tokens` and a token's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bound the `max_tokens` a `/v1/messages` request may ask for, the `max_output_tokens` of a `/v1/responses` request, and the `max_completion_tokens` (or older `max_tokens`) of a `/v1/chat/completions` request, where a body naming both is refused; the stricter applies. On Responses the field is optional and its absence means the model's maximum, so under a ceiling a request without it is refused (`max_output_tokens is required`), before the provider sees a complete request; Codex does not set it, so give Codex users a token without a ceiling.
+`[auth] max_output_tokens` and a token's `max_output_tokens` claim (`wye token issue --max-output-tokens 8000`) bound the `max_tokens` a `/v1/messages` request may ask for, the `max_output_tokens` of a `/v1/responses` request, and the `max_completion_tokens` (or older `max_tokens`) of a `/v1/chat/completions` request, where a body naming both is refused; the stricter applies. On the OpenAI APIs the field is optional (Messages requires it) and its absence means the model's maximum, so under a ceiling a request without it is refused (`max_output_tokens is required`), before the provider sees a complete request; Codex does not set it, so give Codex users a token without a ceiling.
 
 - Read with the same scanner and hold as [model permissions](#gateway-tokens), never rewritten, and only when a ceiling applies: without one, a value such as `null` or `4096.0` is the provider's to judge.
 - Above the ceiling: `403 permission_error` before upstream contact when read during the hold; otherwise the upstream request is aborted mid-body (the provider never sees it whole) and the answer is still `403`.
-- Not a non-negative integer, or repeated: `400`. Absent: forwarded on Messages (the provider requires it), refused on the OpenAI APIs. `count_tokens` generates nothing and is not bounded.
+- Not a non-negative integer, or repeated: `400`. `count_tokens` generates nothing and is not bounded.
 - The ceiling bounds one generation. Chat Completions' `n` asks for several choices, each up to the ceiling, so a request may generate `n` times as much; `n` is not read yet.
 
 ### Provable cost ceiling
 
-Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built. `max_output_tokens` is not a dollar cap: a hard cost ceiling needs a conservative bound on every billable dimension (input tokens, output tokens including hidden reasoning tokens, provider-hosted tools, service tiers, any other usage charge), and tokenization and billing differ by provider. Where Wye cannot establish a safe bound, hard mode refuses the request or labels enforcement estimated-only; an estimate is never advertised as a guaranteed ceiling. The bound and what it needs verified: [research.md](research.md#6-provable-cost-bound).
+Planned ([roadmap](roadmap.md#m2-cost-policy-for-claude)), not built. An output-token ceiling is not a cost ceiling: that needs a conservative bound on every billable dimension (input tokens, output tokens including hidden reasoning tokens, provider-hosted tools, service tiers, any other usage charge), and tokenization and billing differ by provider. Where Wye cannot establish a safe bound, hard mode refuses the request or labels enforcement estimated-only; an estimate is never advertised as a guaranteed ceiling. The bound and what it needs verified: [research.md](research.md#6-provable-cost-bound).
 
 ### Price table
 
@@ -96,9 +92,7 @@ Prices are declarative, versioned, and live in `wye.toml` next to the policy tha
 [pricing]
 version = "anthropic-2026-11-01"     # required; recorded with every cost
 
-# USD per million tokens, as decimal strings. Entries scoped to the
-# serving upstream (`upstreams = [...]`) are tried first; among the rest,
-# the first whose pattern matches the model the provider reported wins.
+# USD per million tokens, as decimal strings.
 [[pricing.prices]]
 models = ["claude-opus-5-5"]         # same patterns as [auth] models
 input = "4.00"
@@ -130,22 +124,21 @@ output = "0.50"
 # cache_read, cache_write_5m, cache_write_1h: copy from the provider's
 # pricing page; until set, requests that use the cache cost "partial".
 [[pricing.prices.tiers]]             # prompt-length tier
-above_prompt_tokens = 100000         # the whole request is priced at this tier
+above_prompt_tokens = 100000
 input = "0.50"
 output = "2.50"
 ```
 
 Which price applies:
 
-- **Fields**: `input` and `output` are required; `cache_read`, `cache_write_5m`, and `cache_write_1h` are optional. Unknown fields fail startup, like the rest of the config.
-- **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its model; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
-- **Matching**: by the model the provider reports in the response, not the one requested (an alias or a routing rewrite cannot misprice). No match: cost `unknown`. Unknown pricing never defaults to $0.
+- **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its entry; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
+- **Matching**: by the model the provider reports in the response, not the one requested (neither an alias nor a provider's own model id can misprice). No match: cost `unknown`, never $0.
 - **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 
 How cost is computed:
 
 - **Integer money**: money is never floating point. Each price is parsed once at startup into integer pico-USD per token (`"0.10"` per million is 100,000 pico-USD per token); a price with more than six decimals, a negative one, or one that overflows is a config error.
-- **Checked arithmetic**: a request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`. Floating point appears only where a number is displayed.
+- **Checked arithmetic**: a request's cost is the sum of tokens × price with checked `u64` arithmetic (the range covers millions of dollars per request) and fails closed: an overflow marks the cost `unknown`.
 - **Cache writes by TTL**: Anthropic reports `usage.cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; the usage scanner reads both. Cache writes the split does not cover (no split reported, or a total `cache_creation_input_tokens` larger than it) are priced at `cache_write_1h` when it is set, else `cache_write_5m`, so the reported cost does not undercount, and the cost is `partial`.
 
 When cost is partial or unknown:
@@ -160,7 +153,7 @@ OpenAI Responses and Chat Completions:
 - OpenAI's `input_tokens` (Chat: `prompt_tokens`) include cached tokens; Wye records the cached share (`input_tokens_details.cached_tokens`, Chat: `prompt_tokens_details.cached_tokens`) as `cache_read_input_tokens` and the rest as `input_tokens`, so `cache_read` prices the cached share and records mean the same as on Messages. Reasoning tokens are part of `output_tokens`, as OpenAI bills them.
 - Hosted tools billed per call (`web_search`, `file_search`, `code_interpreter`, `image_generation`) and a `service_tier` other than `default` make the cost `partial`. A stream cut before its terminal event has no usage (OpenAI reports it only there), so its cost is `unknown`.
 
-With `[pricing]`, every usage record carries `cost_status` (`complete` | `partial` | `unknown`) and `pricing_version`, and `cost_usd` (an exact decimal string) when a cost was computed. Cost is computed in the usage writer task, off the request path. OTLP carries them too, and the `wye.cost` metric is in USD, a double: the export is display ([telemetry](operations.md#usage-records-and-telemetry)).
+With `[pricing]`, every usage record carries its cost, computed in the usage writer task, off the request path. OTLP carries it too, and the `wye.cost` metric is in USD, a double: the export is display ([fields](operations.md#usage-records-and-telemetry)).
 
 ## State boundary
 
@@ -183,7 +176,7 @@ Rate limiting is stateful even when the state is ephemeral, so a local token buc
 
 ### Local resource bounds
 
-Per-process limits that protect the process are allowed. They answer "can this process serve another request now", not "has this caller used too much", so they are not quotas. Nothing queues without bound, and limits are never shared between replicas.
+Limits that protect one process are allowed. They answer "can this process serve another request now", not "has this caller used too much", so they are not quotas. Nothing queues without bound.
 
 - `server.max_concurrent_requests` and `server.max_total_held_bytes`: beyond them, an overload error (Anthropic `overloaded_error`, status `529`, on the Messages endpoints; status `503` in OpenAI's error shape on the OpenAI endpoints; both with `retry-after: 1` and `x-should-retry: true`) so clients back off and retry. A request whose own held chunks alone would pass `max_total_held_bytes` gets `413` instead: a retry could not succeed. A request holds its permit until its response body ends.
 - `server.max_total_kept_bytes`: request bytes kept so that [failover](glossary.md#requests-and-where-they-go) can resend them, across all requests; beyond it, a request is forwarded without failover, never refused. A route's `failover_max_body_bytes` bounds one request's kept body the same way.

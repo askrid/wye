@@ -5,14 +5,14 @@ Open questions, ideas, and experiments; nothing here is a product promise. Measu
 ## Questions to test
 
 - How fast does a disconnect release upstream work, and does the provider stop generation or billing?
-- How much does cache-affine selection raise cache hit rate and lower billed cost on real agent workloads?
+- How much does cache affinity raise cache hit rate and lower billed cost on real agent workloads?
 - Which results hold only against the mock?
 
 A gateway adds a hop and cannot beat direct access on latency. Real-provider experiments are opt-in and record model, usage, cache behavior, pricing, and billed cost.
 
 ## Verification needed
 
-Provider facts a feature depends on; each is confirmed, with a source, before that feature ships. Each entry: the feature that depends on it, the assumption, and how to check it. The cost bound and agent-aware routing list their own below.
+Provider facts a feature depends on, each confirmed with a source before that feature ships: the feature, the assumption, and how to check it. The cost bound and agent-aware routing list their own below.
 
 - **[Provider-held budgets](policy.md#provider-held-budgets)**: which providers enforce workspace spend limits as hard stops, with what lag. Check: a low-limit project driven past its limit.
 - **M0**: Claude Code's gateway contract per release. Check: [gateway guide](https://code.claude.com/docs/en/llm-gateway-protocol); contract tests per release.
@@ -45,7 +45,7 @@ Summaries come from abstracts; check figures against the papers before citing th
 
 ## Feature directions
 
-Request-local, no shared state, config in Git, analysis in the user's OTel backend. Built, and documented where the feature lives: 2, [cache-miss diagnostics](architecture.md#cache-diagnostics); the CI half of 5, `wye policy-diff`; the clean stream endings of 7 ([failure behavior](operations.md#failure-behavior)); and [aliases and upgrade checks](architecture.md#model-aliases-and-upgrade-checks).
+Request-local, config in Git, analysis in the user's OpenTelemetry backend. Built, and documented where the feature lives: 2, [cache-miss diagnostics](architecture.md#cache-diagnostics); the clean stream endings of 7 ([failure behavior](operations.md#failure-behavior)); and [aliases and upgrade checks](architecture.md#model-aliases-and-upgrade-checks).
 
 ### 1. Agent-aware routing
 
@@ -55,7 +55,7 @@ Why: agents already route by phase (Claude Code's [`opusplan`](https://code.clau
 
 ### 3. Narrowable tokens for agent swarms
 
-Planned as [narrowable tokens](glossary.md#planned): a token holder mints a narrower gateway token offline (team → developer → CI job → subagent), narrowing models, output-token ceilings, and expiry. The IETF attenuating-agent-tokens draft specifies this as JWTs, matching Wye's format. Caps each request, never cumulative spend; replay within the validity window stays possible.
+Planned as [narrowable tokens](glossary.md#planned): a holder derives a narrower gateway token offline (team → developer → CI job → subagent), narrowing models, output-token ceilings, and expiry. Caps each request, never cumulative spend; replay within the validity window stays possible.
 
 ### 4. Signed usage receipts
 
@@ -67,21 +67,21 @@ Zelkova-style analysis over static config, beyond `wye explain` for one request.
 
 ### 6. Provable cost bound
 
-Planned for [M2](roadmap.md#m2-cost-policy-for-claude), not built; the rule it serves is in [policy.md](policy.md#provable-cost-ceiling). A bound without a tokenizer, so without per-provider tokenizer dependencies or network calls, from the [price table](policy.md#price-table) and each model's context window:
+Planned for [M2](roadmap.md#m2-cost-policy-for-claude); the rule it serves is in [policy.md](policy.md#provable-cost-ceiling). A bound with no tokenizer dependencies or network calls, from the [price table](policy.md#price-table) and each model's context window:
 
 ```text
 max_input_tokens = min(input_bytes, model_context_window) + provider_overhead
 max_cost = max_input_tokens × highest_input_price_reachable
-         + output_cap       × output_price_per_token
+         + output_ceiling   × output_price_per_token
 ```
 
 - Input: a byte-level BPE token covers at least one byte, so input tokens ≤ UTF-8 bytes; the body's size over-counts (JSON syntax included), and the context window caps it, since the provider rejects a larger request. Verify per tokenizer, template tokens included: its construction, and adversarial requests against reported usage.
-- Output: Wye would insert or lower the output-token field to `output_cap` ([allowlisted rewrite](architecture.md#forwarding-contract)), which must count reasoning tokens. Verify per model: low limits with reasoning on, against usage.
+- Output: Wye would insert or lower the output-token field to `output_ceiling` ([allowlisted rewrite](architecture.md#forwarding-contract)), which must count reasoning tokens. Verify per model: low limits with reasoning on, against usage.
 - Images: add each model's per-image token maximum (Anthropic bills by pixel dimensions, capped after resizing) instead of counting base64 bytes.
 - Cache: reads bill at or below the input price and are ignored; writes use the highest write price the request can trigger (a 1-hour TTL above 5 minutes).
-- Prompt-length tiers: price the whole bound at the tier its worst case (input bytes plus `output_cap`) reaches.
+- Prompt-length tiers: price the whole bound at the tier its worst case (input bytes plus `output_ceiling`) reaches.
 - Provider-added input, such as chat-template tokens and the tool-use system prompt `tools` adds: add each documented overhead. Verify it, the image maximum, and the tiers from provider docs and requests with and without images and `tools`.
-- Refused in hard mode: audio and files (priced by separate formulas), hosted tools billed per call, priority or other service tiers, any field the price table does not cover, images until their maximum is verified, and any model whose bounds are unverified.
+- Refused under the cost ceiling: audio and files (priced by separate formulas), hosted tools billed per call, priority or other service tiers, any field the price table does not cover, images until their maximum is verified, and any model whose bounds are unverified.
 
 Loose on purpose, it always holds; telemetry would report it beside the actual cost. Agent traffic reads most input from the cache at 5 to 10 percent of the input price while the bound assumes writes, so it can exceed actual cost by an order of magnitude: a guard against runaway requests (an enormous context at the most expensive tier, an unbounded output), not a budget. Open: bound ÷ actual cost on real Claude Code sessions (opt-in telemetry), and a tighter bound that subtracts non-billable framing.
 
@@ -93,11 +93,11 @@ Loose on purpose, it always holds; telemetry would report it beside the actual c
 
 ### Agent-native directions
 
-Built: what Claude Code tells a gateway without exposing prompts ([contract](architecture.md#claude-code-gateway-contract), [prompt caching for agents](https://arxiv.org/abs/2601.06007)) feeds attribution by session, subagent, and request class, cache-miss reasons, one trace per session (checked in Jaeger across two replicas), and tool calls. Open: report-only secret detection, which needs a multi-pattern matcher and a sampled body scan; report-only, because blocking would brick a session and redaction would break caching.
+Built: what Claude Code tells a gateway without exposing prompts ([contract](architecture.md#claude-code-gateway-contract), [prompt caching for agents](https://arxiv.org/abs/2601.06007)) feeds attribution by session, subagent, and request class, cache-miss reasons, one trace per session (checked in Jaeger across two replicas), and tool calls. Open: report-only secret detection (blocking would brick a session, redaction would break caching), which needs a multi-pattern matcher and a sampled body scan.
 
 ### Visibility for one developer
 
-Research (2026-10-30): what only a gateway can add for a solo developer, without state between requests; today's tools: [positioning](product.md#positioning). Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or a per-prompt bill; the first two are the [M2c](roadmap.md#m2c-fewer-expensive-tokens) waste report. Ideas beyond it, in the usage writer task or an offline CLI, never on the request path:
+What only a gateway can add (2026-10-30); today's tools: [positioning](product.md#positioning). Nobody prices what-ifs for the prompt cache, the carried cost of tool output, or a per-prompt bill; the first two are the [M2c](roadmap.md#m2c-fewer-expensive-tokens) waste report. Ideas beyond it, in the usage writer task or an offline CLI, never on the request path:
 
 - **A per-prompt bill with labels.** Main, subagent, and auxiliary requests rolled up per prompt, labeled with the prompt's first line by joining Claude Code's local transcripts (which carry `promptId`) in the CLI, so prompt text never enters the usage log.
 - **`wye statusline`.** Reads the end of the usage log for the status line's session and prompt: this prompt's cost with its subagents and retries, the last cache rebuild, the costliest carried tool. The delivery channel for the waste report and the per-prompt bill.
@@ -108,7 +108,7 @@ Not worth building: live 5h/7d headroom, which Claude Code already reads from th
 
 ### Where the tokens go
 
-Measured on 2026-11-01 from one developer's usage log, the evidence behind [M2c](roadmap.md#m2c-fewer-expensive-tokens): 595 Claude Code requests in 3 sessions, all on Opus 5.5 through a claude.ai subscription. Spend is in units of the input price at Opus 5.5's [ratios](https://platform.claude.com/docs/en/about-claude/pricing): output 5, cache read 0.05, cache write 2 on the main conversation (Claude Code's 1-hour TTL on a subscription, [caching](https://code.claude.com/docs/en/prompt-caching)) and 1.25 elsewhere (5 minutes); the usage log does not split writes by TTL, so those follow Claude Code's defaults. One developer and one model: the shares will differ by workload.
+Measured on 2026-11-01 from one developer's usage log, the evidence behind [M2c](roadmap.md#m2c-fewer-expensive-tokens): 595 Claude Code requests in 3 sessions, all on Opus 5.5 through a claude.ai subscription. Spend is in units of the input price at Opus 5.5's [ratios](https://platform.claude.com/docs/en/about-claude/pricing): output 5, cache read 0.05, cache write 2 on the main agent (Claude Code's 1-hour TTL on a subscription, [caching](https://code.claude.com/docs/en/prompt-caching)) and 1.25 elsewhere (5 minutes); the usage log does not split writes by TTL, so those follow Claude Code's defaults. One developer and one model: the shares will differ by workload.
 
 | Spend | Share |
 |---|---|
@@ -133,8 +133,8 @@ The median main request carried 400k tokens; sessions ran to about 968k before t
 Each needs state shared across requests or replicas, which Wye does not keep ([state boundary](policy.md#state-boundary)); the list of what Wye will not do is in the [README](../README.md#what-wye-will-not-do).
 
 - Semantic or response caching, global rate limits, redemption-based tokens, and adaptive per-node concurrency.
-- Loop detection or spend caps per session (cross-request state), prompt rewriting for cache efficiency (beyond the [allowlist](architecture.md#forwarding-contract)), and blocking tool calls (agent control is a non-goal).
-- Signed balances: if a token says `$20 remaining` and Wye returns a new `$18` token, a client can still reuse the original on another replica, since signature verification does not track redemption. This is the double-spending boundary known from Privacy Pass and offline e-cash.
+- Loop detection or spend caps per session, prompt rewriting for cache efficiency (beyond the [allowlist](architecture.md#forwarding-contract)), and blocking tool calls (agent control is a non-goal).
+- Signed balances: if a token says `$20 remaining` and Wye returns a new `$18` token, a client can still reuse the original on another replica, since signature verification does not track redemption.
 - A delayed cutoff: feeding OTLP usage to an external aggregator that triggers a GitOps policy rollout gives monitoring, not a budget; export loss, aggregation windows, rollout delay, and in-flight requests all cause overshoot.
 - Redis, PostgreSQL, or SQLite ledgers: solve global quotas but add state and an operational dependency; SQLite makes even one instance stateful.
 - Peer-to-peer actors: ownership, replication, fencing, quorum, and failover keep state inside the gateway; total cluster loss destroys unpersisted balances.
@@ -174,10 +174,8 @@ Each is a hypothesis until `wye-bench` measures it ([method](benchmarks.md#metho
 
 ### Rejected or not adopted
 
-- **256 lanes instead of 64**: rejected (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%; ~10% of busy samples waited on h2's per-connection lock, but more connections add more overhead than the contention they remove.
-- **Adaptive write coalescing**: rejected, no gain.
-- **Lazy idle deadline**: rejected, no gain.
-- **SWAR string-end search**: rejected, no gain over a byte loop.
+- **256 lanes instead of 64**: rejected (2026-10-24, two alternating 20 s paced runs): CPU per event +3.5% and +8%, idle RSS +18%; more connections add more overhead than the contention they remove.
+- **Adaptive write coalescing, lazy idle deadline, SWAR string-end search** (against a byte loop): rejected, no gain.
 - **mimalloc**: rejected: idle memory +9%, RSS +12%, CPU per MB +4%.
 - **Failover: copy kept bodies into one buffer per request**: rejected (2026-10-26, `failover_` variant, two runs): allocations per agent upload 99.5 → 58.5, but CPU per MB 1.86 → 2.08 ms (agent upload) and 1.81 → 1.97 ms (1 MiB upload), heap 1.12 → 1.55 MB per agent upload, +1 allocation per unary request; the kept chunks stay ([their overhead](benchmarks.md#current-harness-and-baseline)).
 - **SIMD stage-1 prompt scanner** (cache diagnostics): not adopted: the scalar scanner runs 0.61-0.69 ms/MB on Claude Code-shaped bodies, within 15% of a naive lexer (0.54); the prototype classified at 0.17-0.24 ms/MB, but a full scanner would land near 0.35-0.4 ms/MB, still above the 10% target, with the first `unsafe` code on the request path; per-session sampling instead.
