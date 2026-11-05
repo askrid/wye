@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, html};
+use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd, html};
 
 /// Repository headings the page renders in one of its own sections, by
 /// `FILE#slug`, with that section's id: `README.md#performance` → `stream`.
@@ -193,13 +193,16 @@ pub fn slug(heading: &str) -> String {
         .collect()
 }
 
-/// Inline Markdown as one line of plain text, for a page description: the
-/// words of links, code, and emphasis kept, their markup dropped.
+/// Markdown as one line of plain text, for a page description: the words
+/// of links, code, and emphasis kept, their markup dropped, and a space
+/// where a paragraph or list item ends.
 pub fn plain(markdown: &str) -> String {
     let text: String = Parser::new(markdown)
         .filter_map(|event| match event {
             Event::Text(text) | Event::Code(text) => Some(text.into_string()),
-            Event::SoftBreak | Event::HardBreak => Some(" ".to_owned()),
+            Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph | TagEnd::Item) => {
+                Some(" ".to_owned())
+            }
             _ => None,
         })
         .collect();

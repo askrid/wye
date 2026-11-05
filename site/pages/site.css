@@ -68,7 +68,7 @@
   --display: var(--mono);
   --text-face: "Wye Text", "Wye Text fallback", Menlo, Consolas, monospace;
   /* Type roles, in rem so a reader's text size scales them all: body text;
-     the lede and each stop's lead; section headings; output (code, charts,
+     each stop's lead; section headings; output (code, charts,
      tables); captions (facts, footer, chart captions, the version,
      buttons); the rail. */
   --body: 1.0625rem;
@@ -199,9 +199,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
    word or line: their content wraps or scrolls inside it instead. */
 .hero-copy, .hero-install, .part, .prose { grid-template-columns: minmax(0, 1fr); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
-.lede { max-width: 54ch; font-size: var(--lead); line-height: 1.6; }
-/* README's points under the lede: one property a line, led by its bold
-   name, as the stops' items are; no bullet, the names carry the list. */
+/* README's points under the headline: one property a line, led by its
+   bold name, as the stops' items are; no bullet, the names carry the
+   list. */
 .points ul { display: grid; gap: 0.5rem; max-width: 54ch; margin: 0; padding: 0; list-style: none; line-height: 1.5; }
 .points strong { color: var(--ink); }
 /* One line of facts, the changelog last. */

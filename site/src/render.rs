@@ -17,8 +17,8 @@
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening paragraph: its bold `tagline`,
-//!   the `rest` rendered, or the rest as plain `text`; `points` is the list
-//!   after it, rendered.
+//!   the `rest` rendered, or the rest and the list after it as plain
+//!   `text`; `points` is that list, rendered.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -123,7 +123,11 @@ impl Sources {
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline)),
                     "rest" => Ok(markdown::to_html(rest, &self.repo_url, file, &page.anchors)),
-                    "text" => Ok(markdown::escape(&markdown::plain(rest))),
+                    "text" => {
+                        let points = markdown::opening_points(self.document(file)?);
+                        let text = format!("{rest}\n\n{}", points.unwrap_or_default());
+                        Ok(markdown::escape(&markdown::plain(&text)))
+                    }
                     "points" => {
                         let points =
                             markdown::opening_points(self.document(file)?).ok_or_else(|| {
@@ -345,7 +349,7 @@ mod tests {
             "{{opening README.md|tagline}}|{{opening README.md|rest}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary."
+            "LLM gateway without bloat.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary. Fast. Under 1 ms. Small. One file."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())
