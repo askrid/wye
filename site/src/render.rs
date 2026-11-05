@@ -18,7 +18,7 @@
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
 //!   paragraph without the closing period; the list after it, rendered
-//!   (`points`); or the list's first point as plain `text`.
+//!   (`lede`); or that paragraph as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -113,25 +113,20 @@ impl Sources {
                 })?;
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline.trim_end_matches('.'))),
-                    "points" | "text" => {
-                        let points =
-                            markdown::opening_points(self.document(file)?).ok_or_else(|| {
-                                format!("{file}: no list after the opening paragraph")
-                            })?;
-                        if *part == "points" {
+                    "lede" | "text" => {
+                        let lede = markdown::opening_lede(self.document(file)?)
+                            .ok_or_else(|| format!("{file}: no paragraph after the tagline"))?;
+                        if *part == "lede" {
                             return Ok(markdown::to_html(
-                                points,
+                                lede,
                                 &self.files_url(),
                                 file,
                                 &page.anchors,
                             ));
                         }
-                        let first = markdown::list_items(points).into_iter().next();
-                        Ok(markdown::escape(&markdown::plain(
-                            &first.unwrap_or_default(),
-                        )))
+                        Ok(markdown::escape(&markdown::plain(lede)))
                     }
-                    other => Err(format!("{other:?} is not tagline, text, or points")),
+                    other => Err(format!("{other:?} is not tagline, text, or lede")),
                 }
             }
             ("section", [file, heading]) => Ok(markdown::to_html(
@@ -304,8 +299,8 @@ mod tests {
             stylesheet: "nav > a { color: #ededed }".into(),
             documents: [(
                 "README.md",
-                "# Wye\n\n**LLM gateway without bloat.** Wye is one\n`binary`.\n\n\
-                 - **Fast.** Under [1 ms](#performance).\n- **Small.** One file.\n\n\
+                "# Wye\n\n**LLM gateway without bloat.**\n\n\
+                 Small and [fast](#performance): one\n`binary`.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
@@ -343,18 +338,18 @@ mod tests {
         let page = "{{opening README.md|tagline}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat|Fast. Under 1 ms."
+            "LLM gateway without bloat|Small and fast: one binary."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())
                 .unwrap_err()
-                .contains("\"title\" is not tagline, text, or points")
+                .contains("\"title\" is not tagline, text, or lede")
         );
         assert_eq!(
-            render("{{opening README.md|points}}", &sources()).unwrap(),
-            "<ul>\n<li><strong>Fast.</strong> Under \
-             <a href=\"https://github.com/askrid/wye/blob/81e7951/README.md#performance\">1 ms</a>.</li>\n\
-             <li><strong>Small.</strong> One file.</li>\n</ul>\n"
+            render("{{opening README.md|lede}}", &sources()).unwrap(),
+            "<p>Small and \
+             <a href=\"https://github.com/askrid/wye/blob/81e7951/README.md#performance\">fast</a>: one\n\
+             <code>binary</code>.</p>\n"
         );
     }
 
@@ -400,7 +395,7 @@ mod tests {
 
     #[test]
     fn keeps_links_to_headings_the_page_renders_whole() {
-        let page = "<section class=\"hero\">{{opening README.md|points}}</section>\
+        let page = "<section class=\"hero\">{{opening README.md|lede}}</section>\
                     <section class=\"part\" id=\"compare\">{{section README.md|How it compares}}</section>\
                     <section id=\"one\">{{item README.md|What it does|Shows}}</section>\
                     <section id=\"two\">{{ item README.md|What it does|Gives }}</section>";
@@ -505,7 +500,7 @@ mod tests {
         let s = sources();
         assert_eq!(
             render("x {{ opening README.md|title }}", &s).unwrap_err(),
-            "{{opening README.md|title}}: \"title\" is not tagline, text, or points"
+            "{{opening README.md|title}}: \"title\" is not tagline, text, or lede"
         );
         assert_eq!(
             render("{{ratios README.md|Status|Speed}}", &s).unwrap_err(),

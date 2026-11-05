@@ -4,12 +4,7 @@
 
 **LLM gateway without bloat.**
 
-- Records tokens and cost per coding-agent session, subagent, and tool, and why each prompt-cache miss happened.
-- Adds under a millisecond per request (p50), less than other widely used open-source gateways in the [same lab run](#performance).
-- Passes each provider's native API through untranslated, so new features on the endpoints it serves work the day they ship.
-- One binary and one TOML file. No database, no admin API, no state between requests: scale by adding replicas.
-- Connects only to what its config names and holds no secret you didn't give it; every release archive carries build provenance ([security](SECURITY.md)).
-- Covers the rest of what a gateway does, from access per caller to failover.
+Small, fast, and stateless: one binary, one TOML file, under a millisecond per request ([p50, lab](#performance)), and the features a gateway needs, no more.
 
 ## Performance
 
