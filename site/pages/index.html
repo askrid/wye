@@ -54,38 +54,38 @@
     </div>
 
     <figure class="junction">
-      <div class="junction-art" role="img" aria-label="One request from Claude Code through Wye: its gateway token is checked; the alias {{field README.md|{|requested_model}} maps to {{field README.md|{|model}}; the session stays on anthropic, which rejects it with 429 before any output, so it fails over to {{field README.md|{|upstream}}; the stream is relayed unbuffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
+      <div class="junction-art" role="img" aria-label="One request from Claude Code through Wye: its gateway token is checked; the alias {{field docs/operations.md|{|requested_model}} maps to {{field docs/operations.md|{|model}}; the session stays on anthropic, which rejects it with 429 before any output, so it fails over to {{field docs/operations.md|{|upstream}}; the stream is relayed unbuffered; the usage record keeps {{field docs/operations.md|{|input_tokens}} input tokens, {{field docs/operations.md|{|output_tokens}} output tokens, and ${{field docs/operations.md|{|cost_usd}}.">
 <pre class="trace-wide">claude code
 ┃
 ┣━ <b>access</b>     <span class="d">gateway token checked</span>
 ┃
-┣━ <b>model</b>      <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
+┣━ <b>model</b>      <span class="d">{{field docs/operations.md|{|requested_model}} -&gt; {{field docs/operations.md|{|model}}</span>
 ┃
 ┣━ <b>upstream</b>   <span class="d">session stays on anthropic</span>
 ┃  <span class="d">├─</span><span class="no">x</span>        <span class="no">429</span><span class="d"> before output</span>
-┃  <span class="r2">└─o</span>        <span class="d">failover to {{field README.md|{|upstream}}</span>
+┃  <span class="r2">└─o</span>        <span class="d">failover to {{field docs/operations.md|{|upstream}}</span>
 ┃
 ┣━ <b>stream</b>     <span class="d">unbuffered</span>
 ┃
-┗━ <b>record</b>     {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+┗━ <b>record</b>     {{field docs/operations.md|{|input_tokens}} in · {{field docs/operations.md|{|output_tokens}} out · ${{field docs/operations.md|{|cost_usd}}</pre>
 <pre class="trace-narrow">claude code
 ┃
 ┣━ <b>access</b>
 ┃  <span class="d">gateway token checked</span>
 ┃
 ┣━ <b>model</b>
-┃  <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
+┃  <span class="d">{{field docs/operations.md|{|requested_model}} -&gt; {{field docs/operations.md|{|model}}</span>
 ┃
 ┣━ <b>upstream</b>
 ┃  <span class="d">session stays on anthropic</span>
 ┃  <span class="d">├─</span><span class="no">x</span> <span class="no">429</span><span class="d"> before output</span>
-┃  <span class="r2">└─o</span> <span class="d">failover to {{field README.md|{|upstream}}</span>
+┃  <span class="r2">└─o</span> <span class="d">failover to {{field docs/operations.md|{|upstream}}</span>
 ┃
 ┣━ <b>stream</b>
 ┃  <span class="d">unbuffered</span>
 ┃
 ┗━ <b>record</b>
-   {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
+   {{field docs/operations.md|{|input_tokens}} in · {{field docs/operations.md|{|output_tokens}} out · ${{field docs/operations.md|{|cost_usd}}</pre>
       </div>
     </figure>
   </section>
@@ -151,8 +151,7 @@
         <h2 id="record-h"><a href="#record"><span class="hash" aria-hidden="true">#</span> record</a></h2>
         {{item README.md|What it does|Shows usage}}
         {{fence README.md|$ wye report}}
-        {{fence README.md|{}}
-        {{paragraph README.md|Records and decisions|Costs are}}
+        {{fence docs/operations.md|{}}
       </section>
 
       <section class="part" id="compare" aria-labelledby="compare-h">
