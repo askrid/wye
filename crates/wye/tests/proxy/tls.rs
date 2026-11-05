@@ -28,6 +28,12 @@ async fn untrusted_upstream_certificate_is_rejected() {
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
+    let record = h.usage_record().await;
+    assert_eq!(record["outcome"], "upstream_error");
+    assert_eq!(
+        record["upstream_error"], "connect",
+        "a failed TLS handshake"
+    );
 }
 
 #[test]

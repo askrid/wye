@@ -1,6 +1,6 @@
 //! Forwarding a proxied request: the concurrency permit, body admission,
-//! sampling, the upstream choice and failover, and the response or gateway
-//! error.
+//! sampling, the upstream choice and failover, and the response or Wye's own
+//! error answer, recorded by whose it is.
 
 use std::time::Duration;
 use tokio::sync::oneshot::error::TryRecvError;
@@ -20,7 +20,7 @@ use hyper::body::Incoming;
 
 use super::{
     ApiRoute, Gateway, ResBody,
-    admit::ModelSpan,
+    admit::{ModelSpan, NotAdmitted},
     content_length,
     responses::{forward_error, overloaded, too_large},
 };
@@ -30,7 +30,7 @@ use crate::{
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UsageLog},
+    usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UpstreamError, UsageLog},
 };
 
 /// How long a rejected attempt may take to hand its body back: hyper drops a
@@ -46,14 +46,14 @@ impl Gateway {
     ) -> Response<ResBody> {
         let api = info.endpoint.api;
         let Some(permit) = self.in_flight.try_reserve(self.max_concurrent_requests) else {
-            return log.gateway_error(
+            return log.refused(
                 info,
                 overloaded(api, "gateway is at its concurrent request limit"),
             );
         };
         let declared_len = content_length(req.headers());
         if declared_len.is_some_and(|len| len > self.max_request_body_bytes as u64) {
-            return log.gateway_error(info, too_large(api));
+            return log.refused(info, too_large(api));
         }
         // The awaits below read the body and wait for the upstream; if the
         // client leaves meanwhile, hyper drops this future and `pending`
@@ -65,7 +65,12 @@ impl Gateway {
             .await;
         let (body, model_span) = match admitted {
             Ok(admitted) => admitted,
-            Err(res) => return log.gateway_error(pending.answered(), *res),
+            Err(not_admitted) => {
+                return match *not_admitted {
+                    NotAdmitted::Refused(res) => log.refused(pending.answered(), res),
+                    NotAdmitted::Fault(res) => log.gateway_error(pending.answered(), res),
+                };
+            }
         };
         self.sample(pending.info());
         let Some(route) = self.routes.get(api) else {
@@ -83,7 +88,19 @@ impl Gateway {
                     Observed::new(body, info, parts.status, content_type, log.clone(), permit);
                 Response::from_parts(parts, Either::Right(body))
             }
-            Err(e) => log.gateway_error(info, forward_error(api, e)),
+            Err(e) => {
+                let upstream_error = match e {
+                    ForwardError::Connect => Some(UpstreamError::Connect),
+                    ForwardError::HeaderTimeout => Some(UpstreamError::Timeout),
+                    ForwardError::Upstream => Some(UpstreamError::Reset),
+                    ForwardError::Policy(_) => None,
+                };
+                let res = forward_error(api, e);
+                match upstream_error {
+                    Some(error) => log.upstream_error(info, error, res),
+                    None => log.refused(info, res),
+                }
+            }
         }
     }
 
@@ -153,6 +170,7 @@ impl Gateway {
                     .insert(CONTENT_LENGTH, HeaderValue::from(len + prefix.len() as u64));
             }
             info.upstream = upstream.id.clone();
+            info.provider = upstream.provider;
             // Prompt hashes and upgrade checks read the body once: on the first
             // attempt that sends it whole (a resend replays it from the start).
             let result = upstream

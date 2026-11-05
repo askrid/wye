@@ -43,10 +43,14 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         ),
         0,
     ));
-    // An upstream rejection (429, 529) or a client error is an answer like any other,
-    // so its outcome reads completed.
+    // An upstream's error status (a 429, a 529, a client error) is an answer
+    // like any other, so its outcome reads completed; Wye's own read refused,
+    // upstream_error, or gateway_error.
     if !s.errors.is_empty() {
         let _ = writeln!(out, "error statuses: {}", pairs(&s.errors));
+    }
+    if !s.upstream_errors.is_empty() {
+        let _ = writeln!(out, "upstream errors: {}", pairs(&s.upstream_errors));
     }
 
     columns.title(&mut out, "By request class");

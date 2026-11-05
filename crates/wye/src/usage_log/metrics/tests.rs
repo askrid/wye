@@ -63,7 +63,7 @@ fn totals_are_cumulative_and_encode_as_otlp_json() {
     assert_eq!(metric("wye.cost")["unit"], "USD");
 
     assert_eq!(
-        metric("wye.telemetry.lost")["sum"]["dataPoints"][0]["asInt"],
+        metric("wye.records.dropped")["sum"]["dataPoints"][0]["asInt"],
         "2"
     );
     assert_eq!(
@@ -197,4 +197,49 @@ fn route_upstreams_split_requests_tokens_and_costs() {
             "{name}: {upstreams:?}"
         );
     }
+}
+
+#[test]
+fn upstream_errors_of_every_kind_are_one_outcome_series() {
+    use crate::usage_log::{Outcome, UpstreamError};
+    let mut metrics = Metrics::new(0);
+    for error in [UpstreamError::Connect, UpstreamError::Reset] {
+        metrics.record(&Line {
+            outcome: Outcome::UpstreamError(error),
+            ..line("/v1/messages", 502, 1.0, None)
+        });
+    }
+    assert_eq!(metrics.requests.len(), 1);
+    assert_eq!(metrics.requests[0].key.outcome, "upstream_error");
+    assert_eq!(metrics.requests[0].count, 2);
+    assert_eq!(metrics.durations.len(), 1);
+}
+
+#[test]
+fn failovers_name_the_rejecting_upstream_apart_from_the_answering_one() {
+    let rejected = [crate::usage_log::RejectedAttempt {
+        upstream: Some("a".into()),
+        reason: FailoverReason::RateLimited,
+    }];
+    let mut metrics = Metrics::new(0);
+    metrics.record(&Line {
+        upstream: Some("b"),
+        failovers: &rejected,
+        ..line("/v1/messages", 200, 1.0, None)
+    });
+    let json: serde_json::Value =
+        serde_json::from_slice(&metrics.encode(br#"{"attributes":[]}"#, 1, 0, 0)).unwrap();
+    let failovers = json["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "wye.failovers")
+        .unwrap()
+        .clone();
+    assert_eq!(failovers["unit"], "{failover}");
+    let attributes = &failovers["sum"]["dataPoints"][0]["attributes"];
+    assert_eq!(attributes[0]["key"], "wye.failover.upstream");
+    assert_eq!(attributes[0]["value"]["stringValue"], "a");
+    assert_eq!(attributes[1]["key"], "wye.failover.reason");
+    assert_eq!(attributes[1]["value"]["stringValue"], "429");
 }

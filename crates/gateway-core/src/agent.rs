@@ -182,13 +182,13 @@ impl CacheMiss {
         cache_read_tokens: Option<u64>,
         cache_creation_tokens: Option<u64>,
         compaction: Option<Compaction>,
-        context_compacted: Option<Compaction>,
+        after_compaction: Option<Compaction>,
     ) -> Option<Self> {
         let missed = cache_read_tokens == Some(0) && cache_creation_tokens.is_some_and(|n| n > 0);
         missed.then(|| {
             if compaction.is_some() {
                 Self::Compaction
-            } else if context_compacted.is_some() {
+            } else if after_compaction.is_some() {
                 Self::AfterCompaction
             } else {
                 Self::Unexplained

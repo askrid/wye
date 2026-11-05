@@ -200,7 +200,7 @@ pub struct Server {
     /// Request bytes kept for failover across all requests; beyond it,
     /// requests are forwarded without failover, never refused.
     pub max_total_kept_bytes: u64,
-    /// Proxied requests in flight (until their response body ends) before new
+    /// Requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
     pub max_concurrent_requests: usize,
     /// After a shutdown signal, `/readyz` fails but connections are still

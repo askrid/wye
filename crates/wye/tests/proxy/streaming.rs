@@ -92,7 +92,7 @@ async fn stalled_event_stream_ends_with_an_error_event() {
             ),
         "{text}"
     );
-    assert_eq!(h.usage_record().await["outcome"], "failed");
+    assert_eq!(h.usage_record().await["outcome"], "truncated");
 
     let res = h
         .send(
@@ -144,7 +144,11 @@ async fn slow_upstream_headers_time_out() {
     assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
     assert_eq!(res.headers()["content-type"], "application/json");
     let body = read_body(res).await;
-    assert!(body.starts_with(br#"{"type":"error","error":{"type":"api_error""#));
+    assert!(body.starts_with(br#"{"type":"error","error":{"type":"timeout_error""#));
+    let record = h.usage_record().await;
+    assert_eq!(record["status"], 504);
+    assert_eq!(record["outcome"], "upstream_error");
+    assert_eq!(record["upstream_error"], "timeout");
 }
 
 #[tokio::test]

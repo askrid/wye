@@ -85,12 +85,16 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     write_attributes(
         buf,
         &[
-            ("gen_ai.system", Some(Value::Str(line.system))),
+            ("gen_ai.provider.name", Some(Value::Str(line.provider_name))),
             (attr::ROUTE, Some(Value::Str(line.path))),
             (attr::STATUS, Some(Value::Int(u64::from(line.status)))),
             (attr::OUTCOME, Some(Value::Str(line.outcome.as_str()))),
+            ("wye.upstream_error", line.upstream_error.map(Value::Str)),
             ("wye.duration_ms", Some(Value::Double(line.duration_ms))),
-            ("wye.headers_ms", line.headers_ms.map(Value::Double)),
+            (
+                "wye.response_headers_ms",
+                line.response_headers_ms.map(Value::Double),
+            ),
             (attr::UPSTREAM, line.upstream.map(Value::Str)),
             (attr::SUBJECT, line.subject.map(Value::Str)),
             ("session.id", line.session_id.map(Value::Str)),
@@ -101,10 +105,10 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
             ("wye.prompt_id", line.prompt_id.map(Value::Str)),
             ("wye.compaction", line.compaction.map(Value::Str)),
             (
-                "wye.context_compacted",
-                line.context_compacted.map(Value::Str),
+                "wye.after_compaction",
+                line.after_compaction.map(Value::Str),
             ),
-            ("wye.requested_model", line.requested_model.map(Value::Str)),
+            ("gen_ai.request.model", line.requested_model.map(Value::Str)),
             (attr::MODEL, line.model.map(Value::Str)),
             ("wye.usage_status", Some(Value::Str(line.usage_status))),
             (
@@ -143,6 +147,9 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         ],
     );
 }
+
+/// The OpenTelemetry GenAI operation of a tool span, and its name's prefix.
+const EXECUTE_TOOL: &str = "execute_tool";
 
 /// One usage record as an OTLP server `Span`, followed by one internal span
 /// per tool call it reports in `x-claude-code-prev-tool-durations`.
@@ -183,15 +190,20 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
     );
     write_record_attributes(buf, line);
     buf.extend_from_slice(br#"],"events":["#);
-    if let Some(ms) = line.headers_ms {
+    if let Some(ms) = line.response_headers_ms {
         let at = start_ns.saturating_add((ms * 1_000_000.0) as u64);
         let _ = write!(
             buf,
             r#"{{"timeUnixNano":"{at}","name":"response headers"}}"#
         );
     }
-    let failed =
-        matches!(line.outcome, Outcome::Failed | Outcome::GatewayError) || line.status >= 500;
+    // A refusal is the client's to fix, as OpenTelemetry leaves a server
+    // span's 4xx unset; Wye's own overload (`529`, `503`) is one too.
+    let failed = match line.outcome {
+        Outcome::Refused => false,
+        Outcome::UpstreamError(_) | Outcome::GatewayError | Outcome::Truncated => true,
+        Outcome::Completed | Outcome::Cancelled => line.status >= 500,
+    };
     // STATUS_CODE_ERROR = 2, STATUS_CODE_UNSET = 0.
     let _ = write!(
         buf,
@@ -206,7 +218,7 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         let tool_start = start_ns.saturating_sub(ms.saturating_mul(1_000_000));
         // SPAN_KIND_INTERNAL = 1.
         buf.extend_from_slice(br#""name":"#);
-        let _ = serde_json::to_writer(&mut *buf, &format!("tool {name}"));
+        let _ = serde_json::to_writer(&mut *buf, &format!("{EXECUTE_TOOL} {name}"));
         let _ = write!(
             buf,
             r#","kind":1,"startTimeUnixNano":"{tool_start}","endTimeUnixNano":"{start_ns}","attributes":["#
@@ -214,6 +226,7 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         write_attributes(
             buf,
             &[
+                ("gen_ai.operation.name", Some(Value::Str(EXECUTE_TOOL))),
                 (attr::TOOL, Some(Value::Str(&name))),
                 ("wye.tool.duration_ms", Some(Value::Int(ms))),
                 ("session.id", line.session_id.map(Value::Str)),
@@ -316,17 +329,57 @@ mod tests {
         assert_ne!(first[0]["spanId"], second[0]["spanId"]);
 
         let bash = &second[1];
-        assert_eq!(bash["name"], "tool Bash");
+        assert_eq!(bash["name"], "execute_tool Bash");
         assert_eq!(bash["kind"], 1);
         assert!(bash.get("parentSpanId").is_none(), "a sibling of the call");
         // The call ran from 8 s to 10 s; Bash ended by 8 s after 500 ms.
         assert_eq!(bash["startTimeUnixNano"], "7500000000");
         assert_eq!(bash["endTimeUnixNano"], "8000000000");
-        assert_eq!(bash["attributes"][1]["value"]["intValue"], "500");
-        assert_eq!(bash["attributes"][3]["value"]["stringValue"], "a-1");
+        let attribute = |key: &str| {
+            bash["attributes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["key"] == key)
+                .unwrap_or_else(|| panic!("no {key}"))["value"]
+                .clone()
+        };
+        assert_eq!(
+            attribute("gen_ai.operation.name")["stringValue"],
+            "execute_tool"
+        );
+        assert_eq!(attribute("gen_ai.tool.name")["stringValue"], "Bash");
+        assert_eq!(attribute("wye.tool.duration_ms")["intValue"], "500");
+        assert_eq!(attribute("gen_ai.agent.id")["stringValue"], "a-1");
 
         let random = spans(&line(None, None));
         assert_ne!(random[0]["traceId"], trace);
+    }
+
+    #[test]
+    fn a_span_is_an_error_unless_wye_refused_the_request() {
+        use crate::usage_log::UpstreamError;
+        let status = |outcome, status| {
+            let line = Line {
+                outcome,
+                status,
+                ..Line::blank()
+            };
+            spans(&line)[0]["status"]["code"].as_u64().unwrap()
+        };
+        assert_eq!(status(Outcome::Completed, 200), 0);
+        assert_eq!(status(Outcome::Completed, 429), 0);
+        assert_eq!(status(Outcome::Completed, 500), 2);
+        assert_eq!(status(Outcome::Refused, 403), 0);
+        assert_eq!(status(Outcome::Refused, 529), 0, "Wye's own overload");
+        assert_eq!(status(Outcome::Refused, 503), 0, "Wye's own overload");
+        assert_eq!(
+            status(Outcome::UpstreamError(UpstreamError::Timeout), 504),
+            2
+        );
+        assert_eq!(status(Outcome::GatewayError, 500), 2);
+        assert_eq!(status(Outcome::Truncated, 200), 2);
+        assert_eq!(status(Outcome::Cancelled, 499), 0);
     }
 
     #[test]

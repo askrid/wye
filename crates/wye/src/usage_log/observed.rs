@@ -114,7 +114,7 @@ where
                 }
             }
             Poll::Ready(Some(Err(_))) => {
-                this.outcome = Outcome::Failed;
+                this.outcome = Outcome::Truncated;
                 if matches!(this.scanner, Some(UsageScanner::Messages(_))) && this.at_boundary {
                     this.closed = true;
                     return Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(STALLED_EVENT)))));

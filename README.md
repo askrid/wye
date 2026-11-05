@@ -150,7 +150,7 @@ Each request produces one JSON line on stdout and, with `[telemetry]`, an OTLP l
   "status": 200,
   "outcome": "completed",
   "duration_ms": 4100.42,
-  "headers_ms": 651.8,
+  "response_headers_ms": 651.8,
   "upstream": "bedrock-us",
   "subject": "alice",
   "session_id": "7f2c4a10-8e1b-4d3a-9c55-2b6e0d1f9a33",

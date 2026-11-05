@@ -29,7 +29,7 @@ impl Metrics {
             &times,
             "wye.requests",
             "{request}",
-            "Proxied requests by route, upstream, status, and outcome",
+            "Requests by endpoint, upstream, status, and outcome",
             &self.requests,
             |s| {
                 (
@@ -38,7 +38,7 @@ impl Metrics {
                         (attr::ROUTE, Some(Value::Str(&s.key.route))),
                         (attr::UPSTREAM, s.key.upstream.as_deref().map(Value::Str)),
                         (attr::STATUS, Some(Value::Int(u64::from(s.key.status)))),
-                        (attr::OUTCOME, Some(Value::Str(s.key.outcome.as_str()))),
+                        (attr::OUTCOME, Some(Value::Str(s.key.outcome))),
                     ],
                 )
             },
@@ -67,7 +67,7 @@ impl Metrics {
                 &mut buf,
                 &[
                     (attr::ROUTE, Some(Value::Str(&s.route))),
-                    (attr::OUTCOME, Some(Value::Str(s.outcome.as_str()))),
+                    (attr::OUTCOME, Some(Value::Str(s.outcome))),
                 ],
             );
         }
@@ -118,8 +118,8 @@ impl Metrics {
             &mut buf,
             &times,
             "wye.upgrade.issues",
-            "{request}",
-            "Checked requests a target model would reject, by target, rule, and subject",
+            "{issue}",
+            "Upgrade issues, one per target model and rule a checked request breaks, by target, rule, and subject",
             &self.upgrades,
             |s| {
                 (
@@ -137,14 +137,17 @@ impl Metrics {
             &mut buf,
             &times,
             "wye.failovers",
-            "{request}",
-            "Requests moved to the route's next upstream, by the upstream that rejected them and why",
+            "{failover}",
+            "Attempts an upstream rejected that moved the request to the route's next upstream, by the rejecting upstream and reason",
             &self.failovers,
             |s| {
                 (
                     Value::Int(s.count),
                     [
-                        (attr::UPSTREAM, s.key.upstream.as_deref().map(Value::Str)),
+                        (
+                            "wye.failover.upstream",
+                            s.key.upstream.as_deref().map(Value::Str),
+                        ),
                         (
                             "wye.failover.reason",
                             Some(Value::Str(s.key.reason.as_str())),
@@ -187,15 +190,15 @@ impl Metrics {
         sum(
             &mut buf,
             &times,
-            "wye.telemetry.lost",
+            "wye.records.dropped",
             "{record}",
-            "Usage records lost to full queues or failed exports, and records beyond the series limit",
+            "Usage records dropped from the usage log, OTLP log records and spans dropped from export, and records beyond the series limit",
             [lost.saturating_add(self.overflow)],
             |total| (Value::Int(total), []),
         );
 
         buf.extend_from_slice(
-            br#"{"name":"wye.requests.active","unit":"{request}","description":"Proxied requests whose response has not ended","gauge":{"dataPoints":["#,
+            br#"{"name":"wye.requests.active","unit":"{request}","description":"Requests whose response has not ended","gauge":{"dataPoints":["#,
         );
         let _ = write!(
             buf,

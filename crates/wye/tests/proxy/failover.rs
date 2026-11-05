@@ -389,7 +389,10 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
     read_body(res).await;
     assert!(seen_b.try_recv().is_err(), "the request was sent twice");
-    assert!(h.usage_record().await.get("failovers").is_none());
+    let record = h.usage_record().await;
+    assert!(record.get("failovers").is_none());
+    assert_eq!(record["outcome"], "upstream_error");
+    assert_eq!(record["upstream_error"], "reset");
 }
 
 #[tokio::test]

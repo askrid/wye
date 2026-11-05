@@ -79,14 +79,6 @@ impl Api {
         }
     }
 
-    /// The OpenTelemetry `gen_ai.system` value.
-    pub fn system(self) -> &'static str {
-        match self {
-            Self::Messages => "anthropic",
-            Self::Responses | Self::ChatCompletions => "openai",
-        }
-    }
-
     /// The route that serves this API.
     pub fn route(self) -> RouteId {
         match self {

@@ -14,6 +14,10 @@ use serde::{Serialize, Serializer};
 use super::{Outcome, Record, RejectedAttempt, agent::ToolDurations};
 use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
 
+/// The `usage_status` of a response that carries no usage: an error,
+/// `count_tokens`, a content type that is neither SSE nor JSON.
+const NO_USAGE: &str = "none";
+
 /// What the writer adds to every record: keys, prices, upgrade targets.
 pub(super) struct Context<'a> {
     pub(super) prompt_key: Option<&'a HashKey>,
@@ -28,15 +32,20 @@ pub(super) struct Line<'a> {
     pub(super) event: &'static str,
     pub(super) unix_ms: u64,
     pub(super) path: &'a str,
-    /// `gen_ai.system` in OTLP; the path names the API in the JSON line.
+    /// `gen_ai.provider.name` in OTLP; the JSON line has the `upstream`
+    /// id, which config maps to its provider.
     #[serde(skip)]
-    pub(super) system: &'static str,
+    pub(super) provider_name: &'static str,
     pub(super) status: u16,
     #[serde(serialize_with = "outcome")]
     pub(super) outcome: Outcome,
+    /// Why the upstream gave no usable response, for an `upstream_error`
+    /// outcome only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) upstream_error: Option<&'static str>,
     pub(super) duration_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) headers_ms: Option<f64>,
+    pub(super) response_headers_ms: Option<f64>,
     /// The route upstream, when the route names its upstreams.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upstream: Option<&'a str>,
@@ -60,7 +69,7 @@ pub(super) struct Line<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) compaction: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) context_compacted: Option<&'static str>,
+    pub(super) after_compaction: Option<&'static str>,
     /// Tool calls that ran since the agent's previous request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tool_durations: Option<ToolDurations<'a>>,
@@ -115,11 +124,12 @@ impl Line<'_> {
             event: "request",
             unix_ms: 0,
             path: "/v1/messages",
-            system: "anthropic",
+            provider_name: "anthropic",
             status: 200,
             outcome: Outcome::Completed,
+            upstream_error: None,
             duration_ms: 0.0,
-            headers_ms: None,
+            response_headers_ms: None,
             upstream: None,
             subject: None,
             session_id: None,
@@ -130,11 +140,11 @@ impl Line<'_> {
             parent_agent_id: None,
             prompt_id: None,
             compaction: None,
-            context_compacted: None,
+            after_compaction: None,
             tool_durations: None,
             requested_model: None,
             model: None,
-            usage_status: "not_observed",
+            usage_status: NO_USAGE,
             input_tokens: None,
             output_tokens: None,
             cache_creation_input_tokens: None,
@@ -193,11 +203,15 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         event: "request",
         unix_ms: r.unix_ms,
         path: r.info.endpoint.path,
-        system: r.info.endpoint.api.system(),
+        provider_name: r.info.provider.otel_name(),
         status: r.status.as_u16(),
         outcome: r.outcome,
+        upstream_error: match r.outcome {
+            Outcome::UpstreamError(error) => Some(error.as_str()),
+            _ => None,
+        },
         duration_ms: ms(r.duration),
-        headers_ms: r.seen.headers_after.map(ms),
+        response_headers_ms: r.seen.headers_after.map(ms),
         upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         session_id: label(r.info.session_id.as_ref()),
@@ -208,7 +222,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         parent_agent_id: label(headers.parent_agent_id.as_ref()),
         prompt_id: label(headers.prompt_id.as_ref()),
         compaction: headers.compaction.map(|c| c.as_str()),
-        context_compacted: headers.context_compacted.map(|c| c.as_str()),
+        after_compaction: headers.after_compaction.map(|c| c.as_str()),
         tool_durations: headers
             .prev_tool_durations
             .as_ref()
@@ -219,7 +233,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             .seen
             .usage
             .as_ref()
-            .map_or("not_observed", |(_, status)| status.as_str()),
+            .map_or(NO_USAGE, |(_, status)| status.as_str()),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
@@ -232,7 +246,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             usage.cache_read_input_tokens,
             usage.cache_creation_input_tokens,
             headers.compaction,
-            headers.context_compacted,
+            headers.after_compaction,
         ),
         prompt_hashes: r
             .info

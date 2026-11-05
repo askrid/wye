@@ -28,7 +28,7 @@ pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
         HoldError::Stalled => error(
             api,
             StatusCode::REQUEST_TIMEOUT,
-            "timeout_error",
+            "invalid_request_error",
             "request body stalled while the gateway read its model",
         ),
         HoldError::Body => unreadable_body(api),
@@ -50,7 +50,7 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
         ForwardError::HeaderTimeout => error(
             api,
             StatusCode::GATEWAY_TIMEOUT,
-            "api_error",
+            "timeout_error",
             "upstream did not respond in time",
         ),
         ForwardError::Connect | ForwardError::Upstream => error(
@@ -201,5 +201,33 @@ mod tests {
         assert_eq!(busy.headers()["retry-after"], "1");
         assert_eq!(body(busy).await["error"]["type"], "server_error");
         assert_eq!(overloaded(Api::Messages, "busy").status().as_u16(), 529);
+    }
+
+    /// The API timing out is Anthropic's `timeout_error`; a client that stops
+    /// sending its body is the client's request to fix.
+    #[tokio::test]
+    async fn an_upstream_timeout_and_a_stalled_client_have_their_own_types() {
+        let body = |res: Response<ResBody>| async move {
+            let Either::Left(body) = res.into_body() else {
+                panic!("a gateway error has a full body");
+            };
+            let bytes = body.collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        };
+        let timeout = forward_error(Api::Messages, ForwardError::HeaderTimeout);
+        assert_eq!(timeout.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(body(timeout).await["error"]["type"], "timeout_error");
+        let timeout = body(forward_error(Api::Responses, ForwardError::HeaderTimeout)).await;
+        assert_eq!(timeout["error"]["type"], "server_error");
+        assert_eq!(timeout["error"]["code"], "timeout_error");
+
+        let stalled = hold_error(Api::Messages, HoldError::Stalled);
+        assert_eq!(stalled.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(
+            body(stalled).await["error"]["type"],
+            "invalid_request_error"
+        );
+        let stalled = body(hold_error(Api::ChatCompletions, HoldError::Stalled)).await;
+        assert_eq!(stalled["error"]["code"], "invalid_request_error");
     }
 }

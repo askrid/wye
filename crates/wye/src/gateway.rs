@@ -14,7 +14,7 @@ use gateway_core::{
     admission::Refusal,
     alias::Aliases,
     api::{self, Api},
-    config::{Config, DEFAULT_SAMPLE_PERCENT, Routes, UpgradeCheck},
+    config::{Config, DEFAULT_SAMPLE_PERCENT, Provider, Routes, UpgradeCheck},
     policy::ModelPattern,
     pricing::Pricing,
     prompt::HashKey,
@@ -265,12 +265,13 @@ impl Gateway {
             requested_model: None,
             upgrade: None,
             upstream: None,
+            provider: Provider::of_route(api.route()),
             failovers: Vec::new(),
             started: Instant::now(),
         };
         match self.identify(req.headers(), connection) {
             Ok(identity) => info.identity = identity,
-            Err(_) => return log.gateway_error(info, unauthorized(api)),
+            Err(_) => return log.refused(info, unauthorized(api)),
         }
         self.forward(req, info, log).await
     }

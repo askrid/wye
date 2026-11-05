@@ -46,6 +46,25 @@ pub enum Provider {
 }
 
 impl Provider {
+    /// The provider a route's upstream has unless it names one, and that a
+    /// request refused before an upstream was chosen is recorded under.
+    pub fn of_route(route: RouteId) -> Self {
+        match route {
+            RouteId::Claude => Self::Anthropic,
+            RouteId::OpenAi => Self::OpenAi,
+        }
+    }
+
+    /// The OpenTelemetry `gen_ai.provider.name`: Claude Platform on AWS is
+    /// Anthropic's own API, so it reads `anthropic`.
+    pub fn otel_name(self) -> &'static str {
+        match self {
+            Self::Anthropic | Self::ClaudePlatformAws => "anthropic",
+            Self::Bedrock => "aws.bedrock",
+            Self::OpenAi => "openai",
+        }
+    }
+
     /// Whether the provider key goes as `Authorization: Bearer` rather than
     /// `x-api-key`.
     pub fn bearer_key(self) -> bool {

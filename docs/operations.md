@@ -236,8 +236,15 @@ The usage record, field by field:
 **Request and outcome.**
 
 - `event`, `unix_ms`, `path`, `status`: `request`, time, endpoint, HTTP status.
-- `outcome` (`completed` | `failed` | `cancelled` | `gateway_error`): recorded when the response body is dropped, so every outcome is counted; a client that leaves before the response headers is `cancelled` with `status` `499`.
-- `duration_ms`, `headers_ms`: milliseconds; `headers_ms` = time to response headers.
+- `outcome`: recorded when the response body is dropped, so every outcome is counted. An upstream's answer, error statuses included, is `completed`, `cancelled`, or `truncated`; Wye's own answer is `refused`, `upstream_error`, or `gateway_error`:
+  - `completed`: the upstream's response body ended.
+  - `cancelled`: the client left first; one that leaves before the response headers has `status` `499`.
+  - `truncated`: the upstream's response broke after its headers were sent, by the idle timeout or a reset.
+  - `refused`: Wye's [refusal](glossary.md#decisions) (`400`, `401`, `403`, `404`, `408`, `413`, `415`) or its own overload (`529`, `503` on the OpenAI APIs); no upstream response.
+  - `upstream_error`: no usable upstream response ([upstream error](glossary.md#requests-and-where-they-go)): `502` or `504`.
+  - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
+- `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
+- `duration_ms`, `response_headers_ms`: milliseconds; `response_headers_ms` = time to response headers.
 - `upstream`: the upstream's `id`, with `[routes.claude]` or `[routes.openai]`; absent with `[upstream]` and for requests refused before upstream selection.
 - `failovers`, such as `[{"upstream": "a", "reason": "429"}]`, its `reason` the [failover reason](glossary.md#requests-and-where-they-go) (`429`, `529`, or `connect`): attempts rejected before the one that answered, in order ([failover](architecture.md#claude-across-providers-and-upstreams)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
@@ -246,7 +253,7 @@ The usage record, field by field:
 **Model, usage, and cost.**
 
 - `requested_model`: the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named, only when an alias was resolved.
-- `model`, `usage_status`: the reported model; `complete` | `partial` | `unknown` | `not_observed`. Streaming and non-streaming (JSON) responses are read; `not_observed` means errors, `count_tokens`, or other content types.
+- `model`, `usage_status`: the reported model; `complete` | `partial` | `unknown` | `none`. Streaming and non-streaming (JSON) responses are read; `none` means the response carries no usage: errors, `count_tokens`, or other content types.
 - `upgrade_issues`: target model → rules it would reject, for checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none.
 - `cost_usd`, `cost_status`, `pricing_version`: an exact decimal string; `complete` | `partial` | `unknown`; `pricing.version`. With [`[pricing]`](policy.md#price-table); `cost_usd` only when a cost was computed.
 - `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`: counts, as the provider reports them, except that on the OpenAI APIs the cached share of `input_tokens` (Chat: `prompt_tokens`) is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on every API.
@@ -255,7 +262,7 @@ The usage record, field by field:
 
 - `request_class` (`main` | `subagent` | `workflow` | `compaction` | `auxiliary` | `other`): Claude Code's hint header; for Codex, from `x-openai-subagent` ([mapping](architecture.md#codex-integration)).
 - `agent_type`, `agent_id`, `parent_agent_id`, `prompt_id`: bounded strings. Claude Code: `agent_id`s on every subagent request; the rest need `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, which `wye claude` sets. Codex: thread ids as agent ids, the subagent kind as `agent_type`; no prompt id.
-- `compaction`, `context_compacted` (`auto` | `manual` | `reactive` | `other`): hint headers.
+- `compaction`, `after_compaction` (`auto` | `manual` | `reactive` | `other`): hint headers, on the compaction request and on the first main request after it.
 - `tool_durations`, such as `[{"name": "Bash", "ms": 742}]`: tool calls since the agent's previous request; at most 32.
 - `tool_calls`, such as `{"Bash": 2, "Read": 1}`: tool calls the response started (`tool_use` blocks, Responses call items, Chat tool calls); at most 8 names, the rest under `(other)`; inputs never read.
 
@@ -268,9 +275,10 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 
 OTLP logs: each record becomes a log record at `{otlp_endpoint}/v1/logs`, resource `service.name` (`telemetry.service_name`, default `wye`) and `service.version`. Its attributes:
 
-- OpenTelemetry semantic conventions where they exist: `gen_ai.system` (`anthropic` or `openai` by endpoint), `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`.
-- Then the agent fields of either client: `gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.context_compacted`.
-- `wye.*` for the rest: `wye.outcome`, `wye.duration_ms`, `wye.headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.requested_model`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
+- OpenTelemetry semantic conventions where they exist: `gen_ai.provider.name`, `gen_ai.request.model` (`requested_model`), `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`.
+- `gen_ai.provider.name` is the provider of the upstream that served the request: `anthropic` (also for `claude-platform-aws`), `aws.bedrock`, or `openai`; for a request refused before an upstream was chosen, the endpoint's (`anthropic` or `openai`).
+- Then the agent fields of either client: `gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.after_compaction`.
+- `wye.*` for the rest: `wye.outcome`, `wye.upstream_error`, `wye.duration_ms`, `wye.response_headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
 
 OTLP metrics are cumulative since process start, exported every 10 s and at shutdown; at most 256 attribute sets each; per process, summed by the OTel backend.
 
@@ -281,27 +289,28 @@ OTLP metrics are cumulative since process start, exported every 10 s and at shut
 | `wye.tokens` | sum | `gen_ai.token.type`, `gen_ai.response.model`, `wye.request_class`, `wye.upstream` |
 | `wye.cost` | sum, USD | `gen_ai.response.model`, `wye.request_class`, `wye.upstream` |
 | `wye.upgrade.issues` | sum | `wye.upgrade.target`, `wye.upgrade.rule`, `enduser.id` |
-| `wye.failovers` | sum | `wye.upstream`, `wye.failover.reason` |
+| `wye.failovers` | sum | `wye.failover.upstream`, `wye.failover.reason` |
 | `wye.tool.calls` | sum | `gen_ai.tool.name` |
 | `wye.cache.misses` | sum | `wye.cache_miss` |
 | `wye.requests.active` | gauge | |
-| `wye.telemetry.lost` | sum | |
+| `wye.records.dropped` | sum | |
 
 - `wye.cost` counts complete and partial costs, with `[pricing]`.
-- `wye.upgrade.issues` counts checked requests a target would reject.
-- In `wye.failovers`, `wye.upstream` is the rejecting upstream and `wye.failover.reason` a status or `connect`.
-- `wye.telemetry.lost` counts log records and spans lost to full queues, failed exports, or the series cap (a request losing both counts twice).
-- `wye.upstream` is present only with a route's named upstreams (`[routes.claude]`, `[routes.openai]`).
+- `wye.requests` counts requests by endpoint (`http.route`), and `wye.outcome` takes the record's `outcome` values.
+- `wye.upgrade.issues` counts [upgrade issues](glossary.md#models): one per target model and rule a checked request breaks.
+- `wye.failovers` counts rejected attempts: `wye.failover.upstream` is the upstream that rejected one, and `wye.failover.reason` a status or `connect`.
+- `wye.records.dropped` counts records the usage log dropped, OTLP log records and spans dropped by full queues or failed exports (a request losing both counts twice), and records past the series cap.
+- `wye.upstream`, in `wye.requests`, `wye.tokens`, and `wye.cost`, is the upstream that answered; present only with a route's named upstreams (`[routes.claude]`, `[routes.openai]`).
 
-OTLP traces have one server span per request (`POST` and the endpoint, such as `POST /v1/messages`) with the record's attributes, a `response headers` event, and `ERROR` status for failures and 5xx. Its parent is the first that applies:
+OTLP traces have one server span per request (`POST` and the endpoint, such as `POST /v1/messages`) with the record's attributes, a `response headers` event, and `ERROR` status for the outcomes `upstream_error`, `gateway_error`, and `truncated` and for an upstream's 5xx; a `refused` request, Wye's overload included, leaves the status unset, as OpenTelemetry does for a server's 4xx. Its parent is the first that applies:
 
 1. A valid `traceparent` header.
 2. With a client session id (Claude Code's or Codex's), the session's trace: trace id = first 16 bytes of SHA-256 of the prefixed session id, the same on every replica, so a whole session is one timeline.
 3. A new trace.
 
-Each reported tool call becomes a sibling span `tool <name>` (`gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
+Each reported tool call becomes a sibling span `execute_tool <name>` (`gen_ai.operation.name` `execute_tool`, `gen_ai.tool.name`, `wye.tool.duration_ms`) ending when the request starts (approximate: Claude Code's times exclude prompts and hooks). No synthetic prompt or subagent spans: no single request knows it is the first. The `traceparent` sent upstream is the caller's.
 
-Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
+Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count; `otlp_dropped` counts log records and spans together, so a request whose log record and span are both lost counts twice). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
 
 `telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
 
@@ -322,10 +331,10 @@ Set the pod's `terminationGracePeriodSeconds` above the sum of both.
 - **Invalid or expired gateway token**: refuse locally.
 - **No eligible route**: explicit compatibility or policy error.
 - **Slow downstream**: bounded flow control ([upstream connections](architecture.md#upstream-connections)): streams sharing its upstream connection are unaffected, and a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled.
-- **Client body breaks** (bad framing, cut off mid-upload): `400`, recorded as a gateway error; the upstream request is aborted and not failed over.
+- **Client body breaks** (bad framing, cut off mid-upload): `400`, recorded as `refused`; the upstream request is aborted and not failed over.
 - **Client stops sending while its body is held**: `408` after 60 s without bytes, or 5 minutes without reaching its `model`; its held bytes and permit are released.
 - **Request body breaks the policy or the size limit mid-upload**: the upstream request is aborted before the provider sees the body whole; the client gets the refusal's own `400`, `403`, or `413`, from HTTP/1.1 and HTTP/2 upstreams alike.
-- **Upstream failure before downstream output**: gateway error; with `failover` on the route, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
+- **Upstream failure before downstream output**: `502` or `504`, recorded as `upstream_error` with its kind; with `failover` on the route, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
 - **Partial stream failure**: terminate the stream; never silently replay output.
   - A successful Messages event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error.
   - A Responses stream in the same case just ends, which Codex and the OpenAI SDKs retry.

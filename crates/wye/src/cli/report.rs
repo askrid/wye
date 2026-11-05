@@ -34,6 +34,9 @@ struct Record {
     duration_ms: f64,
     status: Option<u16>,
     outcome: Option<String>,
+    /// Why an upstream gave no usable response: `connect`, `timeout`, or
+    /// `reset`.
+    upstream_error: Option<String>,
     upstream: Option<String>,
     subject: Option<String>,
     session_id: Option<String>,
@@ -185,6 +188,8 @@ struct Summary {
     outcomes: HashMap<String, u64>,
     /// Requests answered with a 4xx or 5xx status, by status.
     errors: HashMap<u16, u64>,
+    /// `upstream_error` outcomes by why.
+    upstream_errors: HashMap<String, u64>,
     classes: HashMap<String, Group>,
     /// Route upstreams, when the log names them.
     upstreams: HashMap<String, Group>,
@@ -213,6 +218,9 @@ impl Summary {
             .or_default() += 1;
         if let Some(status) = r.status.filter(|s| *s >= 400) {
             *self.errors.entry(status).or_default() += 1;
+        }
+        if let Some(error) = &r.upstream_error {
+            *self.upstream_errors.entry(error.clone()).or_default() += 1;
         }
         let class = r.request_class.as_deref().unwrap_or("(no hint)");
         self.classes.entry(class.to_owned()).or_default().add(&r);

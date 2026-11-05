@@ -26,6 +26,7 @@ use std::{
 
 use gateway_core::{
     api::Endpoint,
+    config::Provider,
     pricing::Pricing,
     prompt::HashKey,
     route::FailoverReason,
@@ -47,25 +48,57 @@ const QUEUE_CAPACITY: usize = 4096;
 /// The status of a request the client left before it was answered.
 const CLIENT_CLOSED: u16 = 499;
 
+/// How a request ended. Wye's own answers are told apart by whose they are:
+/// a refusal (the client's to fix), an upstream that gave no usable
+/// response, or Wye's own fault.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Outcome {
     /// The upstream body ended normally.
     Completed,
-    /// The upstream body failed (for example, the idle timeout) after headers were sent.
-    Failed,
     /// The client went away before the upstream body ended.
     Cancelled,
-    /// Wye answered without a usable upstream response.
+    /// Wye answered with its own refusal or overload error; no upstream
+    /// response.
+    Refused,
+    /// No usable upstream response: Wye answered `502` or `504`.
+    UpstreamError(UpstreamError),
+    /// Wye's own fault, such as an alias it could not apply (`500`).
     GatewayError,
+    /// The upstream body broke after the response headers were sent: the
+    /// idle timeout, or a reset.
+    Truncated,
 }
 
 impl Outcome {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Completed => "completed",
-            Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Refused => "refused",
+            Self::UpstreamError(_) => "upstream_error",
             Self::GatewayError => "gateway_error",
+            Self::Truncated => "truncated",
+        }
+    }
+}
+
+/// Why an upstream gave no usable response, in records as `upstream_error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpstreamError {
+    /// No connection or TLS handshake.
+    Connect,
+    /// No response headers within `response_header_timeout_secs`.
+    Timeout,
+    /// The request failed after connecting, before response headers.
+    Reset,
+}
+
+impl UpstreamError {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Timeout => "timeout",
+            Self::Reset => "reset",
         }
     }
 }
@@ -90,6 +123,9 @@ pub(crate) struct RequestInfo {
     pub upgrade: Option<UpgradeSlot>,
     /// The route upstream the request went to, when the route names them.
     pub upstream: Option<Arc<str>>,
+    /// Who serves the request: the provider of the upstream it went to, else
+    /// (refused before one was chosen) the endpoint's own.
+    pub provider: Provider,
     /// Upstreams that rejected the request before the one that answered.
     pub failovers: Vec<RejectedAttempt>,
     pub started: Instant,
@@ -172,9 +208,29 @@ impl UsageLog {
         });
     }
 
-    /// Records `res`, a response Wye generated itself, and returns it.
+    /// Records `res`, Wye's own refusal or overload error, and returns it.
+    pub(crate) fn refused<B>(&self, info: RequestInfo, res: Response<B>) -> Response<B> {
+        self.answered(info, Outcome::Refused, res)
+    }
+
+    /// Records `res`, Wye's answer for an upstream that gave no usable
+    /// response, and returns it.
+    pub(crate) fn upstream_error<B>(
+        &self,
+        info: RequestInfo,
+        error: UpstreamError,
+        res: Response<B>,
+    ) -> Response<B> {
+        self.answered(info, Outcome::UpstreamError(error), res)
+    }
+
+    /// Records `res`, Wye's answer for its own fault, and returns it.
     pub(crate) fn gateway_error<B>(&self, info: RequestInfo, res: Response<B>) -> Response<B> {
-        self.record(info, res.status(), Outcome::GatewayError, Seen::default());
+        self.answered(info, Outcome::GatewayError, res)
+    }
+
+    fn answered<B>(&self, info: RequestInfo, outcome: Outcome, res: Response<B>) -> Response<B> {
+        self.record(info, res.status(), outcome, Seen::default());
         res
     }
 }

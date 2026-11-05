@@ -29,7 +29,9 @@ const ORIGINATOR: HeaderName = HeaderName::from_static("originator");
 pub(crate) struct AgentHeaders {
     pub(super) request_class: Option<RequestClass>,
     pub(super) compaction: Option<Compaction>,
-    pub(super) context_compacted: Option<Compaction>,
+    /// The first main-conversation request after a compaction
+    /// (`x-claude-code-context-compacted`).
+    pub(super) after_compaction: Option<Compaction>,
     pub(super) agent_id: Option<HeaderValue>,
     pub(super) parent_agent_id: Option<HeaderValue>,
     pub(super) agent_type: Option<HeaderValue>,
@@ -43,7 +45,7 @@ impl AgentHeaders {
         Self {
             request_class: RequestClass::parse(bytes(REQUEST_CLASS)),
             compaction: Compaction::parse(bytes(COMPACTION)),
-            context_compacted: Compaction::parse(bytes(CONTEXT_COMPACTED)),
+            after_compaction: Compaction::parse(bytes(CONTEXT_COMPACTED)),
             agent_id: headers.get(AGENT_ID).cloned(),
             parent_agent_id: headers.get(PARENT_AGENT_ID).cloned(),
             agent_type: headers.get(AGENT_TYPE).cloned(),

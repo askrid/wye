@@ -3,12 +3,12 @@
 //! Totals are cumulative since process start, so a lost export loses nothing:
 //! the next one carries the totals forward. Each metric keeps at most
 //! [`MAX_SERIES`] attribute sets; records beyond that are counted in
-//! `wye.telemetry.lost` instead of growing memory. Per-process telemetry is
+//! `wye.records.dropped` instead of growing memory. Per-process telemetry is
 //! not shared state: replicas never compare or merge these numbers.
 
 use gateway_core::{agent::CacheMiss, route::FailoverReason};
 
-use super::{Line, Outcome};
+use super::Line;
 
 /// Attribute sets kept per metric.
 const MAX_SERIES: usize = 256;
@@ -25,16 +25,17 @@ struct Counted<K> {
     count: u64,
 }
 
+/// Outcomes are keyed by name: an `upstream_error`'s kind is not an attribute.
 struct RequestKey {
     route: Box<str>,
     upstream: Option<Box<str>>,
     status: u16,
-    outcome: Outcome,
+    outcome: &'static str,
 }
 
 struct DurationSeries {
     route: Box<str>,
-    outcome: Outcome,
+    outcome: &'static str,
     buckets: [u64; DURATION_BOUNDS_MS.len() + 1],
     count: u64,
     sum: f64,
@@ -70,9 +71,9 @@ pub(super) struct Metrics {
     tokens: Vec<Counted<(&'static str, ModelKey)>>,
     /// Priced cost, in pico-USD, exported as USD.
     costs: Vec<Counted<ModelKey>>,
-    /// Checked requests a target model would reject.
+    /// Upgrade issues: one per target model and rule a checked request breaks.
     upgrades: Vec<Counted<UpgradeKey>>,
-    /// Rejections that moved a request to the route's next upstream.
+    /// Rejected attempts that moved a request to the route's next upstream.
     failovers: Vec<Counted<FailoverKey>>,
     /// Tool calls responses requested, by tool name.
     tool_calls: Vec<Counted<Box<str>>>,
@@ -102,6 +103,7 @@ impl Metrics {
     /// models × token kinds), so a linear search beats hashing here.
     pub(super) fn record(&mut self, line: &Line<'_>) {
         let overflow = &mut self.overflow;
+        let outcome = line.outcome.as_str();
         bump(
             &mut self.requests,
             overflow,
@@ -110,13 +112,13 @@ impl Metrics {
                 &*k.route == line.path
                     && k.upstream.as_deref() == line.upstream
                     && k.status == line.status
-                    && k.outcome == line.outcome
+                    && k.outcome == outcome
             },
             || RequestKey {
                 route: line.path.into(),
                 upstream: line.upstream.map(Into::into),
                 status: line.status,
-                outcome: line.outcome,
+                outcome,
             },
         );
         let bucket = DURATION_BOUNDS_MS
@@ -126,10 +128,10 @@ impl Metrics {
         let duration = series(
             &mut self.durations,
             overflow,
-            |s| &*s.route == line.path && s.outcome == line.outcome,
+            |s| &*s.route == line.path && s.outcome == outcome,
             || DurationSeries {
                 route: line.path.into(),
-                outcome: line.outcome,
+                outcome,
                 buckets: [0; DURATION_BOUNDS_MS.len() + 1],
                 count: 0,
                 sum: 0.0,

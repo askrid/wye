@@ -58,7 +58,7 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 `wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OTel backend. The [README](../README.md) shows a sample.
 
-- **First lines:** requests, sessions, outcomes, and error statuses. A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed.
+- **First lines:** requests, sessions, outcomes, error statuses, and why upstreams gave no usable response (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed; Wye's own answers read `refused`, `upstream_error`, or `gateway_error` ([outcomes](operations.md#telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), request time, tool time, and cost with `[pricing]`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
 - **Cache misses:** a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
 - **Failovers, upgrade issues:** when records have them.
@@ -192,7 +192,7 @@ Edit the config or install a new `wye`, run `wye doctor`, then `wye service rest
 
 Run `wye doctor` first. It checks keys, files, and endpoints, lists every problem, and bills nothing.
 
-**Where errors go.** Startup failures and the gateway's messages go to stderr: `~/.wye/wye.log` under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log, and `wye report` lists error statuses. A `502` does not yet record why ([open](roadmap.md#open-findings)).
+**Where errors go.** Startup failures and the gateway's messages go to stderr: `~/.wye/wye.log` under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log, and `wye report` lists error statuses. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#telemetry)).
 
 `wye explain request.json` shows what the gateway would do with one request, offline, and why it would refuse.
 

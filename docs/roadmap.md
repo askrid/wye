@@ -172,7 +172,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#gateway-tokens)).
   - Why it is open: each such field is provider-specific; a list of them is a design change.
 - OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process.
-  - Why it is open: the excess is counted in `wye.telemetry.lost`; per-attribute caps need a design.
+  - Why it is open: the excess is counted in `wye.records.dropped`; per-attribute caps need a design.
 - Tests: a few negative checks (`try_recv` on an empty channel, in aliases, OpenAI, and failover tests) could race the upstream, and some tests wait with fixed sleeps, among them a rejection mid-upload in the failover tests (200 ms for the rejection to arrive first).
   - Why it is open: test cleanup; none has flaked on the laptop or CI. The checks that the upstream never got a rejected body whole now wait a bounded 200 ms.
 - A chunked body whose chunk-size lines are padded (HTTP/1.1 allows leading zeros) can pin 8-32 KiB of the connection's read buffer per held or kept chunk, which counts 1 KiB, so under such a client the hold and failover budgets bound their charges, not memory.
@@ -195,7 +195,6 @@ From the CLI review (2026-10-30), not fixed:
 - `bench/baseline.json` lacks the ten `*_sse_failed_streams` metrics: it is a record, not a gate input, so it waits for the next refresh on an idle machine.
 - `wye doctor` does not warn about a provider key file others can read: mounted secrets are often 0444, so it would need to tell them apart.
 - `wye claude` starts the agent with an expired gateway token, which then gets 401s. The token's `exp` could be read locally first.
-- A `gateway_error` record does not say why: `wye report` shows `502 6` on a real log, and neither the record nor the report tells a refused connection from a broken stream. Six in a burst of auxiliary requests (2026-10-30) stay unexplained for that reason.
 - The report has no cost column until the config has `[pricing]`, which `wye init` does not write ([why](policy.md#price-table); [visibility ideas](research.md#visibility-for-one-developer)).
 
 ## First release (0.1)

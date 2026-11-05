@@ -90,7 +90,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
         "values outside the token alphabet are dropped"
     );
     assert_eq!(record["prompt_id"], "5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a");
-    assert_eq!(record["context_compacted"], "manual");
+    assert_eq!(record["after_compaction"], "manual");
     assert!(record.get("compaction").is_none());
     assert_eq!(record["cache_miss"], "after_compaction");
     assert_eq!(record["tool_calls"], serde_json::json!({"Bash": 1}));
@@ -103,12 +103,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
     // Without the headers, none of the fields appear.
     read_body(h.send(messages(), "{}").await).await;
     let record = h.usage_record().await;
-    for field in [
-        "request_class",
-        "agent_id",
-        "prompt_id",
-        "context_compacted",
-    ] {
+    for field in ["request_class", "agent_id", "prompt_id", "after_compaction"] {
         assert!(record.get(field).is_none(), "{field}");
     }
     assert_eq!(record["cache_miss"], "unexplained");
@@ -226,11 +221,12 @@ async fn a_broken_client_body_is_the_clients_error() {
     );
     let record = h.usage_record().await;
     assert_eq!(record["status"], 400);
-    assert_eq!(record["outcome"], "gateway_error");
+    assert_eq!(record["outcome"], "refused");
+    assert!(record.get("upstream_error").is_none());
 }
 
 #[tokio::test]
-async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
+async fn refusals_and_count_tokens_are_logged_without_usage() {
     let h = Harness::api_key(ok()).await;
     let big = "x".repeat(2048);
     assert_eq!(
@@ -239,8 +235,8 @@ async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     );
     let record = h.usage_record().await;
     assert_eq!(record["status"], 413);
-    assert_eq!(record["outcome"], "gateway_error");
-    assert_eq!(record["usage_status"], "not_observed");
+    assert_eq!(record["outcome"], "refused");
+    assert_eq!(record["usage_status"], "none");
 
     read_body(
         h.send(Request::post("/v1/messages/count_tokens"), "{}")
@@ -250,7 +246,7 @@ async fn gateway_errors_and_count_tokens_are_logged_without_usage() {
     let record = h.usage_record().await;
     assert_eq!(record["path"], "/v1/messages/count_tokens");
     assert_eq!(record["outcome"], "completed");
-    assert_eq!(record["usage_status"], "not_observed");
+    assert_eq!(record["usage_status"], "none");
 }
 
 /// Anthropic's API is HTTP/2, and its `count_tokens` reply has a
@@ -462,6 +458,12 @@ async fn usage_records_are_exported_as_otlp_logs() {
         attribute("wye.outcome").unwrap()["stringValue"],
         "completed"
     );
+    assert!(attribute("wye.upstream_error").is_none());
+    assert_eq!(
+        attribute("gen_ai.provider.name").unwrap()["stringValue"],
+        "anthropic"
+    );
+    assert!(attribute("wye.response_headers_ms").unwrap()["doubleValue"].is_number());
     assert!(record["timeUnixNano"].as_str().unwrap().len() >= 19);
 }
 
@@ -597,7 +599,7 @@ async fn a_closed_log_leaves_otlp_export_running() {
         .unwrap();
     let lost = list
         .iter()
-        .find(|m| m["name"] == "wye.telemetry.lost")
+        .find(|m| m["name"] == "wye.records.dropped")
         .unwrap();
     assert_eq!(lost["sum"]["dataPoints"][0]["asInt"], "2", "{lost}");
 }

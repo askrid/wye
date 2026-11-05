@@ -24,6 +24,14 @@ use crate::{
     usage_log::RequestInfo,
 };
 
+/// Why a body was not admitted, with Wye's answer.
+pub(super) enum NotAdmitted {
+    /// A refusal: the request breaks policy, or the hold could not take it.
+    Refused(Response<ResBody>),
+    /// Wye's own fault: the request was allowed, but Wye could not forward it.
+    Fault(Response<ResBody>),
+}
+
 /// Where the `model` value is in the body as forwarded, and what it says:
 /// the model that runs (an alias already resolved).
 pub(super) struct ModelSpan {
@@ -44,7 +52,7 @@ impl Gateway {
         body: Incoming,
         info: &mut RequestInfo,
         headers: &mut HeaderMap,
-    ) -> Result<(RequestBody<ClientBody>, Option<ModelSpan>), Box<Response<ResBody>>> {
+    ) -> Result<(RequestBody<ClientBody>, Option<ModelSpan>), Box<NotAdmitted>> {
         let api = info.endpoint.api;
         let mut body = Limited::new(body, self.max_request_body_bytes);
         let route = self.routes.get(api);
@@ -60,12 +68,12 @@ impl Gateway {
             return Ok((RequestBody::new(body), None));
         }
         if let Some(reason) = unreadable(headers) {
-            return Err(Box::new(error(
+            return Err(Box::new(NotAdmitted::Refused(error(
                 api,
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
                 "invalid_request_error",
                 reason,
-            )));
+            ))));
         }
         let mut held = hold_until_model(
             &mut body,
@@ -75,11 +83,11 @@ impl Gateway {
             checks.output_ceiling,
         )
         .await
-        .map_err(|e| Box::new(hold_error(api, e)))?;
+        .map_err(|e| Box::new(NotAdmitted::Refused(hold_error(api, e))))?;
         if !checks.checks_rest() {
             held.skip_rest_check();
         }
-        let refuse = |refusal| Box::new(responses::refuse(api, &refusal));
+        let refuse = |refusal| Box::new(NotAdmitted::Refused(responses::refuse(api, &refusal)));
         let Some(sent) = held.model() else {
             return Err(refuse(Refusal::Invalid(PolicyError::Missing)));
         };
@@ -99,12 +107,12 @@ impl Gateway {
                 .get(model)
                 .and_then(|bytes| held.splice_model(bytes.clone()));
             let Some(delta) = spliced else {
-                return Err(Box::new(error(
+                return Err(Box::new(NotAdmitted::Fault(error(
                     api,
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "api_error",
                     "model alias could not be applied",
-                )));
+                ))));
             };
             adjust_content_length(headers, delta);
         }

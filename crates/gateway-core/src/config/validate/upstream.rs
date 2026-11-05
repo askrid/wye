@@ -176,10 +176,7 @@ fn validate_route_upstreams(
     id: RouteId,
 ) -> Result<Vec<Upstream>, ConfigError> {
     // The provider an upstream has unless it names one.
-    let (route, provider) = match id {
-        RouteId::Claude => (id.name(), Provider::Anthropic),
-        RouteId::OpenAi => (id.name(), Provider::OpenAi),
-    };
+    let (route, provider) = (id.name(), Provider::of_route(id));
     if raw_upstreams.is_empty() || raw_upstreams.len() > MAX_UPSTREAMS {
         return Err(in_route(id)(ConfigError::Invalid(
             "upstreams must have between 1 and 16 entries",

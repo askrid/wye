@@ -8,7 +8,7 @@ fn flat(out: &str) -> String {
 const LOG: &str = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":1500.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"main","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":100,"cache_creation_input_tokens":5000,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
 {"event":"request","unix_ms":3000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":2000.0,"subject":"alice","session_id":"session-aaaa-1","request_class":"subagent","agent_type":"Explore","agent_id":"agent-1","prompt_id":"prompt-1111","usage_status":"complete","input_tokens":10,"output_tokens":50,"cache_creation_input_tokens":800,"cache_read_input_tokens":0,"cache_miss":"unexplained","tool_durations":[{"name":"Bash","ms":742},{"name":"Read","ms":9}],"tool_calls":{"Bash":2,"Grep":1}}
 {"event":"request","unix_ms":5000,"path":"/v1/messages","status":200,"outcome":"completed","duration_ms":900.0,"session_id":"session-aaaa-1","request_class":"compaction","compaction":"auto","usage_status":"complete","input_tokens":20,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":6000}
-{"event":"request","unix_ms":2000,"path":"/v1/messages","status":529,"outcome":"gateway_error","duration_ms":0.1,"session_id":"session-bbbb-2","usage_status":"not_observed"}
+{"event":"request","unix_ms":2000,"path":"/v1/messages","status":529,"outcome":"refused","duration_ms":0.1,"session_id":"session-bbbb-2","usage_status":"none"}
 not json
 wye: listening on http://127.0.0.1:8080
 {"event":"usage_log_dropped","records":3}
@@ -20,7 +20,7 @@ fn summarizes_sessions_classes_and_cache_misses() {
     assert!(
         flat(&out).starts_with(
             "4 requests in 2 sessions (1 gateway notice and 2 other lines skipped); \
-             outcomes: completed 3, gateway_error 1 error statuses: 529 1 "
+             outcomes: completed 3, refused 1 error statuses: 529 1 "
         ),
         "{out}"
     );
@@ -68,8 +68,8 @@ fn summarizes_sessions_classes_and_cache_misses() {
 fn a_session_starts_at_its_first_cache_write() {
     // Claude Code counts tokens, and some requests are refused, before the
     // first request that writes the prompt cache.
-    let log = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages/count_tokens","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"not_observed"}
-{"event":"request","unix_ms":1100,"path":"/v1/messages","status":429,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"not_observed"}
+    let log = r#"{"event":"request","unix_ms":1000,"path":"/v1/messages/count_tokens","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"none"}
+{"event":"request","unix_ms":1100,"path":"/v1/messages","status":429,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"none"}
 {"event":"request","unix_ms":1200,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"auxiliary","usage_status":"complete","input_tokens":1172,"output_tokens":9,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}
 {"event":"request","unix_ms":1300,"path":"/v1/messages","status":200,"outcome":"completed","session_id":"s","request_class":"main","usage_status":"complete","input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":36820,"cache_read_input_tokens":0,"cache_miss":"unexplained"}
 "#;
@@ -131,7 +131,7 @@ fn sums_costs_exactly_and_marks_lower_bounds() {
     let log = r#"{"event":"request","outcome":"completed","request_class":"main","cost_usd":"0.1","cost_status":"complete"}
 {"event":"request","outcome":"completed","request_class":"main","cost_usd":"0.2","cost_status":"complete"}
 {"event":"request","outcome":"completed","request_class":"subagent","cost_usd":"0.05","cost_status":"partial"}
-{"event":"request","outcome":"gateway_error","request_class":"subagent","cost_status":"unknown"}
+{"event":"request","outcome":"refused","request_class":"subagent","cost_status":"unknown"}
 "#;
     let out = report(log.as_bytes(), Paint::OFF).unwrap();
     let cost = |name: &str| {
@@ -255,7 +255,7 @@ fn a_count_stays_on_the_line_of_its_name() {
     // Every padding of the first name moves the break to another place.
     for pad in 0..40 {
         let first = format!("{}cancelled", "a".repeat(pad));
-        let log: String = [first.as_str(), "completed", "gateway_error", "refused"]
+        let log: String = [first.as_str(), "completed", "upstream_error", "refused"]
             .iter()
             .map(|o| {
                 format!("{{\"event\":\"request\",\"outcome\":\"{o}\",\"session_id\":\"s\"}}\n")
@@ -270,4 +270,34 @@ fn a_count_stays_on_the_line_of_its_name() {
             );
         }
     }
+}
+
+#[test]
+fn upstream_errors_are_counted_by_why() {
+    let log = r#"{"event":"request","status":502,"outcome":"upstream_error","upstream_error":"connect","session_id":"s"}
+{"event":"request","status":504,"outcome":"upstream_error","upstream_error":"timeout","session_id":"s"}
+{"event":"request","status":502,"outcome":"upstream_error","upstream_error":"connect","session_id":"s"}
+{"event":"request","status":200,"outcome":"truncated","session_id":"s"}
+"#;
+    let out = flat(&report(log.as_bytes(), Paint::OFF).unwrap());
+    assert!(
+        out.contains(
+            "outcomes: truncated 1, upstream_error 3 error statuses: 502 2, 504 1 \
+             upstream errors: connect 2, timeout 1 "
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn outcomes_of_older_logs_are_shown_as_written() {
+    let log = r#"{"event":"request","status":502,"outcome":"gateway_error","session_id":"s"}
+{"event":"request","status":200,"outcome":"failed","session_id":"s"}
+"#;
+    let out = flat(&report(log.as_bytes(), Paint::OFF).unwrap());
+    assert!(
+        out.contains("outcomes: failed 1, gateway_error 1 "),
+        "{out}"
+    );
+    assert!(!out.contains("upstream errors"), "{out}");
 }
