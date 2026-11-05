@@ -7,7 +7,8 @@
 - Records tokens and cost per coding-agent session, subagent, and tool, and why each prompt-cache miss happened.
 - Adds under a millisecond per request (p50), less than other widely used open-source gateways in the [same lab run](#performance).
 - Passes each provider's native API through untranslated, so new features work the day they ship.
-- One binary and one TOML file. No database, no state between requests: scale by adding replicas.
+- One binary and one TOML file. No database, no admin API, no state between requests: scale by adding replicas.
+- Holds only the provider keys you give it and connects only to what its config names; every release archive carries build provenance ([security](SECURITY.md)).
 - Covers the rest of what a gateway does, from access per caller to failover.
 
 ## Performance
