@@ -60,7 +60,6 @@
   --text: #c9c9c9;
   --graphite: #8f8f8f;
   /* The request's line and links are ink; its failover branch is amber. */
-  --line: var(--ink);
   --branch: #f2b544;
   --signal: #ff6b6b;
 
@@ -72,7 +71,6 @@
      tables); captions (facts, footer, chart captions, the version,
      buttons); the rail. */
   --body: 1.0625rem;
-  --lead: 1.125rem;
   --h2: 1.875rem;
   --output: 0.9375rem;
   --caption: 0.8125rem;
@@ -108,7 +106,7 @@ strong, b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
 p, ul, ol { margin: 0; }
 p, li { text-wrap: pretty; }
 a {
-  color: var(--line);
+  color: var(--ink);
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
 }
@@ -358,20 +356,12 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   }
   .prose tbody td, .prose td:first-child { width: auto; padding: 0; border: 0; }
 }
-/* An item of README's "What it does", placed at its stop: its bold lead
-   reads as the stop's subheading. */
-.item p > strong:first-child {
-  display: block;
-  margin-bottom: 0.45rem;
-  font-size: var(--lead);
-  font-weight: 600;
-}
 
 /* Narrow screens: no rail; a line runs down the stops' left edge. */
 @media (max-width: 64rem) {
   .path { display: block; }
   .rail { display: none; }
-  .stop { margin-left: 2px; padding-left: 1.25rem; border-left: 2px solid var(--line); }
+  .stop { margin-left: 2px; padding-left: 1.25rem; border-left: 2px solid var(--ink); }
 }
 
 /* Code and output, as the repository has them */
@@ -453,7 +443,7 @@ pre.code code { font: inherit; }
     border-bottom: 1px dashed var(--rule);
   }
   .numbers tbody th { grid-column: 1 / -1; padding: 0; border: 0; }
-  .numbers td, .numbers .n { padding: 0; border: 0; text-align: left; font-weight: 600; }
+  .numbers td, .numbers .n { padding: 0; border: 0; text-align: left; }
   .numbers td.na { display: none; }
   .numbers td::before {
     content: attr(data-path);

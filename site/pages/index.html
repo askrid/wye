@@ -62,10 +62,10 @@
 ┣━ <b>model</b>      <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
 ┃
 ┣━ <b>upstream</b>   <span class="d">session stays on anthropic</span>
-┃  <span class="d">├─</span><span class="no">x</span>        <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+┃  <span class="d">├─</span><span class="no">x</span>        <span class="no">429</span><span class="d"> before output</span>
 ┃  <span class="r2">└─o</span>        <span class="d">failover to {{field README.md|{|upstream}}</span>
 ┃
-┣━ <b>stream</b>     <span class="d">as it arrives, unbuffered</span>
+┣━ <b>stream</b>     <span class="d">unbuffered</span>
 ┃
 ┗━ <b>record</b>     {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
 <pre class="trace-narrow">claude code
@@ -78,11 +78,11 @@
 ┃
 ┣━ <b>upstream</b>
 ┃  <span class="d">session stays on anthropic</span>
-┃  <span class="d">├─</span><span class="no">x</span> <span class="d">anthropic</span> <span class="no">429</span><span class="d">, before output</span>
+┃  <span class="d">├─</span><span class="no">x</span> <span class="no">429</span><span class="d"> before output</span>
 ┃  <span class="r2">└─o</span> <span class="d">failover to {{field README.md|{|upstream}}</span>
 ┃
 ┣━ <b>stream</b>
-┃  <span class="d">as it arrives, unbuffered</span>
+┃  <span class="d">unbuffered</span>
 ┃
 ┗━ <b>record</b>
    {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
@@ -139,7 +139,7 @@
         <h2 id="stream-h"><a href="#stream"><span class="hash" aria-hidden="true">#</span> stream</a></h2>
         {{paragraph README.md|Performance|Lab results}}
         <figure class="chart">
-          <figcaption>Added latency per request (p50, TLS), in multiples of Wye's from the same run. Shorter is better.</figcaption>
+          <figcaption>Added latency per request (p50, TLS). Shorter is better.</figcaption>
           {{ratios README.md|Performance|Added latency (p50)}}
         </figure>
         {{paragraph README.md|Performance|Where others lead}}

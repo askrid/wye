@@ -3,8 +3,8 @@
 //! fails the build, and the error names the directive as written.
 //!
 //! - `{{version}}`: the wye crate's version.
-//! - `{{release}}`: the version, with ", a prerelease" while it has a
-//!   pre-release part.
+//! - `{{release}}`: `prerelease` while the version has a pre-release part,
+//!   else `stable`.
 //! - `{{commit}}`: the commit the page is built from: `GITHUB_SHA` in CI, else
 //!   the checkout's `HEAD`.
 //! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
@@ -18,7 +18,7 @@
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
 //!   paragraph without the closing period; the list after it, rendered
-//!   (`points`); or that list as plain `text`.
+//!   (`points`); or the list's first point as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -71,11 +71,12 @@ impl Sources {
         };
         match (name, args.as_slice()) {
             ("version", []) => Ok(markdown::escape(&self.version)),
-            ("release", []) => Ok(markdown::escape(&if self.version.contains('-') {
-                format!("{}, a prerelease", self.version)
+            ("release", []) => Ok(if self.version.contains('-') {
+                "prerelease"
             } else {
-                self.version.clone()
-            })),
+                "stable"
+            }
+            .to_owned()),
             ("commit", []) => Ok(markdown::escape(&self.commit)),
             ("license", []) => Ok(markdown::escape(&self.license)),
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
@@ -125,7 +126,10 @@ impl Sources {
                                 &page.anchors,
                             ));
                         }
-                        Ok(markdown::escape(&markdown::plain(points)))
+                        let first = markdown::list_items(points).into_iter().next();
+                        Ok(markdown::escape(&markdown::plain(
+                            &first.unwrap_or_default(),
+                        )))
                     }
                     other => Err(format!("{other:?} is not tagline, text, or points")),
                 }
@@ -327,11 +331,11 @@ mod tests {
         );
         assert_eq!(
             render("{{release}} at {{commit}}", &sources()).unwrap(),
-            "0.1.0-rc.1, a prerelease at 81e7951"
+            "prerelease at 81e7951"
         );
         let mut stable = sources();
         stable.version = "1.0.0".into();
-        assert_eq!(render("{{release}}", &stable).unwrap(), "1.0.0");
+        assert_eq!(render("{{release}}", &stable).unwrap(), "stable");
     }
 
     #[test]
@@ -339,7 +343,7 @@ mod tests {
         let page = "{{opening README.md|tagline}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat|Fast. Under 1 ms. Small. One file."
+            "LLM gateway without bloat|Fast. Under 1 ms."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())
