@@ -315,6 +315,37 @@ pub fn median(out: &str, runs: &[&str]) {
     std::fs::write(out, serde_json::to_string_pretty(&report).unwrap() + "\n").unwrap();
 }
 
+/// Prints every metric of two reports and `b`'s change relative to `a`,
+/// with no limits and no verdict: for effects below the gate's tolerances
+/// (`scripts/bench.sh ab`).
+pub fn diff(a: &str, b: &str) {
+    println!("{:36} {:>10} {:>10} {:>8}", "metric", "a", "b", "change");
+    for line in diff_lines(&load(a), &load(b)) {
+        println!("{line}");
+    }
+}
+
+/// One line per metric of `a`: both values and `b`'s change.
+fn diff_lines(a: &Value, b: &Value) -> Vec<String> {
+    let Some(metrics) = a["metrics"].as_object() else {
+        return Vec::new();
+    };
+    metrics
+        .iter()
+        .map(|(name, value)| {
+            // `null`: a gateway produced no samples.
+            let x = value.as_f64().unwrap_or(f64::NAN);
+            let y = b["metrics"][name].as_f64().unwrap_or(f64::NAN);
+            let change = if x != 0.0 && x.is_finite() && y.is_finite() {
+                format!("{:+.1}%", 100.0 * (y - x) / x.abs())
+            } else {
+                "-".to_owned()
+            };
+            format!("{name:36} {x:>10.2} {y:>10.2} {change:>8}")
+        })
+        .collect()
+}
+
 fn load(path: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}")))
         .unwrap()
@@ -489,5 +520,21 @@ mod tests {
         // Failure counts take the worst round, and a round without samples
         // is worse than any: one round of three failing still fails.
         assert!(merged["metrics"]["unary_failed_requests"].is_null());
+    }
+
+    #[test]
+    fn diff_shows_each_change_and_nothing_it_cannot_compute() {
+        let a = json!({"metrics": {"x": 200.0, "zero": 0.0, "none": null, "gone": 1.0}});
+        let b = json!({"metrics": {"x": 150.0, "zero": 5.0, "none": 3.0}});
+        let lines = diff_lines(&a, &b);
+        let change = |name: &str| {
+            let line = lines.iter().find(|l| l.starts_with(name)).unwrap();
+            line.split_whitespace().last().unwrap().to_owned()
+        };
+        assert_eq!(change("x "), "-25.0%");
+        // No change against zero, a missing sample, or a metric b lacks.
+        assert_eq!(change("zero"), "-");
+        assert_eq!(change("none"), "-");
+        assert_eq!(change("gone"), "-");
     }
 }

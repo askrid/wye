@@ -5,7 +5,7 @@
 #
 # The benchmark runs this checkout and its parent commit in alternating rounds
 # and fails on a metric past its limit in a run and its rerun
-# (scripts/bench-gate.sh). Three variables adjust it, also through the hook:
+# (scripts/bench.sh gate). Three variables adjust it, also through the hook:
 #
 #   WYE_GATE_AGAINST=<ref>        compare with another commit: HEAD~1 when
 #                                 amending, a release to look for slow drift,
@@ -61,4 +61,4 @@ step "build release" cargo build --locked --release --quiet -p wye -p wye-bench
 # Allocation-counting build, in its own target dir so it never replaces the measured binary.
 step "build alloc-stats" cargo build --locked --release --quiet -p wye --features alloc-stats --target-dir target/alloc
 
-step bench scripts/bench-gate.sh "$against" target/bench --allow-new ${accept:+--accept "$accept"}
+step bench scripts/bench.sh gate "$against" --allow-new ${accept:+--accept "$accept"}

@@ -36,4 +36,4 @@ jobs:
           workspaces: |
             . -> target
             target/reference -> target
-      - run: scripts/ci-bench.sh "origin/${{ github.base_ref }}" "$GITHUB_STEP_SUMMARY"
+      - run: scripts/bench.sh ci "origin/${{ github.base_ref }}" "$GITHUB_STEP_SUMMARY"

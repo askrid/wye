@@ -98,6 +98,10 @@ fn main() -> ExitCode {
             gate::median(out, runs);
             ExitCode::SUCCESS
         }
+        ["diff", a, b] => {
+            gate::diff(a, b);
+            ExitCode::SUCCESS
+        }
         _ => usage(),
     }
 }
@@ -142,6 +146,7 @@ fn usage() -> ExitCode {
         "usage:\n  wye-bench run --wye <path> --out <results.json> [--repeat N] [--wye-alloc <path>] [--krakend <path>] [--litellm <path>] [--bifrost <path>] [--agentgateway <path>]\n  \
          wye-bench compare <reference.json> <results.json> [--only <pattern,...>] [--accept <pattern,...>] [--allow-new]\n  \
          wye-bench median <out.json> <results.json>...\n  \
+         wye-bench diff <a.json> <b.json>\n  \
          wye-bench load (--wye | --wye-openai | --wye-refused | --krakend) <path> --scenario <upload|tls-upload|paced|capacity|events> --seconds N"
     );
     ExitCode::from(2)

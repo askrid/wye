@@ -14,10 +14,9 @@ One repository; the four crates are the members of one Cargo workspace.
 | `crates/wye-bench` | The benchmark and its gate comparison, load and capacity runs, competitor runs |
 | `examples/` | `wye.toml` (the config reference); one directory per use: `developer/`, `team/`, `app/`, each a `wye.toml` and, for the last two, its `policy-tests/` |
 | `bench/baseline.json` | Benchmark results recorded on the development laptop: the numbers the docs cite. The commit gate does not read it |
-| `scripts/check.sh`, `scripts/bench-gate.sh`, `scripts/bench-against.sh` | Commit gate; its benchmark comparison with one rerun; this checkout against a commit in alternating rounds |
-| `scripts/ab.sh` | A/B comparison of two binaries |
-| `scripts/machine-lock.sh` | Runs a heavy job under one lock that every worktree shares, so the gate, A/B runs, and site builds take turns on one machine; `check.sh` and `ab.sh` take it themselves, CI skips it |
-| `scripts/ci-bench.sh` | The pull-request benchmark: a commit against its base on one machine |
+| `scripts/check.sh` | The commit gate |
+| `scripts/bench.sh` | Two builds in alternating rounds: `gate <ref>` (this checkout against a commit, with one rerun), `ci <ref>` (the pull-request benchmark, gating what no machine changes), `ab <a> <b>` (two binaries, every metric, no verdict) |
+| `scripts/machine-lock.sh` | Runs a heavy job under one lock that every worktree shares, so the gate, A/B runs, and site builds take turns on one machine; `check.sh` and `bench.sh` take it themselves, CI skips it |
 | `scripts/upload-latency.sh` | Upload latency over HTTP/1.1 and HTTP/2 against the real API (needs an API key; not part of the gate) |
 | `Dockerfile`, `scripts/image-smoke.sh` | OCI image and its build-and-run smoke test (needs Docker; not part of the gate) |
 | `.github/workflows/`, `dist-workspace.toml`, `deny.toml` | CI and release workflows, the release build's settings, the dependency policy |
@@ -42,7 +41,7 @@ The pre-commit hook runs it for every commit that touches more than docs and the
 git config core.hooksPath .githooks
 ```
 
-`scripts/bench-against.sh` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
+`scripts/bench.sh gate` builds the parent in a worktree (`target/reference`, kept between checks) and runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
 
 - **A change that fails the check is not committed**, including any benchmark regression. Fix it or drop it; never weaken a test or a tolerance to pass. Never commit with `--no-verify`.
 - `WYE_GATE_ACCEPT=<pattern,...>` lets the named metrics regress (they read `accepted`), only for an intended, reviewed tradeoff, with the before/after numbers and the reason in the commit message: `WYE_GATE_ACCEPT=tls_upload_cpu_ms_per_mb git commit`.
@@ -56,7 +55,7 @@ A check takes about 8 minutes after an ordinary code change: tests about 15 s, i
 
 A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again: load pushes a different metric past its limit now and then, while a real regression repeats ([evidence](benchmarks.md#gate-tolerances)). A failed request or stream is never noise and fails the check at once.
 
-The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-tolerances)). Smaller effects need `scripts/ab.sh <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md#performance-techniques).
+The gate blocks about 100 µs of added latency per request, about 400 µs on SSE time to first byte (300 µs plus 40% of the parent's value), and about 25% more CPU per unit of work ([tolerances](benchmarks.md#gate-tolerances)). Smaller effects need `scripts/bench.sh ab <wye-a> <wye-b> [rounds]`. Adopt an optimization only when it wins beyond noise in two A/B runs and worsens no gated metric, and record the result in [research.md](research.md#performance-techniques).
 
 Why the parent in alternating rounds: a stored result carries the machine's state on the day it was recorded ([evidence](benchmarks.md#gate-tolerances)), while the two commits share the machine's state of the moment, and with nothing recorded first the gate runs on any machine. The method is the randomized multiple interleaved trials of [Abedi and Brecht (ICPE 2017)](https://research.spec.org/icpe_proceedings/2017/proceedings/p287.pdf), with a fixed alternation in place of a random order, at the price of a second build and twice the benchmark time. Rejected alternatives:
 
@@ -70,7 +69,7 @@ Why the parent in alternating rounds: a stored result carries the machine's stat
 GitHub Actions run on every pull request and push to `main` (`.github/workflows/`). They add to the commit gate without replacing it: shared runners are too noisy to gate latency or CPU.
 
 - **`ci.yml`**, on pushes to `main` and pull requests that touch more than the website: `cargo fmt --check`, clippy and rustdoc with `-D warnings`, tests on Linux and macOS, release and `alloc-stats` builds, `cargo deny check`.
-- **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/ci-bench.sh`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule (`scripts/bench-gate.sh`). Latency and CPU are reported in the job summary only.
+- **`bench.yml`**, on pull requests that touch more than docs and the website: `scripts/bench.sh ci`, the base commit and the pull request in alternating rounds on one runner, gating allocation counts, failed requests, and failed streams with the local gate's rerun rule. Latency and CPU are reported in the job summary only.
 - **`docker.yml`**, on pushes to `main`, and pull requests that touch the image: `scripts/image-smoke.sh`.
 - **`site.yml`**, on pushes to `main` and pull requests that touch the website or a file it reads: `site/check.sh` and `cargo deny check` for the site's workspace; from `main`, a deploy of `site/out` to GitHub Pages.
 - **`release.yml`**, on a version tag (`v0.1.0`, `v0.1.0-rc.1`), and `dist plan` on every pull request: generated by [dist](https://github.com/axodotdev/cargo-dist) from `dist-workspace.toml`; edit that file and run `dist generate`, never `release.yml` by hand. Each target builds on a native runner with the benchmarked `release` profile; what a release publishes: [operations.md](operations.md#distribution).
@@ -185,7 +184,7 @@ The rules the design principles do not already state.
 - Each dependency is justified in its commit, maintained, and added with `default-features = false`; prefer what Tokio and Hyper already pull in. `cargo deny` runs in CI.
 
 **Performance work**
-- Measure first: `wye-bench` for the system, `scripts/ab.sh` for effects below the gate's sensitivity, the `alloc_` metrics for heap allocations, and sampled stacks (`sample`, `perf`) for where CPU and waits go.
+- Measure first: `wye-bench` for the system, `scripts/bench.sh ab` for effects below the gate's sensitivity, the `alloc_` metrics for heap allocations, and sampled stacks (`sample`, `perf`) for where CPU and waits go.
 - A streamed event allocates nothing (`alloc_sse_per_event` is gated at zero).
 - Low-level optimization (`#[inline]`, SIMD, `unsafe`, custom allocators, release-profile settings) lands only with a before and after, adopted by the gate's [A/B rule](#commit-gate). Hot-path work the gate does not measure states its own measurement in the commit message.
 
@@ -234,7 +233,7 @@ These docs and the README are the source of truth for design, status, and result
 | `config` | The config schema, its validation, `examples/wye.toml`, secret resolution |
 | `cli` | Commands and the agent wrappers |
 | `bench` | `wye-bench`, scenarios, competitors, `bench/baseline.json` |
-| `gate` | `scripts/check.sh`, `scripts/ab.sh`, the hooks, tolerances |
+| `gate` | `scripts/check.sh`, `scripts/bench.sh`, the hooks, tolerances |
 | `testkit` | Shared test harnesses |
 | `site` | The website |
 | `release` | The release pipeline and the container image |
