@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.0-rc.2
+
+Names settle: config fields, record values, metrics, and CLI flags now use the glossary's terms, and the Claude route has one form. Many changes are breaking (marked below); a 0.1.0-rc.1 config needs the renames listed under "Breaking, config". `wye init` writes sample policy tests, and every command run with no arguments says what to run next.
+
 - License: MIT, instead of WTFPL.
 - Breaking: `wye init --api-key` is now `--provider-key`, and `--team` is now `--shared`. The flags name the two choices a [setup](docs/glossary.md#the-product) makes. `--shared` with `--provider-key` is no longer an error, since a shared gateway always holds the provider key.
 - Examples, one directory per use: `examples/developer/` (was `examples/subscription.toml`), `examples/team/` (developers through SSO, CI through GitHub Actions tokens, two keys with failover), and `examples/app/` (a gateway token per service, aliases with a canary, a second provider for failover, OpenAI), the last two with policy tests that the test suite runs. `examples/policy-tests/` is gone; its config trusted a public test key.

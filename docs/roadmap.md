@@ -4,7 +4,7 @@ Status, build order, open work, and exit criteria. Each milestone leaves a runna
 
 ## Status
 
-Prerelease `0.1.0-rc.1`: tested and benchmarked on one machine, and in use with Claude Code on a claude.ai subscription since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions).
+Prerelease `0.1.0-rc.2`: tested and benchmarked on one machine, and in use with Claude Code on a claude.ai subscription since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions).
 
 Next, in this order:
 

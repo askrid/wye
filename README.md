@@ -43,7 +43,7 @@ Every commit that changes code is benchmarked against its parent, in alternating
 
 ## Quick start
 
-> **Status:** prerelease (`0.1.0-rc.1`), tested and benchmarked on one machine. [Status](#status) says what is not yet verified against live providers.
+> **Status:** prerelease (`0.1.0-rc.2`), tested and benchmarked on one machine. [Status](#status) says what is not yet verified against live providers.
 
 ```bash
 cargo install --git https://github.com/askrid/wye wye --locked   # Rust 1.99+
