@@ -24,8 +24,8 @@ use gateway_core::config;
 use http::{
     HeaderMap, HeaderName, HeaderValue, Request, Response, Uri, Version,
     header::{
-        ACCEPT_ENCODING, AUTHORIZATION, CONNECTION, HOST, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION,
-        TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
+        ACCEPT_ENCODING, AUTHORIZATION, CONNECTION, Entry, HOST, PROXY_AUTHENTICATE,
+        PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
     },
     uri::{Authority, PathAndQuery, Scheme},
 };
@@ -226,6 +226,7 @@ impl Upstream {
             parts.headers.remove(OPENAI_PROJECT);
             parts.headers.insert(name, value.clone());
         }
+        mark_credentials_sensitive(&mut parts.headers);
         if let Some(workspace) = &self.workspace {
             parts.headers.insert(WORKSPACE_ID, workspace.clone());
         }
@@ -282,6 +283,21 @@ impl Upstream {
     }
 }
 
+/// Marks every credential the request carries upstream as never indexed, so
+/// HTTP/2 header compression keeps it out of the table that all streams on
+/// a connection share: one upstream connection carries requests from many
+/// callers, and in passthrough each brings its own credential. Wye's own
+/// provider keys are marked when they are read; this covers the caller's.
+fn mark_credentials_sensitive(headers: &mut HeaderMap) {
+    for name in [AUTHORIZATION, X_API_KEY] {
+        if let Entry::Occupied(mut values) = headers.entry(name) {
+            for value in values.iter_mut() {
+                value.set_sensitive(true);
+            }
+        }
+    }
+}
+
 fn strip_hop_by_hop(headers: &mut HeaderMap) {
     // Allocates only when `Connection` names extra headers, which is rare.
     let named: Vec<HeaderName> = headers
@@ -314,5 +330,24 @@ mod tests {
         strip_hop_by_hop(&mut headers);
         assert_eq!(headers.len(), 1);
         assert_eq!(headers["anthropic-beta"], "a,b");
+    }
+
+    #[test]
+    fn a_callers_credential_is_never_indexed_upstream() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer caller"));
+        headers.append(X_API_KEY, HeaderValue::from_static("sk-one"));
+        headers.append(X_API_KEY, HeaderValue::from_static("sk-two"));
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        mark_credentials_sensitive(&mut headers);
+        assert!(headers[AUTHORIZATION].is_sensitive());
+        assert!(
+            headers
+                .get_all(X_API_KEY)
+                .iter()
+                .all(HeaderValue::is_sensitive)
+        );
+        // Other headers stay compressible.
+        assert!(!headers["anthropic-version"].is_sensitive());
     }
 }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Security: every credential Wye sends upstream, including a caller's own in passthrough, is marked never-indexed for HTTP/2 header compression, so it stays out of the compression table that requests from other callers on the same connection share. Wye's own provider keys already were.
 - Benchmarks: a reference environment for published numbers (`bench/reference/`): `run.sh`, started by hand, benchmarks a pushed commit against every competitor at pinned, checksum-verified versions on a fresh `c7i.4xlarge`, with the gateway pinned to two physical cores (`WYE_BENCH_GATEWAY_CPUS`), and always deletes the instance ([reference environment](docs/benchmarks.md#reference-environment)).
 - Published benchmark numbers now come from three reference-environment runs of one commit on fresh `c7i.4xlarge` hosts, with every competitor in the same session, instead of the development machine; `bench/baseline.json` is their median, and `docs/benchmarks.md` sets each competitor's own claim beside the number measured for it ([results](docs/benchmarks.md#results)).
 - `wye-bench alternate` and `wye-bench gate` now run the alternating rounds and the gate's rerun rule that `scripts/bench.sh` ran, with the same commands and verdicts.
