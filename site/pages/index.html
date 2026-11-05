@@ -35,8 +35,8 @@
     <span>wye</span> <span class="version">{{version}}</span>
   </a>
   <nav aria-label="Documentation">
-    <a href="{{repo}}/blob/main/docs/guide.md">guide</a>
-    <a href="{{repo}}/blob/main/examples/wye.toml">wye.toml</a>
+    <a href="{{repo}}/blob/{{commit}}/docs/guide.md">guide</a>
+    <a href="{{repo}}/blob/{{commit}}/examples/wye.toml">wye.toml</a>
     <a href="{{repo}}">github</a>
   </nav>
 </header>
@@ -50,7 +50,7 @@
 
     <div class="hero-install">
       {{fence README.md|cargo install}}
-      <p class="facts">{{release}} · {{license}} · <a href="#status">status</a> · <a href="{{repo}}/blob/main/CHANGELOG.md">changelog</a></p>
+      <p class="facts">{{release}} · {{license}} · <a href="#status">status</a> · <a href="{{repo}}/blob/{{commit}}/CHANGELOG.md">changelog</a></p>
     </div>
 
     <figure class="junction">

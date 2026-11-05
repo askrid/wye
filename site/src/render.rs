@@ -16,9 +16,8 @@
 //!   starts with PREFIX, highlighted.
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
 //!   object.
-//! - `{{opening FILE|PART}}`: FILE's opening paragraph: its bold `tagline`,
-//!   the `rest` rendered, or the rest and the list after it as plain
-//!   `text`; `points` is that list, rendered.
+//! - `{{opening FILE|PART}}`: FILE's opening paragraph's bold `tagline`;
+//!   the list after it, rendered (`points`); or both as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -122,7 +121,6 @@ impl Sources {
                 })?;
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline)),
-                    "rest" => Ok(markdown::to_html(rest, &self.repo_url, file, &page.anchors)),
                     "text" => {
                         let points = markdown::opening_points(self.document(file)?);
                         let text = format!("{rest}\n\n{}", points.unwrap_or_default());
@@ -135,17 +133,17 @@ impl Sources {
                             })?;
                         Ok(markdown::to_html(
                             points,
-                            &self.repo_url,
+                            &self.files_url(),
                             file,
                             &page.anchors,
                         ))
                     }
-                    other => Err(format!("{other:?} is not tagline, rest, text, or points")),
+                    other => Err(format!("{other:?} is not tagline, text, or points")),
                 }
             }
             ("section", [file, heading]) => Ok(markdown::to_html(
                 self.section(file, heading)?,
-                &self.repo_url,
+                &self.files_url(),
                 file,
                 &page.anchors,
             )),
@@ -178,7 +176,7 @@ impl Sources {
                     })?;
                 Ok(markdown::to_html(
                     paragraph,
-                    &self.repo_url,
+                    &self.files_url(),
                     file,
                     &page.anchors,
                 ))
@@ -213,8 +211,13 @@ impl Sources {
     fn item_html(&self, item: &str, file: &str, anchors: &markdown::Anchors) -> String {
         format!(
             "<div class=\"item\">{}</div>",
-            markdown::to_html(item, &self.repo_url, file, anchors)
+            markdown::to_html(item, &self.files_url(), file, anchors)
         )
+    }
+
+    /// Where the repository's files are at the page's commit.
+    fn files_url(&self) -> String {
+        format!("{}/blob/{}", self.repo_url, self.commit)
     }
 
     fn document(&self, file: &str) -> Result<&str, String> {
@@ -345,21 +348,20 @@ mod tests {
 
     #[test]
     fn splits_the_opening_paragraph_at_its_tagline() {
-        let page =
-            "{{opening README.md|tagline}}|{{opening README.md|rest}}|{{opening README.md|text}}";
+        let page = "{{opening README.md|tagline}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat.|<p>Wye is one\n<code>binary</code>.</p>\n|Wye is one binary. Fast. Under 1 ms. Small. One file."
+            "LLM gateway without bloat.|Wye is one binary. Fast. Under 1 ms. Small. One file."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())
                 .unwrap_err()
-                .contains("\"title\" is not tagline, rest, text, or points")
+                .contains("\"title\" is not tagline, text, or points")
         );
         assert_eq!(
             render("{{opening README.md|points}}", &sources()).unwrap(),
             "<ul>\n<li><strong>Fast.</strong> Under \
-             <a href=\"https://github.com/askrid/wye#performance\">1 ms</a>.</li>\n\
+             <a href=\"https://github.com/askrid/wye/blob/81e7951/README.md#performance\">1 ms</a>.</li>\n\
              <li><strong>Small.</strong> One file.</li>\n</ul>\n"
         );
     }
@@ -395,7 +397,7 @@ mod tests {
             )
             .unwrap(),
             "<p>Where others lead: one, on\n\
-             <a href=\"https://github.com/askrid/wye/blob/main/docs/b.md\">two</a>.</p>\n"
+             <a href=\"https://github.com/askrid/wye/blob/81e7951/docs/b.md\">two</a>.</p>\n"
         );
         assert!(
             render("{{paragraph README.md|Performance|Nobody}}", &sources())
@@ -406,7 +408,7 @@ mod tests {
 
     #[test]
     fn keeps_links_to_headings_the_page_renders_whole() {
-        let page = "<section class=\"hero\">{{opening README.md|rest}}</section>\
+        let page = "<section class=\"hero\">{{opening README.md|points}}</section>\
                     <section class=\"part\" id=\"compare\">{{section README.md|How it compares}}</section>\
                     <section id=\"one\">{{item README.md|What it does|Shows}}</section>\
                     <section id=\"two\">{{ item README.md|What it does|Gives }}</section>";
@@ -511,7 +513,7 @@ mod tests {
         let s = sources();
         assert_eq!(
             render("x {{ opening README.md|title }}", &s).unwrap_err(),
-            "{{opening README.md|title}}: \"title\" is not tagline, rest, text, or points"
+            "{{opening README.md|title}}: \"title\" is not tagline, text, or points"
         );
         assert_eq!(
             render("{{ratios README.md|Status|Speed}}", &s).unwrap_err(),

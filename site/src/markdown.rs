@@ -216,8 +216,9 @@ pub fn lead(item: &str) -> Option<&str> {
         .map(|(lead, _)| lead)
 }
 
-/// Renders Markdown from `source` (a path relative to the repository root).
-pub fn to_html(markdown: &str, repo_url: &str, source: &str, anchors: &Anchors) -> String {
+/// Renders Markdown from `source` (a path relative to the repository root);
+/// `files_url` is where the repository's files are, at one commit.
+pub fn to_html(markdown: &str, files_url: &str, source: &str, anchors: &Anchors) -> String {
     let events = Parser::new_ext(markdown, Options::ENABLE_TABLES).map(|event| match event {
         Event::Start(Tag::Link {
             link_type,
@@ -226,7 +227,7 @@ pub fn to_html(markdown: &str, repo_url: &str, source: &str, anchors: &Anchors) 
             id,
         }) => Event::Start(Tag::Link {
             link_type,
-            dest_url: CowStr::from(link_url(&dest_url, repo_url, source, anchors)),
+            dest_url: CowStr::from(link_url(&dest_url, files_url, source, anchors)),
             title,
             id,
         }),
@@ -239,8 +240,9 @@ pub fn to_html(markdown: &str, repo_url: &str, source: &str, anchors: &Anchors) 
 
 /// Where a link in a repository document points once its text is on the
 /// site: a heading of the same document that the page renders stays on the
-/// page; other files and anchors open on GitHub, as they do from the file.
-fn link_url(dest: &str, repo_url: &str, source: &str, anchors: &Anchors) -> String {
+/// page; other files and anchors open on GitHub at the page's commit, so
+/// they say what the page says.
+fn link_url(dest: &str, files_url: &str, source: &str, anchors: &Anchors) -> String {
     if dest.contains("://") || dest.starts_with("mailto:") {
         return dest.to_owned();
     }
@@ -248,14 +250,11 @@ fn link_url(dest: &str, repo_url: &str, source: &str, anchors: &Anchors) -> Stri
         if let Some(id) = anchors.get(&format!("{source}#{anchor}")) {
             return format!("#{id}");
         }
-        return match source {
-            "README.md" => format!("{repo_url}#{anchor}"),
-            _ => format!("{repo_url}/blob/main/{source}#{anchor}"),
-        };
+        return format!("{files_url}/{source}#{anchor}");
     }
     match source.rsplit_once('/') {
-        Some((dir, _)) => format!("{repo_url}/blob/main/{dir}/{dest}"),
-        None => format!("{repo_url}/blob/main/{dest}"),
+        Some((dir, _)) => format!("{files_url}/{dir}/{dest}"),
+        None => format!("{files_url}/{dest}"),
     }
 }
 
@@ -432,42 +431,42 @@ mod tests {
 
     #[test]
     fn links_open_on_the_page_or_github() {
-        let repo = "https://github.com/askrid/wye";
+        let files = "https://github.com/askrid/wye/blob/81e7951";
         let none = Anchors::new();
         let page: Anchors = [("README.md#performance".to_owned(), "stream".to_owned())].into();
         assert_eq!(
-            link_url("#performance", repo, "README.md", &page),
+            link_url("#performance", files, "README.md", &page),
             "#stream"
         );
         assert_eq!(
-            link_url("#performance", repo, "docs/guide.md", &page),
-            "https://github.com/askrid/wye/blob/main/docs/guide.md#performance"
+            link_url("#performance", files, "docs/guide.md", &page),
+            "https://github.com/askrid/wye/blob/81e7951/docs/guide.md#performance"
         );
         assert_eq!(slug("What Wye will not do"), "what-wye-will-not-do");
         assert_eq!(
-            link_url("docs/roadmap.md", repo, "README.md", &none),
-            "https://github.com/askrid/wye/blob/main/docs/roadmap.md"
+            link_url("docs/roadmap.md", files, "README.md", &none),
+            "https://github.com/askrid/wye/blob/81e7951/docs/roadmap.md"
         );
         assert_eq!(
-            link_url("#features", repo, "README.md", &none),
-            "https://github.com/askrid/wye#features"
+            link_url("#features", files, "README.md", &none),
+            "https://github.com/askrid/wye/blob/81e7951/README.md#features"
         );
         assert_eq!(
-            link_url("#a", repo, "docs/guide.md", &none),
-            "https://github.com/askrid/wye/blob/main/docs/guide.md#a"
+            link_url("#a", files, "docs/guide.md", &none),
+            "https://github.com/askrid/wye/blob/81e7951/docs/guide.md#a"
         );
         assert_eq!(
-            link_url("product.md", repo, "docs/guide.md", &none),
-            "https://github.com/askrid/wye/blob/main/docs/product.md"
+            link_url("product.md", files, "docs/guide.md", &none),
+            "https://github.com/askrid/wye/blob/81e7951/docs/product.md"
         );
         assert_eq!(
-            link_url("https://x.dev/", repo, "README.md", &none),
+            link_url("https://x.dev/", files, "README.md", &none),
             "https://x.dev/"
         );
-        let html = to_html("See [Features](#features).", repo, "README.md", &none);
+        let html = to_html("See [Features](#features).", files, "README.md", &none);
         assert_eq!(
             html,
-            "<p>See <a href=\"https://github.com/askrid/wye#features\">Features</a>.</p>\n"
+            "<p>See <a href=\"https://github.com/askrid/wye/blob/81e7951/README.md#features\">Features</a>.</p>\n"
         );
     }
 
