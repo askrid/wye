@@ -95,6 +95,12 @@ pub fn opening(doc: &str) -> Option<(&str, &str)> {
     Some((tagline, rest.trim()))
 }
 
+/// The list that follows the opening paragraph, before the first section:
+/// what the document's subject is, a line per point.
+pub fn opening_points(doc: &str) -> Option<&str> {
+    paragraph(doc.split("\n## ").next()?, "- ")
+}
+
 /// The first paragraph of `text` that starts with `start`, trimmed.
 pub fn paragraph<'a>(text: &'a str, start: &str) -> Option<&'a str> {
     text.split("\n\n")

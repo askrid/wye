@@ -17,7 +17,8 @@
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening paragraph: its bold `tagline`,
-//!   the `rest` rendered, or the rest as plain `text`.
+//!   the `rest` rendered, or the rest as plain `text`; `points` is the list
+//!   after it, rendered.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -123,7 +124,19 @@ impl Sources {
                     "tagline" => Ok(markdown::escape(tagline)),
                     "rest" => Ok(markdown::to_html(rest, &self.repo_url, file, &page.anchors)),
                     "text" => Ok(markdown::escape(&markdown::plain(rest))),
-                    other => Err(format!("{other:?} is not tagline, rest, or text")),
+                    "points" => {
+                        let points =
+                            markdown::opening_points(self.document(file)?).ok_or_else(|| {
+                                format!("{file}: no list after the opening paragraph")
+                            })?;
+                        Ok(markdown::to_html(
+                            points,
+                            &self.repo_url,
+                            file,
+                            &page.anchors,
+                        ))
+                    }
+                    other => Err(format!("{other:?} is not tagline, rest, text, or points")),
                 }
             }
             ("section", [file, heading]) => Ok(markdown::to_html(
@@ -293,6 +306,7 @@ mod tests {
             documents: [(
                 "README.md",
                 "# Wye\n\n**LLM gateway without bloat.** Wye is one\n`binary`.\n\n\
+                 - **Fast.** Under [1 ms](#performance).\n- **Small.** One file.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
@@ -336,7 +350,13 @@ mod tests {
         assert!(
             render("{{opening README.md|title}}", &sources())
                 .unwrap_err()
-                .contains("\"title\" is not tagline, rest, or text")
+                .contains("\"title\" is not tagline, rest, text, or points")
+        );
+        assert_eq!(
+            render("{{opening README.md|points}}", &sources()).unwrap(),
+            "<ul>\n<li><strong>Fast.</strong> Under \
+             <a href=\"https://github.com/askrid/wye#performance\">1 ms</a>.</li>\n\
+             <li><strong>Small.</strong> One file.</li>\n</ul>\n"
         );
     }
 
@@ -487,7 +507,7 @@ mod tests {
         let s = sources();
         assert_eq!(
             render("x {{ opening README.md|title }}", &s).unwrap_err(),
-            "{{opening README.md|title}}: \"title\" is not tagline, rest, or text"
+            "{{opening README.md|title}}: \"title\" is not tagline, rest, text, or points"
         );
         assert_eq!(
             render("{{ratios README.md|Status|Speed}}", &s).unwrap_err(),
