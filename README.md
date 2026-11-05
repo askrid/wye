@@ -11,10 +11,10 @@
 </div>
 
 - **Fast.** Adds under a millisecond per request ([p50, lab](#performance)).
-- **Stateless.** Replicas share no state, so you scale by running more.
-- **Fails over.** A request the provider rejects moves to another upstream before any output.
-- **One file.** One binary and one TOML config. No database, no dashboard.
-- **Untranslated.** Each provider's own API passes through, so new features work the day they ship.
+- **Stateless.** Scale by running more replicas.
+- **Fails over.** A rejected request can be resent to another upstream before any output.
+- **One binary, one TOML file.** No database, no dashboard.
+- **Untranslated.** Native APIs pass through, so new features work the day they ship.
 
 ## Performance
 
