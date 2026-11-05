@@ -6,33 +6,6 @@
 
 Small, fast, and stateless: one binary, one TOML file, under a millisecond per request ([p50 on c7i.4xlarge](#performance)), and the features a gateway needs, no more.
 
-## Performance
-
-Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four other gateways in the same session against a mock provider, every gateway pinned to the same two physical cores; one command reproduces them ([reference environment](docs/benchmarks.md#reference-environment)). Each cell is the gateway's median divided by Wye's (TLS to the upstream; stream events with 2,000 token-paced streams):
-
-| Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
-|---|---|---|---|---|
-| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 2.8× | 1.9× | 1.2× | 2.1× |
-| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 9.7× | 8.1× | 4.0× | 28× |
-| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 330× | 220× | 9.8× | 19× |
-| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.7× | cannot stream | 1.4× |
-
-Under load the gap widens. With 2,000 token-paced streams, Wye adds 0.28 ms per event at p99; agentgateway adds 1.0 ms, Bifrost 132 ms, LiteLLM 490 ms, and KrakenD, which buffers, 404 ms ([results](docs/benchmarks.md#results)). Under the stress scenarios LiteLLM failed 104-132 requests and streams on every host; Wye failed none, in any scenario ([failures](docs/benchmarks.md#failures)).
-
-Where others lead: KrakenD on bulk transfer (3.7 against 2.4 GB/s), because it buffers responses instead of streaming them; agentgateway on cold connections and on memory beside clients that stopped reading, with a delay per event close to Wye's; LiteLLM on memory per idle stream over plain HTTP, on top of 2.1 GB at idle. Each vendor's own claim beside the number measured here, the method, and the configs: [docs/benchmarks.md](docs/benchmarks.md#what-they-claim-what-i-measured).
-
-| What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
-|---|---|---|
-| Latency per request (p50 / p99) | 254 / 559 µs | 325 / 628 µs |
-| CPU per request | 42 µs | 62.5 µs |
-| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 77 / 282 µs |
-| CPU per event and memory per open stream at that load | | 14 µs, 12.6 KB |
-| Memory at idle | 28 MB | 28 MB |
-
-A heavy Claude Code user (five concurrent streams) takes about 0.4% of a vCPU and 270 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The delay per event doesn't add up over a stream, so tokens per second don't change.
-
-Every commit that changes code is benchmarked against its parent, in alternating rounds on the same machine (`scripts/check.sh`). If it makes Wye slower or heavier beyond the commit gate's tolerances, it doesn't get in.
-
 ## Quick start
 
 Prerelease, tested on one machine; [status](#status) lists what is not yet verified against live providers.
@@ -71,6 +44,33 @@ By request class
 - **Checks decisions before they ship.** `wye explain` shows what the gateway would do with a request, offline. `wye policy-test` and `wye policy-diff` run in CI and fail when a change widens access. `wye doctor` checks secrets, files, and upstreams, and bills nothing. ([commands](docs/operations.md#commands))
 - **Works with existing clients.** Point Claude Code, Codex, or any app on the official Anthropic or OpenAI SDK at it by base URL; `wye claude` and `wye codex` do it for you. Messages, Responses, and Chat Completions go through untranslated, except a model id your config maps. Streams are relayed as the provider sends them, never buffered. ([running it](docs/guide.md#running-it), [apps](docs/guide.md#using-it-from-apps))
 - **Runs as one process, or many.** `wye service` installs a macOS LaunchAgent or a systemd user unit. Replicas behind any load balancer never talk to each other, and each sends a session to the same upstream, so prompt caches stay warm without sticky sessions. Each has health checks and a graceful shutdown. ([deployment](docs/operations.md#deployment))
+
+## Performance
+
+Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four other gateways in the same session against a mock provider, every gateway pinned to the same two physical cores; one command reproduces them ([reference environment](docs/benchmarks.md#reference-environment)). Each cell is the gateway's median divided by Wye's (TLS to the upstream; stream events with 2,000 token-paced streams):
+
+| Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
+|---|---|---|---|---|
+| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 2.8× | 1.9× | 1.2× | 2.1× |
+| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 9.7× | 8.1× | 4.0× | 28× |
+| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 330× | 220× | 9.8× | 19× |
+| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.7× | cannot stream | 1.4× |
+
+Under load the gap widens. With 2,000 token-paced streams, Wye adds 0.28 ms per event at p99; agentgateway adds 1.0 ms, Bifrost 132 ms, LiteLLM 490 ms, and KrakenD, which buffers, 404 ms ([results](docs/benchmarks.md#results)). Under the stress scenarios LiteLLM failed 104-132 requests and streams on every host; Wye failed none, in any scenario ([failures](docs/benchmarks.md#failures)).
+
+Where others lead: KrakenD on bulk transfer (3.7 against 2.4 GB/s), because it buffers responses instead of streaming them; agentgateway on cold connections and on memory beside clients that stopped reading, with a delay per event close to Wye's; LiteLLM on memory per idle stream over plain HTTP, on top of 2.1 GB at idle. Each vendor's own claim beside the number measured here, the method, and the configs: [docs/benchmarks.md](docs/benchmarks.md#what-they-claim-what-i-measured).
+
+| What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
+|---|---|---|
+| Latency per request (p50 / p99) | 254 / 559 µs | 325 / 628 µs |
+| CPU per request | 42 µs | 62.5 µs |
+| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 77 / 282 µs |
+| CPU per event and memory per open stream at that load | | 14 µs, 12.6 KB |
+| Memory at idle | 28 MB | 28 MB |
+
+A heavy Claude Code user (five concurrent streams) takes about 0.4% of a vCPU and 270 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The delay per event doesn't add up over a stream, so tokens per second don't change.
+
+Every commit that changes code is benchmarked against its parent, in alternating rounds on the same machine (`scripts/check.sh`). If it makes Wye slower or heavier beyond the commit gate's tolerances, it doesn't get in.
 
 ## How it compares
 
@@ -129,41 +129,7 @@ cache_write_1h = "8.00"
 
 Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way ([details](docs/guide.md#several-upstreams)). Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
 
-## Records and decisions
-
-A usage record:
-
-```json
-{
-  "event": "request",
-  "unix_ms": 1793178637975,
-  "path": "/v1/messages",
-  "status": 200,
-  "outcome": "completed",
-  "duration_ms": 4100.42,
-  "response_headers_ms": 651.8,
-  "upstream": "bedrock-us",
-  "subject": "alice",
-  "session_id": "7f2c4a10-8e1b-4d3a-9c55-2b6e0d1f9a33",
-  "request_class": "main",
-  "requested_model": "claude-coding",
-  "model": "claude-opus-5-5",
-  "usage_status": "complete",
-  "input_tokens": 12,
-  "output_tokens": 38,
-  "cache_creation_input_tokens": 1530,
-  "cache_read_input_tokens": 48210,
-  "cost_usd": "0.0181",
-  "cost_status": "complete",
-  "pricing_version": "anthropic-2026-11-01",
-  "tool_calls": { "Bash": 1 },
-  "failovers": [{ "upstream": "anthropic", "reason": "429" }]
-}
-```
-
-Costs are exact decimal strings, computed in integers. A model with no price is recorded as [`unknown`](docs/glossary.md#usage-and-cost), never $0.
-
-`wye explain` calls the gateway's own functions, in the same order:
+`wye explain` shows what this config decides for one request, offline, through the gateway's own functions:
 
 ```console
 $ wye explain -c wye.toml --session session-a request.json
@@ -200,14 +166,6 @@ Next: a report of which tokens were wasted and what each fix would save, and a s
 - Protect a public endpoint from abuse: per-user authentication and quotas stay in your backend.
 - Grow a dashboard or an admin API. Config changes go through Git and a restart or rolling deploy.
 
-## Development
-
-Tests run against local mock upstreams and never call a paid API. See [docs/development.md](docs/development.md).
-
 ## Documentation
 
-[docs/README.md](docs/README.md) maps each question to the document that answers it, and [docs/glossary.md](docs/glossary.md) defines the terms.
-
-## License
-
-[MIT](LICENSE).
+[docs/README.md](docs/README.md) maps each question to the document that answers it, and [docs/glossary.md](docs/glossary.md) defines the terms. Development: [docs/development.md](docs/development.md); tests run against local mock upstreams and never call a paid API. License: [MIT](LICENSE).
