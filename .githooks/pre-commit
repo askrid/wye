@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Blocks commits that fail correctness or regress performance. See scripts/check.sh.
-# Commits that touch only docs, the website (site/), or bench/baseline.json
-# skip the run, except docs/policy.md, which a test reads. The website has its
-# own check, site/check.sh, run for a commit that changes the site or a file
-# the site reads.
+# Commits that touch only docs, the website (site/ and its workflow,
+# .github/workflows/site.yml), or bench/baseline.json skip the run, except
+# docs/policy.md, which a test reads. The website has its own check,
+# site/check.sh, run for a commit that changes the site or a file the site
+# reads.
 set -euo pipefail
 # A variable, not a pipe: with pipefail, grep -q leaving early could fail
 # the pipeline and skip the gate.
 staged=$(git diff --cached --name-only)
 
-site_files=$(grep -E '^site/' <<<"$staged" | grep -vE '\.md$' || true)
+site_files=$(grep -E '^(site/|\.github/workflows/site\.yml$)' <<<"$staged" | grep -vE '\.md$' || true)
 if [[ -n $site_files ]] || grep -qxE \
-  'README\.md|CHANGELOG\.md|Cargo\.toml|crates/wye/Cargo\.toml' \
+  'README\.md|CHANGELOG\.md|docs/operations\.md|Cargo\.toml|crates/wye/Cargo\.toml' \
   <<<"$staged"; then
   # site/check.sh builds the working tree too, site/ and the files it reads.
-  if ! git diff --quiet -- site README.md CHANGELOG.md Cargo.toml crates/wye/Cargo.toml; then
+  if ! git diff --quiet -- site .github/workflows/site.yml README.md CHANGELOG.md \
+    docs/operations.md Cargo.toml crates/wye/Cargo.toml; then
     echo "pre-commit: unstaged changes the site reads would be checked but not" \
       "committed; stage or stash them" >&2
     exit 1
@@ -28,7 +30,7 @@ if [[ -n $site_files ]] || grep -qxE \
   "$(git rev-parse --show-toplevel)/site/check.sh"
 fi
 
-if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md|site/.*)$' <<<"$staged" \
+if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md|site/.*|\.github/workflows/site\.yml)$' <<<"$staged" \
   || grep -qx 'docs/policy\.md' <<<"$staged"; }; then
   # check.sh builds the working tree: it must be what is committed. The
   # website is its own workspace, which check.sh never builds, so edits in

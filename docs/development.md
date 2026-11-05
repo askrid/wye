@@ -36,7 +36,7 @@ Because `gateway-core` does no I/O ([functional core](#design-principles)), it c
 5. A release build plus an allocation-counting build (`--features alloc-stats`, in `target/alloc`).
 6. The benchmark of this checkout against its parent commit.
 
-The pre-commit hook runs it for every commit that touches more than docs and the website (or `docs/policy.md`, which a test reads), and refuses one with unstaged changes or untracked source files, since the check builds the working tree: what is benchmarked must be what is committed. A commit that changes `site/`, or a file the site reads (`README.md`, `CHANGELOG.md`, the manifests), runs `site/check.sh` instead or as well; it takes seconds once the site is built. Enable the hook once per clone:
+The pre-commit hook runs it for every commit that touches more than docs and the website, `site/` and its workflow `.github/workflows/site.yml` (or `docs/policy.md`, which a test reads), and refuses one with unstaged changes or untracked source files, since the check builds the working tree: what is benchmarked must be what is committed. A commit that changes `site/`, its workflow, or a file the site reads (`README.md`, `CHANGELOG.md`, `docs/operations.md`, the manifests), runs `site/check.sh` instead or as well; it takes seconds once the site is built. Enable the hook once per clone:
 
 ```bash
 git config core.hooksPath .githooks
