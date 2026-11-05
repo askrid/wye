@@ -137,7 +137,7 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
     let h = Harness::api_key(Arc::new(|_| Box::pin(std::future::pending()))).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
-        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-length: 2\r\n\r\n{}")
+        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}")
         .await
         .unwrap();
     tokio::time::timeout(WAIT, async {
@@ -170,7 +170,7 @@ async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
     let h = Harness::start_tls(handler, &ca, true).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
-        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-length: 2\r\n\r\n{}")
+        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}")
         .await
         .unwrap();
     tokio::time::timeout(WAIT, async {
@@ -196,7 +196,7 @@ async fn a_broken_client_body_is_the_clients_error() {
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
         .write_all(
-            b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\ntransfer-encoding: chunked\r\n\r\n\
+            b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\r\n\
               2\r\n{}\r\nzz\r\n",
         )
         .await

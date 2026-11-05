@@ -233,6 +233,20 @@ impl InitOptions {
                 "Issue a gateway token for each person or service:".to_owned(),
                 format!("wye token issue alice{c} --out alice.token"),
             ));
+            // Whoever holds the key mints tokens, which cannot be revoked
+            // one by one.
+            let key = self.key_path().map_or_else(
+                |_| "The signing key".to_owned(),
+                |key| format!("The signing key, {},", show(&key)),
+            );
+            steps.push((
+                format!(
+                    "{key} issues gateway tokens, and `wye serve` never reads it: keep it \
+                     off the hosts that serve (move it, if this is one), with whoever \
+                     issues tokens."
+                ),
+                String::new(),
+            ));
             steps.push((
                 format!("Deploy it: {REPO_AT_RELEASE}/docs/operations.md#deployment"),
                 String::new(),
@@ -445,7 +459,7 @@ mod tests {
         // the first one wrote.
         let again = options(Setup::Shared, false, &dir.join("home/other.toml"));
         let printed = init(&again, &env).unwrap();
-        assert!(!printed.contains("signing key"), "{printed}");
+        assert!(!printed.contains(", and the signing key"), "{printed}");
         assert!(printed.contains("\n     wye doctor -c "), "{printed}");
         assert!(
             printed.contains("kept the policy tests in ")
@@ -560,6 +574,14 @@ mod tests {
         );
         assert!(
             repo.contains("\n     wye token issue alice -c wye.toml --out alice.token\n"),
+            "{repo}"
+        );
+        let flat = repo.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains(
+                "The signing key, /h/signing.key, issues gateway tokens, and `wye serve` \
+                 never reads it: keep it off the hosts that serve"
+            ),
             "{repo}"
         );
     }

@@ -286,6 +286,41 @@ fn read_secret(path: &Path) -> Result<String, StartupError> {
     Ok(secret.to_owned())
 }
 
+/// Why the secret file `path` is open to more than its owner, with the
+/// command that closes it; `None` when only its owner may read or write it
+/// (or it cannot be read, which reading it reports).
+pub(crate) fn open_to_others(path: &Path) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path).ok()?.permissions().mode() & 0o777;
+        (mode & 0o077 != 0).then(|| {
+            let path = path.display();
+            format!("{path} is open to group or others (mode {mode:o}): chmod 600 {path}")
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// Each upstream's `provider_key_file` (relative to `config_dir`) that group
+/// or others may open, and the command that closes it: `serve` warns of
+/// each, and `wye doctor` fails on it.
+pub fn key_file_warnings(config: &Config, config_dir: &Path) -> Vec<String> {
+    config
+        .routes
+        .upstreams()
+        .filter_map(|upstream| match &upstream.provider_key {
+            ProviderKey::File(path) => open_to_others(&config_dir.join(path)),
+            _ => None,
+        })
+        .map(|why| format!("provider_key_file {why}"))
+        .collect()
+}
+
 fn env(name: &str) -> Result<String, StartupError> {
     std::env::var(name).map_err(|_| StartupError::MissingEnv(name.to_owned()))
 }

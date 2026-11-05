@@ -1,12 +1,14 @@
 //! `wye explain`: what `wye serve` would decide for one request, offline.
 //!
 //! The checks call the same functions the gateway uses (token
-//! verification, the policy scanner, body admission's [`BodyChecks`], session
-//! sampling) in the server's order, and make no network calls. Upstream
-//! selection is a pure function of request, gateway token, and config, so the
-//! answer is what every replica would do.
+//! verification, [`admission::check_local_client`], the policy scanner, body
+//! admission's [`BodyChecks`], session sampling) in the server's order, and
+//! make no network calls. Upstream selection is a pure function of request,
+//! gateway token, and config, so the answer is what every replica would do.
 
-use std::path::Path;
+use std::{borrow::Cow, net::SocketAddr, path::Path};
+
+use http::{HeaderMap, HeaderName, HeaderValue, header::HOST};
 
 use super::{args::Parsed, files};
 use gateway_core::{
@@ -66,11 +68,13 @@ pub fn run(
         (Some(token), Some(verifier)) => CallerToken::Token(token, verifier),
         _ => CallerToken::None,
     };
+    let endpoint = parsed.value("endpoint").unwrap_or("/v1/messages");
+    let headers = request_headers(endpoint, parsed.value("session"), &parsed.values("header"))?;
     let explanation = explain(
         &config,
-        parsed.value("endpoint").unwrap_or("/v1/messages"),
+        endpoint,
         caller,
-        parsed.value("session"),
+        &headers,
         &body,
         super::unix_secs()?,
         &parsed.values("target-model"),
@@ -84,6 +88,35 @@ pub fn run(
         ),
         forwarded,
     ))
+}
+
+/// The headers of a request to `path`: each `Name: value` line, as curl's
+/// `-H` takes it, and the client's `session` id in the endpoint's session
+/// header, where its client sends it.
+pub fn request_headers(
+    path: &str,
+    session: Option<&str>,
+    lines: &[&str],
+) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+    for line in lines {
+        let (name, value) = line
+            .split_once(':')
+            .ok_or_else(|| format!("--header {line:?}: write it as 'Name: value'"))?;
+        let name = HeaderName::from_bytes(name.trim().as_bytes())
+            .map_err(|_| format!("--header {line:?}: not a header name"))?;
+        let value = HeaderValue::from_str(value.trim())
+            .map_err(|_| format!("--header {line:?}: not a header value"))?;
+        headers.append(name, value);
+    }
+    let name = api::endpoint(path.split_once('?').map_or(path, |(path, _)| path))
+        .and_then(|endpoint| endpoint.api.session_header());
+    if let (Some(name), Some(session)) = (name, session) {
+        let value = HeaderValue::from_str(session)
+            .map_err(|_| format!("--session {session:?}: not a header value"))?;
+        headers.insert(name, value);
+    }
+    Ok(headers)
 }
 
 /// The error for `wye explain` without a request: a command to copy, with a
@@ -179,15 +212,24 @@ impl Explanation {
         Ok((endpoint, route))
     }
 
-    /// The caller's identity, verified as the server verifies it.
+    /// The caller's identity, verified as the server verifies it; without
+    /// `[auth]`, whether the request comes from a program on this machine.
     fn token(
         &mut self,
         config: &Config,
         caller: CallerToken<'_>,
+        headers: &HeaderMap,
         now: u64,
     ) -> Stage<Option<Identity>> {
         if config.auth.is_none() {
-            self.step("gateway token: not required (no [auth])".into());
+            if let Err(refusal) = admission::check_local_client(headers) {
+                return Err(self.refuse_policy(&refusal));
+            }
+            self.step(
+                "gateway token: not required (no [auth]); a local client: a loopback Host, \
+                 no Origin"
+                    .into(),
+            );
             return Ok(None);
         }
         match caller {
@@ -318,13 +360,11 @@ impl Explanation {
     fn selection<'r>(
         &mut self,
         route: &'r Route,
-        session: Option<&str>,
+        session: Option<&[u8]>,
         identity: Option<&Identity>,
     ) -> &'r Upstream {
-        let ranking = route.rank(
-            route::affinity_key(session.map(str::as_bytes), identity.map(|i| &*i.subject))
-                .unwrap_or_default(),
-        );
+        let ranking = route
+            .rank(route::affinity_key(session, identity.map(|i| &*i.subject)).unwrap_or_default());
         let upstreams = route.upstreams();
         let Some(upstream) = upstreams.get(ranking.first()) else {
             unreachable!("a route has at least one upstream")
@@ -421,13 +461,12 @@ impl Explanation {
     fn body_scans(
         &mut self,
         config: &Config,
-        session: Option<&str>,
+        session: Option<&[u8]>,
         body: &[u8],
         targets: &[&str],
     ) {
         if let Some(diagnostics) = &config.cache_diagnostics {
-            let sampled =
-                prompt::session_sampled(session.map(str::as_bytes), diagnostics.sample_percent);
+            let sampled = prompt::session_sampled(session, diagnostics.sample_percent);
             self.step(format!(
                 "cache diagnostics: {} (sample_percent {})",
                 if sampled {
@@ -470,15 +509,16 @@ impl Explanation {
     }
 }
 
-/// Explains `POST path` with `body`, the `caller`'s gateway token, and the client's
-/// `session` id (Claude Code's or Codex's), at Unix time `now`. Upgrade
-/// checks run against `targets`, or, when empty, against
-/// `[upgrade_check] targets`.
+/// Explains `POST path` with `headers` and `body`, and the `caller`'s
+/// gateway token, at Unix time `now`. The client's session id is read from
+/// `headers`, as the server reads it; without a `Host`, the request is a
+/// local client's, which names the listen address. Upgrade checks run
+/// against `targets`, or, when empty, against `[upgrade_check] targets`.
 pub fn explain(
     config: &Config,
     path: &str,
     caller: CallerToken<'_>,
-    session: Option<&str>,
+    headers: &HeaderMap,
     body: &[u8],
     now: u64,
     targets: &[&str],
@@ -497,8 +537,12 @@ pub fn explain(
         let (endpoint, route) = out.endpoint(config, path)?;
         let api = endpoint.api;
         // Chat Completions carries no session header: the server never sees one.
-        let session = session.filter(|_| api.session_header().is_some());
-        let identity = out.token(config, caller, now)?;
+        let session = api
+            .session_header()
+            .and_then(|name| headers.get(name))
+            .map(HeaderValue::as_bytes);
+        let headers = with_host(headers, config.server.listen);
+        let identity = out.token(config, caller, &headers, now)?;
         out.body_size(config, body)?;
         let checks = BodyChecks::new(
             config.auth.as_ref().and_then(|a| a.models.as_deref()),
@@ -519,6 +563,19 @@ pub fn explain(
         Ok(())
     })();
     out
+}
+
+/// `headers`, with the `Host` a local client sends, the listen address,
+/// when they have none.
+fn with_host(headers: &HeaderMap, listen: SocketAddr) -> Cow<'_, HeaderMap> {
+    if headers.contains_key(HOST) {
+        return Cow::Borrowed(headers);
+    }
+    let mut headers = headers.clone();
+    if let Ok(listen) = HeaderValue::from_str(&listen.to_string()) {
+        headers.insert(HOST, listen);
+    }
+    Cow::Owned(headers)
 }
 
 /// Bytes of `body` through the end of its top-level `model` value, where

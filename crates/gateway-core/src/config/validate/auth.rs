@@ -104,13 +104,24 @@ pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
             .max_output_tokens
             .map(|n| nonzero(n, "auth.max_output_tokens"))
             .transpose()?,
-        max_gateway_token_ttl: nonzero(
+        max_gateway_token_ttl: token_ttl(
             raw.max_gateway_token_ttl_secs
                 .unwrap_or(DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS),
-            "auth.max_gateway_token_ttl_secs",
-        )
-        .map(Duration::from_secs)?,
+        )?,
     })
+}
+
+/// `max_gateway_token_ttl_secs`: more than zero, at most
+/// [`MAX_GATEWAY_TOKEN_TTL_SECS`].
+fn token_ttl(secs: u64) -> Result<Duration, ConfigError> {
+    const FIELD: &str = "auth.max_gateway_token_ttl_secs";
+    if secs > MAX_GATEWAY_TOKEN_TTL_SECS {
+        return Err(ConfigError::TooLong {
+            field: FIELD,
+            max: MAX_GATEWAY_TOKEN_TTL_SECS,
+        });
+    }
+    nonzero(secs, FIELD).map(Duration::from_secs)
 }
 
 fn validate_own(

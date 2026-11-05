@@ -120,8 +120,16 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         Id::Doctor => {
             let path = config_path()?;
             let config = files::load(&path)?;
-            let (report, ok) =
-                current_thread()?.block_on(wye::doctor(&config, files::config_dir(&path)));
+            // The key `wye token issue` signs with by default, if this
+            // machine has one.
+            let signing_key = files::home(&env)
+                .map(|home| home.join(files::SIGNING_KEY_FILE))
+                .filter(|key| key.exists());
+            let (report, ok) = current_thread()?.block_on(wye::doctor(
+                &config,
+                files::config_dir(&path),
+                signing_key.as_deref(),
+            ));
             let shown = files::tilde(&path, &env);
             Ok(verdicts(&format!("config: {shown}\n{report}"), ok))
         }
@@ -221,7 +229,11 @@ fn unknown(args: &[&str]) -> String {
 }
 
 fn serve(config: Config, path: &Path) -> Result<(), Box<dyn Error>> {
-    let resources = files::named(path, Resources::resolve(&config, files::config_dir(path)))?;
+    let config_dir = files::config_dir(path);
+    let resources = files::named(path, Resources::resolve(&config, config_dir))?;
+    for warning in wye::key_file_warnings(&config, config_dir) {
+        eprintln!("wye: warning: {warning}");
+    }
     let gateway = Arc::new(files::named(path, Gateway::new(&config, resources))?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

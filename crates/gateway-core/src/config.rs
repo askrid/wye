@@ -46,6 +46,12 @@ const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 /// health-check interval.
 const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
 const DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
+/// The longest `max_gateway_token_ttl_secs`, 30 days: tokens cannot be
+/// revoked one by one, so a stolen one is good until it expires.
+pub const MAX_GATEWAY_TOKEN_TTL_SECS: u64 = 30 * 24 * 3600;
+/// The most `server.max_connections`, about a million: Linux's default
+/// ceiling on one process's open files (`fs.nr_open`).
+pub const MAX_CONNECTIONS: usize = 1 << 20;
 /// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
 pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
 /// Default `server.max_total_kept_bytes`, across all requests of a process.
@@ -203,6 +209,11 @@ pub struct Server {
     /// Requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
     pub max_concurrent_requests: usize,
+    /// Open client connections, idle ones included; at the limit, Wye
+    /// accepts no more until one closes, and new ones wait in the kernel's
+    /// listen queue. At least `max_concurrent_requests`, since a request in
+    /// flight holds its connection.
+    pub max_connections: usize,
     /// After a shutdown signal, `/readyz` fails but connections are still
     /// accepted for this long, so load balancers stop routing here before
     /// new connections are refused. Zero for local use.

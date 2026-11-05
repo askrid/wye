@@ -105,11 +105,6 @@ pub(super) fn empty(status: StatusCode) -> Response<ResBody> {
     res
 }
 
-/// A missing or invalid gateway token.
-pub(super) fn unauthorized(api: Api) -> Response<ResBody> {
-    refuse(api, &Refusal::Unauthenticated)
-}
-
 /// A path or method the gateway does not proxy, in the Messages shape.
 pub(super) fn not_proxied() -> Response<ResBody> {
     refuse(Api::Messages, &Refusal::NotProxied)

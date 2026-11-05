@@ -27,7 +27,7 @@ use gateway_core::{config::Config, policy::ModelPattern, token::Identity};
 use serde::Deserialize;
 
 use super::{
-    explain::{CallerToken, explain},
+    explain::{CallerToken, explain, request_headers},
     paint::verdict,
 };
 
@@ -127,15 +127,8 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
         }),
     };
     let path = expect.endpoint.as_deref().unwrap_or("/v1/messages");
-    let result = explain(
-        config,
-        path,
-        credential,
-        expect.session.as_deref(),
-        &body,
-        now,
-        &[],
-    );
+    let headers = request_headers(path, expect.session.as_deref(), &[])?;
+    let result = explain(config, path, credential, &headers, &body, now, &[]);
     let got = match &result.refused {
         Some(_) => Decision::Refuse,
         None => Decision::Forward,

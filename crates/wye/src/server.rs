@@ -10,6 +10,7 @@ use hyper_util::{
 use tokio::{
     io::AsyncWrite,
     net::{TcpListener, TcpStream},
+    sync::{OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
 };
 
@@ -46,7 +47,14 @@ const LOG_FLUSH_TIMEOUT: Duration = Duration::from_secs(1);
 /// descriptors, say): the listener stays ready, so retrying at once spins a core.
 const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(100);
 
-/// Serves connections until `shutdown` resolves, then shuts down in two phases:
+/// Serves connections until `shutdown` resolves, then shuts down in two phases.
+///
+/// At most the gateway's `max_connections` are open at once: at the limit,
+/// accepting stops until one closes, and new connections wait in the
+/// kernel's listen queue, whose own limit refuses the rest. Closing them
+/// instead would answer each with work and invite an immediate retry.
+///
+/// The phases:
 ///
 /// 1. Draining, for the gateway's drain delay: `/readyz` fails, but new
 ///    connections and requests are still served, so load balancers stop
@@ -71,9 +79,12 @@ pub async fn serve(
     http.max_buf_size(MAX_CONNECTION_BUFFER);
     // Owns every connection task; aborted after the grace period.
     let mut connections = JoinSet::new();
+    // One permit per open connection, released when its task ends.
+    let slots = Arc::new(Semaphore::new(gateway.max_connections));
     // `connections` is an argument, not a capture, so `accept_until` can also
     // reap from it. Returns whether to pause.
     let accept = |connections: &mut JoinSet<_>,
+                  slot: OwnedSemaphorePermit,
                   accepted: std::io::Result<(TcpStream, SocketAddr)>| {
         // Accept errors (file descriptor exhaustion, say) are transient: they
         // must not stop the server.
@@ -96,14 +107,19 @@ pub async fn serve(
             async move { Ok::<_, Infallible>(gateway.handle(req, &log, &auth).await) }
         });
         // Watched by `graceful` so shutdown can ask it to finish its current request.
-        connections.spawn(graceful.watch(http.serve_connection(io, service)));
+        let connection = graceful.watch(http.serve_connection(io, service));
+        connections.spawn(async move {
+            let served = connection.await;
+            drop(slot);
+            served
+        });
         false
     };
 
-    accept_until(&listener, &mut connections, &accept, shutdown).await;
+    accept_until(&listener, &slots, &mut connections, &accept, shutdown).await;
     gateway.start_draining();
     let drain = tokio::time::sleep(gateway.drain_delay);
-    accept_until(&listener, &mut connections, &accept, drain).await;
+    accept_until(&listener, &slots, &mut connections, &accept, drain).await;
 
     drop(listener);
     let _ = tokio::time::timeout(gateway.shutdown_grace, graceful.shutdown()).await;
@@ -118,21 +134,35 @@ pub async fn serve(
 }
 
 /// Serves `listener` with `accept` until `stop` resolves, reaping finished
-/// connections so the set stays as large as the live ones.
+/// connections so the set stays as large as the live ones. A connection is
+/// accepted only with one of `slots`, which its task holds.
 async fn accept_until<T: 'static>(
     listener: &TcpListener,
+    slots: &Arc<Semaphore>,
     connections: &mut JoinSet<T>,
-    accept: &impl Fn(&mut JoinSet<T>, std::io::Result<(TcpStream, SocketAddr)>) -> bool,
+    accept: &impl Fn(
+        &mut JoinSet<T>,
+        OwnedSemaphorePermit,
+        std::io::Result<(TcpStream, SocketAddr)>,
+    ) -> bool,
     stop: impl Future<Output = ()>,
 ) {
     tokio::pin!(stop);
-    // Cancel safety: `accept` and `join_next` lose nothing when another
-    // branch wins; a pause delays the other branches by at most
+    // Cancel safety: a slot dropped before its accept returns is released,
+    // and `acquire_owned`, `accept`, and `join_next` lose nothing when
+    // another branch wins; a pause delays the other branches by at most
     // ACCEPT_ERROR_PAUSE.
     loop {
         tokio::select! {
-            accepted = listener.accept() => if accept(connections, accepted) {
-                tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
+            accepted = async {
+                // The semaphore is never closed, so this waits for a slot.
+                let slot = Arc::clone(slots).acquire_owned().await;
+                (slot, listener.accept().await)
+            } => {
+                let (Ok(slot), accepted) = accepted else { break };
+                if accept(connections, slot, accepted) {
+                    tokio::time::sleep(ACCEPT_ERROR_PAUSE).await;
+                }
             },
             Some(_) = connections.join_next() => {}
             () = &mut stop => break,

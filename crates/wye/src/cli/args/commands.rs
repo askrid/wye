@@ -216,6 +216,15 @@ pub const COMMANDS: &[Command] = &[
             Opt::value("session", "id", "The client's session id"),
             Opt::value("endpoint", "path", "The endpoint (default: /v1/messages)"),
             Opt {
+                short: Some('H'),
+                repeats: true,
+                ..Opt::value(
+                    "header",
+                    "'name: value'",
+                    "A request header (default: a local client's Host, the listen address)",
+                )
+            },
+            Opt {
                 repeats: true,
                 ..Opt::value(
                     "target-model",

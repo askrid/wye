@@ -37,6 +37,36 @@ fn a_definition_reads_back_as_written() {
     );
     assert!(unit.contains("StandardOutput=append:/home/a%%b/.wye/usage.jsonl\n"));
     assert!(unit.contains("StandardError=append:/home/a%%b/.wye/wye.log\n"));
+    // Room for a client and an upstream connection per max_connections.
+    assert!(unit.contains("\nLimitNOFILE=65536\n"), "{unit}");
+    for limits in ["SoftResourceLimits", "HardResourceLimits"] {
+        assert!(
+            plist.contains(&format!(
+                "<key>{limits}</key>\n  <dict>\n    \
+                 <key>NumberOfFiles</key><integer>65536</integer>\n  </dict>\n"
+            )),
+            "{plist}"
+        );
+    }
+}
+
+/// A definition an older wye wrote, without the open-file limit, is still
+/// ours: `restart` rewrites it, `uninstall` removes it.
+#[test]
+fn a_definition_without_the_open_file_limit_reads_back() {
+    for manager in [Manager::Launchd, Manager::Systemd] {
+        let written = service("/home/a");
+        let text = written.definition(manager).unwrap();
+        let older: String = match manager {
+            Manager::Launchd => {
+                let (head, rest) = text.split_once("  <key>SoftResourceLimits</key>").unwrap();
+                format!("{head}{}", &rest[rest.find("</dict>\n</plist>").unwrap()..])
+            }
+            Manager::Systemd => text.replace("LimitNOFILE=65536\n", ""),
+        };
+        assert!(!older.contains("65536"), "{older}");
+        assert_eq!(Service::parse(manager, &older), Some(written), "{older}");
+    }
 }
 
 #[test]

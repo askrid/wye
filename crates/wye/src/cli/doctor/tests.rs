@@ -19,7 +19,7 @@ async fn reports_each_problem_and_what_works() {
          provider_key_env = \"WYE_DOCTOR_SURELY_UNSET\"\n"
     ))
     .unwrap();
-    let (report, ok) = doctor(&config, Path::new(".")).await;
+    let (report, ok) = doctor(&config, Path::new("."), None).await;
     assert!(!ok, "{report}");
     assert!(
         report.contains("ok    upstream up: $PATH set (sent as x-api-key)"),
@@ -53,7 +53,7 @@ async fn a_bedrock_upstream_needs_the_anthropic_path() {
          base_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"PATH\"\n",
     )
     .unwrap();
-    let (report, _) = doctor(&config, Path::new(".")).await;
+    let (report, _) = doctor(&config, Path::new("."), None).await;
     assert!(
         report.contains("ok    upstream right: Bedrock Messages endpoint path"),
         "{report}"
@@ -67,30 +67,65 @@ async fn a_bedrock_upstream_needs_the_anthropic_path() {
     );
 }
 
-/// Checked without a network: the rule reads only the config.
-#[test]
-fn otlp_headers_over_plain_http_beyond_this_machine_are_a_problem() {
-    let config = |endpoint: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n\
-             [telemetry]\notlp_endpoint = \"{endpoint}\"\notlp_headers_env = \"PATH\"\n"
-        ))
-        .unwrap()
+/// A key file other users can read lends them the key; `serve` warns of
+/// it, doctor fails.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_key_file_open_to_others_is_a_problem() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = wye_testkit::TempDir::new("doctor-modes");
+    let key = dir.join("key");
+    std::fs::write(&key, "sk-test\n").unwrap();
+    let signing = dir.join("signing.key");
+    std::fs::write(&signing, "not checked for its contents\n").unwrap();
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_file = \"key\"\n",
+    )
+    .unwrap();
+    let chmod = |path: &Path, mode| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
     };
-    let in_clear = |endpoint: &str| {
-        let config = config(endpoint);
-        super::headers_in_clear(config.telemetry.as_ref().unwrap()).map(|check| check.unwrap_err())
-    };
-    assert_eq!(
-        in_clear("http://collector.example:4318").as_deref(),
-        Some(
-            "telemetry: $PATH would cross the network in the clear to collector.example:4318; \
-             use https, or a collector on this machine"
-        )
-    );
-    assert_eq!(in_clear("https://collector.example:4318"), None);
-    assert_eq!(in_clear("http://127.0.0.1:4318"), None);
+    for mode in [0o644, 0o640, 0o604, 0o620] {
+        chmod(&key, mode);
+        chmod(&signing, mode);
+        let (report, ok) = doctor(&config, &dir, Some(&signing)).await;
+        assert!(!ok, "{report}");
+        let key = key.display();
+        assert!(
+            report.contains(&format!(
+                "FAIL  routes.claude.upstreams[0]: provider_key_file {key} is open to group \
+                 or others (mode {mode:o}): chmod 600 {key}"
+            )),
+            "{report}"
+        );
+        let signing = signing.display();
+        assert!(
+            report.contains(&format!(
+                "FAIL  signing key {signing} is open to group or others (mode {mode:o}): \
+                 chmod 600 {signing}"
+            )),
+            "{report}"
+        );
+        assert_eq!(
+            crate::key_file_warnings(&config, &dir),
+            [format!(
+                "provider_key_file {key} is open to group or others (mode {mode:o}): \
+                 chmod 600 {key}"
+            )]
+        );
+    }
+    for mode in [0o600, 0o400] {
+        chmod(&key, mode);
+        chmod(&signing, mode);
+        let (report, _) = doctor(&config, &dir, Some(&signing)).await;
+        assert!(
+            report.contains("ok    routes.claude.upstreams[0]: key read (sent as x-api-key)"),
+            "{report}"
+        );
+        assert!(!report.contains("signing key"), "{report}");
+        assert!(crate::key_file_warnings(&config, &dir).is_empty());
+    }
 }
 
 /// doctor resolves a key as `serve` does: a key file whose contents cannot
@@ -104,7 +139,7 @@ async fn a_key_serve_would_refuse_fails_the_check() {
          [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_file = \"key\"\n",
     )
     .unwrap();
-    let (report, ok) = doctor(&config, &dir).await;
+    let (report, ok) = doctor(&config, &dir, None).await;
     assert!(!ok, "{report}");
     assert!(
         report.contains(

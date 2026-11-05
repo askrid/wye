@@ -123,3 +123,86 @@ fn the_ceiling_is_the_stricter_one_and_only_where_output_is_generated() {
     assert_eq!(checks(Some(100), false), None, "count_tokens");
     assert_eq!(checks(None, true), None);
 }
+
+fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for (name, value) in pairs {
+        headers.append(*name, value.parse().unwrap());
+    }
+    headers
+}
+
+#[test]
+fn a_local_client_names_a_loopback_host_with_or_without_a_port() {
+    for host in [
+        "localhost",
+        "localhost:8080",
+        "LOCALHOST:8080",
+        "127.0.0.1",
+        "127.0.0.1:8080",
+        "[::1]",
+        "[::1]:8080",
+    ] {
+        assert_eq!(
+            check_local_client(&headers(&[("host", host)])),
+            Ok(()),
+            "{host}"
+        );
+    }
+}
+
+/// DNS rebinding: the attacker's name resolves to loopback, and the browser
+/// sends that name in `Host`.
+#[test]
+fn any_other_host_is_refused_as_a_web_page() {
+    for host in [
+        "evil.example",
+        "evil.example:8080",
+        "localhost.evil.example:8080",
+        "127.0.0.1.nip.io:8080",
+        "192.168.1.10:8080",
+        "[::2]:8080",
+        "::1",
+        "[::1]x",
+        "[::1",
+        "localhost:80a",
+        "",
+    ] {
+        assert_eq!(
+            check_local_client(&headers(&[("host", host)])),
+            Err(Refusal::WebPage),
+            "{host:?}"
+        );
+    }
+    assert_eq!(check_local_client(&HeaderMap::new()), Err(Refusal::WebPage));
+}
+
+#[test]
+fn an_origin_or_a_cross_site_fetch_is_refused_even_on_a_loopback_host() {
+    let host = ("host", "127.0.0.1:8080");
+    for page in [
+        ("origin", "http://evil.example"),
+        ("origin", "null"),
+        ("origin", "http://localhost:8080"),
+        ("sec-fetch-site", "cross-site"),
+        ("sec-fetch-site", "same-site"),
+        ("sec-fetch-site", "same-origin"),
+    ] {
+        let refused = check_local_client(&headers(&[host, page]));
+        assert_eq!(refused, Err(Refusal::WebPage), "{page:?}");
+        assert_eq!(refused.unwrap_err().status(), 403);
+    }
+    // A navigation the user typed sends `none`.
+    assert_eq!(
+        check_local_client(&headers(&[host, ("sec-fetch-site", "none")])),
+        Ok(())
+    );
+    assert_eq!(
+        check_local_client(&headers(&[
+            host,
+            ("sec-fetch-site", "none"),
+            ("sec-fetch-site", "cross-site")
+        ])),
+        Err(Refusal::WebPage)
+    );
+}

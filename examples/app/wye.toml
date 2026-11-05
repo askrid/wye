@@ -101,6 +101,7 @@ input = "0.10"
 output = "0.50"
 # gpt-5.5 has no entry yet, so its requests cost "unknown", never $0.
 
+# To an OpenTelemetry collector beside the gateway; one elsewhere takes https.
 [telemetry]
-otlp_endpoint = "http://otel-collector:4318"
+otlp_endpoint = "http://localhost:4318"
 service_name = "wye-app"

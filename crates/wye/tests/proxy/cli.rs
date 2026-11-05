@@ -269,7 +269,7 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
         let mut request = std::net::TcpStream::connect(addr).unwrap();
         std::io::Write::write_all(
             &mut request,
-            b"POST /v1/messages HTTP/1.1\r\nhost: wye\r\nx-api-key: k\r\n\
+            b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\nx-api-key: k\r\n\
               content-length: 2\r\nconnection: close\r\n\r\n{}",
         )
         .unwrap();
@@ -631,4 +631,27 @@ fn help_answers_the_usual_ways_of_asking() {
         leading.contains("options go after the command"),
         "{leading}"
     );
+}
+
+/// The documented install builds this version's release tag: a version bump
+/// without the docs fails here instead of sending users to an old tag.
+#[test]
+fn the_documented_install_names_this_versions_tag() {
+    let tag = concat!("--tag v", env!("CARGO_PKG_VERSION"), " ");
+    for (name, text) in [
+        ("README.md", include_str!("../../../../README.md")),
+        ("docs/guide.md", include_str!("../../../../docs/guide.md")),
+    ] {
+        let installs: Vec<&str> = text
+            .lines()
+            .filter(|l| l.contains("cargo install --git https://github.com/askrid/wye"))
+            .collect();
+        assert!(!installs.is_empty(), "{name}: no install command");
+        for line in installs {
+            assert!(
+                line.contains(tag),
+                "{name}: `{line}` should install `{tag}`"
+            );
+        }
+    }
 }

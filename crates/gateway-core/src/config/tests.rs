@@ -112,6 +112,34 @@ fn auth_allows_network_listen_and_validates_keys() {
     ));
 }
 
+/// Gateway tokens cannot be revoked one by one, so how long one may live
+/// has a hard cap.
+#[test]
+fn gateway_token_lifetimes_are_capped_at_30_days() {
+    let with_ttl = |secs: u64| {
+        Config::from_toml_str(&format!(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
+             base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+             [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\nmax_gateway_token_ttl_secs = {secs}\n\
+             [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
+        ))
+    };
+    let ttl = |secs| with_ttl(secs).unwrap().auth.unwrap().max_gateway_token_ttl;
+    assert_eq!(ttl(30 * 24 * 3600), Duration::from_secs(2_592_000));
+    assert_eq!(ttl(3600), Duration::from_secs(3600));
+    assert_eq!(
+        with_ttl(30 * 24 * 3600 + 1).unwrap_err(),
+        ConfigError::TooLong {
+            field: "auth.max_gateway_token_ttl_secs",
+            max: 2_592_000
+        }
+    );
+    assert_eq!(
+        with_ttl(0).unwrap_err(),
+        ConfigError::Zero("auth.max_gateway_token_ttl_secs")
+    );
+}
+
 #[test]
 fn auth_models_are_validated_patterns() {
     let with_models = |models: &str| {
@@ -257,6 +285,33 @@ fn lifecycle_defaults_and_zero_limits_rejected() {
 }
 
 #[test]
+fn connections_default_to_twice_the_requests_and_fit_them() {
+    assert_eq!(parse(FORWARDING).unwrap().server.max_connections, 20_000);
+    let connections = |lines: &str| server(lines).map(|c| c.server.max_connections);
+    assert_eq!(connections("max_concurrent_requests = 100"), Ok(200));
+    assert_eq!(
+        connections("max_concurrent_requests = 100\nmax_connections = 100"),
+        Ok(100)
+    );
+    assert_eq!(
+        connections("max_concurrent_requests = 1000000"),
+        Ok(MAX_CONNECTIONS)
+    );
+    assert_eq!(
+        connections("max_concurrent_requests = 100\nmax_connections = 99"),
+        Err(ConfigError::Invalid(
+            "server.max_connections must be at least server.max_concurrent_requests"
+        ))
+    );
+    assert_eq!(
+        connections("max_connections = 1048577"),
+        Err(ConfigError::Invalid(
+            "server.max_connections must be at most 1048576"
+        ))
+    );
+}
+
+#[test]
 fn cache_diagnostics_require_a_key_variable() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
                 base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
@@ -344,16 +399,16 @@ fn telemetry_endpoint_gets_the_logs_path() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
                 base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
     let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
-    let telemetry = with("otlp_endpoint = \"http://collector:4318\"")
+    let telemetry = with("otlp_endpoint = \"http://localhost:4318\"")
         .unwrap()
         .telemetry
         .unwrap();
-    assert_eq!(telemetry.otlp_logs_uri, "http://collector:4318/v1/logs");
+    assert_eq!(telemetry.otlp_logs_uri, "http://localhost:4318/v1/logs");
     assert_eq!(
         telemetry.otlp_metrics_uri,
-        "http://collector:4318/v1/metrics"
+        "http://localhost:4318/v1/metrics"
     );
-    assert_eq!(telemetry.otlp_traces_uri, "http://collector:4318/v1/traces");
+    assert_eq!(telemetry.otlp_traces_uri, "http://localhost:4318/v1/traces");
     assert_eq!(telemetry.service_name, "wye");
     assert_eq!(telemetry.otlp_headers_env, None);
     let telemetry = with(
@@ -373,6 +428,9 @@ fn telemetry_endpoint_gets_the_logs_path() {
         "otlp_endpoint = \"/relative\"",
         // Secrets come from otlp_headers_env, never from config.
         "otlp_endpoint = \"https://user:secret@collector\"",
+        // Records and OTLP headers would cross the network in the clear.
+        "otlp_endpoint = \"http://collector:4318\"",
+        "otlp_endpoint = \"http://10.0.0.5:4318\"",
     ] {
         assert!(
             matches!(with(bad), Err(ConfigError::InvalidUrl { .. })),
@@ -380,6 +438,17 @@ fn telemetry_endpoint_gets_the_logs_path() {
         );
     }
     assert!(Config::from_toml_str(base).unwrap().telemetry.is_none());
+    for local in ["http://127.0.0.1:4318", "http://[::1]:4318"] {
+        let endpoint = format!("otlp_endpoint = \"{local}\"");
+        assert!(with(&endpoint).is_ok(), "{local}");
+    }
+    assert_eq!(
+        with("otlp_endpoint = \"http://collector:4318\"")
+            .unwrap_err()
+            .to_string(),
+        "telemetry.otlp_endpoint \"http://collector:4318\": plain http is allowed only for \
+         loopback hosts"
+    );
 }
 
 #[test]

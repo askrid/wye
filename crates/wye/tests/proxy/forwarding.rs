@@ -82,6 +82,53 @@ async fn forward_caller_credential_keeps_caller_headers() {
     assert!(headers.get("x-api-key").is_none());
 }
 
+/// Response headers naming the provider key's organization and project.
+const ACCOUNT_HEADERS: [&str; 3] = [
+    "anthropic-organization-id",
+    "openai-organization",
+    "openai-project",
+];
+
+/// An upstream that names its account in every response.
+fn naming_its_account() -> Handler {
+    answering(|| {
+        let mut res = full(StatusCode::OK, "{}");
+        for name in ACCOUNT_HEADERS {
+            res.headers_mut()
+                .insert(name, "org-operator".parse().unwrap());
+        }
+        res.headers_mut()
+            .insert("request-id", "req_1".parse().unwrap());
+        res
+    })
+}
+
+/// The operator's organization is not the token holder's business; in
+/// passthrough the account is the caller's own.
+#[tokio::test]
+async fn the_provider_keys_account_is_not_shown_to_callers() {
+    let keyed = Harness::api_key(naming_its_account()).await;
+    let res = keyed.send(messages(), "{}").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    for name in ACCOUNT_HEADERS {
+        assert!(res.headers().get(name).is_none(), "{name}");
+    }
+    assert_eq!(res.headers()["request-id"], "req_1");
+
+    let passthrough = Harness::start(
+        naming_its_account(),
+        "forward_caller_credential = true",
+        UpstreamAuth::ForwardCaller,
+    )
+    .await;
+    let res = passthrough
+        .send(messages().header("x-api-key", "caller-key"), "{}")
+        .await;
+    for name in ACCOUNT_HEADERS {
+        assert_eq!(res.headers()[name], "org-operator", "{name}");
+    }
+}
+
 #[tokio::test]
 async fn preserves_upstream_errors() {
     let handler: Handler = Arc::new(|_| {

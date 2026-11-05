@@ -11,7 +11,7 @@ use std::{
 
 use bytes::Bytes;
 use gateway_core::{
-    admission::Refusal,
+    admission::{self, Refusal},
     alias::Aliases,
     api::{self, Api},
     config::{Config, DEFAULT_SAMPLE_PERCENT, Provider, Routes, UpgradeCheck},
@@ -19,7 +19,7 @@ use gateway_core::{
     pricing::Pricing,
     prompt::HashKey,
     route::Route,
-    token::{Identity, TokenError, Verifier},
+    token::{Identity, Verifier},
 };
 use http::{HeaderName, Method, Request, Response, StatusCode};
 use http_body_util::{Either, Full};
@@ -38,7 +38,7 @@ mod admit;
 mod forward;
 mod responses;
 
-use responses::{empty, unauthorized};
+use responses::empty;
 
 pub(crate) type ResBody = Either<Full<Bytes>, Observed<UpstreamBody<Incoming>>>;
 
@@ -83,6 +83,8 @@ pub struct Gateway {
     in_flight: Gauge,
     max_concurrent_requests: usize,
     draining: AtomicBool,
+    /// Open client connections `serve` accepts at once.
+    pub(crate) max_connections: usize,
     pub(crate) drain_delay: Duration,
     pub(crate) shutdown_grace: Duration,
     pub(crate) client_write_timeout: Duration,
@@ -165,6 +167,7 @@ impl Gateway {
             in_flight: Gauge::default(),
             max_concurrent_requests: config.server.max_concurrent_requests,
             draining: AtomicBool::new(false),
+            max_connections: config.server.max_connections,
             drain_delay: config.server.drain_delay,
             shutdown_grace: config.server.shutdown_grace,
             client_write_timeout: config.server.client_write_timeout,
@@ -172,16 +175,19 @@ impl Gateway {
     }
 
     /// The caller's identity when gateway tokens are configured, `None`
-    /// when they are not; `Err` for a missing or invalid token.
+    /// when they are not; `Err` for a missing or invalid token, or, without
+    /// tokens, for a request a web page may have sent.
     fn identify(
         &self,
         headers: &http::HeaderMap,
         connection: &ConnectionAuth,
-    ) -> Result<Option<Arc<Identity>>, TokenError> {
-        self.verifier
-            .as_ref()
-            .map(|verifier| authenticate(verifier, headers, connection))
-            .transpose()
+    ) -> Result<Option<Arc<Identity>>, Refusal> {
+        match &self.verifier {
+            Some(verifier) => authenticate(verifier, headers, connection)
+                .map(Some)
+                .map_err(|_| Refusal::Unauthenticated),
+            None => admission::check_local_client(headers).map(|()| None),
+        }
     }
 
     /// Endpoints Wye answers itself.
@@ -271,23 +277,23 @@ impl Gateway {
         };
         match self.identify(req.headers(), connection) {
             Ok(identity) => info.identity = identity,
-            Err(_) => return log.refused(info, unauthorized(api)),
+            Err(refusal) => return log.refused(info, responses::refuse(api, &refusal)),
         }
         self.forward(req, info, log).await
     }
 
-    /// The catalog this caller's credential may use. Authenticated like a
-    /// proxied request when `[auth]` is set, since the answer reveals the
-    /// credential's permissions. Not a usage record: nothing reaches the
-    /// provider.
+    /// The catalog this caller's credential may use. Admitted like a
+    /// proxied request, since the answer reveals the credential's
+    /// permissions. Not a usage record: nothing reaches the provider.
     fn list_models(
         &self,
         catalog: &ModelCatalog,
         req: &Request<Incoming>,
         connection: &ConnectionAuth,
     ) -> Response<ResBody> {
-        let Ok(identity) = self.identify(req.headers(), connection) else {
-            return unauthorized(Api::Messages);
+        let identity = match self.identify(req.headers(), connection) {
+            Ok(identity) => identity,
+            Err(refusal) => return responses::refuse(Api::Messages, &refusal),
         };
         let body = catalog.list(
             identity.as_ref().and_then(|i| i.models.as_deref()),

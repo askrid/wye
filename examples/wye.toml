@@ -15,7 +15,10 @@
 # from environment variables or files.
 
 [server]
-listen = "127.0.0.1:8080"              # beyond loopback only with [auth]
+# Beyond loopback only with [auth]. Without [auth], every local user and
+# program may use the gateway, but no web page: requests need a loopback Host
+# (localhost, 127.0.0.1, [::1]) and no Origin (docs/policy.md).
+listen = "127.0.0.1:8080"
 max_request_body_bytes = 33554432      # Anthropic's request size limit
 # Request bytes held while Wye reads `model` (the hold), all requests
 # together; beyond it, an overload error. A chunk counts at least 1 KiB, for
@@ -29,6 +32,12 @@ max_total_kept_bytes = 268435456
 # Requests in flight before new ones get an overload error (529 on the
 # Messages API, 503 on the OpenAI APIs):
 max_concurrent_requests = 10000
+# Open client connections, idle ones included; at the limit, new connections
+# wait in the kernel's listen queue until one closes. Default twice
+# max_concurrent_requests; at least that, at most 1048576. Needs an open-file
+# limit about twice this (a client and an upstream connection each): `wye
+# service` sets 65536; `wye serve` keeps the one it inherits (`ulimit -n`):
+max_connections = 20000
 # Behind a load balancer: keep serving with /readyz failing this long after
 # SIGTERM, so traffic moves away before connections are refused:
 drain_delay_secs = 0
@@ -63,7 +72,8 @@ weight = 1                             # share of sessions, 1 to 1000
 base_url = "https://api.anthropic.com" # without /v1; http only for loopback hosts
 provider_key_env = "ANTHROPIC_API_KEY"
 # Or read the provider key from a mounted secret file (Docker or Kubernetes
-# secrets, systemd credentials):
+# secrets, systemd credentials), readable only by its owner (`wye doctor`
+# fails, and `serve` warns, when group or others may open it):
 # provider_key_file = "/run/secrets/anthropic_api_key"
 # Or forward each caller's own credential: a claude.ai login, or an API key,
 # which bills the API (a route with one upstream, loopback only, no [auth];
@@ -115,13 +125,15 @@ http_version = "auto"
 
 # Gateway tokens; incompatible with forward_caller_credential. `wye init
 # --shared` writes this section and a signing key; issue gateway tokens with
-# it offline:
+# it offline, away from the hosts that serve (`serve` never reads the key):
 #   wye token issue alice --ttl 1d
 # Claude Code sends one with ANTHROPIC_AUTH_TOKEN (or ANTHROPIC_API_KEY).
 # [auth]
 # issuer = "wye"
 # audience = "wye-prod"
-# max_gateway_token_ttl_secs = 604800  # longest accepted exp - iat: one week
+# Longest accepted exp - iat: one week; at most 2592000 (30 days), since a
+# gateway token cannot be revoked before it expires:
+# max_gateway_token_ttl_secs = 604800
 # Model permissions: the models any gateway token may use (exact names, or
 # prefixes ending in *); a gateway token issued with --models narrows this
 # further. Omit to allow all:
@@ -169,7 +181,8 @@ http_version = "auto"
 # Usage records as OTLP logs, metrics, and per-session traces (OTLP/HTTP,
 # JSON) to a collector or an OpenTelemetry backend that accepts OTLP
 # directly, at {otlp_endpoint}/v1/logs, /v1/metrics, and /v1/traces. Records
-# also stay in the usage log.
+# also stay in the usage log. Plain http only to a loopback host, as for
+# base_url: beyond this machine, records and OTLP headers need https.
 # [telemetry]
 # otlp_endpoint = "http://localhost:4318"  # no credentials in the URL
 # otlp_headers_env = "OTLP_HEADERS"    # extra headers, "key=value,key2=value2": the API key goes here

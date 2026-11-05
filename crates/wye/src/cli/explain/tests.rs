@@ -7,7 +7,17 @@ const NOW: u64 = 1_800_000_000;
 
 /// `explain` for a `/v1/messages` request without a session, at `NOW`.
 fn explain_messages(config: &Config, caller: CallerToken<'_>, body: &[u8]) -> Explanation {
-    explain(config, "/v1/messages", caller, None, body, NOW, &[])
+    explain(config, "/v1/messages", caller, &none(), body, NOW, &[])
+}
+
+/// No headers: a local client's, without a session.
+fn none() -> HeaderMap {
+    HeaderMap::new()
+}
+
+/// A local client's headers for `path`, with the session id `id`.
+fn session(path: &str, id: &str) -> HeaderMap {
+    request_headers(path, Some(id), &[]).unwrap()
 }
 
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
@@ -53,7 +63,7 @@ fn explains_forwarding_and_each_refusal() {
         &config,
         "/v1/messages",
         CallerToken::Token(&t, &verifier(&config)),
-        Some("s-1"),
+        &session("/v1/messages", "s-1"),
         haiku,
         NOW,
         &[],
@@ -89,7 +99,7 @@ fn explains_forwarding_and_each_refusal() {
             &config,
             "/v1/messages",
             CallerToken::Token(&t, &verifier(&config)),
-            None,
+            &none(),
             haiku,
             NOW + 601,
             &[]
@@ -117,7 +127,7 @@ fn explains_forwarding_and_each_refusal() {
             &config,
             "/v1/other",
             CallerToken::Token(&t, &verifier(&config)),
-            None,
+            &none(),
             haiku,
             NOW,
             &[]
@@ -128,7 +138,7 @@ fn explains_forwarding_and_each_refusal() {
         &config,
         "/v1/other",
         CallerToken::None,
-        None,
+        &none(),
         haiku,
         NOW,
         &[],
@@ -213,7 +223,7 @@ fn explains_upgrade_issues_per_target_without_refusing() {
         &config,
         "/v1/messages",
         CallerToken::None,
-        None,
+        &none(),
         body,
         NOW,
         &["claude-haiku-4-5"],
@@ -242,7 +252,7 @@ fn shows_the_upstream_a_session_goes_to() {
             &config,
             "/v1/messages",
             CallerToken::None,
-            Some(session),
+            &self::session("/v1/messages", session),
             b"{}",
             NOW,
             &[],
@@ -318,8 +328,17 @@ fn explains_responses_on_the_openai_route() {
             max_output_tokens: None,
         })
     };
-    let run =
-        |path: &str, body: &[u8]| explain(&config, path, dev(), Some("codex-1"), body, NOW, &[]);
+    let run = |path: &str, body: &[u8]| {
+        explain(
+            &config,
+            path,
+            dev(),
+            &session(path, "codex-1"),
+            body,
+            NOW,
+            &[],
+        )
+    };
     let ok = run(
         "/v1/responses",
         br#"{"model":"gpt-5.5","max_output_tokens":500,"input":[]}"#,
@@ -393,7 +412,7 @@ fn reads_the_body_in_the_servers_order() {
     )
     .unwrap();
     let anonymous = |path: &str, body: &[u8]| {
-        explain(&aliased, path, CallerToken::None, None, body, NOW, &[]).refused
+        explain(&aliased, path, CallerToken::None, &none(), body, NOW, &[]).refused
     };
     // With an alias alone the server reads only to the model: the provider
     // answers the rest.
@@ -412,7 +431,7 @@ fn reads_the_body_in_the_servers_order() {
     let t = token(&key, Some(&["claude-haiku-*"]));
     let status = |body: &[u8]| {
         let credential = CallerToken::Token(&t, &verifier);
-        explain(&config, "/v1/messages", credential, None, body, NOW, &[])
+        explain(&config, "/v1/messages", credential, &none(), body, NOW, &[])
             .refused
             .map(|(status, ..)| status)
     };
@@ -430,7 +449,7 @@ fn reads_the_body_in_the_servers_order() {
     let verifier = self::verifier(&capped);
     let credential = CallerToken::Token(&t, &verifier);
     let body = br#"{"model":"claude-haiku-4-5","max_tokens":4096.0}"#;
-    let refused = explain(&capped, "/v1/messages", credential, None, body, NOW, &[]).refused;
+    let refused = explain(&capped, "/v1/messages", credential, &none(), body, NOW, &[]).refused;
     assert_eq!(refused.map(|(status, ..)| status), Some(400));
 }
 
@@ -446,7 +465,8 @@ fn chat_completions_carries_no_session_to_route_by() {
         &config,
         "/v1/chat/completions",
         CallerToken::None,
-        Some("s-1"),
+        // Both agents' session headers: Chat Completions reads neither.
+        &request_headers("/v1/messages", Some("s-1"), &["session-id: s-1"]).unwrap(),
         br#"{"model":"gpt-5"}"#,
         NOW,
         &[],
@@ -467,7 +487,10 @@ fn a_passthrough_names_the_callers_credential() {
     .unwrap();
     let report = explain_messages(&config, CallerToken::None, b"{}").report();
     assert!(
-        report.contains("\ngateway token: not required (no [auth])\n"),
+        report.contains(
+            "\ngateway token: not required (no [auth]); a local client: a loopback Host, \
+             no Origin\n"
+        ),
         "{report}"
     );
     assert!(
@@ -475,4 +498,58 @@ fn a_passthrough_names_the_callers_credential() {
         "{report}"
     );
     assert!(report.ends_with("decision: forward\n"), "{report}");
+}
+
+/// Without `[auth]`, a request a web page may have sent is refused, as the
+/// server refuses it; without headers, the request is a local client's.
+#[test]
+fn a_web_pages_request_is_refused_without_auth() {
+    let config = Config::from_toml_str(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+    )
+    .unwrap();
+    let with = |lines: &[&str]| {
+        let headers = request_headers("/v1/messages", None, lines).unwrap();
+        explain(
+            &config,
+            "/v1/messages",
+            CallerToken::None,
+            &headers,
+            b"{}",
+            NOW,
+            &[],
+        )
+    };
+    assert_eq!(with(&[]).refused, None);
+    assert_eq!(with(&["Host: localhost:8080"]).refused, None);
+    for lines in [
+        &["Host: rebound.evil.example:8080"][..],
+        &["Origin: http://evil.example"][..],
+        &["Sec-Fetch-Site: cross-site"][..],
+    ] {
+        let out = with(lines);
+        let (status, kind, message) = out.refused.clone().unwrap();
+        assert_eq!((status, kind), (403, "permission_error"), "{lines:?}");
+        assert_eq!(Some(&*message), Refusal::WebPage.fixed_message());
+        assert!(
+            out.report()
+                .contains("decision: refuse 403 permission_error: a gateway without [auth]")
+        );
+    }
+}
+
+#[test]
+fn request_headers_take_curls_form_and_place_the_session() {
+    let headers = request_headers(
+        "/v1/responses?x=1",
+        Some("s-1"),
+        &["Origin: http://evil.example", "x-a:b"],
+    )
+    .unwrap();
+    assert_eq!(headers["origin"], "http://evil.example");
+    assert_eq!(headers["x-a"], "b");
+    assert_eq!(headers["session-id"], "s-1");
+    assert!(request_headers("/v1/messages", None, &["no colon"]).is_err());
+    assert!(request_headers("/v1/messages", None, &["bad name: x"]).is_err());
 }

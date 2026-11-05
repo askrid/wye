@@ -36,7 +36,7 @@ Infrastructure provides service discovery, TLS/ingress, scheduling, replica coun
 ## Request path
 
 1. Validate endpoint, framing, and request size.
-2. Verify the signed [gateway token](glossary.md#access) against its issuer's keys in config.
+2. Verify the signed [gateway token](glossary.md#access) against its issuer's keys in config; without `[auth]`, refuse a request a web page may have sent ([policy.md](policy.md#a-gateway-without-auth)).
 3. Enforce static model permissions and output-token ceilings ([policy.md](policy.md)).
 4. Resolve a model alias; select the route that serves this endpoint natively, and among its [upstreams](glossary.md#requests-and-where-they-go) the one policy picks (`cache_affine` or `ordered`).
 5. Apply allowlisted rewrites (the [served model](glossary.md#models), the provider's model id, [size-aware model routing](glossary.md#planned)).
@@ -144,7 +144,7 @@ A body wrapper emits one record when the body is dropped, so every outcome is re
 - **Non-streaming JSON** (all three APIs) carries `model` and `usage` as top-level members after the generated content. A constant-memory lexer keeps those and counts tool calls among `content` blocks or `output` items; Chat's sit in `choices` and are not counted. A body cut off before `usage` is `unknown`.
 - Error responses, `count_tokens` (which generates nothing), and responses that are neither SSE nor JSON carry no usage: `none`.
 
-**Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured [provider key](glossary.md#requests-and-where-they-go), except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough); with the provider key, also drop the caller's `OpenAI-Organization` and `OpenAI-Project`, which would choose what the provider key bills. Forward only appropriate end-to-end headers.
+**Headers and destination.** Strip hop-by-hop headers, including those named by `Connection`. Replace caller authorization (`Authorization` or `x-api-key`) with the configured [provider key](glossary.md#requests-and-where-they-go), except in explicit loopback [caller-credential passthrough](policy.md#caller-credential-passthrough); with the provider key, also drop the caller's `OpenAI-Organization` and `OpenAI-Project`, which would choose what the provider key bills, and the response's `anthropic-organization-id`, `openai-organization`, and `openai-project`, which name the operator's account to the token holder (in passthrough the account is the caller's, and they stay). Forward only appropriate end-to-end headers.
 
 Replace `accept-encoding` with `identity`: Claude Code asks for Brotli and Anthropic complies, which would hide usage from the [observer](#usage-extraction); an uncompressed response adds only bytes, while decompressing a copy adds CPU overhead per event ([measured](research.md#performance-techniques)).
 
@@ -172,7 +172,7 @@ Upstreams are configured per route (`[[routes.claude.upstreams]]` or `[[routes.o
 
 Provider prompt caches are per account (and sometimes per region), and cached input is priced at a large discount. Upstream selection that spreads one session across accounts or providers forfeits that discount.
 
-When a route has several upstreams, Wye chooses by weighted rendezvous hashing (`gateway-core/src/route.rs`), keyed by the client's session id (Claude Code's or Codex's), otherwise the token subject, otherwise nothing (without `[auth]` Wye serves one loopback user, so every such request picks the same upstream).
+When a route has several upstreams, Wye chooses by weighted rendezvous hashing (`gateway-core/src/route.rs`), keyed by the client's session id (Claude Code's or Codex's), otherwise the token subject, otherwise nothing (without `[auth]` a request has no subject, so every request without a session id picks the same upstream).
 
 Each upstream scores `weight / -ln(u)`, with `u` from an xxh3 hash of the key seeded by the upstream's id; the highest score wins, so a key lands on an upstream with probability proportional to its weight. The same session reaches the same upstream from any replica, with no shared state. It moves only when its upstream leaves the route or the weights change; adding an upstream moves only the keys it now wins, and reordering the config moves nothing. A test pins the choice for fixed keys, since a change of hash or scoring would move every session during a rolling update.
 

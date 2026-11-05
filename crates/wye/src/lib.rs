@@ -21,11 +21,11 @@ mod upgrade_check;
 mod upstream;
 mod usage_log;
 
-pub use cli::{CallerToken, doctor, explain, policy_diff, policy_test, probe};
+pub use cli::{CallerToken, doctor, explain, policy_diff, policy_test, probe, request_headers};
 pub use gateway::Gateway;
 pub use server::serve;
 pub(crate) use startup::StartupError;
-pub use startup::{Resources, UpstreamAuth, UpstreamResources, verifier};
+pub use startup::{Resources, UpstreamAuth, UpstreamResources, key_file_warnings, verifier};
 
 /// An error from a request body or the connection under it.
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;

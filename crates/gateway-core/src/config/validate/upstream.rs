@@ -354,9 +354,6 @@ fn parse_base_url(
         reason,
     };
     let (scheme, authority, path_prefix) = parse_url(field, url)?;
-    if scheme == Scheme::HTTP && !is_loopback_host(authority.host()) {
-        return Err(invalid("plain http is allowed only for loopback hosts"));
-    }
     if path_prefix.ends_with("/v1") {
         return Err(invalid(
             "drop the trailing /v1: Wye forwards the client's /v1/... path after it",

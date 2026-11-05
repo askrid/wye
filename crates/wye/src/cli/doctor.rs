@@ -2,11 +2,12 @@
 //! `wye serve` runs it, and says what to change.
 //!
 //! Each referenced secret is checked to be present (never printed), each
-//! file to parse, and each upstream and the OTLP endpoint to answer over
-//! the network: one unauthenticated `HEAD` to the base URL, so DNS, TCP,
-//! TLS (with the configured extra roots), and HTTP are proven while no
-//! model request is made and nothing is billed. Every check runs, so one
-//! pass lists every problem.
+//! secret file, and the signing key if this machine has one, to be closed
+//! to other users, each file to parse, and each upstream and the OTLP
+//! endpoint to answer over the network: one unauthenticated `HEAD` to the
+//! base URL, so DNS, TCP, TLS (with the configured extra roots), and HTTP
+//! are proven while no model request is made and nothing is billed. Every
+//! check runs, so one pass lists every problem.
 
 use std::{
     path::Path,
@@ -14,15 +15,15 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::config::{
-    Config, Provider, ProviderKey, Telemetry, Upstream, is_cleartext_remote,
-};
+use gateway_core::config::{Config, Provider, ProviderKey, Upstream};
 use http::{Request, Uri};
 use http_body_util::Empty;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 
 use super::paint::verdict;
-use crate::startup::{otlp_headers, prompt_key, upstream_auth, upstream_roots, verifier};
+use crate::startup::{
+    open_to_others, otlp_headers, prompt_key, upstream_auth, upstream_roots, verifier,
+};
 
 /// Each network check, including the connection, must finish within this.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,9 +31,14 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 /// One finding: a line of the report, for a check that passed or failed.
 type Check = Result<String, String>;
 
-/// Runs every check of `config` (read from `config_dir`); the report and
-/// whether all passed.
-pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
+/// Runs every check of `config` (read from `config_dir`), and of the
+/// `signing_key` file this machine holds, if any; the report and whether
+/// all passed.
+pub async fn doctor(
+    config: &Config,
+    config_dir: &Path,
+    signing_key: Option<&Path>,
+) -> (String, bool) {
     let mut checks = Vec::new();
     for (route_id, route) in config.routes.iter() {
         for upstream in route.upstreams() {
@@ -58,8 +64,13 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
             Err(e) => Err(format!("cache_diagnostics: {e}")),
         });
     }
+    // It signs gateway tokens: anyone who can read it can mint one.
+    checks.extend(
+        signing_key
+            .and_then(open_to_others)
+            .map(|why| Err(format!("signing key {why}"))),
+    );
     if let Some(telemetry) = &config.telemetry {
-        checks.extend(headers_in_clear(telemetry));
         if let Some(name) = &telemetry.otlp_headers_env {
             checks.push(match otlp_headers(name) {
                 Ok(_) => Ok(format!("telemetry: ${name} set")),
@@ -83,20 +94,6 @@ pub async fn doctor(config: &Config, config_dir: &Path) -> (String, bool) {
     (report, problems == 0)
 }
 
-/// OTLP headers, usually a backend's API key, sent over plain http to
-/// another machine.
-fn headers_in_clear(telemetry: &Telemetry) -> Option<Check> {
-    let name = telemetry.otlp_headers_env.as_ref()?;
-    let uri = &telemetry.otlp_logs_uri;
-    is_cleartext_remote(uri).then(|| {
-        Err(format!(
-            "telemetry: ${name} would cross the network in the clear to {}; \
-             use https, or a collector on this machine",
-            uri.authority().map_or("the collector", |a| a.as_str())
-        ))
-    })
-}
-
 /// A Bedrock upstream's base URL ends in `/anthropic`, where its Messages
 /// endpoint is (VPC endpoints too); `None` for other providers.
 fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
@@ -113,13 +110,17 @@ fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
     })
 }
 
-/// The provider key is present, without printing it.
+/// The provider key is present, without printing it, and its file, if
+/// any, closed to other users.
 fn provider_key(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
     let header = upstream.provider.key_header();
     upstream_auth(upstream, config_dir).map_err(|e| format!("{name}: {e}"))?;
     Ok(match &upstream.provider_key {
         ProviderKey::Env(var) => format!("{name}: ${var} set (sent as {header})"),
         ProviderKey::File(path) => {
+            if let Some(why) = open_to_others(&config_dir.join(path)) {
+                return Err(format!("{name}: provider_key_file {why}"));
+            }
             format!("{name}: {} read (sent as {header})", path.display())
         }
         ProviderKey::ForwardCaller => {

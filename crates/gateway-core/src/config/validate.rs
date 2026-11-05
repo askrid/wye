@@ -74,6 +74,7 @@ pub(super) struct RawServer {
     pub(super) max_total_held_bytes: Option<u64>,
     pub(super) max_total_kept_bytes: Option<u64>,
     pub(super) max_concurrent_requests: Option<usize>,
+    pub(super) max_connections: Option<usize>,
     pub(super) drain_delay_secs: Option<u64>,
     pub(super) shutdown_grace_secs: Option<u64>,
     pub(super) client_write_timeout_secs: Option<u64>,
@@ -104,6 +105,29 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             "server.max_total_held_bytes must be at least server.max_request_body_bytes",
         ));
     }
+    let max_concurrent_requests = match raw.max_concurrent_requests {
+        Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
+        value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
+    };
+    let max_connections = match raw.max_connections {
+        // Twice the requests: room for the idle connections clients keep.
+        None => max_concurrent_requests
+            .saturating_mul(2)
+            .min(MAX_CONNECTIONS),
+        Some(n) if n > MAX_CONNECTIONS => {
+            return Err(ConfigError::Invalid(
+                "server.max_connections must be at most 1048576",
+            ));
+        }
+        // A request in flight holds a connection, so fewer connections
+        // would lower max_concurrent_requests in silence.
+        Some(n) if n < max_concurrent_requests => {
+            return Err(ConfigError::Invalid(
+                "server.max_connections must be at least server.max_concurrent_requests",
+            ));
+        }
+        Some(n) => n,
+    };
     Ok(Server {
         listen,
         max_request_body_bytes,
@@ -113,10 +137,8 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
                 .unwrap_or(DEFAULT_MAX_TOTAL_KEPT_BYTES),
             "server.max_total_kept_bytes",
         )?,
-        max_concurrent_requests: match raw.max_concurrent_requests {
-            Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
-            value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
-        },
+        max_concurrent_requests,
+        max_connections,
         drain_delay: timer(
             raw.drain_delay_secs.unwrap_or(DEFAULT_DRAIN_DELAY_SECS),
             "server.drain_delay_secs",
@@ -135,9 +157,11 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
     })
 }
 
-/// An http or https URL without credentials or a query: its scheme, host,
-/// and path without a trailing slash. Secrets come from the environment,
-/// never from a URL in config. `field` names it in errors.
+/// An https URL, or an http one to a loopback host, without credentials or
+/// a query: its scheme, host, and path without a trailing slash. Secrets
+/// come from the environment, never from a URL in config, and what a
+/// request carries (a key, OTLP headers, prompts) never crosses a network
+/// in the clear. `field` names it in errors.
 pub(super) fn parse_url(
     field: &'static str,
     url: &str,
@@ -158,6 +182,9 @@ pub(super) fn parse_url(
     let authority = parts.authority.ok_or_else(|| invalid("missing host"))?;
     if authority.as_str().contains('@') {
         return Err(invalid("credentials in the URL are not allowed"));
+    }
+    if scheme == Scheme::HTTP && !is_loopback_host(authority.host()) {
+        return Err(invalid("plain http is allowed only for loopback hosts"));
     }
     let path = match parts.path_and_query {
         Some(pq) if pq.query().is_some() => return Err(invalid("query strings are not allowed")),

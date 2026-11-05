@@ -44,6 +44,34 @@ async fn requests_beyond_the_concurrency_limit_get_an_overload_error() {
     assert_eq!(status, 200);
 }
 
+/// Past `max_connections`, Wye stops accepting: a new connection waits in
+/// the listen queue, costing Wye nothing, until an open one closes.
+#[tokio::test]
+async fn connections_past_the_limit_wait_until_one_closes() {
+    let h =
+        Harness::with_server_config(ok(), "max_concurrent_requests = 2\nmax_connections = 2").await;
+    let first = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    let _second = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
+    let req = Request::post(format!("http://{}/v1/messages", h.gateway))
+        .header("content-type", "application/json")
+        .body(Full::new(Bytes::from_static(b"{}")))
+        .unwrap();
+    let client = h.client.clone();
+    let mut third = tokio::spawn(async move { client.request(req).await });
+    assert!(
+        tokio::time::timeout(QUIET, &mut third).await.is_err(),
+        "a third connection was served"
+    );
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
+    drop(first);
+    let res = tokio::time::timeout(WAIT, third)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
 #[tokio::test]
 async fn requests_beyond_the_hold_budget_get_an_overload_error() {
     // An alias makes the gateway hold each body until its model is read.

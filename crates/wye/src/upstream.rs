@@ -9,7 +9,9 @@
 //! credential headers (when Wye sends its provider key, with
 //! `openai-organization` and `openai-project`), `anthropic-workspace-id`
 //! (Claude Platform on AWS), and `content-length` (after a `model` rewrite)
-//! are changed.
+//! are changed. Of the response's, hop-by-hop headers, and, with the
+//! provider key, the ones naming the account it belongs to
+//! ([`ACCOUNT_HEADERS`]).
 
 mod body;
 mod connect;
@@ -68,6 +70,14 @@ const WORKSPACE_ID: HeaderName = HeaderName::from_static("anthropic-workspace-id
 /// key decides that, not the caller.
 const OPENAI_ORGANIZATION: HeaderName = HeaderName::from_static("openai-organization");
 const OPENAI_PROJECT: HeaderName = HeaderName::from_static("openai-project");
+/// Response headers that name the provider key's organization or project:
+/// the operator's account, which a gateway token's holder has no business
+/// knowing. In passthrough the account is the caller's own, so they stay.
+const ACCOUNT_HEADERS: [HeaderName; 3] = [
+    HeaderName::from_static("anthropic-organization-id"),
+    OPENAI_ORGANIZATION,
+    OPENAI_PROJECT,
+];
 /// Asked of the upstream instead of the caller's `accept-encoding`: Wye
 /// reads usage, models, and tool calls from the response bytes it relays,
 /// and Anthropic compresses responses (Brotli) when Claude Code asks for it.
@@ -209,6 +219,7 @@ impl Upstream {
             UpstreamAuth::Bearer(value) => Some((AUTHORIZATION, X_API_KEY, value)),
             UpstreamAuth::ForwardCaller => None,
         };
+        let provider_key = credential.is_some();
         if let Some((name, other, value)) = credential {
             parts.headers.remove(other);
             parts.headers.remove(OPENAI_ORGANIZATION);
@@ -240,6 +251,11 @@ impl Upstream {
 
         let (mut parts, body) = res.into_parts();
         strip_hop_by_hop(&mut parts.headers);
+        if provider_key {
+            for name in &ACCOUNT_HEADERS {
+                parts.headers.remove(name);
+            }
+        }
         Ok(Response::from_parts(
             parts,
             UpstreamBody::new(body, self.stream_idle_timeout, slot),

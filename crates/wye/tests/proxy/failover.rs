@@ -213,7 +213,7 @@ async fn a_chunked_body_too_large_to_keep_answers_the_rejection() {
     client
         .write_all(
             format!(
-                "POST /v1/messages HTTP/1.1\r\nhost: wye\r\ntransfer-encoding: chunked\r\n\
+                "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\
                  connection: close\r\n\r\n{:x}\r\n{BODY}\r\n0\r\n\r\n",
                 BODY.len()
             )
@@ -248,7 +248,7 @@ async fn a_rejection_during_the_upload_resends_the_whole_body() {
     client
         .write_all(
             format!(
-                "POST /v1/messages HTTP/1.1\r\nhost: wye\r\ncontent-type: application/json\r\n\
+                "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
                  anthropic-version: 2023-06-01\r\ncontent-length: {}\r\n\r\n{start}",
                 body.len()
             )

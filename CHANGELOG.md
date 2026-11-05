@@ -2,10 +2,19 @@
 
 ## Unreleased
 
+- Security: `SECURITY.md` says how to report a vulnerability privately, what a running gateway holds and reaches, and how releases are built and verified.
 - Security: the install command in the README and the guide builds the latest release tag (`--tag v0.1.0-rc.2`) instead of `main`, and both show how to check a release archive with `gh attestation verify <archive> --repo askrid/wye`.
 - Security: a version tag publishes a release only if `ci` passed on that commit on `main`; a tag on a red or unmerged commit publishes nothing.
 - Security: the release workflow pins every action to a commit SHA, like the other workflows, and the `Dockerfile` pins its base images by digest.
 - Security: `cargo deny check advisories` runs weekly, so an advisory against a locked dependency is caught between changes.
+- Security, breaking: a gateway without `[auth]` refuses, with `403 permission_error`, a request whose `Host` is not `localhost`, `127.0.0.1`, or `[::1]` (with or without a port), or that carries `Origin` or a `Sec-Fetch-Site` other than `none`. A web page could otherwise reach the loopback port through DNS rebinding, spend the provider key Wye holds or the caller's forwarded login, and read the replies. Claude Code, Codex, and the SDKs send none of these; a client that names the gateway by another host name (an `/etc/hosts` alias) must use `localhost`. `/healthz` and `/readyz` still answer anyone. `wye explain` reports the refusal and takes request headers with `--header` (`-H`).
+- Security, breaking: config refuses a `[telemetry] otlp_endpoint` over plain http to a host other than this machine, as it refuses such a `base_url`: OTLP headers (an API key) and records would cross the network in the clear. Use https, or a collector on loopback; `examples/team` and `examples/app` now send to a collector beside the gateway (`http://localhost:4318`).
+- Security: new `[server] max_connections` bounds open client connections, idle ones included (default twice `max_concurrent_requests`, so 20,000; at least `max_concurrent_requests`). At the limit Wye stops accepting until one closes, and new connections wait in the kernel's listen queue. It needs an open-file limit of about twice its value (a client and an upstream connection each): `wye service install` now sets 65536 in the LaunchAgent and the systemd unit, where launchd would start the gateway with 256 and systemd with 1024; `wye service restart` updates a definition an older wye wrote. `wye serve` run by hand or in a container keeps the limit it inherits (`ulimit -n`).
+- Security: with a provider key, responses no longer carry the provider's `anthropic-organization-id`, `openai-organization`, or `openai-project`, which named the operator's account to gateway-token holders. Passthrough keeps them: the account is the caller's.
+- Security, breaking: `[auth] max_gateway_token_ttl_secs` is at most 30 days (2592000); a config above that fails at startup. `wye init --shared`'s next steps say to keep the signing key off the hosts that serve.
+- Security: `wye doctor` fails when a `provider_key_file`, or the signing key in `~/.wye/signing.key`, can be opened by group or others, and names the `chmod 600` to run; `serve` warns of such a provider key file and starts.
+- Security: the docs say that `wye claude` passes a gateway token as `ANTHROPIC_AUTH_TOKEN`, which every tool Claude Code runs inherits, and point to `apiKeyHelper` to keep it out of the environment; and that a loopback gateway without `[auth]` serves every user of its machine.
+
 ## 0.1.0-rc.2
 
 Names settle: config fields, record values, metrics, and CLI flags now use the glossary's terms, and the Claude route has one form. Many changes are breaking (marked below); a 0.1.0-rc.1 config needs the renames listed under "Breaking, config". `wye init` writes sample policy tests, and every command run with no arguments says what to run next.

@@ -8,6 +8,14 @@ use std::path::{Path, PathBuf};
 const LABEL: &str = "dev.wye.gateway";
 /// The systemd unit.
 pub(super) const UNIT: &str = "wye.service";
+/// The service's open-file limit, soft and hard. Each client connection
+/// takes a file descriptor, and so does its upstream connection while a
+/// request is in flight: about twice `server.max_connections` (20,000 by
+/// default). Without it, launchd starts the service with 256 and systemd
+/// with 1024. launchd sets it even above `kern.maxfilesperproc` (122,880 on
+/// a 2026 Mac), which still caps what the process opens; systemd's default
+/// hard limit is 524,288.
+pub(super) const OPEN_FILES: u32 = 65_536;
 /// Width of the labels in the plan `install` shows and in `status`:
 /// "Installed", "Usage log".
 pub(super) const LABEL_WIDTH: usize = 9;
@@ -107,6 +115,10 @@ impl Service {
                  \x20 <key>StandardOutPath</key><string>{}</string>\n\
                  \x20 <key>StandardErrorPath</key><string>{}</string>\n\
                  \x20 <key>ExitTimeOut</key><integer>{}</integer>\n\
+                 \x20 <key>SoftResourceLimits</key>\n\x20 <dict>\n\
+                 \x20   <key>NumberOfFiles</key><integer>{OPEN_FILES}</integer>\n\x20 </dict>\n\
+                 \x20 <key>HardResourceLimits</key>\n\x20 <dict>\n\
+                 \x20   <key>NumberOfFiles</key><integer>{OPEN_FILES}</integer>\n\x20 </dict>\n\
                  </dict>\n</plist>\n",
                 xml(&program),
                 xml(&config),
@@ -128,7 +140,8 @@ impl Service {
                     "# Written by wye service install; removed by wye service uninstall.\n\
                      [Unit]\nDescription=Wye gateway\n\n\
                      [Service]\nExecStart={} serve --config {}\nRestart=on-failure\n\
-                     StandardOutput=append:{}\nStandardError=append:{}\nTimeoutStopSec={}\n\n\
+                     StandardOutput=append:{}\nStandardError=append:{}\nTimeoutStopSec={}\n\
+                     LimitNOFILE={OPEN_FILES}\n\n\
                      [Install]\nWantedBy=default.target\n",
                     escape(&program),
                     escape(&config),
@@ -141,7 +154,9 @@ impl Service {
     }
 
     /// What a definition `install` wrote runs; `None` for one it did not
-    /// write.
+    /// write. The open-file limit is not read back: every definition this
+    /// wye writes has the same one, one an older wye wrote without it is
+    /// still ours, and `restart` rewrites a definition whose text differs.
     pub fn parse(manager: Manager, text: &str) -> Option<Self> {
         match manager {
             Manager::Launchd => {
@@ -158,6 +173,8 @@ impl Service {
                     return None;
                 }
                 let stop_secs = text
+                    .split_once("<key>ExitTimeOut</key>")?
+                    .1
                     .split_once("<integer>")?
                     .1
                     .split_once("</integer>")?

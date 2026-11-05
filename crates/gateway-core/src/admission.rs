@@ -1,19 +1,76 @@
-//! Body admission: what config and a gateway token decide about one request
-//! body, before and once its `model` is read.
+//! Admission: what config and a gateway token decide about one request, from
+//! its headers ([`check_local_client`]) and its body, before and once its
+//! `model` is read ([`BodyChecks`]).
 //!
-//! `serve` (`crates/wye/src/gateway/admit.rs`) and `wye explain` both decide
-//! through [`BodyChecks`], so an offline answer cannot drift from the
-//! server's. Reading the body (holding it, splicing an alias in) stays with
-//! the caller; this module only decides.
+//! `serve` (`crates/wye/src/gateway.rs` and `gateway/admit.rs`) and `wye
+//! explain` both decide through these, so an offline answer cannot drift
+//! from the server's. Reading the body (holding it, splicing an alias in)
+//! stays with the caller; this module only decides.
 
 use std::{fmt, sync::Arc};
+
+use http::{
+    HeaderMap, HeaderName,
+    header::{HOST, ORIGIN},
+};
 
 use crate::{
     alias::Aliases,
     api::Api,
+    config::is_loopback_host,
     policy::{self, ModelPattern, PolicyError, PolicyScanner},
     token::Identity,
 };
+
+/// Sent by browsers only: where the request comes from relative to its
+/// target; `none` when the user started it (typed the URL).
+const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
+
+/// Whether a gateway without `[auth]` serves a request with `headers`.
+///
+/// Without gateway tokens, being on this machine is the credential, and a
+/// web page the user visits runs on this machine too: through DNS
+/// rebinding (a name of the attacker's that resolves to `127.0.0.1`) its
+/// script can reach the loopback port, spend the provider key Wye holds or
+/// the credential the caller forwards, and read the replies. Such a request
+/// names the attacker's host in `Host`; a cross-origin one carries `Origin`
+/// or `Sec-Fetch-Site`. Programs (Claude Code, Codex, the SDKs) send their
+/// base URL's loopback host and neither header. A missing `Host` is refused
+/// too: HTTP/1.1 requires one, and every client sends it.
+pub fn check_local_client(headers: &HeaderMap) -> Result<(), Refusal> {
+    let loopback = headers
+        .get(HOST)
+        .and_then(|host| host.to_str().ok())
+        .is_some_and(is_loopback_authority);
+    let from_page = headers.contains_key(ORIGIN)
+        || headers
+            .get_all(SEC_FETCH_SITE)
+            .iter()
+            .any(|site| site.as_bytes() != b"none");
+    if loopback && !from_page {
+        Ok(())
+    } else {
+        Err(Refusal::WebPage)
+    }
+}
+
+/// Whether a `Host` value (a host and an optional port) names this
+/// machine: `localhost`, `127.0.0.1`, or `[::1]`. Allocates nothing.
+fn is_loopback_authority(authority: &str) -> bool {
+    let (host, port) = match authority.strip_prefix('[') {
+        // An IPv6 literal: `[::1]` or `[::1]:8080`.
+        Some(rest) => match rest.split_once(']') {
+            Some((host, "")) => (host, ""),
+            Some((host, after)) => match after.strip_prefix(':') {
+                Some(port) => (host, port),
+                None => return false,
+            },
+            None => return false,
+        },
+        None => authority.split_once(':').unwrap_or((authority, "")),
+    };
+    port.bytes().all(|b| b.is_ascii_digit()) && is_loopback_host(host)
+}
 
 /// The scanner for a request body under `output_ceiling`: the field is read only
 /// when a ceiling applies, so a value only a ceiling would mind is not refused.
@@ -167,6 +224,9 @@ pub enum Refusal {
     Unauthenticated,
     /// A body past `server.max_request_body_bytes`, declared or sent.
     TooLarge,
+    /// A request a web page may have sent, to a gateway without `[auth]`
+    /// ([`check_local_client`]).
+    WebPage,
 }
 
 impl Refusal {
@@ -174,7 +234,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => 400,
             Self::Unauthenticated => 401,
-            Self::Model(_) | Self::OutputCeiling(_) => 403,
+            Self::Model(_) | Self::OutputCeiling(_) | Self::WebPage => 403,
             Self::NoRoute { .. } | Self::NotProxied => 404,
             Self::TooLarge => 413,
         }
@@ -188,6 +248,10 @@ impl Refusal {
             Self::NotProxied => Some("unsupported endpoint"),
             Self::Unauthenticated => Some("invalid or missing gateway token"),
             Self::TooLarge => Some("request body exceeds the gateway limit"),
+            Self::WebPage => Some(
+                "a gateway without [auth] serves programs on this machine, not web pages: \
+                 a request needs a loopback Host and no Origin header",
+            ),
             Self::Invalid(_) | Self::Model(_) | Self::OutputCeiling(_) | Self::NoRoute { .. } => {
                 None
             }
@@ -199,7 +263,7 @@ impl Refusal {
         match self {
             Self::Invalid(_) => "invalid_request_error",
             Self::Unauthenticated => "authentication_error",
-            Self::Model(_) | Self::OutputCeiling(_) => "permission_error",
+            Self::Model(_) | Self::OutputCeiling(_) | Self::WebPage => "permission_error",
             Self::NoRoute { .. } | Self::NotProxied => "not_found_error",
             Self::TooLarge => "request_too_large",
         }
@@ -215,7 +279,7 @@ impl fmt::Display for Refusal {
             Self::NoRoute { api, path } => {
                 write!(f, "no route serves {path}: add {}", api.route().section())
             }
-            Self::NotProxied | Self::Unauthenticated | Self::TooLarge => {
+            Self::NotProxied | Self::Unauthenticated | Self::TooLarge | Self::WebPage => {
                 f.write_str(self.fixed_message().unwrap_or_default())
             }
         }
