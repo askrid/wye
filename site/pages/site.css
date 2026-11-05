@@ -255,7 +255,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   grid-template-columns: 13rem minmax(0, 1fr);
   column-gap: clamp(2rem, 4vw, 4rem);
   border-top: 1px solid var(--rule);
-  timeline-scope: --client, --gate, --model, --upstream, --stream, --record, --compare, --config, --status, --limits;
+  timeline-scope: --client, --access, --model, --upstream, --stream, --record, --compare, --config, --status, --limits;
 }
 .stops { min-width: 0; }
 .rail { position: sticky; top: 0; align-self: start; padding-block: clamp(2rem, 5vw, 3.5rem); }
@@ -286,7 +286,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 @supports (animation-timeline: view()) {
   .stops > section { view-timeline-axis: block; view-timeline-inset: 20% 79%; }
   #client { view-timeline-name: --client; }
-  #gate { view-timeline-name: --gate; }
+  #access { view-timeline-name: --access; }
   #model { view-timeline-name: --model; }
   #upstream { view-timeline-name: --upstream; }
   #stream { view-timeline-name: --stream; }
@@ -296,7 +296,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   #status { view-timeline-name: --status; }
   #limits { view-timeline-name: --limits; }
   .to-client { --stop: --client; }
-  .to-gate { --stop: --gate; }
+  .to-access { --stop: --access; }
   .to-model { --stop: --model; }
   .to-upstream { --stop: --upstream; }
   .to-stream { --stop: --stream; }

@@ -14,7 +14,6 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
-      - docs/benchmarks.md
       - Cargo.toml
       - crates/wye/Cargo.toml
       - deny.toml
@@ -25,7 +24,6 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
-      - docs/benchmarks.md
       - Cargo.toml
       - crates/wye/Cargo.toml
       - deny.toml

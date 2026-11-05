@@ -6,8 +6,6 @@ use crate::markdown;
 /// The longest bar of a ratio chart, in cells; a longer value is cut there
 /// and marked, its number still printed in full.
 const RATIO_CELLS: usize = 20;
-/// The longest bar of a two-way chart, in cells.
-const VERSUS_CELLS: usize = 12;
 /// Eighths of a cell, for the end of a bar.
 const PARTIAL: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
@@ -54,45 +52,6 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
         return Err(format!("the {column:?} column holds no multiples"));
     }
     Ok(draw(bars, 1.0, RATIO_CELLS))
-}
-
-/// A chart of one row of a table whose columns are gateways, Wye among them:
-/// each cell's first figure ("1.2" of "1.2 / 3.1 ms", the p50 of a p50 / p99
-/// pair) with the cell's unit.
-pub fn versus(text: &str, row_start: &str) -> Result<String, String> {
-    let (header, row) = markdown::tables(text)
-        .into_iter()
-        .find_map(|rows| {
-            let header = rows.first()?.clone();
-            let row = rows
-                .iter()
-                .skip(1)
-                .find(|row| row.first().is_some_and(|cell| cell.starts_with(row_start)))?
-                .clone();
-            Some((header, row))
-        })
-        .ok_or_else(|| format!("no table row starts with {row_start:?}"))?;
-    let mut bars = Vec::new();
-    for (name, cell) in header.iter().zip(&row).skip(1) {
-        let first = cell.split(" / ").next().unwrap_or(cell).trim();
-        let figure = first.split(' ').next().unwrap_or(first);
-        let unit = cell.rsplit(' ').next().unwrap_or_default();
-        let value = number(figure)
-            .ok_or_else(|| format!("{row_start:?}: {cell:?} does not start with a figure"))?;
-        bars.push(Bar {
-            name: name.clone(),
-            label: format!("{figure} {unit}"),
-            value,
-            us: name == "Wye",
-        });
-    }
-    let longest = bars.iter().map(|bar| bar.value).fold(0.0, f64::max);
-    if bars.len() < 2 || !bars.iter().any(|bar| bar.us) || longest <= 0.0 {
-        return Err(format!(
-            "{row_start:?}: no figures for Wye and another gateway"
-        ));
-    }
-    Ok(draw(bars, longest / VERSUS_CELLS as f64, VERSUS_CELLS))
 }
 
 /// One line per bar, shortest first: the name, the value as printed, and the
@@ -190,19 +149,5 @@ mod tests {
         let chart = ratios(RATIOS, "Memory").unwrap();
         assert!(chart.contains("320×") && !chart.contains("KrakenD"));
         assert!(ratios(RATIOS, "Nothing").is_err());
-    }
-
-    #[test]
-    fn draws_one_row_against_another_gateway() {
-        let text = "| Metric | Wye | agentgateway |\n|---|---|---|\n\
-                    | Paced: event delay p50 / p99 | 1.2 / 3.1 ms | 1.0 / 3.6 ms |\n";
-        assert_eq!(
-            versus(text, "Paced: event delay").unwrap(),
-            "<pre class=\"bars\" tabindex=\"0\">\
-             agentgateway  1.0 ms  <span class=\"fill\" aria-hidden=\"true\">██████████</span>\n\
-             <span class=\"us\">Wye           1.2 ms  <span class=\"fill\" aria-hidden=\"true\">████████████</span></span>\
-             </pre>"
-        );
-        assert!(versus(text, "Other").is_err());
     }
 }

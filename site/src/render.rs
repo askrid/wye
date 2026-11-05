@@ -16,8 +16,9 @@
 //!   starts with PREFIX, highlighted.
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
 //!   object.
-//! - `{{opening FILE|PART}}`: FILE's opening paragraph's bold `tagline`;
-//!   the list after it, rendered (`points`); or both as plain `text`.
+//! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
+//!   paragraph without the closing period; the list after it, rendered
+//!   (`points`); or that list's bold leads as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -29,8 +30,6 @@
 //!   is headed FIRST, as a table of figures.
 //! - `{{ratios FILE|HEADING|COLUMN}}`: a bar chart of that section's table
 //!   column of multiples of Wye ("7×").
-//! - `{{versus FILE|HEADING|ROW}}`: a bar chart of the first figure in each
-//!   gateway column of the row that starts with ROW.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -39,19 +38,11 @@ use crate::{chart, markdown};
 mod sources;
 
 /// The documents directives may read, relative to the repository root.
-const DOCUMENTS: [&str; 3] = ["README.md", "CHANGELOG.md", "docs/benchmarks.md"];
+const DOCUMENTS: [&str; 2] = ["README.md", "CHANGELOG.md"];
 
 /// The directives whose first two arguments name a document and one of its
 /// headings.
-const HEADED: [&str; 7] = [
-    "section",
-    "item",
-    "rest",
-    "paragraph",
-    "numbers",
-    "ratios",
-    "versus",
-];
+const HEADED: [&str; 6] = ["section", "item", "rest", "paragraph", "numbers", "ratios"];
 
 /// Everything a page may draw from the repository, read once per build.
 pub struct Sources {
@@ -114,29 +105,32 @@ impl Sources {
                 }))
             }
             ("opening", [file, part]) => {
-                let (tagline, rest) = markdown::opening(self.document(file)?).ok_or_else(|| {
+                let (tagline, _) = markdown::opening(self.document(file)?).ok_or_else(|| {
                     format!(
                         "{file}: no opening paragraph with a bold tagline before its first section"
                     )
                 })?;
                 match *part {
-                    "tagline" => Ok(markdown::escape(tagline)),
-                    "text" => {
-                        let points = markdown::opening_points(self.document(file)?);
-                        let text = format!("{rest}\n\n{}", points.unwrap_or_default());
-                        Ok(markdown::escape(&markdown::plain(&text)))
-                    }
-                    "points" => {
+                    "tagline" => Ok(markdown::escape(tagline.trim_end_matches('.'))),
+                    "points" | "text" => {
                         let points =
                             markdown::opening_points(self.document(file)?).ok_or_else(|| {
                                 format!("{file}: no list after the opening paragraph")
                             })?;
-                        Ok(markdown::to_html(
-                            points,
-                            &self.files_url(),
-                            file,
-                            &page.anchors,
-                        ))
+                        if *part == "points" {
+                            return Ok(markdown::to_html(
+                                points,
+                                &self.files_url(),
+                                file,
+                                &page.anchors,
+                            ));
+                        }
+                        let items = markdown::list_items(points);
+                        let leads: Vec<&str> = items
+                            .iter()
+                            .filter_map(|item| markdown::lead(item))
+                            .collect();
+                        Ok(markdown::escape(&leads.join(" ")))
                     }
                     other => Err(format!("{other:?} is not tagline, text, or points")),
                 }
@@ -189,7 +183,6 @@ impl Sources {
             ("ratios", [file, heading, column]) => {
                 chart::ratios(self.section(file, heading)?, column)
             }
-            ("versus", [file, heading, row]) => chart::versus(self.section(file, heading)?, row),
             _ => Err("unknown directive".to_owned()),
         }
     }
@@ -351,7 +344,7 @@ mod tests {
         let page = "{{opening README.md|tagline}}|{{opening README.md|text}}";
         assert_eq!(
             render(page, &sources()).unwrap(),
-            "LLM gateway without bloat.|Wye is one binary. Fast. Under 1 ms. Small. One file."
+            "LLM gateway without bloat|Fast. Small."
         );
         assert!(
             render("{{opening README.md|title}}", &sources())

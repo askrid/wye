@@ -14,7 +14,7 @@
 <meta property="og:image" content="{{homepage}}assets/share.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
-<meta property="og:image:alt" content="The Wye mark, a line forking in two, beside the name wye">
+<meta property="og:image:alt" content="Wye's mark, a line forking in two, beside its name">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#070707">
@@ -34,7 +34,7 @@
     <svg viewBox="0 0 32 32" aria-hidden="true"><rect class="tile" x="0.5" y="0.5" width="31" height="31" rx="7"/><path class="fork" d="M4.5 16 H11 L16 9 H27.5 M11 16 L16 23 H27.5"/></svg>
     <span>wye</span> <span class="version">{{version}}</span>
   </a>
-  <nav aria-label="Documentation">
+  <nav aria-label="Project">
     <a href="{{repo}}/blob/{{commit}}/docs/guide.md">guide</a>
     <a href="{{repo}}/blob/{{commit}}/examples/wye.toml">wye.toml</a>
     <a href="{{repo}}">github</a>
@@ -44,7 +44,7 @@
 <main class="wrap" id="content">
   <section class="hero" aria-labelledby="top">
     <div class="hero-copy">
-      <h1 id="top">{{opening README.md|tagline}}</h1>
+      <h1 id="top">{{opening README.md|tagline}}.</h1>
       <div class="points">{{opening README.md|points}}</div>
     </div>
 
@@ -54,10 +54,10 @@
     </div>
 
     <figure class="junction">
-      <div class="junction-art" role="img" aria-label="One request through Wye. Claude Code sends it; the gate checks its gateway token; the model stop maps the alias {{field README.md|{|requested_model}} to {{field README.md|{|model}}; at the upstream stop the session stays on anthropic, which rejects the request with 429 before any output, so with failover on, Wye resends it to {{field README.md|{|upstream}}; the stream is relayed as it arrives, never buffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
+      <div class="junction-art" role="img" aria-label="One request from Claude Code through Wye: its gateway token is checked; the alias {{field README.md|{|requested_model}} maps to {{field README.md|{|model}}; the session stays on anthropic, which rejects it with 429 before any output, so it fails over to {{field README.md|{|upstream}}; the stream is relayed unbuffered; the usage record keeps {{field README.md|{|input_tokens}} input tokens, {{field README.md|{|output_tokens}} output tokens, and ${{field README.md|{|cost_usd}}.">
 <pre class="trace-wide">claude code
 ┃
-┣━ <b>gate</b>       <span class="d">gateway token checked</span>
+┣━ <b>access</b>     <span class="d">gateway token checked</span>
 ┃
 ┣━ <b>model</b>      <span class="d">{{field README.md|{|requested_model}} -&gt; {{field README.md|{|model}}</span>
 ┃
@@ -70,7 +70,7 @@
 ┗━ <b>record</b>     {{field README.md|{|input_tokens}} in · {{field README.md|{|output_tokens}} out · ${{field README.md|{|cost_usd}}</pre>
 <pre class="trace-narrow">claude code
 ┃
-┣━ <b>gate</b>
+┣━ <b>access</b>
 ┃  <span class="d">gateway token checked</span>
 ┃
 ┣━ <b>model</b>
@@ -96,7 +96,7 @@
         <li>
           <ol>
             <li class="to-client"><a href="#client"><span class="name">client</span></a></li>
-            <li class="to-gate"><a href="#gate"><span class="name">gate</span></a></li>
+            <li class="to-access"><a href="#access"><span class="name">access</span></a></li>
             <li class="to-model"><a href="#model"><span class="name">model</span></a></li>
             <li class="to-upstream"><a href="#upstream"><span class="name">upstream</span></a></li>
             <li class="to-stream"><a href="#stream"><span class="name">stream</span></a></li>
@@ -120,8 +120,8 @@
         {{item README.md|What it does|Works with}}
       </section>
 
-      <section class="part stop" id="gate" aria-labelledby="gate-h">
-        <h2 id="gate-h"><a href="#gate"><span class="hash" aria-hidden="true">#</span> gate</a></h2>
+      <section class="part stop" id="access" aria-labelledby="access-h">
+        <h2 id="access-h"><a href="#access"><span class="hash" aria-hidden="true">#</span> access</a></h2>
         {{item README.md|What it does|Gives}}
       </section>
 
@@ -141,10 +141,6 @@
         <figure class="chart">
           <figcaption>Added latency per request (p50, TLS), in multiples of Wye's from the same run. Shorter is better.</figcaption>
           {{ratios README.md|Performance|Added latency (p50)}}
-        </figure>
-        <figure class="chart">
-          <figcaption>Delay per event (p50) with 2,000 token-paced streams open. Shorter is better.</figcaption>
-          {{versus docs/benchmarks.md|Against agentgateway|2,000 paced streams: event delay}}
         </figure>
         {{paragraph README.md|Performance|Where others lead}}
         {{numbers README.md|Performance|What Wye adds}}
@@ -189,7 +185,6 @@
 </main>
 
 <footer class="wrap foot">
-  <p>wye {{version}} · {{license}} · <a href="{{repo}}">github.com/askrid/wye</a></p>
   <p>This page: under 150 KiB with fonts. No cookies, no requests to other sites, works without JavaScript. Built from <a href="{{repo}}/commit/{{commit}}">{{commit}}</a>.</p>
 </footer>
 </body>
