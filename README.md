@@ -2,7 +2,7 @@
 
 <h1><img src="site/assets/icon-fork.svg" alt="" width="44" align="absmiddle"> Wye</h1>
 
-**LLM gateway without bloat.** Wye sits between Claude Code, Codex, or your app and the provider's API: one place to decide who uses which model, and to see what every request costs.
+**LLM gateway without bloat.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases) [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
