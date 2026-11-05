@@ -2,13 +2,19 @@
 
 <h1><img src="site/assets/icon-fork.svg" alt="" width="44" align="absmiddle"> Wye</h1>
 
-**LLM gateway without bloat.** Wye sits between Claude Code, Codex, or your app and the provider's API, passes requests through untranslated, and records what each one cost. It adds under a millisecond per request ([p50, lab](#performance)). Replicas share no state, so you scale by running more, and a request the provider rejects can fail over to another upstream before any output. One binary, one TOML file, no database, no dashboard.
+**LLM gateway without bloat.** Wye sits between Claude Code, Codex, or your app and the provider's API: one place to decide who uses which model, and to see what every request costs.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&color=555)](https://github.com/askrid/wye/releases) [![License](https://img.shields.io/github/license/askrid/wye?style=flat-square&color=555)](LICENSE)
 
 [Quick start](#quick-start) · [Guide](docs/guide.md) · [Configuration](examples/wye.toml) · [Benchmarks](docs/benchmarks.md) · [Website](https://askrid.github.io/wye/)
 
 </div>
+
+- **Fast.** Adds under a millisecond per request ([p50, lab](#performance)).
+- **Stateless.** Replicas share no state, so you scale by running more.
+- **Fails over.** A request the provider rejects moves to another upstream before any output.
+- **One file.** One binary and one TOML config. No database, no dashboard.
+- **Untranslated.** Each provider's own API passes through, so new features work the day they ship.
 
 ## Performance
 
