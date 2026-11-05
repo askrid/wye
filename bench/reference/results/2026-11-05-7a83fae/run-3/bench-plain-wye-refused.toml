@@ -1,0 +1,15 @@
+[server]
+listen = "127.0.0.1:42349"
+shutdown_grace_secs = 0
+
+[routes.claude]
+select = "ordered"
+failover = ["429", "529", "connect"]
+[[routes.claude.upstreams]]
+id = "a"
+base_url = "http://127.0.0.1:39873"
+provider_key_env = "WYE_BENCH_PROVIDER_KEY"
+[[routes.claude.upstreams]]
+id = "b"
+base_url = "http://127.0.0.1:37273"
+provider_key_env = "WYE_BENCH_PROVIDER_KEY"

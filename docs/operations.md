@@ -233,11 +233,9 @@ For container platforms, `provider_key_file` reads the provider key from a mount
 
 ### Sizing (estimate)
 
-From the TLS-path benchmark on a laptop, not yet measured on EC2: Wye's [overhead](glossary.md#usage-and-cost) for a heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) is about 10 ms of CPU per second, about 1% of a core, and about 250 KB of memory (49 KB of heap per stream after a large upload, from the allocation benchmark). A 2-vCPU instance would serve roughly 130 heavy or 400 typical users at 70% CPU. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type and a separate load machine.
+An estimate from the [reference environment](benchmarks.md#current-harness-and-baseline) (TLS + HTTP/2 to the upstream, on a `c7i.4xlarge`), not a production measurement. A heavy Claude Code user (about 5 concurrent streams, 250 events/s, 150 KB/s of resent context) costs Wye about 4 ms of CPU per second, 0.4% of a vCPU: 14 µs per paced event and 1.12 ms per uploaded MB. Memory is about 270 KB: 53 KB of heap per stream after a large request, 12.6 KB per paced stream without one. A 2-vCPU instance would serve roughly 370 such users at 70% CPU, or 1,100 at a third of that load. Provider rate limits bind first; run two small instances for availability rather than capacity. Confirm with `wye-bench` on the target instance type.
 
 Wye does not lower a stream's tokens per second. It adds a roughly constant delay per event that does not accumulate ([measured](benchmarks.md#current-harness-and-baseline)), small against the provider's 10-20 ms between tokens. Model permissions and cache diagnostics add overhead per request and per uploaded MB, not per streamed event.
-
-One Tokio worker held about 1,500 paced streams (36,000 events/s) within 10 ms of added p99. Latency, not CPU, sets the limit, so size by streams per core ([measurements](benchmarks.md#current-harness-and-baseline)).
 
 ## Health and shutdown
 

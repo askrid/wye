@@ -27,7 +27,7 @@ Tokens are compact JWTs, parsed by one strict parser whatever their issuer.
 - Refused with `401 authentication_error` before any upstream contact: another `alg`, an unknown header field (including `crit`), a `kid` not in `[[auth.signing_keys]]` or an issuer's key set, a bad signature, the wrong `iss` or `aud`, expiry, `iat`/`nbf` more than 60 s ahead, or `exp - iat` above `max_gateway_token_ttl_secs` (default one week; config refuses more than 30 days, since a token cannot be [revoked](#revocation) before it expires). Claims are parsed only after the signature verifies.
 - Read from `Authorization: Bearer` or `x-api-key`; replaced by the provider key, never forwarded.
 - Cached per connection: a request repeating the last verified token skips signature verification, compares the bytes in constant time, and rechecks expiry. The cache holds one verified token and dies with the connection; keys are fixed for the process lifetime, so its answers equal a fresh check.
-- On a reused connection, authenticated requests have the same overhead as unauthenticated ones; a full verification costs what the `auth_` scenarios in [benchmarks.md](benchmarks.md#current-harness-and-baseline) show.
+- On a reused connection, authenticated requests have the same overhead as unauthenticated ones ([the `auth_` variant](benchmarks.md#variants)).
 
 The key fixes the algorithm; the token never chooses it: Ed25519 for Wye tokens, one configured algorithm per identity provider. General JWT algorithm negotiation (`alg: none`, HMAC/RSA confusion) is a well-known source of verification bugs. A pinned `alg` removes that class of bug, and ordinary JWT tooling can still read the encoding.
 
@@ -85,7 +85,7 @@ Browsers send these; Claude Code, Codex, and the SDKs name the gateway as their 
   - A compressed body or a charset other than UTF-8 gets `415` (on any `Content-Encoding` or `Content-Type` line, and two `Content-Type` lines too), since a provider that decoded it could find other keys in the same bytes.
 - **Strict JSON**: the body is read as strict UTF-8 JSON, the way a conforming provider reads it. A byte outside JSON's grammar (the NUL bytes of UTF-16 text, an unquoted key, a comment, a second value after the object) is refused rather than skipped, and top-level keys compare ignoring ASCII case (some decoders bind `MODEL` to `model`).
 - **Scope**: permissions read the top-level `model`. A model named inside the body, such as the `model` of a Responses `image_generation` tool, is not checked.
-- **The tail check**: JSON allows a repeated key, and a provider might honor a later `"model"`, so the rest of the body is lexed as it streams; a second top-level `model`, or an escaped top-level key, fails the body and aborts the upstream request. It adds CPU overhead per MB on structure-dense bodies ([benchmarks.md](benchmarks.md#current-harness-and-baseline)) and can go if the provider is verified to reject duplicate keys.
+- **The tail check**: JSON allows a repeated key, and a provider might honor a later `"model"`, so the rest of the body is lexed as it streams; a second top-level `model`, or an escaped top-level key, fails the body and aborts the upstream request. It adds CPU overhead per MB on structure-dense bodies ([benchmarks.md](benchmarks.md#variants)) and can go if the provider is verified to reject duplicate keys.
 
 ## Per-request ceilings
 

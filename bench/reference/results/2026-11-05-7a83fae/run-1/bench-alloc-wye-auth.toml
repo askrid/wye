@@ -1,0 +1,15 @@
+[server]
+listen = "127.0.0.1:34587"
+shutdown_grace_secs = 0
+
+[[routes.claude.upstreams]]
+base_url = "http://127.0.0.1:46459"
+provider_key_env = "WYE_BENCH_PROVIDER_KEY"
+
+[auth]
+issuer = "wye-bench"
+audience = "wye-bench"
+
+[[auth.signing_keys]]
+id = "bench"
+ed25519_public_key = "xHP_3AFvDG1f78ntF5ezpcEUeO0NRWHH4jZ7F1Uq1zY"

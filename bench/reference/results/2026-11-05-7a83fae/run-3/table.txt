@@ -1,0 +1,717 @@
+agent_upload_added_p50_us                1637.0
+agent_upload_added_p99_us                2862.0
+agent_upload_cpu_ms_per_mb               0.6
+agent_upload_failed_requests             0.0
+agentgateway_agent_upload_added_p50_us   68862.0
+agentgateway_agent_upload_added_p99_us   104608.0
+agentgateway_agent_upload_cpu_ms_per_mb  16.6
+agentgateway_agent_upload_failed_requests 0.0
+agentgateway_cancel_upstream_release_max_us 1505.0
+agentgateway_cancel_upstream_release_p50_us 82.0
+agentgateway_idle_rss_kb_per_stream      75.39
+agentgateway_rss_after_load_kb           158560.0
+agentgateway_rss_idle_kb                 66432.0
+agentgateway_sse_cpu_us_per_event        7.66
+agentgateway_sse_event_added_p50_us      202.0
+agentgateway_sse_event_added_p99_us      386.0
+agentgateway_sse_failed_streams          0.0
+agentgateway_sse_ttfb_added_p50_us       382.0
+agentgateway_sse_ttfb_added_p99_us       1204.0
+agentgateway_throughput_cpu_ms_per_mb    3.7
+agentgateway_unary_added_p50_us          672.0
+agentgateway_unary_added_p99_us          1206.0
+agentgateway_unary_cpu_us_per_request    96.5
+agentgateway_unary_failed_requests       0.0
+agentgateway_upload_added_p50_us         8700.0
+agentgateway_upload_added_p99_us         17208.0
+agentgateway_upload_cpu_ms_per_mb        2.46
+agentgateway_upload_failed_requests      0.0
+agentgateway_via_throughput_mb_s         1055.2
+agentgateway_via_unary_p50_us            780.0
+agentgateway_via_unary_p99_us            1378.0
+alloc_agent_upload_bytes_per_request     87822.88
+alloc_agent_upload_per_request           21.88
+alloc_auth_unary_per_request             20.52
+alloc_bedrock_unary_bytes_per_request    25184.01
+alloc_bedrock_unary_per_request          25.53
+alloc_diag_agent_upload_bytes_per_request 114595.63
+alloc_diag_agent_upload_per_request      27.47
+alloc_diag_unary_bytes_per_request       25623.27
+alloc_diag_unary_per_request             22.51
+alloc_failover_agent_upload_bytes_per_request 1134926.75
+alloc_failover_agent_upload_per_request  98.94
+alloc_failover_unary_bytes_per_request   25532.75
+alloc_failover_unary_per_request         27.56
+alloc_idle_after_upload_live_bytes_per_stream 96229.32
+alloc_idle_live_bytes_per_stream         55050.89
+alloc_models_unary_per_request           21.55
+alloc_sse_per_event                      0.01
+alloc_sse_per_stream                     23.0
+alloc_tls_idle_after_upload_live_bytes_per_stream 53077.12
+alloc_tls_idle_live_bytes_per_stream     27817.09
+alloc_tls_stalled_live_bytes_per_stream  578420.69
+alloc_unary_bytes_per_request            24491.02
+alloc_unary_per_request                  20.57
+alloc_upload_bytes_per_request           109053.88
+alloc_upload_per_request                 23.23
+auth_sse_event_added_p50_us              157.0
+auth_sse_event_added_p99_us              362.0
+auth_sse_failed_streams                  0.0
+auth_sse_ttfb_added_p50_us               69.0
+auth_sse_ttfb_added_p99_us               342.0
+auth_unary_added_p50_us                  256.0
+auth_unary_added_p99_us                  552.0
+auth_unary_cpu_us_per_request            43.0
+auth_unary_failed_requests               0.0
+auth_via_unary_p50_us                    365.0
+auth_via_unary_p99_us                    728.0
+bedrock_sse_event_added_p50_us           152.0
+bedrock_sse_event_added_p99_us           355.0
+bedrock_sse_failed_streams               0.0
+bedrock_sse_ttfb_added_p50_us            130.0
+bedrock_sse_ttfb_added_p99_us            319.0
+bedrock_unary_added_p50_us               271.0
+bedrock_unary_added_p99_us               564.0
+bedrock_unary_cpu_us_per_request         46.5
+bedrock_unary_failed_requests            0.0
+bedrock_via_unary_p50_us                 380.0
+bedrock_via_unary_p99_us                 736.0
+bifrost_agent_upload_added_p50_us        235860.0
+bifrost_agent_upload_added_p99_us        467749.0
+bifrost_agent_upload_cpu_ms_per_mb       60.95
+bifrost_agent_upload_failed_requests     0.0
+bifrost_cancel_upstream_release_max_us   500418.0
+bifrost_cancel_upstream_release_p50_us   500183.0
+bifrost_idle_rss_kb_per_stream           73.96
+bifrost_rss_after_load_kb                858240.0
+bifrost_rss_idle_kb                      347984.0
+bifrost_sse_cpu_us_per_event             24.53
+bifrost_sse_event_added_p50_us           262.0
+bifrost_sse_event_added_p99_us           3078.0
+bifrost_sse_failed_streams               0.0
+bifrost_sse_ttfb_added_p50_us            1176.0
+bifrost_sse_ttfb_added_p99_us            10170.0
+bifrost_throughput_cpu_ms_per_mb         16.12
+bifrost_unary_added_p50_us               3317.0
+bifrost_unary_added_p99_us               14275.0
+bifrost_unary_cpu_us_per_request         508.0
+bifrost_unary_failed_requests            0.0
+bifrost_upload_added_p50_us              85488.0
+bifrost_upload_added_p99_us              248059.0
+bifrost_upload_cpu_ms_per_mb             23.66
+bifrost_upload_failed_requests           0.0
+bifrost_via_throughput_mb_s              240.7
+bifrost_via_unary_p50_us                 3426.0
+bifrost_via_unary_p99_us                 14447.0
+cancel_upstream_release_max_us           4291.0
+cancel_upstream_release_p50_us           64.0
+diag_agent_upload_added_p50_us           5849.0
+diag_agent_upload_added_p99_us           9147.0
+diag_agent_upload_cpu_ms_per_mb          1.56
+diag_agent_upload_failed_requests        0.0
+diag_sse_event_added_p50_us              153.0
+diag_sse_event_added_p99_us              354.0
+diag_sse_failed_streams                  0.0
+diag_sse_ttfb_added_p50_us               78.0
+diag_sse_ttfb_added_p99_us               440.0
+diag_unary_added_p50_us                  257.0
+diag_unary_added_p99_us                  571.0
+diag_unary_cpu_us_per_request            44.0
+diag_unary_failed_requests               0.0
+diag_upload_added_p50_us                 1973.0
+diag_upload_added_p99_us                 2935.0
+diag_upload_cpu_ms_per_mb                0.71
+diag_upload_failed_requests              0.0
+diag_via_unary_p50_us                    365.0
+diag_via_unary_p99_us                    743.0
+direct_throughput_mb_s                   4352.91
+direct_unary_p50_us                      109.0
+direct_unary_p99_us                      174.0
+failover_agent_upload_added_p50_us       2126.0
+failover_agent_upload_added_p99_us       3758.0
+failover_agent_upload_cpu_ms_per_mb      0.67
+failover_agent_upload_failed_requests    0.0
+failover_sse_event_added_p50_us          159.0
+failover_sse_event_added_p99_us          341.0
+failover_sse_failed_streams              0.0
+failover_sse_ttfb_added_p50_us           122.0
+failover_sse_ttfb_added_p99_us           239.0
+failover_unary_added_p50_us              271.0
+failover_unary_added_p99_us              592.0
+failover_unary_cpu_us_per_request        45.0
+failover_unary_failed_requests           0.0
+failover_upload_added_p50_us             2148.0
+failover_upload_added_p99_us             4626.0
+failover_upload_cpu_ms_per_mb            0.75
+failover_upload_failed_requests          0.0
+failover_via_unary_p50_us                380.0
+failover_via_unary_p99_us                768.0
+idle_rss_kb_per_stream                   32.1
+krakend_agent_upload_added_p50_us        1559.0
+krakend_agent_upload_added_p99_us        5929.0
+krakend_agent_upload_cpu_ms_per_mb       0.6
+krakend_agent_upload_failed_requests     0.0
+krakend_rss_after_load_kb                72024.0
+krakend_sse_cpu_us_per_event             0.47
+krakend_sse_event_added_p50_us           26001.0
+krakend_sse_event_added_p99_us           55271.0
+krakend_sse_failed_streams               0.0
+krakend_sse_ttfb_added_p50_us            44724.0
+krakend_sse_ttfb_added_p99_us            47383.0
+krakend_throughput_cpu_ms_per_mb         0.85
+krakend_unary_added_p50_us               525.0
+krakend_unary_added_p99_us               2831.0
+krakend_unary_cpu_us_per_request         103.5
+krakend_unary_failed_requests            0.0
+krakend_upload_added_p50_us              1655.0
+krakend_upload_added_p99_us              5061.0
+krakend_upload_cpu_ms_per_mb             0.63
+krakend_upload_failed_requests           0.0
+krakend_via_throughput_mb_s              4080.68
+krakend_via_unary_p50_us                 633.0
+krakend_via_unary_p99_us                 3006.0
+litellm_agent_upload_added_p50_us        238714.0
+litellm_agent_upload_added_p99_us        820177.0
+litellm_agent_upload_cpu_ms_per_mb       71.75
+litellm_agent_upload_failed_requests     0.0
+litellm_cancel_upstream_release_max_us   26633.0
+litellm_cancel_upstream_release_p50_us   396.0
+litellm_idle_rss_kb_per_stream           4.14
+litellm_rss_after_load_kb                2743136.0
+litellm_rss_idle_kb                      2106504.0
+litellm_sse_cpu_us_per_event             6.95
+litellm_sse_event_added_p50_us           3006.0
+litellm_sse_event_added_p99_us           26041.0
+litellm_sse_failed_streams               0.0
+litellm_sse_ttfb_added_p50_us            17932.0
+litellm_sse_ttfb_added_p99_us            110723.0
+litellm_throughput_cpu_ms_per_mb         8.61
+litellm_unary_added_p50_us               118904.0
+litellm_unary_added_p99_us               200410.0
+litellm_unary_cpu_us_per_request         15043.0
+litellm_unary_failed_requests            2.0
+litellm_upload_added_p50_us              131692.0
+litellm_upload_added_p99_us              282220.0
+litellm_upload_cpu_ms_per_mb             32.11
+litellm_upload_failed_requests           0.0
+litellm_via_throughput_mb_s              441.56
+litellm_via_unary_p50_us                 119013.0
+litellm_via_unary_p99_us                 200584.0
+models_agent_upload_added_p50_us         4268.0
+models_agent_upload_added_p99_us         7911.0
+models_agent_upload_cpu_ms_per_mb        1.19
+models_agent_upload_failed_requests      0.0
+models_sse_event_added_p50_us            150.0
+models_sse_event_added_p99_us            334.0
+models_sse_failed_streams                0.0
+models_sse_ttfb_added_p50_us             99.0
+models_sse_ttfb_added_p99_us             347.0
+models_unary_added_p50_us                273.0
+models_unary_added_p99_us                599.0
+models_unary_cpu_us_per_request          44.0
+models_unary_failed_requests             0.0
+models_upload_added_p50_us               1714.0
+models_upload_added_p99_us               3418.0
+models_upload_cpu_ms_per_mb              0.63
+models_upload_failed_requests            0.0
+models_via_unary_p50_us                  382.0
+models_via_unary_p99_us                  771.0
+openai_sse_cpu_us_per_event              5.39
+openai_sse_event_added_p50_us            160.0
+openai_sse_event_added_p99_us            375.0
+openai_sse_failed_streams                0.0
+openai_sse_ttfb_added_p50_us             82.0
+openai_sse_ttfb_added_p99_us             535.0
+openai_unary_added_p50_us                253.0
+openai_unary_added_p99_us                567.0
+openai_unary_cpu_us_per_request          42.5
+openai_unary_failed_requests             0.0
+openai_via_unary_p50_us                  361.0
+openai_via_unary_p99_us                  739.0
+otlp_sse_event_added_p50_us              160.0
+otlp_sse_event_added_p99_us              379.0
+otlp_sse_failed_streams                  0.0
+otlp_sse_ttfb_added_p50_us               81.0
+otlp_sse_ttfb_added_p99_us               387.0
+otlp_unary_added_p50_us                  290.0
+otlp_unary_added_p99_us                  572.0
+otlp_unary_cpu_us_per_request            48.5
+otlp_unary_failed_requests               0.0
+otlp_via_unary_p50_us                    399.0
+otlp_via_unary_p99_us                    746.0
+refused_agent_upload_added_p50_us        2411.0
+refused_agent_upload_added_p99_us        4284.0
+refused_agent_upload_cpu_ms_per_mb       0.74
+refused_agent_upload_failed_requests     0.0
+refused_sse_event_added_p50_us           152.0
+refused_sse_event_added_p99_us           365.0
+refused_sse_failed_streams               0.0
+refused_sse_ttfb_added_p50_us            107.0
+refused_sse_ttfb_added_p99_us            670.0
+refused_unary_added_p50_us               302.0
+refused_unary_added_p99_us               681.0
+refused_unary_cpu_us_per_request         51.0
+refused_unary_failed_requests            0.0
+refused_upload_added_p50_us              2320.0
+refused_upload_added_p99_us              5796.0
+refused_upload_cpu_ms_per_mb             0.82
+refused_upload_failed_requests           0.0
+refused_via_unary_p50_us                 411.0
+refused_via_unary_p99_us                 857.0
+rss_after_load_kb                        44188.0
+rss_idle_kb                              27968.0
+sse_cpu_us_per_event                     5.39
+sse_event_added_p50_us                   156.0
+sse_event_added_p99_us                   384.0
+sse_failed_streams                       0.0
+sse_ttfb_added_p50_us                    110.0
+sse_ttfb_added_p99_us                    290.0
+throughput_cpu_ms_per_mb                 1.81
+tls_agentgateway_cancel_upstream_release_max_us 192.0
+tls_agentgateway_cancel_upstream_release_p50_us 87.0
+tls_agentgateway_cold_failed_requests    0.0
+tls_agentgateway_cold_unary_added_p50_us 1752.0
+tls_agentgateway_cold_unary_added_p99_us 1566.0
+tls_agentgateway_idle_rss_kb_per_stream  56.68
+tls_agentgateway_mixed_event_added_p50_us 786.0
+tls_agentgateway_mixed_event_added_p99_us 4083.0
+tls_agentgateway_mixed_upload_added_p50_us 6443.0
+tls_agentgateway_paced_cpu_us_per_event  18.95
+tls_agentgateway_paced_event_added_p50_us 217.0
+tls_agentgateway_paced_event_added_p99_us 1087.0
+tls_agentgateway_paced_failed_streams    0.0
+tls_agentgateway_paced_rss_kb_per_stream 37.32
+tls_agentgateway_paced_ttfb_added_p99_us 1217.0
+tls_agentgateway_rss_after_load_kb       410940.0
+tls_agentgateway_rss_idle_kb             58856.0
+tls_agentgateway_sse_cpu_us_per_event    5.39
+tls_agentgateway_sse_event_added_p50_us  242.0
+tls_agentgateway_sse_event_added_p99_us  388.0
+tls_agentgateway_sse_failed_streams      0.0
+tls_agentgateway_sse_ttfb_added_p50_us   556.0
+tls_agentgateway_sse_ttfb_added_p99_us   1411.0
+tls_agentgateway_stalled_event_added_p99_us 601.0
+tls_agentgateway_stalled_rss_kb_per_stream 12.32
+tls_agentgateway_stress_failed_requests  0.0
+tls_agentgateway_throughput_cpu_ms_per_mb 7.39
+tls_agentgateway_unary_added_p50_us      934.0
+tls_agentgateway_unary_added_p99_us      1782.0
+tls_agentgateway_unary_cpu_us_per_request 120.5
+tls_agentgateway_unary_failed_requests   0.0
+tls_agentgateway_upload_added_p50_us     13279.0
+tls_agentgateway_upload_added_p99_us     22723.0
+tls_agentgateway_upload_cpu_ms_per_mb    3.05
+tls_agentgateway_upload_failed_requests  0.0
+tls_agentgateway_via_throughput_mb_s     419.86
+tls_agentgateway_via_unary_p50_us        1115.0
+tls_agentgateway_via_unary_p99_us        2114.0
+tls_bifrost_cancel_upstream_release_max_us 499768.0
+tls_bifrost_cancel_upstream_release_p50_us 499102.0
+tls_bifrost_cold_failed_requests         0.0
+tls_bifrost_cold_unary_added_p50_us      60530.0
+tls_bifrost_cold_unary_added_p99_us      61196.0
+tls_bifrost_idle_rss_kb_per_stream       153.3
+tls_bifrost_mixed_event_added_p50_us     15442.0
+tls_bifrost_mixed_event_added_p99_us     103934.0
+tls_bifrost_mixed_upload_added_p50_us    81931.0
+tls_bifrost_paced_cpu_us_per_event       60.9
+tls_bifrost_paced_event_added_p50_us     12110.0
+tls_bifrost_paced_event_added_p99_us     145123.0
+tls_bifrost_paced_failed_streams         0.0
+tls_bifrost_paced_rss_kb_per_stream      83.91
+tls_bifrost_paced_ttfb_added_p99_us      378649.0
+tls_bifrost_rss_after_load_kb            5501600.0
+tls_bifrost_rss_idle_kb                  358368.0
+tls_bifrost_sse_cpu_us_per_event         25.23
+tls_bifrost_sse_event_added_p50_us       278.0
+tls_bifrost_sse_event_added_p99_us       5271.0
+tls_bifrost_sse_failed_streams           0.0
+tls_bifrost_sse_ttfb_added_p50_us        2240.0
+tls_bifrost_sse_ttfb_added_p99_us        18519.0
+tls_bifrost_stalled_event_added_p99_us   5746.0
+tls_bifrost_stalled_rss_kb_per_stream    21914.58
+tls_bifrost_stress_failed_requests       0.0
+tls_bifrost_throughput_cpu_ms_per_mb     16.0
+tls_bifrost_unary_added_p50_us           3287.0
+tls_bifrost_unary_added_p99_us           14277.0
+tls_bifrost_unary_cpu_us_per_request     510.5
+tls_bifrost_unary_failed_requests        0.0
+tls_bifrost_upload_added_p50_us          79992.0
+tls_bifrost_upload_added_p99_us          251850.0
+tls_bifrost_upload_cpu_ms_per_mb         24.29
+tls_bifrost_upload_failed_requests       0.0
+tls_bifrost_via_throughput_mb_s          242.23
+tls_bifrost_via_unary_p50_us             3467.0
+tls_bifrost_via_unary_p99_us             14609.0
+tls_cancel_upstream_release_max_us       132.0
+tls_cancel_upstream_release_p50_us       53.0
+tls_cold_failed_requests                 0.0
+tls_cold_unary_added_p50_us              2262.0
+tls_cold_unary_added_p99_us              2409.0
+tls_direct_throughput_mb_s               2416.12
+tls_direct_unary_p50_us                  180.0
+tls_direct_unary_p99_us                  331.0
+tls_idle_rss_kb_per_stream               17.44
+tls_krakend_cold_failed_requests         0.0
+tls_krakend_cold_unary_added_p50_us      2926.0
+tls_krakend_cold_unary_added_p99_us      4215.0
+tls_krakend_paced_cpu_us_per_event       19.95
+tls_krakend_paced_event_added_p50_us     208987.0
+tls_krakend_paced_event_added_p99_us     405345.0
+tls_krakend_paced_failed_streams         1.0
+tls_krakend_paced_rss_kb_per_stream      85.88
+tls_krakend_paced_ttfb_added_p99_us      359398.0
+tls_krakend_rss_after_load_kb            278776.0
+tls_krakend_sse_cpu_us_per_event         0.55
+tls_krakend_sse_event_added_p50_us       25506.0
+tls_krakend_sse_event_added_p99_us       55164.0
+tls_krakend_sse_failed_streams           0.0
+tls_krakend_sse_ttfb_added_p50_us        44787.0
+tls_krakend_sse_ttfb_added_p99_us        48256.0
+tls_krakend_throughput_cpu_ms_per_mb     0.96
+tls_krakend_unary_added_p50_us           468.0
+tls_krakend_unary_added_p99_us           2973.0
+tls_krakend_unary_cpu_us_per_request     107.0
+tls_krakend_unary_failed_requests        0.0
+tls_krakend_upload_added_p50_us          2044.0
+tls_krakend_upload_added_p99_us          7034.0
+tls_krakend_upload_cpu_ms_per_mb         1.12
+tls_krakend_upload_failed_requests       0.0
+tls_krakend_via_throughput_mb_s          3568.71
+tls_krakend_via_unary_p50_us             648.0
+tls_krakend_via_unary_p99_us             3304.0
+tls_litellm_cancel_upstream_release_max_us 30152.0
+tls_litellm_cancel_upstream_release_p50_us 355.0
+tls_litellm_cold_failed_requests         0.0
+tls_litellm_cold_unary_added_p50_us      1438733.0
+tls_litellm_cold_unary_added_p99_us      1682069.0
+tls_litellm_idle_rss_kb_per_stream       46.14
+tls_litellm_mixed_event_added_p50_us     38747.0
+tls_litellm_mixed_event_added_p99_us     1149801.0
+tls_litellm_mixed_upload_added_p50_us    144706.0
+tls_litellm_paced_cpu_us_per_event       158.8
+tls_litellm_paced_event_added_p50_us     12367.0
+tls_litellm_paced_event_added_p99_us     490491.0
+tls_litellm_paced_failed_streams         0.0
+tls_litellm_paced_rss_kb_per_stream      0.28
+tls_litellm_paced_ttfb_added_p99_us      5234668.0
+tls_litellm_rss_after_load_kb            3816348.0
+tls_litellm_rss_idle_kb                  2140376.0
+tls_litellm_sse_cpu_us_per_event         7.81
+tls_litellm_sse_event_added_p50_us       3007.0
+tls_litellm_sse_event_added_p99_us       30360.0
+tls_litellm_sse_failed_streams           0.0
+tls_litellm_sse_ttfb_added_p50_us        16864.0
+tls_litellm_sse_ttfb_added_p99_us        117584.0
+tls_litellm_stalled_event_added_p99_us   1284283.0
+tls_litellm_stalled_rss_kb_per_stream    3528.22
+tls_litellm_stress_failed_requests       104.0
+tls_litellm_throughput_cpu_ms_per_mb     9.16
+tls_litellm_unary_added_p50_us           118011.0
+tls_litellm_unary_added_p99_us           191911.0
+tls_litellm_unary_cpu_us_per_request     15030.5
+tls_litellm_unary_failed_requests        1.0
+tls_litellm_upload_added_p50_us          137264.0
+tls_litellm_upload_added_p99_us          221861.0
+tls_litellm_upload_cpu_ms_per_mb         33.53
+tls_litellm_upload_failed_requests       0.0
+tls_litellm_via_throughput_mb_s          381.17
+tls_litellm_via_unary_p50_us             118191.0
+tls_litellm_via_unary_p99_us             192243.0
+tls_mixed_event_added_p50_us             216.0
+tls_mixed_event_added_p99_us             637.0
+tls_mixed_upload_added_p50_us            1195.0
+tls_paced_cpu_us_per_event               14.7
+tls_paced_event_added_p50_us             82.0
+tls_paced_event_added_p99_us             367.0
+tls_paced_failed_streams                 0.0
+tls_paced_rss_kb_per_stream              13.48
+tls_paced_ttfb_added_p99_us              742.0
+tls_rss_after_load_kb                    194248.0
+tls_rss_idle_kb                          28384.0
+tls_sse_cpu_us_per_event                 1.25
+tls_sse_event_added_p50_us               172.0
+tls_sse_event_added_p99_us               271.0
+tls_sse_failed_streams                   0.0
+tls_sse_ttfb_added_p50_us                43.0
+tls_sse_ttfb_added_p99_us                447.0
+tls_stalled_event_added_p99_us           184.0
+tls_stalled_rss_kb_per_stream            537.42
+tls_stress_failed_requests               0.0
+tls_throughput_cpu_ms_per_mb             1.63
+tls_unary_added_p50_us                   330.0
+tls_unary_added_p99_us                   640.0
+tls_unary_cpu_us_per_request             63.0
+tls_unary_failed_requests                0.0
+tls_upload_added_p50_us                  1751.0
+tls_upload_added_p99_us                  7579.0
+tls_upload_cpu_ms_per_mb                 1.12
+tls_upload_failed_requests               0.0
+tls_via_throughput_mb_s                  2365.82
+tls_via_unary_p50_us                     510.0
+tls_via_unary_p99_us                     972.0
+unary_added_p50_us                       257.0
+unary_added_p99_us                       559.0
+unary_cpu_us_per_request                 43.5
+unary_failed_requests                    0.0
+upload_added_p50_us                      1587.0
+upload_added_p99_us                      2723.0
+upload_cpu_ms_per_mb                     0.6
+upload_failed_requests                   0.0
+via_throughput_mb_s                      2169.2
+via_unary_p50_us                         366.0
+via_unary_p99_us                         735.0
+
+metric                                      wye    bifrost  winner
+agent_upload_added_p50_us               1637.00  235860.00  wye
+agent_upload_added_p99_us               2862.00  467749.00  wye
+agent_upload_cpu_ms_per_mb                 0.60      60.95  wye
+agent_upload_failed_requests               0.00       0.00  wye
+cancel_upstream_release_max_us          4291.00  500418.00  wye
+cancel_upstream_release_p50_us            64.00  500183.00  wye
+idle_rss_kb_per_stream                    32.10      73.96  wye
+rss_after_load_kb                      44188.00  858240.00  wye
+rss_idle_kb                            27968.00  347984.00  wye
+sse_cpu_us_per_event                       5.39      24.53  wye
+sse_event_added_p50_us                   156.00     262.00  wye
+sse_event_added_p99_us                   384.00    3078.00  wye
+sse_failed_streams                         0.00       0.00  wye
+sse_ttfb_added_p50_us                    110.00    1176.00  wye
+sse_ttfb_added_p99_us                    290.00   10170.00  wye
+throughput_cpu_ms_per_mb                   1.81      16.12  wye
+unary_added_p50_us                       257.00    3317.00  wye
+unary_added_p99_us                       559.00   14275.00  wye
+unary_cpu_us_per_request                  43.50     508.00  wye
+unary_failed_requests                      0.00       0.00  wye
+upload_added_p50_us                     1587.00   85488.00  wye
+upload_added_p99_us                     2723.00  248059.00  wye
+upload_cpu_ms_per_mb                       0.60      23.66  wye
+upload_failed_requests                     0.00       0.00  wye
+via_throughput_mb_s                     2169.20     240.70  wye
+via_unary_p50_us                         366.00    3426.00  wye
+via_unary_p99_us                         735.00   14447.00  wye
+tls_cancel_upstream_release_max_us       132.00  499768.00  wye
+tls_cancel_upstream_release_p50_us        53.00  499102.00  wye
+tls_cold_failed_requests                   0.00       0.00  wye
+tls_cold_unary_added_p50_us             2262.00   60530.00  wye
+tls_cold_unary_added_p99_us             2409.00   61196.00  wye
+tls_idle_rss_kb_per_stream                17.44     153.30  wye
+tls_mixed_event_added_p50_us             216.00   15442.00  wye
+tls_mixed_event_added_p99_us             637.00  103934.00  wye
+tls_mixed_upload_added_p50_us           1195.00   81931.00  wye
+tls_paced_cpu_us_per_event                14.70      60.90  wye
+tls_paced_event_added_p50_us              82.00   12110.00  wye
+tls_paced_event_added_p99_us             367.00  145123.00  wye
+tls_paced_failed_streams                   0.00       0.00  wye
+tls_paced_rss_kb_per_stream               13.48      83.91  wye
+tls_paced_ttfb_added_p99_us              742.00  378649.00  wye
+tls_rss_after_load_kb                 194248.00 5501600.00  wye
+tls_rss_idle_kb                        28384.00  358368.00  wye
+tls_sse_cpu_us_per_event                   1.25      25.23  wye
+tls_sse_event_added_p50_us               172.00     278.00  wye
+tls_sse_event_added_p99_us               271.00    5271.00  wye
+tls_sse_failed_streams                     0.00       0.00  wye
+tls_sse_ttfb_added_p50_us                 43.00    2240.00  wye
+tls_sse_ttfb_added_p99_us                447.00   18519.00  wye
+tls_stalled_event_added_p99_us           184.00    5746.00  wye
+tls_stalled_rss_kb_per_stream            537.42   21914.58  wye
+tls_stress_failed_requests                 0.00       0.00  wye
+tls_throughput_cpu_ms_per_mb               1.63      16.00  wye
+tls_unary_added_p50_us                   330.00    3287.00  wye
+tls_unary_added_p99_us                   640.00   14277.00  wye
+tls_unary_cpu_us_per_request              63.00     510.50  wye
+tls_unary_failed_requests                  0.00       0.00  wye
+tls_upload_added_p50_us                 1751.00   79992.00  wye
+tls_upload_added_p99_us                 7579.00  251850.00  wye
+tls_upload_cpu_ms_per_mb                   1.12      24.29  wye
+tls_upload_failed_requests                 0.00       0.00  wye
+tls_via_throughput_mb_s                 2365.82     242.23  wye
+tls_via_unary_p50_us                     510.00    3467.00  wye
+tls_via_unary_p99_us                     972.00   14609.00  wye
+
+metric                                      wye agentgateway  winner
+agent_upload_added_p50_us               1637.00   68862.00  wye
+agent_upload_added_p99_us               2862.00  104608.00  wye
+agent_upload_cpu_ms_per_mb                 0.60      16.60  wye
+agent_upload_failed_requests               0.00       0.00  wye
+cancel_upstream_release_max_us          4291.00    1505.00  AGENTGATEWAY
+cancel_upstream_release_p50_us            64.00      82.00  wye
+idle_rss_kb_per_stream                    32.10      75.39  wye
+rss_after_load_kb                      44188.00  158560.00  wye
+rss_idle_kb                            27968.00   66432.00  wye
+sse_cpu_us_per_event                       5.39       7.66  wye
+sse_event_added_p50_us                   156.00     202.00  wye
+sse_event_added_p99_us                   384.00     386.00  wye
+sse_failed_streams                         0.00       0.00  wye
+sse_ttfb_added_p50_us                    110.00     382.00  wye
+sse_ttfb_added_p99_us                    290.00    1204.00  wye
+throughput_cpu_ms_per_mb                   1.81       3.70  wye
+unary_added_p50_us                       257.00     672.00  wye
+unary_added_p99_us                       559.00    1206.00  wye
+unary_cpu_us_per_request                  43.50      96.50  wye
+unary_failed_requests                      0.00       0.00  wye
+upload_added_p50_us                     1587.00    8700.00  wye
+upload_added_p99_us                     2723.00   17208.00  wye
+upload_cpu_ms_per_mb                       0.60       2.46  wye
+upload_failed_requests                     0.00       0.00  wye
+via_throughput_mb_s                     2169.20    1055.20  wye
+via_unary_p50_us                         366.00     780.00  wye
+via_unary_p99_us                         735.00    1378.00  wye
+tls_cancel_upstream_release_max_us       132.00     192.00  wye
+tls_cancel_upstream_release_p50_us        53.00      87.00  wye
+tls_cold_failed_requests                   0.00       0.00  wye
+tls_cold_unary_added_p50_us             2262.00    1752.00  AGENTGATEWAY
+tls_cold_unary_added_p99_us             2409.00    1566.00  AGENTGATEWAY
+tls_idle_rss_kb_per_stream                17.44      56.68  wye
+tls_mixed_event_added_p50_us             216.00     786.00  wye
+tls_mixed_event_added_p99_us             637.00    4083.00  wye
+tls_mixed_upload_added_p50_us           1195.00    6443.00  wye
+tls_paced_cpu_us_per_event                14.70      18.95  wye
+tls_paced_event_added_p50_us              82.00     217.00  wye
+tls_paced_event_added_p99_us             367.00    1087.00  wye
+tls_paced_failed_streams                   0.00       0.00  wye
+tls_paced_rss_kb_per_stream               13.48      37.32  wye
+tls_paced_ttfb_added_p99_us              742.00    1217.00  wye
+tls_rss_after_load_kb                 194248.00  410940.00  wye
+tls_rss_idle_kb                        28384.00   58856.00  wye
+tls_sse_cpu_us_per_event                   1.25       5.39  wye
+tls_sse_event_added_p50_us               172.00     242.00  wye
+tls_sse_event_added_p99_us               271.00     388.00  wye
+tls_sse_failed_streams                     0.00       0.00  wye
+tls_sse_ttfb_added_p50_us                 43.00     556.00  wye
+tls_sse_ttfb_added_p99_us                447.00    1411.00  wye
+tls_stalled_event_added_p99_us           184.00     601.00  wye
+tls_stalled_rss_kb_per_stream            537.42      12.32  AGENTGATEWAY
+tls_stress_failed_requests                 0.00       0.00  wye
+tls_throughput_cpu_ms_per_mb               1.63       7.39  wye
+tls_unary_added_p50_us                   330.00     934.00  wye
+tls_unary_added_p99_us                   640.00    1782.00  wye
+tls_unary_cpu_us_per_request              63.00     120.50  wye
+tls_unary_failed_requests                  0.00       0.00  wye
+tls_upload_added_p50_us                 1751.00   13279.00  wye
+tls_upload_added_p99_us                 7579.00   22723.00  wye
+tls_upload_cpu_ms_per_mb                   1.12       3.05  wye
+tls_upload_failed_requests                 0.00       0.00  wye
+tls_via_throughput_mb_s                 2365.82     419.86  wye
+tls_via_unary_p50_us                     510.00    1115.00  wye
+tls_via_unary_p99_us                     972.00    2114.00  wye
+
+metric                                      wye    litellm  winner
+agent_upload_added_p50_us               1637.00  238714.00  wye
+agent_upload_added_p99_us               2862.00  820177.00  wye
+agent_upload_cpu_ms_per_mb                 0.60      71.75  wye
+agent_upload_failed_requests               0.00       0.00  wye
+cancel_upstream_release_max_us          4291.00   26633.00  wye
+cancel_upstream_release_p50_us            64.00     396.00  wye
+idle_rss_kb_per_stream                    32.10       4.14  LITELLM
+rss_after_load_kb                      44188.00 2743136.00  wye
+rss_idle_kb                            27968.00 2106504.00  wye
+sse_cpu_us_per_event                       5.39       6.95  wye
+sse_event_added_p50_us                   156.00    3006.00  wye
+sse_event_added_p99_us                   384.00   26041.00  wye
+sse_failed_streams                         0.00       0.00  wye
+sse_ttfb_added_p50_us                    110.00   17932.00  wye
+sse_ttfb_added_p99_us                    290.00  110723.00  wye
+throughput_cpu_ms_per_mb                   1.81       8.61  wye
+unary_added_p50_us                       257.00  118904.00  wye
+unary_added_p99_us                       559.00  200410.00  wye
+unary_cpu_us_per_request                  43.50   15043.00  wye
+unary_failed_requests                      0.00       2.00  wye
+upload_added_p50_us                     1587.00  131692.00  wye
+upload_added_p99_us                     2723.00  282220.00  wye
+upload_cpu_ms_per_mb                       0.60      32.11  wye
+upload_failed_requests                     0.00       0.00  wye
+via_throughput_mb_s                     2169.20     441.56  wye
+via_unary_p50_us                         366.00  119013.00  wye
+via_unary_p99_us                         735.00  200584.00  wye
+tls_cancel_upstream_release_max_us       132.00   30152.00  wye
+tls_cancel_upstream_release_p50_us        53.00     355.00  wye
+tls_cold_failed_requests                   0.00       0.00  wye
+tls_cold_unary_added_p50_us             2262.00 1438733.00  wye
+tls_cold_unary_added_p99_us             2409.00 1682069.00  wye
+tls_idle_rss_kb_per_stream                17.44      46.14  wye
+tls_mixed_event_added_p50_us             216.00   38747.00  wye
+tls_mixed_event_added_p99_us             637.00 1149801.00  wye
+tls_mixed_upload_added_p50_us           1195.00  144706.00  wye
+tls_paced_cpu_us_per_event                14.70     158.80  wye
+tls_paced_event_added_p50_us              82.00   12367.00  wye
+tls_paced_event_added_p99_us             367.00  490491.00  wye
+tls_paced_failed_streams                   0.00       0.00  wye
+tls_paced_rss_kb_per_stream               13.48       0.28  LITELLM
+tls_paced_ttfb_added_p99_us              742.00 5234668.00  wye
+tls_rss_after_load_kb                 194248.00 3816348.00  wye
+tls_rss_idle_kb                        28384.00 2140376.00  wye
+tls_sse_cpu_us_per_event                   1.25       7.81  wye
+tls_sse_event_added_p50_us               172.00    3007.00  wye
+tls_sse_event_added_p99_us               271.00   30360.00  wye
+tls_sse_failed_streams                     0.00       0.00  wye
+tls_sse_ttfb_added_p50_us                 43.00   16864.00  wye
+tls_sse_ttfb_added_p99_us                447.00  117584.00  wye
+tls_stalled_event_added_p99_us           184.00 1284283.00  wye
+tls_stalled_rss_kb_per_stream            537.42    3528.22  wye
+tls_stress_failed_requests                 0.00     104.00  wye
+tls_throughput_cpu_ms_per_mb               1.63       9.16  wye
+tls_unary_added_p50_us                   330.00  118011.00  wye
+tls_unary_added_p99_us                   640.00  191911.00  wye
+tls_unary_cpu_us_per_request              63.00   15030.50  wye
+tls_unary_failed_requests                  0.00       1.00  wye
+tls_upload_added_p50_us                 1751.00  137264.00  wye
+tls_upload_added_p99_us                 7579.00  221861.00  wye
+tls_upload_cpu_ms_per_mb                   1.12      33.53  wye
+tls_upload_failed_requests                 0.00       0.00  wye
+tls_via_throughput_mb_s                 2365.82     381.17  wye
+tls_via_unary_p50_us                     510.00  118191.00  wye
+tls_via_unary_p99_us                     972.00  192243.00  wye
+
+metric                                      wye    krakend  winner
+agent_upload_added_p50_us               1637.00    1559.00  KRAKEND
+agent_upload_added_p99_us               2862.00    5929.00  wye
+agent_upload_cpu_ms_per_mb                 0.60       0.60  wye
+agent_upload_failed_requests               0.00       0.00  wye
+rss_after_load_kb                      44188.00   72024.00  wye
+sse_cpu_us_per_event                       5.39       0.47  KRAKEND
+sse_event_added_p50_us                   156.00   26001.00  wye
+sse_event_added_p99_us                   384.00   55271.00  wye
+sse_failed_streams                         0.00       0.00  wye
+sse_ttfb_added_p50_us                    110.00   44724.00  wye
+sse_ttfb_added_p99_us                    290.00   47383.00  wye
+throughput_cpu_ms_per_mb                   1.81       0.85  KRAKEND
+unary_added_p50_us                       257.00     525.00  wye
+unary_added_p99_us                       559.00    2831.00  wye
+unary_cpu_us_per_request                  43.50     103.50  wye
+unary_failed_requests                      0.00       0.00  wye
+upload_added_p50_us                     1587.00    1655.00  wye
+upload_added_p99_us                     2723.00    5061.00  wye
+upload_cpu_ms_per_mb                       0.60       0.63  wye
+upload_failed_requests                     0.00       0.00  wye
+via_throughput_mb_s                     2169.20    4080.68  KRAKEND
+via_unary_p50_us                         366.00     633.00  wye
+via_unary_p99_us                         735.00    3006.00  wye
+tls_cold_failed_requests                   0.00       0.00  wye
+tls_cold_unary_added_p50_us             2262.00    2926.00  wye
+tls_cold_unary_added_p99_us             2409.00    4215.00  wye
+tls_paced_cpu_us_per_event                14.70      19.95  wye
+tls_paced_event_added_p50_us              82.00  208987.00  wye
+tls_paced_event_added_p99_us             367.00  405345.00  wye
+tls_paced_failed_streams                   0.00       1.00  wye
+tls_paced_rss_kb_per_stream               13.48      85.88  wye
+tls_paced_ttfb_added_p99_us              742.00  359398.00  wye
+tls_rss_after_load_kb                 194248.00  278776.00  wye
+tls_sse_cpu_us_per_event                   1.25       0.55  KRAKEND
+tls_sse_event_added_p50_us               172.00   25506.00  wye
+tls_sse_event_added_p99_us               271.00   55164.00  wye
+tls_sse_failed_streams                     0.00       0.00  wye
+tls_sse_ttfb_added_p50_us                 43.00   44787.00  wye
+tls_sse_ttfb_added_p99_us                447.00   48256.00  wye
+tls_throughput_cpu_ms_per_mb               1.63       0.96  KRAKEND
+tls_unary_added_p50_us                   330.00     468.00  wye
+tls_unary_added_p99_us                   640.00    2973.00  wye
+tls_unary_cpu_us_per_request              63.00     107.00  wye
+tls_unary_failed_requests                  0.00       0.00  wye
+tls_upload_added_p50_us                 1751.00    2044.00  wye
+tls_upload_added_p99_us                 7579.00    7034.00  KRAKEND
+tls_upload_cpu_ms_per_mb                   1.12       1.12  wye
+tls_upload_failed_requests                 0.00       0.00  wye
+tls_via_throughput_mb_s                 2365.82    3568.71  KRAKEND
+tls_via_unary_p50_us                     510.00     648.00  wye
+tls_via_unary_p99_us                     972.00    3304.00  wye

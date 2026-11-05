@@ -1,0 +1,7 @@
+[server]
+listen = "127.0.0.1:32911"
+shutdown_grace_secs = 0
+
+[[routes.claude.upstreams]]
+base_url = "http://127.0.0.1:41813"
+forward_caller_credential = true

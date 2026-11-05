@@ -8,32 +8,34 @@ Small, fast, and stateless: one binary, one TOML file, under a millisecond per r
 
 ## Performance
 
-Lab results from one laptop (Intel i9-9880H, macOS) against a local mock provider. Not production. Each gateway was measured in the same run as Wye, at its best configuration, and each cell is its number divided by Wye's (TLS; stream events with 2,000 token-paced streams). The runs are from 2026-10-15 (KrakenD, LiteLLM) to 2026-11-01 (agentgateway), so Wye's build differs between rows:
+Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four other gateways in the same session against a mock provider, every gateway pinned to the same two physical cores; one command reproduces them ([reference environment](docs/benchmarks.md#reference-environment)). Each cell is the gateway's median divided by Wye's (TLS to the upstream; stream events with 2,000 token-paced streams):
 
 | Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
 |---|---|---|---|---|
-| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 7× | 3.1× | 1.1× | 2.9× |
-| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 11× | 6.6× | 4.4× | 21× |
-| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 170× | 120× | 8.9× | 320× (at idle) |
-| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.6× | cannot stream | 5.7× |
+| [agentgateway](https://github.com/agentgateway/agentgateway) 1.7 (Rust) | 2.8× | 1.9× | 1.2× | 2.1× |
+| [Bifrost](https://github.com/maximhq/bifrost) 2.3 (Go) | 9.7× | 8.1× | 4.0× | 28× |
+| [LiteLLM](https://github.com/BerriAI/litellm) 1.105 (Python) | 330× | 220× | 9.8× | 19× |
+| [KrakenD](https://github.com/krakend/krakend-ce) 3.0 CE (Go) | 1.4× | 1.7× | cannot stream | 1.4× |
 
-Where others lead: agentgateway on delay per event (1.0 vs 1.2 ms p50 in that run, and during uploads), cold connections, and memory next to stalled clients. KrakenD on bulk transfer and TLS uploads. Method, full tables, and configs: [docs/benchmarks.md](docs/benchmarks.md).
+Under load the gap widens. With 2,000 token-paced streams, Wye adds 0.28 ms per event at p99; agentgateway adds 1.0 ms, Bifrost 132 ms, LiteLLM 490 ms, and KrakenD, which buffers, 404 ms ([results](docs/benchmarks.md#results)). Under the stress scenarios LiteLLM failed 104-132 requests and streams on every host; Wye failed none, in any scenario ([failures](docs/benchmarks.md#failures)).
+
+Where others lead: KrakenD on bulk transfer (3.7 against 2.4 GB/s), because it buffers responses instead of streaming them; agentgateway on cold connections and on memory beside clients that stopped reading, with a delay per event close to Wye's; LiteLLM on memory per idle stream over plain HTTP, on top of 2.1 GB at idle. Each vendor's own claim beside the number measured here, the method, and the configs: [docs/benchmarks.md](docs/benchmarks.md#what-they-claim-what-i-measured).
 
 | What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
-| Latency per request (p50) | 0.28 ms | 0.22 ms |
-| CPU per request | 120 µs | 161 µs |
-| Heap allocations per streamed event | 0 | |
-| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 1.4 / 4.0 ms |
-| CPU per event and memory per open stream at that load | | 37 µs, 9.3 KB |
+| Latency per request (p50 / p99) | 254 / 559 µs | 325 / 628 µs |
+| CPU per request | 42 µs | 62.5 µs |
+| 2,000 concurrent token-paced streams, delay per event (p50 / p99) | | 77 / 282 µs |
+| CPU per event and memory per open stream at that load | | 14 µs, 12.6 KB |
+| Memory at idle | 28 MB | 28 MB |
 
-A heavy Claude Code user (five concurrent streams) takes about 1% of a core and 250 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The delay per event doesn't add up over a stream, so tokens per second don't change. On my laptop, 35 hours of Claude Code sessions (2,562 requests) took 31 s of CPU and 25 MB of memory ([in use](docs/benchmarks.md#in-use)).
+A heavy Claude Code user (five concurrent streams) takes about 0.4% of a vCPU and 270 KB of memory ([sizing](docs/operations.md#sizing-estimate), an estimate). The delay per event doesn't add up over a stream, so tokens per second don't change.
 
 Every commit that changes code is benchmarked against its parent, in alternating rounds on the same machine (`scripts/check.sh`). If it makes Wye slower or heavier beyond the commit gate's tolerances, it doesn't get in.
 
 ## Quick start
 
-Prerelease, tested and benchmarked on one machine; [status](#status) lists what is not yet verified against live providers.
+Prerelease, tested on one machine; [status](#status) lists what is not yet verified against live providers.
 
 ```bash
 cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked   # Rust 1.99+

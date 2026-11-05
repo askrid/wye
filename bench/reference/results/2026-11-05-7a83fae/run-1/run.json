@@ -1,0 +1,12 @@
+{
+  "run": "20261105-100541-7a83fae",
+  "commit": "7a83fae27fddf666927e3e0d8738411881280cc6",
+  "status": "Success",
+  "region": "us-east-1",
+  "zone": "us-east-1a",
+  "instance_type": "c7i.4xlarge",
+  "ami": "ami-0d6dd9e8265d48906",
+  "ami_parameter": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id",
+  "lifetime_minutes": 180,
+  "minutes": 28
+}

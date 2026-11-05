@@ -275,7 +275,7 @@ when = [{ subjects = ["team-canary-*"], model = "claude-sonnet-5-5" }]
 - Canary: `when` rules match the token's subject (exact or a prefix ending in `*`, as in model permissions); the first match wins, and callers without a token get the alias's `model`. Resolution is one step: an alias names a model, never another alias.
 - Model permissions apply to the served model, and the price table to the model the provider reports (the served one). `GET /v1/models` lists aliases after the catalog's models, each when the model it resolves to for that caller is permitted. Claude Code's model picker keeps only ids containing `claude` or `anthropic`, so aliases meant for it are named accordingly (`claude-coding`).
 - Visibility: `requested_model` in records ([operations.md](operations.md#usage-records-and-telemetry)); `wye explain` prints the resolution, and a policy test can pin the served model, so a rollout is reviewed like any policy change.
-- Overhead: with aliases alone the rest of the body is not lexed ([measured](benchmarks.md#current-harness-and-baseline)).
+- Overhead: with aliases alone the rest of the body is not lexed, unlike with model permissions ([their cost](benchmarks.md#variants)).
 - Mapping one name to several providers of a model is [a route](#upstream-selection-and-failover), not a second alias mechanism.
 
 ### Upgrade checks
@@ -307,7 +307,7 @@ Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a 
 - `cache_control` members and whitespace outside strings are excluded: Claude Code moves the marker every turn.
 - xxh3 in process; every exported hash is HMAC-SHA256 under a shared key, truncated to 64 bits, so hashes compare across replicas but cannot be matched against guessed prompts. The key is required.
 - A constant-memory scanner; a body it cannot follow is recorded `unknown` and forwarded unchanged. Property tests cover random bodies, whitespace, and chunkings.
-- Sampled per session (`sample_percent`), by a hash of the session id, so every replica agrees. Sampling, not a faster scanner, bounds the overhead ([benchmarks.md](benchmarks.md#current-harness-and-baseline), [the SIMD verdict](research.md#performance-techniques)).
+- Sampled per session (`sample_percent`), by a hash of the session id, so every replica agrees. Sampling, not a faster scanner, bounds the overhead ([benchmarks.md](benchmarks.md#variants), [the SIMD verdict](research.md#performance-techniques)).
 
 ## Configuration
 

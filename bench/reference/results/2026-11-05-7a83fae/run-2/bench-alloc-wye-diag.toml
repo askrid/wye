@@ -1,0 +1,10 @@
+[server]
+listen = "127.0.0.1:44271"
+shutdown_grace_secs = 0
+
+[[routes.claude.upstreams]]
+base_url = "http://127.0.0.1:41813"
+forward_caller_credential = true
+
+[cache_diagnostics]
+hash_key_env = "WYE_BENCH_HASH_KEY"

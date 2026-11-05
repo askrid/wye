@@ -1,0 +1,1 @@
+{"endpoints":[{"backend":[{"encoding":"no-op","host":["http://127.0.0.1:37273"],"url_pattern":"/v1/messages"}],"endpoint":"/v1/messages","input_headers":["*"],"input_query_strings":["*"],"method":"POST","output_encoding":"no-op"}],"extra_config":{"router":{"disable_access_log":true},"telemetry/logging":{"level":"ERROR","stdout":true}},"port":34949,"timeout":"600s","version":4}

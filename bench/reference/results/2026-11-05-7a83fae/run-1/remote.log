@@ -1,0 +1,462 @@
+==> wye-bench reference run 20261105-100541-7a83fae: 7a83fae27fddf666927e3e0d8738411881280cc6
+==> quiet the machine
+
+Running kernel seems to be up-to-date.
+
+No services need to be restarted.
+
+No containers need to be restarted.
+
+No user sessions are running outdated binaries.
+
+No VM guests are running outdated hypervisor (qemu) binaries on this host.
+==> AWS CLI
+==> Rust (rust-toolchain.toml)
+
+
+Rust is installed now. Great!
+
+To get started you need Cargo's bin directory ($HOME/.cargo/bin) in your PATH
+environment variable. This has not been done automatically.
+
+To configure your current shell, you need to source
+the corresponding env file under $HOME/.cargo.
+
+Consider running the right command for your shell (note the leading DOT):
+. "$HOME/.cargo/env" # For sh/ash/dash/pdksh/bash
+cargo:rerun-if-env-changed=CC_x86_64-unknown-linux-gnu
+CC_x86_64-unknown-linux-gnu = None
+cargo:rerun-if-env-changed=CC_x86_64_unknown_linux_gnu
+CC_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=HOST_CC
+HOST_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+cargo:rerun-if-env-changed=CPATH
+cargo:rerun-if-env-changed=C_INCLUDE_PATH
+cargo:rerun-if-env-changed=CPLUS_INCLUDE_PATH
+cargo:rerun-if-env-changed=OBJC_INCLUDE_PATH
+cargo:rerun-if-env-changed=OBJCPLUS_INCLUDE_PATH
+cargo:rerun-if-env-changed=COMPILER_PATH
+cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH
+cargo:rerun-if-env-changed=GCC_EXEC_PREFIX
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=HOST_CFLAGS
+HOST_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64_unknown_linux_gnu
+CFLAGS_x86_64_unknown_linux_gnu = None
+cargo:rerun-if-env-changed=CFLAGS_x86_64-unknown-linux-gnu
+CFLAGS_x86_64-unknown-linux-gnu = None
+info: syncing channel updates for 1.99.1-x86_64-unknown-linux-gnu
+info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+info: downloading 5 components
+info: the active toolchain `1.99.1-x86_64-unknown-linux-gnu` has been installed
+info: it's active because: overridden by '/opt/wye-bench/repo/rust-toolchain.toml'
+info: checking for self-update (current version: 1.29.3)
+==> build
+==> competitors
+==> split the CPUs
+    gateway: 6,14,7,15; wye-bench: 0,8,1,9,2,10,3,11,4,12,5,13
+==> record the machine
+{
+  "ami": "ami-0d6dd9e8265d48906",
+  "client_cpus": "0,8,1,9,2,10,3,11,4,12,5,13",
+  "commit": "7a83fae27fddf666927e3e0d8738411881280cc6",
+  "competitors": {
+    "agentgateway": "v1.7.0",
+    "bifrost": "v2.3.2",
+    "krakend": "3.0.1",
+    "litellm": "1.105.0"
+  },
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8488C",
+  "gateway_cpus": "6,14,7,15",
+  "instance_id": "i-0f49d83c6cc80a225",
+  "instance_type": "c7i.4xlarge",
+  "kernel": "Linux ip-172-31-5-87 7.0.0-1014-aws #14~24.04.1-Ubuntu SMP PREEMPT Fri Sep 18 21:24:59 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+  "memory_kb": 32306640,
+  "os": "Ubuntu 24.04.5 LTS",
+  "python": "Python 3.12.3",
+  "run": "20261105-100541-7a83fae",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "ulimit_n": "65536",
+  "vcpus": 16,
+  "zone": "us-east-1a"
+}==> benchmark
+  phase direct: 1.7s
+run 1/3: plain upstream, wye
+  phase latency: 1.8s
+  phase cpu-per-request: 0.2s
+  phase cpu-per-event: 0.2s
+  phase idle+cancel: 2.3s
+  phase throughput: 0.1s
+  phase upload: 0.0s
+  phase agent_upload: 0.0s
+run 1/3: plain upstream, bifrost
+  phase bifrost_latency: 4.2s
+  phase bifrost_cpu-per-request: 2.2s
+  phase bifrost_cpu-per-event: 0.7s
+  phase bifrost_idle+cancel: 11.3s
+  phase bifrost_throughput: 1.0s
+  phase bifrost_upload: 1.5s
+  phase bifrost_agent_upload: 1.9s
+run 1/3: plain upstream, agentgateway
+  phase agentgateway_latency: 2.0s
+  phase agentgateway_cpu-per-request: 0.5s
+  phase agentgateway_cpu-per-event: 0.2s
+  phase agentgateway_idle+cancel: 2.9s
+  phase agentgateway_throughput: 0.2s
+  phase agentgateway_upload: 0.1s
+  phase agentgateway_agent_upload: 0.5s
+run 1/3: plain upstream, litellm
+  phase litellm_latency: 74.0s
+  phase litellm_cpu-per-request: 64.1s
+  phase litellm_cpu-per-event: 0.2s
+  phase litellm_idle+cancel: 3.2s
+  phase litellm_throughput: 0.6s
+  phase litellm_upload: 1.9s
+  phase litellm_agent_upload: 2.7s
+run 1/3: plain upstream, krakend
+  phase krakend_latency: 2.1s
+  phase krakend_cpu-per-request: 0.5s
+  phase krakend_cpu-per-event: 0.0s
+  phase krakend_throughput: 0.1s
+  phase krakend_upload: 0.0s
+  phase krakend_agent_upload: 0.0s
+run 1/3: plain upstream, wye-auth
+  phase auth_latency: 1.8s
+  phase auth_cpu-per-request: 0.2s
+run 1/3: plain upstream, wye-models
+  phase models_latency: 1.8s
+  phase models_cpu-per-request: 0.2s
+  phase models_upload: 0.0s
+  phase models_agent_upload: 0.0s
+run 1/3: plain upstream, wye-diag
+  phase diag_latency: 1.8s
+  phase diag_cpu-per-request: 0.2s
+  phase diag_upload: 0.0s
+  phase diag_agent_upload: 0.0s
+run 1/3: plain upstream, wye-otlp
+  phase otlp_latency: 1.8s
+  phase otlp_cpu-per-request: 0.2s
+run 1/3: plain upstream, wye-openai
+  phase openai_latency: 1.8s
+  phase openai_cpu-per-request: 0.2s
+  phase openai_cpu-per-event: 0.2s
+run 1/3: plain upstream, wye-bedrock
+  phase bedrock_latency: 1.8s
+  phase bedrock_cpu-per-request: 0.2s
+run 1/3: plain upstream, wye-failover
+  phase failover_latency: 1.8s
+  phase failover_cpu-per-request: 0.2s
+  phase failover_upload: 0.0s
+  phase failover_agent_upload: 0.0s
+run 1/3: plain upstream, wye-refused
+  phase refused_latency: 1.8s
+  phase refused_cpu-per-request: 0.3s
+  phase refused_upload: 0.0s
+  phase refused_agent_upload: 0.0s
+  phase tls_direct: 13.3s
+run 1/3: tls upstream, wye
+  phase tls_cold: 0.0s
+  phase tls_latency: 1.9s
+  phase tls_cpu-per-request: 0.3s
+  phase tls_cpu-per-event: 0.0s
+  phase tls_idle+cancel: 2.5s
+  phase tls_throughput: 0.1s
+  phase tls_upload: 0.1s
+  phase tls_paced: 4.1s
+  phase tls_stress: 7.3s
+run 1/3: tls upstream, bifrost
+  phase tls_bifrost_cold: 0.1s
+  phase tls_bifrost_latency: 4.2s
+  phase tls_bifrost_cpu-per-request: 2.3s
+  phase tls_bifrost_cpu-per-event: 0.7s
+  phase tls_bifrost_idle+cancel: 11.4s
+  phase tls_bifrost_throughput: 1.0s
+  phase tls_bifrost_upload: 1.5s
+  phase tls_bifrost_paced: 4.2s
+  phase tls_bifrost_stress: 10.1s
+run 1/3: tls upstream, agentgateway
+  phase tls_agentgateway_cold: 0.0s
+  phase tls_agentgateway_latency: 2.3s
+  phase tls_agentgateway_cpu-per-request: 0.6s
+  phase tls_agentgateway_cpu-per-event: 0.3s
+  phase tls_agentgateway_idle+cancel: 2.9s
+  phase tls_agentgateway_throughput: 0.6s
+  phase tls_agentgateway_upload: 0.2s
+  phase tls_agentgateway_paced: 4.1s
+  phase tls_agentgateway_stress: 7.3s
+run 1/3: tls upstream, litellm
+  phase tls_litellm_cold: 1.5s
+  phase tls_litellm_latency: 73.1s
+  phase tls_litellm_cpu-per-request: 64.6s
+  phase tls_litellm_cpu-per-event: 0.2s
+  phase tls_litellm_idle+cancel: 3.6s
+  phase tls_litellm_throughput: 0.7s
+  phase tls_litellm_upload: 2.0s
+  phase tls_litellm_paced: 7.7s
+  phase tls_litellm_stress: 10.1s
+run 1/3: tls upstream, krakend
+  phase tls_krakend_cold: 0.0s
+  phase tls_krakend_latency: 2.1s
+  phase tls_krakend_cpu-per-request: 0.5s
+  phase tls_krakend_cpu-per-event: 0.0s
+  phase tls_krakend_throughput: 0.1s
+  phase tls_krakend_upload: 0.1s
+  phase tls_krakend_paced: 4.1s
+run 1/3: allocations
+  phase allocations: 8.0s
+  phase direct: 1.7s
+run 2/3: plain upstream, wye
+  phase latency: 1.8s
+  phase cpu-per-request: 0.2s
+  phase cpu-per-event: 0.2s
+  phase idle+cancel: 3.1s
+  phase throughput: 0.1s
+  phase upload: 0.0s
+  phase agent_upload: 0.0s
+run 2/3: plain upstream, bifrost
+  phase bifrost_latency: 4.2s
+  phase bifrost_cpu-per-request: 2.2s
+  phase bifrost_cpu-per-event: 0.7s
+  phase bifrost_idle+cancel: 11.3s
+  phase bifrost_throughput: 1.0s
+  phase bifrost_upload: 1.5s
+  phase bifrost_agent_upload: 1.9s
+run 2/3: plain upstream, agentgateway
+  phase agentgateway_latency: 2.0s
+  phase agentgateway_cpu-per-request: 0.4s
+  phase agentgateway_cpu-per-event: 0.2s
+  phase agentgateway_idle+cancel: 3.3s
+  phase agentgateway_throughput: 0.2s
+  phase agentgateway_upload: 0.1s
+  phase agentgateway_agent_upload: 0.5s
+run 2/3: plain upstream, litellm
+  phase litellm_latency: 74.0s
+  phase litellm_cpu-per-request: 64.2s
+  phase litellm_cpu-per-event: 0.2s
+  phase litellm_idle+cancel: 3.1s
+  phase litellm_throughput: 0.5s
+  phase litellm_upload: 1.9s
+  phase litellm_agent_upload: 2.3s
+run 2/3: plain upstream, krakend
+  phase krakend_latency: 2.2s
+  phase krakend_cpu-per-request: 0.5s
+  phase krakend_cpu-per-event: 0.0s
+  phase krakend_throughput: 0.1s
+  phase krakend_upload: 0.0s
+  phase krakend_agent_upload: 0.0s
+run 2/3: plain upstream, wye-auth
+  phase auth_latency: 1.8s
+  phase auth_cpu-per-request: 0.2s
+run 2/3: plain upstream, wye-models
+  phase models_latency: 1.8s
+  phase models_cpu-per-request: 0.2s
+  phase models_upload: 0.0s
+  phase models_agent_upload: 0.0s
+run 2/3: plain upstream, wye-diag
+  phase diag_latency: 1.8s
+  phase diag_cpu-per-request: 0.2s
+  phase diag_upload: 0.0s
+  phase diag_agent_upload: 0.0s
+run 2/3: plain upstream, wye-otlp
+  phase otlp_latency: 1.8s
+  phase otlp_cpu-per-request: 0.2s
+run 2/3: plain upstream, wye-openai
+  phase openai_latency: 1.8s
+  phase openai_cpu-per-request: 0.2s
+  phase openai_cpu-per-event: 0.2s
+run 2/3: plain upstream, wye-bedrock
+  phase bedrock_latency: 1.8s
+  phase bedrock_cpu-per-request: 0.2s
+run 2/3: plain upstream, wye-failover
+  phase failover_latency: 1.8s
+  phase failover_cpu-per-request: 0.2s
+  phase failover_upload: 0.0s
+  phase failover_agent_upload: 0.0s
+run 2/3: plain upstream, wye-refused
+  phase refused_latency: 1.8s
+  phase refused_cpu-per-request: 0.3s
+  phase refused_upload: 0.0s
+  phase refused_agent_upload: 0.0s
+  phase tls_direct: 13.3s
+run 2/3: tls upstream, wye
+  phase tls_cold: 0.0s
+  phase tls_latency: 1.9s
+  phase tls_cpu-per-request: 0.3s
+  phase tls_cpu-per-event: 0.0s
+  phase tls_idle+cancel: 2.9s
+  phase tls_throughput: 0.1s
+  phase tls_upload: 0.1s
+  phase tls_paced: 4.1s
+  phase tls_stress: 7.3s
+run 2/3: tls upstream, bifrost
+  phase tls_bifrost_cold: 0.1s
+  phase tls_bifrost_latency: 4.2s
+  phase tls_bifrost_cpu-per-request: 2.3s
+  phase tls_bifrost_cpu-per-event: 0.7s
+  phase tls_bifrost_idle+cancel: 11.4s
+  phase tls_bifrost_throughput: 1.0s
+  phase tls_bifrost_upload: 1.5s
+  phase tls_bifrost_paced: 4.2s
+  phase tls_bifrost_stress: 10.3s
+run 2/3: tls upstream, agentgateway
+  phase tls_agentgateway_cold: 0.0s
+  phase tls_agentgateway_latency: 2.3s
+  phase tls_agentgateway_cpu-per-request: 0.7s
+  phase tls_agentgateway_cpu-per-event: 0.3s
+  phase tls_agentgateway_idle+cancel: 3.7s
+  phase tls_agentgateway_throughput: 0.6s
+  phase tls_agentgateway_upload: 0.2s
+  phase tls_agentgateway_paced: 4.1s
+  phase tls_agentgateway_stress: 7.2s
+run 2/3: tls upstream, litellm
+  phase tls_litellm_cold: 1.5s
+  phase tls_litellm_latency: 72.8s
+  phase tls_litellm_cpu-per-request: 64.0s
+  phase tls_litellm_cpu-per-event: 0.2s
+  phase tls_litellm_idle+cancel: 3.6s
+  phase tls_litellm_throughput: 0.6s
+  phase tls_litellm_upload: 2.0s
+  phase tls_litellm_paced: 7.7s
+  phase tls_litellm_stress: 10.0s
+run 2/3: tls upstream, krakend
+  phase tls_krakend_cold: 0.0s
+  phase tls_krakend_latency: 2.1s
+  phase tls_krakend_cpu-per-request: 0.5s
+  phase tls_krakend_cpu-per-event: 0.0s
+  phase tls_krakend_throughput: 0.1s
+  phase tls_krakend_upload: 0.1s
+  phase tls_krakend_paced: 4.1s
+run 2/3: allocations
+  phase allocations: 9.7s
+  phase direct: 1.7s
+run 3/3: plain upstream, wye
+  phase latency: 1.8s
+  phase cpu-per-request: 0.2s
+  phase cpu-per-event: 0.2s
+  phase idle+cancel: 3.8s
+  phase throughput: 0.1s
+  phase upload: 0.0s
+  phase agent_upload: 0.0s
+run 3/3: plain upstream, bifrost
+  phase bifrost_latency: 4.2s
+  phase bifrost_cpu-per-request: 2.3s
+  phase bifrost_cpu-per-event: 0.7s
+  phase bifrost_idle+cancel: 11.3s
+  phase bifrost_throughput: 1.0s
+  phase bifrost_upload: 1.5s
+  phase bifrost_agent_upload: 1.9s
+run 3/3: plain upstream, agentgateway
+  phase agentgateway_latency: 2.1s
+  phase agentgateway_cpu-per-request: 0.5s
+  phase agentgateway_cpu-per-event: 0.2s
+  phase agentgateway_idle+cancel: 3.3s
+  phase agentgateway_throughput: 0.2s
+  phase agentgateway_upload: 0.1s
+  phase agentgateway_agent_upload: 0.5s
+run 3/3: plain upstream, litellm
+  phase litellm_latency: 74.6s
+  phase litellm_cpu-per-request: 64.0s
+  phase litellm_cpu-per-event: 0.2s
+  phase litellm_idle+cancel: 3.1s
+  phase litellm_throughput: 0.6s
+  phase litellm_upload: 1.9s
+  phase litellm_agent_upload: 2.4s
+run 3/3: plain upstream, krakend
+  phase krakend_latency: 2.1s
+  phase krakend_cpu-per-request: 0.5s
+  phase krakend_cpu-per-event: 0.0s
+  phase krakend_throughput: 0.1s
+  phase krakend_upload: 0.0s
+  phase krakend_agent_upload: 0.0s
+run 3/3: plain upstream, wye-auth
+  phase auth_latency: 1.8s
+  phase auth_cpu-per-request: 0.2s
+run 3/3: plain upstream, wye-models
+  phase models_latency: 1.8s
+  phase models_cpu-per-request: 0.2s
+  phase models_upload: 0.0s
+  phase models_agent_upload: 0.0s
+run 3/3: plain upstream, wye-diag
+  phase diag_latency: 1.8s
+  phase diag_cpu-per-request: 0.2s
+  phase diag_upload: 0.0s
+  phase diag_agent_upload: 0.0s
+run 3/3: plain upstream, wye-otlp
+  phase otlp_latency: 1.8s
+  phase otlp_cpu-per-request: 0.2s
+run 3/3: plain upstream, wye-openai
+  phase openai_latency: 1.8s
+  phase openai_cpu-per-request: 0.2s
+  phase openai_cpu-per-event: 0.2s
+run 3/3: plain upstream, wye-bedrock
+  phase bedrock_latency: 1.8s
+  phase bedrock_cpu-per-request: 0.2s
+run 3/3: plain upstream, wye-failover
+  phase failover_latency: 1.8s
+  phase failover_cpu-per-request: 0.2s
+  phase failover_upload: 0.0s
+  phase failover_agent_upload: 0.0s
+run 3/3: plain upstream, wye-refused
+  phase refused_latency: 1.8s
+  phase refused_cpu-per-request: 0.3s
+  phase refused_upload: 0.0s
+  phase refused_agent_upload: 0.0s
+  phase tls_direct: 13.3s
+run 3/3: tls upstream, wye
+  phase tls_cold: 0.0s
+  phase tls_latency: 1.9s
+  phase tls_cpu-per-request: 0.3s
+  phase tls_cpu-per-event: 0.0s
+  phase tls_idle+cancel: 3.1s
+  phase tls_throughput: 0.1s
+  phase tls_upload: 0.1s
+  phase tls_paced: 4.1s
+  phase tls_stress: 7.3s
+run 3/3: tls upstream, bifrost
+  phase tls_bifrost_cold: 0.1s
+  phase tls_bifrost_latency: 4.2s
+  phase tls_bifrost_cpu-per-request: 2.3s
+  phase tls_bifrost_cpu-per-event: 0.7s
+  phase tls_bifrost_idle+cancel: 11.4s
+  phase tls_bifrost_throughput: 1.0s
+  phase tls_bifrost_upload: 1.5s
+  phase tls_bifrost_paced: 4.3s
+  phase tls_bifrost_stress: 10.1s
+run 3/3: tls upstream, agentgateway
+  phase tls_agentgateway_cold: 0.0s
+  phase tls_agentgateway_latency: 2.3s
+  phase tls_agentgateway_cpu-per-request: 0.6s
+  phase tls_agentgateway_cpu-per-event: 0.3s
+  phase tls_agentgateway_idle+cancel: 2.9s
+  phase tls_agentgateway_throughput: 0.5s
+  phase tls_agentgateway_upload: 0.2s
+  phase tls_agentgateway_paced: 4.1s
+  phase tls_agentgateway_stress: 7.2s
+run 3/3: tls upstream, litellm
+  phase tls_litellm_cold: 1.5s
+  phase tls_litellm_latency: 73.3s
+  phase tls_litellm_cpu-per-request: 64.2s
+  phase tls_litellm_cpu-per-event: 0.2s
+  phase tls_litellm_idle+cancel: 3.5s
+  phase tls_litellm_throughput: 0.6s
+  phase tls_litellm_upload: 2.0s
+  phase tls_litellm_paced: 7.8s
+  phase tls_litellm_stress: 10.7s
+run 3/3: tls upstream, krakend
+  phase tls_krakend_cold: 0.0s
+  phase tls_krakend_latency: 2.1s
+  phase tls_krakend_cpu-per-request: 0.5s
+  phase tls_krakend_cpu-per-event: 0.0s
+  phase tls_krakend_throughput: 0.1s
+  phase tls_krakend_upload: 0.1s
+  phase tls_krakend_paced: 4.1s
+run 3/3: allocations
+  phase allocations: 8.6s
+==> done
+==> exit 0; uploading results

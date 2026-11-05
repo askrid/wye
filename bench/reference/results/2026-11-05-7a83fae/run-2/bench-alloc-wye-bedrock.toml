@@ -1,0 +1,10 @@
+[server]
+listen = "127.0.0.1:36021"
+shutdown_grace_secs = 0
+
+[routes.claude]
+[[routes.claude.upstreams]]
+id = "bedrock"
+provider = "bedrock"
+base_url = "http://127.0.0.1:41813"
+provider_key_env = "WYE_BENCH_PROVIDER_KEY"

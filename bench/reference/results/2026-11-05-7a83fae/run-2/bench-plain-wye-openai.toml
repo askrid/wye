@@ -1,0 +1,9 @@
+[server]
+listen = "127.0.0.1:33913"
+shutdown_grace_secs = 0
+
+[routes.openai]
+[[routes.openai.upstreams]]
+id = "openai"
+base_url = "http://127.0.0.1:41813"
+provider_key_env = "WYE_BENCH_PROVIDER_KEY"

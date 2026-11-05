@@ -1,0 +1,8 @@
+[server]
+listen = "127.0.0.1:44209"
+shutdown_grace_secs = 0
+
+[[routes.claude.upstreams]]
+base_url = "https://127.0.0.1:45473"
+forward_caller_credential = true
+ca_file = "/opt/wye-bench/out/bench-alloc-tls-ca.pem"

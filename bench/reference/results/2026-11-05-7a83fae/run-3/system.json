@@ -1,0 +1,24 @@
+{
+  "ami": "ami-0d6dd9e8265d48906",
+  "client_cpus": "0,8,1,9,2,10,3,11,4,12,5,13",
+  "commit": "7a83fae27fddf666927e3e0d8738411881280cc6",
+  "competitors": {
+    "agentgateway": "v1.7.0",
+    "bifrost": "v2.3.2",
+    "krakend": "3.0.1",
+    "litellm": "1.105.0"
+  },
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8488C",
+  "gateway_cpus": "6,14,7,15",
+  "instance_id": "i-0d7798fcb210720c0",
+  "instance_type": "c7i.4xlarge",
+  "kernel": "Linux ip-172-31-12-231 7.0.0-1014-aws #14~24.04.1-Ubuntu SMP PREEMPT Fri Sep 18 21:24:59 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+  "memory_kb": 32306628,
+  "os": "Ubuntu 24.04.5 LTS",
+  "python": "Python 3.12.3",
+  "run": "20261105-112725-7a83fae",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "ulimit_n": "65536",
+  "vcpus": 16,
+  "zone": "us-east-1a"
+}

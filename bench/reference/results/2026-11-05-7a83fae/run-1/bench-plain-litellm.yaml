@@ -1,0 +1,8 @@
+general_settings:
+  master_key: sk-bench-master
+  pass_through_endpoints:
+    - path: "/pt/v1/messages"
+      target: "http://127.0.0.1:46459/v1/messages"
+      forward_headers: true
+      merge_query_params: true
+      timeout: 600

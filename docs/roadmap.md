@@ -126,14 +126,14 @@ Exit: a team serves Claude Code from at least two providers, keeps prompt-cache 
 
 ### M5: benchmarks and optimization
 
-Started early: the [commit gate](development.md#commit-gate) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons ([benchmarks.md](benchmarks.md)).
+Started early: the [commit gate](development.md#commit-gate) since M0, with provider, failover, and rejection variants, and the agentgateway, Bifrost, LiteLLM, and KrakenD comparisons. Done: published numbers from three [reference-environment](benchmarks.md#reference-environment) runs of one commit ([results](benchmarks.md#results)).
 
 Open:
 
 - A floor baseline: nginx or Envoy streaming with `proxy_buffering off`, the overhead of a proxy that does nothing.
 - Replay of the public TraceLab coding-agent trace: context sizes, output lengths, turn gaps ([related work](research.md#related-work)).
-- Published numbers from the [reference environment](benchmarks.md#reference-environment) (built; no run recorded yet), replacing the laptop's in this documentation.
 - A separate load machine, since the load generator saturates first at multi-core load (the reference environment gives the gateway 4 vCPUs of 16); then 10k streams.
+- Soak (`wye-bench load --scenario paced`, for hours) and capacity per core (`--scenario capacity`) in the reference environment, whose published results have neither yet.
 - A mock upstream that varies time to first token (token rate, stream length, and a rejection rate already vary).
 - The next competitors, each in passthrough at its best case, with its license, version, and Claude Code support checked first and the result and configuration recorded in [benchmarks.md](benchmarks.md):
   - LiteLLM's Rust gateway, next: its July 2026 benchmark claims 0.7 ms p99 overhead against Bifrost's 4.5 ms.
@@ -159,7 +159,7 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - Chat Completions' `n` asks for several choices, each up to the output-token ceiling, so one request may generate `n` times the ceiling ([policy.md](policy.md#per-request-ceilings)). Open: reading `n` is one more field under the hold; refuse or multiply is a policy choice.
 - Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#model-permissions)). Open: each such field is provider-specific; a list of them is a design change.
 - OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process. Open: the excess is counted in `wye.records.dropped`; per-attribute caps need a design.
-- Tests: a few negative checks (`try_recv` on an empty channel, in aliases, OpenAI, and failover tests) could race the upstream, and some tests wait with fixed sleeps, among them a rejection mid-upload in the failover tests (200 ms for the rejection to arrive first). Open: test cleanup; none has flaked on the laptop or CI.
+- Tests: a few negative checks (`try_recv` on an empty channel, in aliases, OpenAI, and failover tests) could race the upstream, and some tests wait with fixed sleeps, among them a rejection mid-upload in the failover tests (200 ms for the rejection to arrive first). Open: test cleanup; none has flaked locally or in CI.
 - A chunked body whose chunk-size lines are padded (HTTP/1.1 allows leading zeros) can pin 8-32 KiB of the connection's read buffer per held or kept chunk, which counts 1 KiB, so under such a client the hold and failover budgets bound their charges, not memory. Open: a strict bound copies each held or kept chunk, one more allocation per request (gated), or caps chunk-size framing, which hyper does not expose; it takes an authenticated client uploading gigabytes.
 - A client that stalls mid-upload after the hold is reported as an upstream timeout (504) after `response_header_timeout_secs` (600 s), and keeps its permit and, on a failover route, its share of the kept-body budget. Decided (2026-11-02): no idle timer on uploads, which would add a timer to every request and a new way for slow uploads to fail.
 - Test and benchmark code repeats setup (recording upstreams, SSE responses, leaked `'static` bodies, CPU before-and-after pairs), and `wye-bench` leaves its gateways running when interrupted. Open: cleanup with no behavior change; next round.
@@ -167,7 +167,6 @@ Found by review rounds ([development.md](development.md#review-rounds)) and not 
 - No `cargo-fuzz` targets for the parsers of untrusted input; property tests cover the scanners. Open: needs a nightly toolchain: a decision for the maintainer.
 - `wye service uninstall` ignores any `bootout` failure (exit 3 means not loaded). Open: launchctl's other failure modes are unverified.
 - Idle upstream sockets after a burst stay until the peer closes them, since no `pool_timer` is set. Open: the fix needs a way to test it without a 90 s wait.
-- `bench/baseline.json` lacks the ten `*_sse_failed_streams` metrics: it is a record, not a gate input, so it waits for the next refresh on an idle machine.
 - `wye doctor` does not warn about a provider key file others can read: mounted secrets are often 0444, so it would need to tell them apart.
 - `wye claude` starts the agent with an expired gateway token, which then gets 401s. The token's `exp` could be read locally first.
 - The report has no cost column until the config has `[pricing]`, which `wye init` does not write ([why](policy.md#price-table); [visibility ideas](research.md#visibility-for-one-developer)).
