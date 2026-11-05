@@ -174,13 +174,20 @@ async fn wye_claude_runs_claude_against_the_gateway() {
     std::fs::write(&credential, "gateway-token\n").unwrap();
 
     let gateway = format!("http://{}", h.gateway);
-    // Run the binary off the runtime, which also serves the gateway.
+    // Run the binary off the runtime, which also serves the gateway, in a
+    // home of its own: what it advises depends on whether a config exists.
+    let home = dir.join("home");
     let run = |args: &[&str]| {
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
         let fake = fake.clone();
+        let home = home.clone();
         tokio::task::spawn_blocking(move || {
             wye()
                 .args(args)
+                .current_dir(home.parent().unwrap())
+                .env("HOME", &home)
+                .env_remove("WYE_HOME")
+                .env_remove("WYE_CONFIG")
                 .env("WYE_CLAUDE_BIN", fake)
                 .env("ANTHROPIC_API_KEY", "sk-should-be-removed")
                 .env_remove("CLAUDE_CODE_GATEWAY_HINT_HEADERS")
@@ -214,12 +221,22 @@ async fn wye_claude_runs_claude_against_the_gateway() {
         )
     );
 
-    // Without a reachable gateway, claude is not started.
+    // Without a reachable gateway, claude is not started, and the advice
+    // fits the machine: set one up when there is no config, else start it.
     let output = run(&["claude", "--url", "http://127.0.0.1:9"])
         .await
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("wye serve"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("set one up with `wye init`"), "{stderr}");
+    std::fs::create_dir_all(home.join(".wye")).unwrap();
+    std::fs::write(home.join(".wye/wye.toml"), "").unwrap();
+    let output = run(&["claude", "--url", "http://127.0.0.1:9"])
+        .await
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`wye serve`"), "{stderr}");
 }
 
 /// The binary's two streams: records are data, for a pipe or a file; messages
