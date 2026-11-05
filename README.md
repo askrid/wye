@@ -2,11 +2,11 @@
 
 **LLM gateway without bloat.**
 
-- **Sees agent sessions.** Cost per Claude Code or Codex session, subagent, and tool, with the reason for each prompt-cache miss.
-- **Fast.** Adds under a millisecond per request, less than the four other gateways measured ([p50, lab](#performance)).
-- **Untranslated.** Native APIs pass through, so new features work the day they ship.
-- **One binary, one TOML file.** No database and no state between requests: scale by running more replicas.
-- **Plus the essentials.** Everything below, from access per caller to failover.
+- Records tokens and cost per coding-agent session, subagent, and tool, and why each prompt-cache miss happened.
+- Adds under a millisecond per request (p50), less than other widely used open-source gateways in the [same lab run](#performance).
+- Passes each provider's native API through untranslated, so new features work the day they ship.
+- One binary and one TOML file. No database, no state between requests: scale by adding replicas.
+- Covers the rest of what a gateway does, from access per caller to failover.
 
 ## Performance
 
