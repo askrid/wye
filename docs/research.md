@@ -4,6 +4,7 @@ Open questions, ideas, and experiments; nothing here is a product promise. Measu
 
 ## Questions to test
 
+- Does skipping to the next `"` or `\` with `memchr2` inside long strings, instead of a byte at a time, cut the request scanners' CPU per MB enough to run cache diagnostics on every session? It uses SIMD inside the `memchr` crate Wye already depends on, with no `unsafe` of its own. Distinct from the rejected SWAR string-end search and the full SIMD stage-1 scanner ([verdicts](#rejected-or-not-adopted)): most of a Claude Code body is long strings, which is where a skip pays. Measure with `scripts/bench.sh ab` on `diag_agent_upload_cpu_ms_per_mb` and `models_agent_upload_cpu_ms_per_mb`.
 - How fast does a disconnect release upstream work, and does the provider stop generation or billing?
 - How much does cache affinity raise cache hit rate and lower billed cost on real agent workloads?
 - Which results hold only against the mock?
@@ -95,7 +96,7 @@ Loose on purpose, it always holds; telemetry would report it beside the actual c
 
 ### Agent-native directions
 
-Built: what Claude Code tells a gateway without exposing prompts ([contract](architecture.md#claude-code-gateway-contract), [prompt caching for agents](https://arxiv.org/abs/2601.06007)) feeds attribution by session, subagent, and request class, cache-miss reasons, one trace per session (checked in Jaeger across two replicas), and tool calls. Open: report-only secret detection (blocking would brick a session, redaction would break caching), which needs a multi-pattern matcher and a sampled body scan.
+Built: what Claude Code tells a gateway without exposing prompts ([contract](architecture.md#claude-code-gateway-contract), [prompt caching for agents](https://arxiv.org/abs/2601.06007)) feeds attribution by session, subagent, and request class, cache-miss reasons, one trace per session (checked in Jaeger across two replicas), and tool calls. Open: [report-only secret detection](#what-the-request-scanner-could-also-find).
 
 ### Visibility for one developer
 
@@ -129,6 +130,16 @@ The median main request carried 400k tokens; sessions ran to about 968k before t
 - Shortening or compressing prompts at the gateway would raise the bill and break report-don't-rewrite: at Opus 5.5's prices, a changed byte in a cached prefix turns reads at 0.05 into writes at 1.25 or 2, 25 to 40 times the price.
 - What can be cut: context carried from turn to turn, conversations resumed after a break (only the user or agent can act, by clearing, compacting, or starting fresh first), rebuilds with a cause to fix, and the main model on small background work (on a subscription, Claude Code runs every background request on it, [source](https://code.claude.com/docs/en/llm-gateway-protocol)). Only small requests should move: each model has its own cache, so a large auxiliary request, which reads the main thread's, would rebuild that context at write prices.
 - TTL advice must be computed per user, from timestamps: this user already had the 1-hour TTL and lost the cache after hours, while an API key defaults to 5 minutes. Idle time past the TTL is visible only across requests; one request cannot tell that it starts a session or a subagent, so its record says `cache_miss: unexplained`, and `wye report` counts those first writes as starts.
+
+### What the request scanner could also find
+
+Proposed 2026-11-07. Each runs in the request scanner or offline from the usage log, keeps no prompt text, and reports a fix with its price; none changes a request. Prices below are the policy.md example for Opus 5.5 ($4 input, $0.20 cache read, $5 or $8 cache write, per million tokens).
+
+- **Cache-break forensics.** `wye report` compares the [`prompt_hashes`](operations.md#usage-records-and-telemetry) of a session's consecutive requests and names, for each cache miss, the first section whose hash changed (tools, system, then messages, the cache's order), with what the miss cost; summed across sessions, replicas, and clients. A 400k-token turn that reads its cache costs about $0.08; one that rewrites it, $2.00 to $3.20, which is why one cause matters. Causes it can tell apart: tool definitions reordered or edited (same count, new hash: an MCP server that lists its tools differently on each start), the system prompt changed (`CLAUDE.md` or a hook edited mid-session), a model switched (each model has its own cache), and, from timestamps, idle past the TTL, priced against Claude Code's `promptCacheTtl` and `subagentPromptCacheTtl`. It names a section, not a line; a hash per tool definition would name the tool. Today the comparison is left to a query in the user's OpenTelemetry backend, and Claude Code's own `last_miss_cause` covers its main thread only.
+- **Duplicate content within a request.** Content-defined chunks of the request's string values (a rolling hash, so boundaries survive edits), each counted under the cache-diagnostics key, find the same file read twice or a tool output repeated in one context. The record carries only how many bytes repeat and in how many places; the waste report prices them as tokens re-read every turn until compaction. Stateless: one request's own content, compared with itself.
+- **Report-only secret detection.** A multi-pattern search over request bodies for credential formats (`sk-ant-`, `sk-`, `AKIA`, `ghp_`, `xoxb-`, private-key headers) records a count per kind, never a value; `wye report` and an OTLP metric show which sessions and subjects sent one to a provider. For a team this answers what no provider dashboard does: "3 sessions sent an AWS key to the model this week". Report only, like upgrade checks: blocking would end a session, redacting would break its cache, and both are guardrails, which Wye will not do. The `aho-corasick` crate's Teddy algorithm runs such searches with SIMD; a hand-written scan of a few prefixes is the alternative (open on the [roadmap](roadmap.md)).
+
+All three cost CPU per uploaded MB, and cache diagnostics already raise upload CPU from 0.60 to 1.49 ms per MB in the [reference environment](benchmarks.md#reference-environment), which is why they are sampled per session. The test below decides whether they can run on every request.
 
 ## Rejected approaches
 

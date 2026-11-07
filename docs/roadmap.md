@@ -44,7 +44,7 @@ Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md#usa
 
 Open:
 
-- Report-only secret detection, sampled per session. It needs a dependency decision and a measured overhead per MB, and values never leave the process ([background](research.md#agent-native-directions)).
+- Report-only secret detection, sampled per session. It needs a dependency decision and a measured overhead per MB, and values never leave the process ([background](research.md#what-the-request-scanner-could-also-find)).
 - Usage records gain the time to first token, the config version (to see a rollout's mixed window), and the provider's request id (for support tickets).
 - `wye report` by subject and by model, and over a time window (`--since`).
 
