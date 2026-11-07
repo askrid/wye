@@ -12,9 +12,9 @@ Wye is an ordinary process: IaC, DNS, certificates, infrastructure secrets, sche
 
 `wye --help` lists the commands and `wye <command> --help` a command's options. Both are generated from the table the parser reads, so help cannot drift. Options follow the GNU conventions: any order, `--name value` or `--name=value`, `-c` for `--config`, and `--` before arguments that start with a dash.
 
-A command exits 0, or 1 with an error on stderr; 3 when `doctor` finds a problem, `explain` a refusal, `policy-test` a failed case, `policy-diff` widened access, or `service status` a service that is not installed or does not answer.
+A command exits 0 when done; 1 when it failed, with an error on stderr, or a check found problems (`validate`, `doctor`, `policy-test`, `probe`, and `service status` for a service that does not answer); 2 for wrong usage: an unknown command or option, a missing argument, or a value it cannot read (`--ttl 1w`); 3 when done with something a script should act on: `explain` found a refusal, `policy-diff` widened access, `service status` nothing installed.
 
-Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. Data goes to stdout and messages to stderr, and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors.
+Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. A command's result goes to stdout (a report, a token, the plan `service` shows) and messages to stderr (progress, what `init` wrote and the next steps), and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors.
 
 ### Files
 
@@ -29,7 +29,7 @@ A user's files live in `~/.wye`, or `$WYE_HOME`:
 | `signing.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
 | `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
 
-A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.
+A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`; `wye init` creates it there too, except with `--shared` (`./wye.toml`). A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.
 
 ### Environment variables
 
@@ -40,11 +40,13 @@ Read by `wye`:
 | `WYE_CONFIG` | The config, when `-c` is not given; the container image sets `/etc/wye/wye.toml` | every command that takes `-c` |
 | `WYE_HOME` | Your files (default `~/.wye`) | every command |
 | `WYE_URL` | The gateway (default `http://127.0.0.1:8080`) | `claude`, `codex`, `probe` |
-| `WYE_TOKEN` | The gateway token; removed from the agent's environment | `claude`, `codex` |
+| `WYE_TOKEN` | The gateway token itself; removed from the agent's environment | `claude`, `codex`, `explain` |
 | `WYE_CLAUDE_BIN`, `WYE_CODEX_BIN` | Another path to the agent | `claude`, `codex` |
 | `NO_COLOR`, `TERM` | No color when `NO_COLOR` is set or `TERM=dumb` | every command |
 
-Set but empty counts as unset, except `WYE_TOKEN`, where it is an error instead of leaving the agent on its own login.
+`wye --help` lists them all but `WYE_CLAUDE_BIN` and `WYE_CODEX_BIN`, which are for tests and agents that run a stand-in, and `TERM`. A flag beats its variable. Set but empty counts as unset, except `WYE_TOKEN`, where it is an error instead of leaving the agent on its own login.
+
+`--token-file` takes a path while `WYE_TOKEN` holds the token itself: a secret never goes in a flag's value, which other users of the machine can read in `ps`.
 
 Named by the config, read once at startup; the names are yours to choose, and these are the usual ones:
 
@@ -69,13 +71,31 @@ Clients read their own: the SDKs' `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `OP
 
 ### Commands
 
-What `--help` does not say.
+What `--help` does not say, in the order `wye --help` lists the commands. What every command keeps (streams, flags, the environment, asking first, exit status) is in the [command-line conventions](development.md#command-line-conventions).
 
 Run with no argument, every command does what its name says on the config it finds, or fails with one line that says what to run next: `wye explain` names a sample from `policy-tests/`, `wye claude` and `wye probe` say to run `wye init` when nothing answers and there is no config, and `wye token keygen` refuses to replace the key `wye token issue` signs with.
 
 **`wye serve`** writes usage records to stdout, or with `--usage-log <path>` to that file, appended, and created with mode 600. At 64 MiB the gateway finishes the line it is writing, renames the file beside itself with the UTC time (`usage.jsonl` becomes `usage-20261107T091500Z.jsonl`), and starts a new one at the path, so a record never spans two files and the names sort in the order written. Rotated files are never deleted: remove them when you no longer need their records. A rename that fails is reported once in the message log, and records keep going to the current file. A container or a replica keeps stdout for its platform's log collector.
 
-**`wye init`**: [choosing a setup](guide.md#choosing-a-setup). Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
+**`wye service install`**, **`status`**, **`restart`**, **`uninstall`**: [running as a service](#running-as-a-service). `install` and `uninstall` print on stdout what they will change, then ask on stderr; `-y` skips the question, and `--dry-run` only shows.
+
+**`wye claude`** and **`wye codex`**: [agent wrapper](#agent-wrapper).
+
+**`wye report [<usage-log>...]`** reads the files it is given, in order (`-` for standard input); with none, `~/.wye/usage.jsonl` and its rotated files, oldest first. `--since` and `--until` take a time back from now (`30m`, `24h`, `7d`) or a UTC date (`2026-11-01`, its midnight UTC); a record counts from `--since` on and before `--until`, by its `unix_ms`, and the first line names the window and how many records fell outside it. Lines that are not records are skipped and counted. [Reading it](guide.md#reading-wye-report).
+
+```bash
+wye report --since 7d                     # the last week, rotated files included
+wye report --since 2026-11-01 --until 2026-11-08
+cat replica-*.jsonl | wye report -        # usage logs collected from replicas
+```
+
+**`wye init`** writes the config `-c` names, else the one later commands would read (with `--shared`, `./wye.toml`): [choosing a setup](guide.md#choosing-a-setup). What it wrote and the next steps go to stderr, and the steps pass `-c` only when later commands would not find the config by themselves. Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
+
+**`wye token keygen`** writes a new signing key to `--out <path>`, created mode 600 and never over an existing file, and prints on stdout the `[[auth.signing_keys]]` entry for its public half. Without `--out` it writes `~/.wye/signing.key`, the key `wye token issue` signs with, unless one is there.
+
+**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.signing_keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
+
+**`wye validate`** parses the config and reads the identity providers' key sets, without starting the gateway or resolving secrets, so CI can run it without credentials. `wye doctor` checks the rest.
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
 
@@ -87,12 +107,10 @@ Run with no argument, every command does what its name says on the config it fin
 
 Not checked yet: model availability per upstream.
 
-**`wye validate`** parses the config and reads the identity providers' key sets, without starting the gateway or resolving secrets, so CI can run it without credentials. `wye doctor` checks the rest.
-
 **`wye explain`** prints each step `serve` would take for one request, offline, calling the same functions in the same order:
 
 1. Endpoint (`--endpoint`, default `/v1/messages`).
-2. Gateway token, verified at the current time (`--token-file`, never `$WYE_TOKEN`); without `[auth]`, whether a web page may have sent it ([policy.md](policy.md#a-gateway-without-auth); `--header 'Origin: ...'`, and by default a local client's `Host`, the listen address).
+2. Gateway token, verified at the current time (`--token-file`, else `$WYE_TOKEN`, as the agent wrappers present it); without `[auth]`, whether a web page may have sent it ([policy.md](policy.md#a-gateway-without-auth); `--header 'Origin: ...'`, and by default a local client's `Host`, the listen address).
 3. Body size, alias, model permission, output-token ceiling.
 4. [Upstream selection](glossary.md#requests-and-where-they-go) and failover order, the upstream URL and credential (a provider key by name, never value, or the caller's own under passthrough), and the provider's model id.
 5. The price, and whether cache diagnostics would hash it.
@@ -109,17 +127,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
 
-**`wye report [<usage-log>...]`** reads the files it is given, in order (`-` for standard input); with none, `~/.wye/usage.jsonl` and its rotated files, oldest first. `--since` and `--until` take a time back from now (`30m`, `24h`, `7d`) or a UTC date (`2026-11-01`, its midnight UTC); a record counts from `--since` on and before `--until`, by its `unix_ms`, and the first line names the window and how many records fell outside it. Lines that are not records are skipped and counted. [Reading it](guide.md#reading-wye-report).
-
-```bash
-wye report --since 7d                     # the last week, rotated files included
-wye report --since 2026-11-01 --until 2026-11-08
-cat replica-*.jsonl | wye report -        # usage logs collected from replicas
-```
-
 **`wye probe [<url>]`** sends one `GET` and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway and asks its `/healthz` (the gateway's `/` serves nothing). A path is asked as given, such as `/readyz` for a load balancer's view.
-
-**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.signing_keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
 
 ### Agent wrapper
 
@@ -158,7 +166,7 @@ Whatever sits in front must not buffer event streams (nginx: `proxy_buffering of
 
 On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops (on Linux, if it fails), through the operating system's own service manager, as you. It needs no sudo and changes nothing outside your home directory.
 
-It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config> --usage-log <home>/usage.jsonl` (the usage log, [rotated](#commands)), with stdout and stderr appended to the message log `wye.log`. With `--usage-log` nothing else goes to stdout; anything that ever did would be a message, kept there rather than lost in `/dev/null`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
+It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config> --usage-log <home>/usage.jsonl` (the usage log, [rotated](#commands)), with stdout and stderr appended to the message log `wye.log`. With `--usage-log` nothing else goes to stdout; anything that ever did would be a message, kept there rather than lost in `/dev/null`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal, else it exits 2).
 
 Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment.
 
@@ -170,7 +178,7 @@ Before installing, the config is checked as the service will start it: it parses
 ```bash
 wye service status      # installed? what it runs, its logs, whether it answers
 wye service restart     # after a config edit or a new wye
-wye service uninstall   # stops it and removes the file; the config, the usage log, and the message log stay
+wye service uninstall   # shows what it stops and removes, and asks; your files stay
 ```
 
 `restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. A definition an older `wye` wrote, which appended stdout to `usage.jsonl`, is rewritten to pass `--usage-log` with the same file. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.

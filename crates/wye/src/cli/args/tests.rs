@@ -128,6 +128,42 @@ fn help_shows_options_with_their_values() {
 }
 
 #[test]
+fn a_shared_flag_reads_the_same_in_every_command() {
+    for (i, a) in COMMANDS.iter().enumerate() {
+        for b in COMMANDS.iter().skip(i + 1) {
+            for x in a.options {
+                // `--out` names the secret each command makes, and its default.
+                let Some(y) = b
+                    .options
+                    .iter()
+                    .find(|y| y.long == x.long && x.long != "out")
+                else {
+                    continue;
+                };
+                assert_eq!(
+                    (x.short, x.value, x.help),
+                    (y.short, y.value, y.help),
+                    "--{} in {} and {}",
+                    x.long,
+                    a.name,
+                    b.name
+                );
+            }
+        }
+    }
+    let takes = |long: &str| {
+        COMMANDS
+            .iter()
+            .filter(|c| c.options.iter().any(|o| o.long == long))
+            .map(|c| c.name)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(takes("token-file"), ["claude", "codex", "explain"]);
+    assert_eq!(takes("yes"), ["service install", "service uninstall"]);
+    assert!(takes("config").contains(&"init"));
+}
+
+#[test]
 fn a_typo_gets_the_closest_command() {
     assert_eq!(
         unknown_command("srve"),

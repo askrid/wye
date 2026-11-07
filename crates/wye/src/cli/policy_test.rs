@@ -75,7 +75,7 @@ pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, boo
     if cases.is_empty() {
         return Err(format!(
             "no policy tests in {}: write <name>.json and <name>.expect.toml there \
-             (`wye init --out /tmp/wye/wye.toml` writes samples to copy)",
+             (`wye init -c /tmp/wye/wye.toml` writes samples to copy)",
             dir.display()
         ));
     }

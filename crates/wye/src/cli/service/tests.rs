@@ -232,6 +232,32 @@ fn the_plan_says_what_changes_and_how_to_undo_it() {
 }
 
 #[test]
+fn the_uninstall_plan_says_what_stops_goes_and_stays() {
+    let show = |p: &Path| p.display().to_string().replace("/home/a", "~");
+    let file = Manager::Systemd.file(Path::new("/home/a"));
+    let text = uninstall_plan(
+        &service("/home/a"),
+        &file,
+        &stop_commands(Manager::Systemd, "1000"),
+        &vec![systemctl(&["daemon-reload"])],
+        &show,
+    );
+    for line in [
+        "  Stop      systemctl --user disable --now wye.service\n",
+        "  Remove    ~/.config/systemd/user/wye.service\n",
+        "  Then      systemctl --user daemon-reload\n",
+        "  Keep      ~/.wye/wye.toml (the config)\n",
+        "            ~/.wye/usage.jsonl (the usage log and its rotated files)\n",
+        "            ~/.wye/wye.log (the message log)\n",
+    ] {
+        assert!(text.contains(line), "{line}\n---\n{text}");
+    }
+    for line in text.lines() {
+        assert!(line.len() <= crate::cli::text::WIDTH, "{line}");
+    }
+}
+
+#[test]
 fn secrets_from_the_environment_are_named() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\

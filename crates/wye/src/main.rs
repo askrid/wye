@@ -15,7 +15,7 @@ use gateway_core::config::Config;
 use wye::{
     Gateway, Resources, UsageFile, UsageOut,
     cli::{
-        Agent,
+        self, Agent,
         args::{self, ArgsError, Command, Id},
         current_thread, emit, files, gateway_url, no_gateway,
         paint::Paint,
@@ -34,26 +34,34 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(e) => {
             eprintln!("{} {e}", Paint::stderr().red("wye:"));
-            ExitCode::FAILURE
+            let usage = matches!(e.downcast_ref(), Some(cli::Error::Usage(_)));
+            ExitCode::from(if usage { USAGE } else { FAILED })
         }
     }
 }
 
-/// Exit status of a command that found what it checks for: a problem, a
-/// refusal, a failed case, or widened access.
-const FOUND: u8 = 3;
+/// Exit status: the command failed, or a check found problems.
+const FAILED: u8 = 1;
+/// Exit status: wrong usage.
+const USAGE: u8 = 2;
+/// Exit status: done, with something a script should act on.
+const ACT_ON: u8 = 3;
 
 fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
+    let usage = |why: String| cli::Error::Usage(why);
     let args: Vec<&str> = args
         .iter()
-        .map(|a| a.to_str().ok_or("arguments must be valid UTF-8"))
+        .map(|a| {
+            a.to_str()
+                .ok_or_else(|| usage("arguments must be valid UTF-8".into()))
+        })
         .collect::<Result<_, _>>()?;
     let help = match args.as_slice() {
         [] | ["--help" | "-h" | "help"] => Some(args::overview()),
         ["--version" | "-V" | "version"] => Some(format!("wye {}\n", env!("CARGO_PKG_VERSION"))),
-        ["help" | "--help" | "-h", topic @ ..] => Some(help_for(topic)?),
+        ["help" | "--help" | "-h", topic @ ..] => Some(help_for(topic).map_err(usage)?),
         [family] | [family, "--help" | "-h" | "help"] => args::family_help(family),
-        [family, "help", sub] => Some(help_for(&[family, sub])?),
+        [family, "help", sub] => Some(help_for(&[family, sub]).map_err(usage)?),
         _ => None,
     };
     if let Some(text) = help {
@@ -61,7 +69,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         return Ok(0);
     }
     let Some((command, rest)) = Command::find(&args) else {
-        return Err(unknown(&args).into());
+        return Err(usage(unknown(&args)).into());
     };
     let parsed = match command.parse(rest) {
         Ok(parsed) => parsed,
@@ -69,13 +77,13 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             emit(&Paint::stdout().style(&command.help()));
             return Ok(0);
         }
-        Err(ArgsError::Missing(why)) => return Err(why.into()),
+        Err(ArgsError::Missing(why)) => return Err(usage(why).into()),
         Err(ArgsError::Usage(why)) => {
-            return Err(format!(
+            return Err(usage(format!(
                 "{why}\nusage: {}\nmore: wye {} --help",
                 command.usage(),
                 command.name
-            )
+            ))
             .into());
         }
     };
@@ -100,13 +108,21 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             )?;
             Ok(0)
         }
-        Id::ServiceStatus => Ok(found(service::status(&Context::new(env)?)?)),
+        Id::ServiceStatus => Ok(match service::status(&Context::new(env)?)? {
+            service::Status::Answering => 0,
+            service::Status::NotInstalled => ACT_ON,
+            service::Status::Failing => FAILED,
+        }),
         Id::ServiceRestart => {
             service::restart(&Context::new(env)?)?;
             Ok(0)
         }
         Id::ServiceUninstall => {
-            service::uninstall(&Context::new(env)?)?;
+            service::uninstall(
+                &Context::new(env)?,
+                parsed.flag("yes"),
+                parsed.flag("dry-run"),
+            )?;
             Ok(0)
         }
         Id::Validate => {
@@ -135,7 +151,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 signing_key.as_deref(),
             ));
             let shown = files::tilde(&path, &env);
-            Ok(verdicts(&format!("config: {shown}\n{report}"), ok))
+            Ok(check(&format!("config: {shown}\n{report}"), ok))
         }
         Id::Claude => std::process::exit(run_agent(Agent::Claude, &parsed, env)?),
         Id::Codex => std::process::exit(run_agent(Agent::Codex, &parsed, env)?),
@@ -144,11 +160,15 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             Ok(0)
         }
         Id::Init => {
-            emit(&Paint::stdout().style(&run_init(&parsed, &env)?));
+            // What it wrote, and what to run next: messages; its result is
+            // the files.
+            eprint!("{}", Paint::stderr().style(&run_init(&parsed, &env)?));
             Ok(0)
         }
         Id::TokenKeygen => {
-            emit(&Paint::stdout().style(&token::run_keygen(&parsed, &env)?));
+            let (told, entry) = token::run_keygen(&parsed, &env)?;
+            eprint!("{}", Paint::stderr().style(&told));
+            emit(&entry);
             Ok(0)
         }
         Id::TokenIssue => {
@@ -157,7 +177,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         }
         Id::Explain => {
             let (report, forwarded) = run_explain(&parsed, &env)?;
-            Ok(verdicts(&report, forwarded))
+            Ok(act_on(&report, !forwarded))
         }
         Id::PolicyTest => {
             let path = config_path()?;
@@ -168,11 +188,11 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             };
             let (report, passed) = wye::policy_test(&config, &dir, unix_secs()?)?;
             let shown = files::tilde(&path, &env);
-            Ok(verdicts(&format!("config: {shown}\n{report}"), passed))
+            Ok(check(&format!("config: {shown}\n{report}"), passed))
         }
         Id::PolicyDiff => {
             let [old, new] = parsed.positional.as_slice() else {
-                return Err("policy-diff takes two configs".into());
+                return Err(usage("policy-diff takes two configs".into()).into());
             };
             let (old, new) = (Path::new(old), Path::new(new));
             let (before, after) = (files::load(old)?, files::load(new)?);
@@ -183,7 +203,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
                 &after,
                 files::config_dir(new),
             )?;
-            Ok(verdicts(&diff.report(), !diff.widens()))
+            Ok(act_on(&diff.report(), diff.widens()))
         }
         Id::Probe => {
             let given = parsed.positional.first().copied();
@@ -198,14 +218,17 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     }
 }
 
-/// Prints a check's report; the exit status of its result.
-fn verdicts(report: &str, ok: bool) -> u8 {
+/// Prints a check's report; the exit status: whether it found problems.
+fn check(report: &str, ok: bool) -> u8 {
     emit(&Paint::stdout().style(report));
-    found(ok)
+    if ok { 0 } else { FAILED }
 }
 
-fn found(ok: bool) -> u8 {
-    if ok { 0 } else { FOUND }
+/// Prints a report; the exit status: whether it found something a script
+/// should act on (a refusal, widened access).
+fn act_on(report: &str, found: bool) -> u8 {
+    emit(&Paint::stdout().style(report));
+    if found { ACT_ON } else { 0 }
 }
 
 /// `wye help <command>`: that command's help.

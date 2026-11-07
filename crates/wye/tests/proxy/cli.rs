@@ -14,8 +14,11 @@ use super::harness::*;
 /// How long a `wye` process may stay silent when a test waits for its output.
 const OUTPUT_WAIT: Duration = Duration::from_secs(30);
 
+/// `wye`, without the caller's gateway and token.
 fn wye() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_wye"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_wye"));
+    command.env_remove("WYE_URL").env_remove("WYE_TOKEN");
+    command
 }
 
 /// A running `wye`, stopped however the test ends.
@@ -397,21 +400,24 @@ fn the_cli_answers_help_and_version_and_names_an_unknown_command() {
         format!("wye {}\n", env!("CARGO_PKG_VERSION"))
     );
     let typo = run(&["srve"]);
-    assert_eq!(typo.status.code(), Some(1));
+    assert_eq!(typo.status.code(), Some(2), "wrong usage");
     assert_eq!(
         String::from_utf8_lossy(&typo.stderr),
         "wye: unknown command `srve`; did you mean `serve`?\n"
     );
     // A known command with wrong arguments gets its own usage.
     let wrong = run(&["serve", "--confg", "x"]);
+    assert_eq!(wrong.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&wrong.stderr),
         "wye: unknown option --confg\nusage: wye serve [options]\nmore: wye serve --help\n"
     );
 }
 
+/// Exit status: 1 for a check that found problems, 3 for a result a script
+/// should act on, 2 for wrong usage.
 #[test]
-fn review_commands_exit_3_on_what_they_report() {
+fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
     let dir = TempDir::new("exit");
     let write = |name: &str, text: &str| {
         let path = dir.join(name);
@@ -455,10 +461,20 @@ fn review_commands_exit_3_on_what_they_report() {
     let cases = cases.display().to_string();
     assert_eq!(
         status(&["policy-test", "--config", &keyed, &cases]),
-        Some(3)
+        Some(1)
     );
     // The provider key is not set.
-    assert_eq!(status(&["doctor", "--config", &keyed]), Some(3));
+    assert_eq!(status(&["doctor", "--config", &keyed]), Some(1));
+    // A flag's value the command cannot read is wrong usage.
+    assert_eq!(status(&["report", "--since", "1w", &request]), Some(2));
+    assert_eq!(
+        status(&["explain", "-c", &keyed, "-H", "no colon", &request]),
+        Some(2)
+    );
+    assert_eq!(
+        status(&["token", "issue", "a", "-c", &keyed, "--ttl", "1w"]),
+        Some(2)
+    );
 }
 
 /// The commands that need no argument, on a fresh home.
@@ -478,7 +494,13 @@ fn the_defaults_work_on_a_fresh_home() {
     let keygen = run(&["token", "keygen"]);
     assert!(keygen.status.success(), "{}", err(&keygen));
     assert!(
-        out(&keygen).starts_with("wrote ~/.wye/signing.key "),
+        err(&keygen).starts_with("wrote ~/.wye/signing.key "),
+        "{}",
+        err(&keygen)
+    );
+    // The result is the entry to add to the config, and only that.
+    assert!(
+        out(&keygen).starts_with("[[auth.signing_keys]]\nid = \"<a new id>\"\n"),
         "{}",
         out(&keygen)
     );
@@ -491,17 +513,19 @@ fn the_defaults_work_on_a_fresh_home() {
     );
     std::fs::remove_file(setup.home.join(".wye/signing.key")).unwrap();
 
-    // `init` is for you on this machine, and needs no key.
+    // `init` is for you on this machine, and needs no key. What it wrote,
+    // and the next steps, are messages: its result is the files.
     let init = run(&["init"]);
     assert!(init.status.success(), "{}", err(&init));
     assert!(
-        out(&init).starts_with(
+        err(&init).starts_with(
             "wrote ~/.wye/wye.toml\n\
              wrote 1 policy test in ~/.wye/policy-tests, for `wye policy-test`\n"
         ),
         "{}",
-        out(&init)
+        err(&init)
     );
+    assert!(out(&init).is_empty(), "{}", out(&init));
     let config = std::fs::read_to_string(setup.home.join(".wye/wye.toml")).unwrap();
     assert!(
         config.contains("forward_caller_credential = true"),
@@ -539,11 +563,11 @@ fn the_defaults_work_on_a_fresh_home() {
     let shared = run(&["init", "--shared"]);
     assert!(shared.status.success(), "{}", err(&shared));
     assert!(
-        out(&shared).contains(
+        err(&shared).contains(
             "\nwrote 2 policy tests in policy-tests, for `wye policy-test -c wye.toml`\n"
         ),
         "{}",
-        out(&shared)
+        err(&shared)
     );
     assert!(setup.repo.join("wye.toml").exists());
     assert!(setup.home.join(".wye/signing.key").exists());
@@ -556,6 +580,27 @@ fn the_defaults_work_on_a_fresh_home() {
     );
     let issued = run(&["token", "issue", "alice", "-c", "wye.toml"]);
     assert!(out(&issued).starts_with("eyJ"), "{}", err(&issued));
+    // explain presents $WYE_TOKEN, as the agent wrappers do.
+    let mut explain = setup.wye(&["explain", "-c", "wye.toml", "policy-tests/messages.json"]);
+    explain.env("WYE_TOKEN", out(&issued).trim());
+    let explained = explain.output().unwrap();
+    assert_eq!(explained.status.code(), Some(0), "{}", err(&explained));
+    assert!(
+        out(&explained).contains("\ngateway token: valid; subject alice, "),
+        "{}",
+        out(&explained)
+    );
+    let without = run(&["explain", "-c", "wye.toml", "policy-tests/messages.json"]);
+    assert_eq!(without.status.code(), Some(3), "refused: {}", out(&without));
+    // init -c names the config, and the next steps pass it on.
+    let named = run(&["init", "-c", "other/wye.toml"]);
+    assert!(named.status.success(), "{}", err(&named));
+    assert!(
+        err(&named).contains("\n     wye doctor -c other/wye.toml\n"),
+        "{}",
+        err(&named)
+    );
+    assert!(setup.repo.join("other/policy-tests/messages.json").exists());
     let written = run(&[
         "token",
         "issue",
@@ -607,13 +652,20 @@ fn the_defaults_work_on_a_fresh_home() {
 #[test]
 fn a_command_without_its_arguments_says_what_to_run() {
     let setup = Setup::new();
-    let line = |args: &[&str]| {
+    // Wrong usage (a required argument missing) exits 2; a failure, 1.
+    let exits = |code: i32, args: &[&str]| {
         let output = setup.run(args);
-        assert_eq!(output.status.code(), Some(1), "{args:?}: {}", out(&output));
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "{args:?}: {}",
+            out(&output)
+        );
         let message = err(&output);
         assert_eq!(message.lines().count(), 1, "{args:?}: {message}");
         message
     };
+    let line = |args: &[&str]| exits(2, args);
     assert_eq!(
         line(&["token", "issue"]),
         "wye: missing <subject>: who the token is for, as in \
@@ -630,9 +682,9 @@ fn a_command_without_its_arguments_says_what_to_run() {
          standard input\n"
     );
     assert_eq!(
-        line(&["policy-test", "-c", "wye.toml"]),
+        exits(1, &["policy-test", "-c", "wye.toml"]),
         "wye: no policy tests in policy-tests: write <name>.json and <name>.expect.toml \
-         there (`wye init --out /tmp/wye/wye.toml` writes samples to copy)\n"
+         there (`wye init -c /tmp/wye/wye.toml` writes samples to copy)\n"
     );
     std::fs::create_dir_all(setup.repo.join("policy-tests")).unwrap();
     std::fs::write(setup.repo.join("policy-tests/a.json"), "{}").unwrap();

@@ -357,11 +357,11 @@ fn a_window_reads_durations_back_from_now_and_utc_dates() {
     );
     assert_eq!(
         window(Some("1w"), None),
-        Err("--since 1w: write it as 30m, 24h, or 7d ago, or as a UTC date, 2026-11-01".into())
+        Err("--since 1w: write it as a time ago (30m, 8h, 7d) or a UTC date (2026-11-01)".into())
     );
     assert_eq!(
         window(None, Some("2026-02-30")).unwrap_err(),
-        "--until 2026-02-30: write it as 30m, 24h, or 7d ago, or as a UTC date, 2026-11-01"
+        "--until 2026-02-30: write it as a time ago (30m, 8h, 7d) or a UTC date (2026-11-01)"
     );
     assert_eq!(
         window(Some("1h"), Some("2h")),

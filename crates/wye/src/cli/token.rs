@@ -17,8 +17,9 @@ use ring::{
 };
 
 use super::{
+    Error,
     args::Parsed,
-    emit,
+    duration, emit,
     files::{self, SIGNING_KEY_FILE},
 };
 
@@ -57,15 +58,16 @@ pub fn public_key(key: &Ed25519KeyPair) -> String {
     token::encode_public_key(key.public_key().as_ref())
 }
 
-/// `wye token keygen`: a new key, and what to add to the config.
+/// `wye token keygen`: a new key. Returns what to tell the user, and the
+/// result: the `[[auth.signing_keys]]` entry to add to the config.
 pub fn run_keygen(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
-) -> Result<String, String> {
+) -> Result<(String, String), String> {
     let out = match parsed.value("out") {
         Some(out) => out.into(),
         None => {
-            let out = files::in_home(SIGNING_KEY_FILE, "pass --out", env)?;
+            let out = files::in_home(SIGNING_KEY_FILE, "pass --out <path>", env)?;
             if out.symlink_metadata().is_ok() {
                 return Err(format!(
                     "{} exists, and `wye token issue` signs with it; for another key, \
@@ -77,17 +79,39 @@ pub fn run_keygen(
         }
     };
     let key = new_key(&out)?;
-    Ok(format!(
-        "wrote {} (keep it secret, outside the gateway)\n\n\
-         Add to wye.toml, under [auth]:\n[[auth.signing_keys]]\nid = \"<a new id>\"\n\
-         ed25519_public_key = \"{}\"\n",
-        files::tilde(&out, env),
-        public_key(&key),
+    Ok((
+        format!(
+            "wrote {} (keep it secret, outside the gateway); add its public half to \
+             wye.toml, under [auth]:\n",
+            files::tilde(&out, env),
+        ),
+        format!(
+            "[[auth.signing_keys]]\nid = \"<a new id>\"\ned25519_public_key = \"{}\"\n",
+            public_key(&key),
+        ),
     ))
 }
 
 /// `wye token issue`, from its options.
-pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<(), String> {
+pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<(), Error> {
+    let ttl_secs = parsed
+        .value("ttl")
+        .map(|ttl| {
+            duration_secs(ttl).ok_or_else(|| {
+                Error::Usage(format!(concat!("--ttl {}: write it as ", duration!()), ttl))
+            })
+        })
+        .transpose()?;
+    let models = parsed
+        .value("models")
+        .map(models)
+        .transpose()
+        .map_err(Error::Usage)?;
+    let max_output_tokens = parsed
+        .value("max-output-tokens")
+        .map(ceiling)
+        .transpose()
+        .map_err(Error::Usage)?;
     // The config first: one that takes no tokens of Wye's needs no key.
     let path = files::config_path(parsed, env)?;
     let config = files::load(&path)?;
@@ -95,28 +119,23 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
     let key = match parsed.value("signing-key") {
         Some(key) => key.into(),
         None => {
-            let key = files::in_home(SIGNING_KEY_FILE, "pass --signing-key", env)?;
+            let key = files::in_home(SIGNING_KEY_FILE, "pass --signing-key <path>", env)?;
             if key.symlink_metadata().is_err() {
                 return Err(format!(
                     "no signing key at {}: pass --signing-key <path>, or make one with \
                      `wye token keygen` and add its public half to [[auth.signing_keys]]",
                     files::tilde(&key, env)
-                ));
+                )
+                .into());
             }
             key
         }
     };
-    let ttl_secs = parsed
-        .value("ttl")
-        .map(|ttl| {
-            duration_secs(ttl).ok_or_else(|| format!("--ttl {ttl}: write it as 30m, 8h, or 7d"))
-        })
-        .transpose()?;
     let request = Issue {
         subject: parsed.positional.first().copied().unwrap_or_default(),
         ttl_secs,
-        models: parsed.value("models"),
-        max_output_tokens: parsed.value("max-output-tokens"),
+        models,
+        max_output_tokens,
     };
     let key = read_key(&key)?;
     let issued = files::named(&path, issue(&request, &key, &config, super::unix_secs()?))?;
@@ -130,14 +149,33 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
     Ok(())
 }
 
+/// `--models`: comma-separated model names or prefixes ending in `*`.
+fn models(list: &str) -> Result<Vec<&str>, String> {
+    let models: Vec<&str> = list.split(',').collect();
+    match models.iter().find(|p| ModelPattern::parse(p).is_none()) {
+        Some(bad) => Err(format!(
+            "--models: {bad:?} is not a model name or a prefix ending in *"
+        )),
+        None => Ok(models),
+    }
+}
+
+/// `--max-output-tokens`: a positive number.
+fn ceiling(n: &str) -> Result<u64, String> {
+    match n.parse::<u64>() {
+        Ok(n) if n > 0 => Ok(n),
+        _ => Err("--max-output-tokens must be a positive number".into()),
+    }
+}
+
 /// What `wye token issue` was asked for.
 #[derive(Debug, Default)]
 pub struct Issue<'a> {
     pub subject: &'a str,
     pub ttl_secs: Option<u64>,
-    /// Comma-separated model names or prefixes ending in `*`.
-    pub models: Option<&'a str>,
-    pub max_output_tokens: Option<&'a str>,
+    /// Model names or prefixes ending in `*`.
+    pub models: Option<Vec<&'a str>>,
+    pub max_output_tokens: Option<u64>,
 }
 
 /// A token for `issue.subject`, signed with `key`. The issuer, audience, key
@@ -149,21 +187,6 @@ pub fn issue(
     config: &Config,
     now: u64,
 ) -> Result<String, String> {
-    let models: Option<Vec<&str>> = issue.models.map(|list| list.split(',').collect());
-    if let Some(list) = &models
-        && let Some(bad) = list.iter().find(|p| ModelPattern::parse(p).is_none())
-    {
-        return Err(format!(
-            "--models: {bad:?} is not a model name or a prefix ending in *"
-        ));
-    }
-    let max_output_tokens = issue
-        .max_output_tokens
-        .map(|n| match n.parse::<u64>() {
-            Ok(n) if n > 0 => Ok(n),
-            _ => Err("--max-output-tokens must be a positive number"),
-        })
-        .transpose()?;
     let (auth, own) = issuer(config)?;
     let public = key.public_key().as_ref();
     let kid = own
@@ -195,8 +218,8 @@ pub fn issue(
             aud: &own.audience,
             iat: now,
             exp: now.checked_add(ttl).ok_or("--ttl too large")?,
-            models: models.as_deref(),
-            max_output_tokens,
+            models: issue.models.as_deref(),
+            max_output_tokens: issue.max_output_tokens,
         },
     ))
 }
@@ -298,11 +321,9 @@ mod tests {
             issue(&long, &key, &config, 0).unwrap_err(),
             "--ttl 2h is longer than it accepts (1h, max_gateway_token_ttl_secs)"
         );
-        let bad = Issue {
-            models: Some("claude-*,a*b"),
-            ..Issue::default()
-        };
-        assert!(issue(&bad, &key, &config, 0).unwrap_err().contains("a*b"));
+        assert!(models("claude-*,a*b").unwrap_err().contains("a*b"));
+        assert_eq!(models("claude-*,m").unwrap(), ["claude-*", "m"]);
+        assert!(ceiling("0").is_err() && ceiling("8000") == Ok(8000));
         let (other, _) = signing_key(&dir.join("other.key")).unwrap();
         let unknown = issue(&Issue::default(), &other, &config, 0).unwrap_err();
         assert!(unknown.contains(&public_key(&other)), "{unknown}");

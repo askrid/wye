@@ -4,8 +4,10 @@
 //! home directory changes.
 //!
 //! Nothing happens unannounced: `install` shows the file it writes, what
-//! runs, where the log goes, and how to undo it, and asks first; every
-//! command a step runs is printed as it runs.
+//! runs, where the log goes, and how to undo it, and `uninstall` what it
+//! stops, removes, and keeps; both ask first. That plan is a command's
+//! result, on stdout; every command a step runs is printed to stderr as it
+//! runs.
 
 use std::{
     io::{BufRead, IsTerminal},
@@ -17,7 +19,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    REPO_AT_RELEASE,
+    Error, REPO_AT_RELEASE,
     files::{self, MESSAGE_LOG_FILE, USAGE_LOG_FILE},
     paint::Paint,
     probe_blocking as probe, say,
@@ -34,6 +36,7 @@ use run::{run_all, uid, wait_for, write_atomically};
 use unit::UNIT;
 use unit::{
     Commands, LABEL_WIDTH, plan, restart_commands, shell, start_commands, stop_commands, systemctl,
+    uninstall_plan,
 };
 pub use unit::{Manager, Service};
 
@@ -146,7 +149,7 @@ pub fn install(
     config_path: &Path,
     yes: bool,
     dry_run: bool,
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let show = &context.show;
     let config_path = std::path::absolute(config_path).map_err(|e| e.to_string())?;
     let config = check(&config_path, show)?;
@@ -170,7 +173,8 @@ pub fn install(
     if !replacing && probe(&url).is_ok() {
         return Err(format!(
             "a gateway already answers at {url} (a wye serve in a terminal?); stop it first"
-        ));
+        )
+        .into());
     }
     let uid = uid()?;
     let commands = start_commands(context.manager, &uid, &file, replacing);
@@ -192,8 +196,8 @@ pub fn install(
         say!("\n{}:\n\n{definition}", show(&file));
         return Ok(());
     }
-    if !yes && !confirm(&file, &definition, show)? {
-        say!("Nothing changed.");
+    if !yes && !confirm("Install", Some((&file, &definition)), show)? {
+        eprintln!("Nothing changed.");
         return Ok(());
     }
     if let Some(dir) = file.parent() {
@@ -202,50 +206,73 @@ pub fn install(
     // It may later hold a signing key.
     super::create_private_dir(&context.wye_home)?;
     write_atomically(&file, &definition)?;
-    say!("Wrote {}", show(&file));
+    eprintln!("Wrote {}", show(&file));
     if replacing {
-        say!(
+        eprintln!(
             "The running gateway finishes its requests first, for up to {} s.",
             service.stop_secs
         );
     }
     run_all(&commands, show, stopping(&service))?;
-    wait_for(&url, &service.messages, show, START_WAIT)
+    Ok(wait_for(&url, &service.messages, show, START_WAIT)?)
 }
 
-/// Asks before installing; `[s]how` prints the file and asks again.
-fn confirm(file: &Path, definition: &str, show: &dyn Fn(&Path) -> String) -> Result<bool, String> {
+/// Asks whether to `verb` (`Install`, `Uninstall`), on stderr; with `file`,
+/// `[s]how` prints it and asks again. Without a terminal to ask on, it is
+/// for `--yes` or `--dry-run` to say.
+fn confirm(
+    verb: &str,
+    file: Option<(&Path, &str)>,
+    show: &dyn Fn(&Path) -> String,
+) -> Result<bool, Error> {
     if !std::io::stdin().is_terminal() {
-        return Err(
-            "not a terminal to ask on: install with --yes, or see the plan with \
-                    --dry-run"
-                .into(),
-        );
+        return Err(Error::Usage(format!(
+            "not a terminal to ask on: {} with --yes, or see the plan with --dry-run",
+            verb.to_lowercase()
+        )));
     }
+    let choices = if file.is_some() {
+        "[y]es, [n]o, [s]how the file"
+    } else {
+        "[y]es, [n]o"
+    };
     loop {
-        super::emit("Install? [y]es, [n]o, [s]how the file: ");
+        eprint!("{verb}? {choices}: ");
         let mut answer = String::new();
         std::io::stdin()
             .lock()
             .read_line(&mut answer)
             .map_err(|e| e.to_string())?;
-        match answer.trim().to_ascii_lowercase().as_str() {
-            "y" | "yes" => return Ok(true),
-            "s" | "show" => say!("\n{}:\n\n{definition}", show(file)),
+        match (answer.trim().to_ascii_lowercase().as_str(), file) {
+            ("y" | "yes", _) => return Ok(true),
+            ("s" | "show", Some((file, definition))) => {
+                say!("\n{}:\n\n{definition}", show(file));
+            }
             _ => return Ok(false),
         }
     }
 }
 
-/// `wye service status`: whether it is installed and answering; `false`
-/// when it is not running, for whatever reason.
-pub fn status(context: &Context) -> Result<bool, String> {
+/// What `wye service status` found; the exit status follows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// Installed, and the gateway answers.
+    Answering,
+    /// Nothing `install` wrote, nor a definition of another's.
+    NotInstalled,
+    /// Installed but not answering, its config broken, or a definition
+    /// `install` did not write.
+    Failing,
+}
+
+/// `wye service status`: whether it is installed and answering.
+pub fn status(context: &Context) -> Result<Status, String> {
     let show = &context.show;
     let service = match context.installed()? {
         Installed::Ours(service) => service,
         Installed::None => {
             say!("Not installed. `wye service install` sets it up.");
-            return Ok(false);
+            return Ok(Status::NotInstalled);
         }
         Installed::Foreign => {
             say!(
@@ -253,7 +280,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
                  `wye service install` offers to replace it.",
                 show(&context.file())
             );
-            return Ok(false);
+            return Ok(Status::Failing);
         }
     };
     let log_size = std::fs::metadata(&service.usage_log)
@@ -283,7 +310,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
                 "State",
                 Paint::stdout().green("answering")
             );
-            Ok(true)
+            Ok(Status::Answering)
         }
         Some((false, url)) => {
             say!(
@@ -291,7 +318,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
                 "State",
                 Paint::stdout().red("not answering"),
             );
-            Ok(false)
+            Ok(Status::Failing)
         }
         None => {
             say!(
@@ -299,7 +326,7 @@ pub fn status(context: &Context) -> Result<bool, String> {
                 "State",
                 show(&service.config)
             );
-            Ok(false)
+            Ok(Status::Failing)
         }
     }
 }
@@ -322,7 +349,7 @@ pub fn restart(context: &Context) -> Result<(), String> {
         // An older wye wrote it, or the config's drain or grace changed: the
         // manager loads the new one, as `install` does when replacing.
         write_atomically(&file, &definition)?;
-        say!(
+        eprintln!(
             "Updated {} for this wye and config (stop timeout {} s).",
             show(&file),
             service.stop_secs
@@ -353,37 +380,35 @@ fn stop_secs(config: &Config) -> u64 {
     (config.server.drain_delay + config.server.shutdown_grace).as_secs() + 5
 }
 
-/// `wye service uninstall`: stops the service and removes its definition.
-pub fn uninstall(context: &Context) -> Result<(), String> {
+/// `wye service uninstall`: shows what it stops, removes, and keeps, asks,
+/// then stops the service and removes its definition.
+pub fn uninstall(context: &Context, yes: bool, dry_run: bool) -> Result<(), Error> {
     let show = &context.show;
     let file = context.file();
     let service = match context.installed()? {
         Installed::None => {
-            say!("Not installed; nothing changed.");
+            eprintln!("Not installed; nothing changed.");
             return Ok(());
         }
         _ => context.ours()?,
     };
-    run_all(
-        &stop_commands(context.manager, &uid()?),
-        show,
-        stopping(&service),
-    )?;
-    std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", show(&file)))?;
-    say!("Removed {}", show(&file));
-    if context.manager == Manager::Systemd {
-        run_all(
-            &vec![systemctl(&["daemon-reload"])],
-            show,
-            stopping(&service),
-        )?;
+    let stop = stop_commands(context.manager, &uid()?);
+    let reload = match context.manager {
+        Manager::Systemd => vec![systemctl(&["daemon-reload"])],
+        Manager::Launchd => vec![],
+    };
+    super::emit(&uninstall_plan(&service, &file, &stop, &reload, show));
+    if dry_run {
+        return Ok(());
     }
-    say!(
-        "The config {}, the usage log {}, and the message log {} stay.",
-        show(&service.config),
-        show(&service.usage_log),
-        show(&service.messages)
-    );
+    if !yes && !confirm("Uninstall", None, show)? {
+        eprintln!("Nothing changed.");
+        return Ok(());
+    }
+    run_all(&stop, show, stopping(&service))?;
+    std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", show(&file)))?;
+    eprintln!("Removed {}", show(&file));
+    run_all(&reload, show, stopping(&service))?;
     Ok(())
 }
 

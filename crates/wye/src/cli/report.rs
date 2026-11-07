@@ -21,7 +21,9 @@ use gateway_core::{
 use serde::Deserialize;
 
 use super::{
+    Error,
     args::Parsed,
+    duration,
     files::{self, USAGE_LOG_FILE},
     paint::Paint,
     token::duration_secs,
@@ -204,8 +206,12 @@ impl Window {
                     .map(|secs| secs.saturating_mul(1000))
                     .ok_or_else(|| {
                         format!(
-                            "--{flag} {when}: write it as 30m, 24h, or 7d ago, or as a UTC \
-                             date, 2026-11-01"
+                            concat!(
+                                "--{} {}: write it as a time ago (",
+                                duration!(),
+                                ") or a UTC date (2026-11-01)"
+                            ),
+                            flag, when
                         )
                     })
             })
@@ -398,13 +404,14 @@ pub fn run(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
     paint: Paint,
-) -> Result<String, String> {
+) -> Result<String, Error> {
     let mut summary = Summary {
         window: Window::parse(
             parsed.value("since"),
             parsed.value("until"),
             super::unix_secs()?,
-        )?,
+        )
+        .map_err(Error::Usage)?,
         ..Summary::default()
     };
     let paths = match parsed.positional.as_slice() {

@@ -1,16 +1,44 @@
 //! The commands: every command's options, summary, and notes, and how help
 //! groups them. The parser and the help both read these tables.
 
-use super::{Command, Id, Opt};
+//!
+//! A flag one command shares with another is defined here once, so it reads
+//! the same everywhere (docs/development.md, "Command-line conventions").
 
-/// `-c, --config <path>`, on every command that reads a config.
+use super::{Command, Id, Opt};
+use crate::cli::duration;
+
+/// `-c, --config <path>`: the config a command reads, or `init` creates.
 const CONFIG: Opt = Opt {
     long: "config",
     short: Some('c'),
     value: Some("path"),
-    help: "The config (default: $WYE_CONFIG, else ~/.wye/wye.toml)",
+    help: "The config (default: $WYE_CONFIG, else $WYE_HOME/wye.toml)",
     repeats: false,
 };
+
+/// `--url <url>`: the gateway a client uses.
+const URL: Opt = Opt::value(
+    "url",
+    "url",
+    "The gateway (default: $WYE_URL, else http://127.0.0.1:8080)",
+);
+
+/// `--token-file <path>`: the gateway token a client presents.
+const TOKEN_FILE: Opt = Opt::value(
+    "token-file",
+    "path",
+    "Read the gateway token from this file (default: the token in $WYE_TOKEN)",
+);
+
+/// `-y, --yes`, on a command that asks before it changes something.
+const YES: Opt = Opt {
+    short: Some('y'),
+    ..Opt::flag("yes", "Do it without asking")
+};
+
+/// `--dry-run`, on a command that asks before it changes something.
+const DRY_RUN: Opt = Opt::flag("dry-run", "Show what it would change; change nothing");
 
 /// A command with no arguments, options, or notes.
 const BASE: Command = Command {
@@ -42,23 +70,17 @@ pub const COMMANDS: &[Command] = &[
         notes: "One JSON usage record per request on stdout, or in the --usage-log file, \
                 which at 64 MiB is renamed beside itself with the UTC time and never \
                 deleted. Messages go to stderr. `wye service install` passes \
-                --usage-log ~/.wye/usage.jsonl.",
+                --usage-log $WYE_HOME/usage.jsonl.",
         ..BASE
     },
     Command {
         id: Id::ServiceInstall,
         name: "service install",
         summary: "Run the gateway in the background, now and at every login",
-        options: &[
-            CONFIG,
-            Opt {
-                short: Some('y'),
-                ..Opt::flag("yes", "Install without asking")
-            },
-            Opt::flag("dry-run", "Show the plan and the file; change nothing"),
-        ],
+        options: &[CONFIG, YES, DRY_RUN],
         notes: "On macOS a LaunchAgent (launchd), on Linux a systemd user unit: both run \
-                as you, without sudo. Shows what it writes and runs, and asks first.",
+                as you, without sudo. Shows what it writes and runs, and asks first; \
+                --dry-run also shows the file.",
         ..BASE
     },
     Command {
@@ -80,7 +102,9 @@ pub const COMMANDS: &[Command] = &[
         id: Id::ServiceUninstall,
         name: "service uninstall",
         summary: "Stop the background gateway and remove it",
-        notes: "The config, the usage log, and the message log stay.",
+        options: &[YES, DRY_RUN],
+        notes: "Shows what it stops and removes, and asks first. The config, the usage \
+                log, and the message log stay.",
         ..BASE
     },
     Command {
@@ -131,11 +155,15 @@ pub const COMMANDS: &[Command] = &[
             Opt::value(
                 "since",
                 "when",
-                "Records from then on: 30m, 24h, or 7d ago, or a UTC date (2026-11-01)",
+                concat!(
+                    "Records from then on: a time ago (",
+                    duration!(),
+                    ") or a UTC date (2026-11-01)"
+                ),
             ),
             Opt::value("until", "when", "Records before then, written the same way"),
         ],
-        notes: "Reads ~/.wye/usage.jsonl, the usage log `wye service install` keeps, and \
+        notes: "Reads $WYE_HOME/usage.jsonl, the usage log `wye service install` keeps, and \
                 its rotated files (usage-*.jsonl), unless given others; `-` reads \
                 standard input, as in `cat replica-*.jsonl | wye report -`.",
         ..BASE
@@ -145,6 +173,7 @@ pub const COMMANDS: &[Command] = &[
         name: "init",
         summary: "Write a starter config and policy tests",
         options: &[
+            CONFIG,
             Opt::flag(
                 "provider-key",
                 "The gateway holds an Anthropic API key, in a file (still this machine only)",
@@ -154,16 +183,12 @@ pub const COMMANDS: &[Command] = &[
                 "Reachable from other machines: gateway tokens, a signing key, the provider key from the environment",
             ),
             Opt::flag("openai", "Also serve the OpenAI APIs (for Codex)"),
-            Opt::value(
-                "out",
-                "path",
-                "Where to write it (default: ~/.wye/wye.toml; with --shared, ./wye.toml)",
-            ),
         ],
         notes: "Two choices: who can reach the gateway (this machine, or --shared) and \
                 whose credential pays (the caller's, or --provider-key). By default, \
                 for you on this machine: Claude Code's login, or any API key a caller \
-                sends, goes through, and the gateway holds no secret. Sample policy tests \
+                sends, goes through, and the gateway holds no secret. With --shared, the \
+                config goes in ./wye.toml unless -c names another. Sample policy tests \
                 go in policy-tests, next to the config, for `wye policy-test`. Never \
                 overwrites a file.",
         ..BASE
@@ -175,7 +200,8 @@ pub const COMMANDS: &[Command] = &[
         options: &[Opt::value(
             "out",
             "path",
-            "Where to write it (default: ~/.wye/signing.key)",
+            "Write the key to this new file, readable only by you (default: \
+             $WYE_HOME/signing.key)",
         )],
         notes: "Prints the public half for [[auth.signing_keys]]. `wye init --shared` makes \
                 the first key; this one is for rotation.",
@@ -192,12 +218,16 @@ pub const COMMANDS: &[Command] = &[
             Opt::value(
                 "signing-key",
                 "path",
-                "The signing key (default: ~/.wye/signing.key)",
+                "The signing key (default: $WYE_HOME/signing.key)",
             ),
             Opt::value(
                 "ttl",
                 "duration",
-                "Lifetime: 30m, 8h, 7d (default: the config's longest)",
+                concat!(
+                    "Lifetime: ",
+                    duration!(),
+                    " (default: the config's longest)"
+                ),
             ),
             Opt::value(
                 "models",
@@ -208,7 +238,7 @@ pub const COMMANDS: &[Command] = &[
             Opt::value(
                 "out",
                 "path",
-                "Write it to a new file only you can read (default: stdout)",
+                "Write the token to this new file, readable only by you (default: stdout)",
             ),
         ],
         notes: "The issuer, audience, and key id come from the config's [auth], the key id \
@@ -226,11 +256,7 @@ pub const COMMANDS: &[Command] = &[
         arity: (0, 1),
         options: &[
             CONFIG,
-            Opt::value(
-                "token-file",
-                "path",
-                "Read the caller's gateway token from this file (default: none)",
-            ),
+            TOKEN_FILE,
             Opt::value("session", "id", "The client's session id"),
             Opt::value("endpoint", "path", "The endpoint (default: /v1/messages)"),
             Opt {
@@ -291,18 +317,7 @@ pub const COMMANDS: &[Command] = &[
     },
 ];
 
-const WRAPPER: [Opt; 2] = [
-    Opt::value(
-        "url",
-        "url",
-        "The gateway (default: $WYE_URL, else http://127.0.0.1:8080)",
-    ),
-    Opt::value(
-        "token-file",
-        "path",
-        "Read the gateway token from this file (default: the token in $WYE_TOKEN)",
-    ),
-];
+const WRAPPER: [Opt; 2] = [URL, TOKEN_FILE];
 
 const WRAPPER_NOTES: &str = "Without a token the agent keeps its own login. Arguments \
     after `--`, or from the first one wye does not know, go to the agent unchanged. A \

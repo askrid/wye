@@ -10,7 +10,7 @@ use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use http::{HeaderMap, HeaderName, HeaderValue, header::HOST};
 
-use super::{args::Parsed, files};
+use super::{Error, args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
@@ -43,17 +43,17 @@ pub enum CallerToken<'a> {
 pub fn run(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
-) -> Result<(String, bool), String> {
+) -> Result<(String, bool), Error> {
     let path = files::config_path(parsed, env)?;
     let config = files::load(&path)?;
     let verifier = files::named(
         &path,
         crate::startup::verifier(&config, files::config_dir(&path)),
     )?;
-    let token = parsed
-        .value("token-file")
-        .map(files::read_token)
-        .transpose()?;
+    let token = files::caller_token(parsed.value("token-file"), env)?;
+    let endpoint = parsed.value("endpoint").unwrap_or("/v1/messages");
+    let headers = request_headers(endpoint, parsed.value("session"), &parsed.values("header"))
+        .map_err(Error::Usage)?;
     let body = match parsed.positional.first() {
         Some(&"-") => {
             let mut body = Vec::new();
@@ -62,14 +62,18 @@ pub fn run(
             body
         }
         Some(file) => std::fs::read(file).map_err(|e| format!("cannot read {file}: {e}"))?,
-        None => return Err(missing_request(parsed.value("config"), &path, env)),
+        None => {
+            return Err(Error::Usage(missing_request(
+                parsed.value("config"),
+                &path,
+                env,
+            )));
+        }
     };
     let caller = match (token.as_deref(), &verifier) {
         (Some(token), Some(verifier)) => CallerToken::Token(token, verifier),
         _ => CallerToken::None,
     };
-    let endpoint = parsed.value("endpoint").unwrap_or("/v1/messages");
-    let headers = request_headers(endpoint, parsed.value("session"), &parsed.values("header"))?;
     let explanation = explain(
         &config,
         endpoint,

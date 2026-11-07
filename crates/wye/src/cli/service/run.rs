@@ -3,13 +3,12 @@
 use std::{path::Path, time::Duration};
 
 use super::{Commands, probe, shell};
-use crate::cli::say;
 
 /// How often `install` asks launchd to load the service while the old gateway
 /// finishes its requests.
 const RETRY_EVERY: Duration = Duration::from_millis(500);
 
-/// Runs each command, printing it first. A `bootout` of a service that is not
+/// Runs each command, printing it first, to stderr with the other messages. A `bootout` of a service that is not
 /// loaded is not an error. launchd reports `bootout` done while the old gateway
 /// still finishes its requests, and refuses `bootstrap` until it has exited, so
 /// that one is retried for as long as the old gateway may take: `settle`.
@@ -19,7 +18,7 @@ pub(super) fn run_all(
     settle: Duration,
 ) -> Result<(), String> {
     for command in commands {
-        say!("  $ {}", shell(command, show));
+        eprintln!("  $ {}", shell(command, show));
         let (program, args) = command.split_first().ok_or("an empty command")?;
         let verb = args.first().map(String::as_str);
         let run = || {
@@ -74,7 +73,7 @@ pub(super) fn wait_for(
     let deadline = std::time::Instant::now() + wait;
     while std::time::Instant::now() < deadline {
         if probe(url).is_ok() {
-            say!("The gateway answers at {url}.");
+            eprintln!("The gateway answers at {url}.");
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(250));

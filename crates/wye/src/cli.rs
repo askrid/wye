@@ -66,6 +66,46 @@ pub fn emit(text: &str) {
     }
 }
 
+/// Why a command stopped short; the exit status tells a script which.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
+    /// Wrong usage: an argument or a value the command cannot take (exit 2).
+    Usage(String),
+    /// Anything else (exit 1).
+    Failed(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Usage(why) | Self::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<String> for Error {
+    fn from(why: String) -> Self {
+        Self::Failed(why)
+    }
+}
+
+impl From<&str> for Error {
+    fn from(why: &str) -> Self {
+        Self::Failed(why.to_owned())
+    }
+}
+
+/// How every option that takes a duration writes it: `--ttl`, `--since`,
+/// `--until`, in their help and their errors.
+macro_rules! duration {
+    () => {
+        "30m, 8h, 7d"
+    };
+}
+pub(crate) use duration;
+
 /// `println!` through [`emit`].
 macro_rules! say {
     ($($arg:tt)*) => {

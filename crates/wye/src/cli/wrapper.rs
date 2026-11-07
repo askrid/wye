@@ -84,10 +84,7 @@ impl Launch {
         args: &[&str],
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, String> {
-        let token = match token_file {
-            Some(path) => Some(super::files::read_token(path)?),
-            None => env("WYE_TOKEN"),
-        };
+        let token = files::caller_token(token_file, &env)?;
         let gateway = gateway_url(url, &env);
         // Plain http beyond this machine would carry the gateway token, or
         // the agent's own login, in the clear.
@@ -97,9 +94,6 @@ impl Launch {
             return Err(format!(
                 "{gateway} is a remote gateway over plain http; use https"
             ));
-        }
-        if token.as_deref() == Some("") {
-            return Err("the gateway token is empty".into());
         }
         Ok(Self {
             gateway,

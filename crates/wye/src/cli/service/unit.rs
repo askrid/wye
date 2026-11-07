@@ -355,6 +355,44 @@ pub(super) fn plan(
     out
 }
 
+/// The plan `uninstall` shows before it asks: the commands that `stop` the
+/// service, the file it removes, the commands that `reload` the manager
+/// after, and the files that stay.
+pub(super) fn uninstall_plan(
+    service: &Service,
+    file: &Path,
+    stop: &Commands,
+    reload: &Commands,
+    show: &dyn Fn(&Path) -> String,
+) -> String {
+    let mut out = crate::cli::text::wrap(
+        "wye service uninstall stops the background gateway and removes its service \
+         definition; your files stay.",
+        0,
+    );
+    out.push('\n');
+    let mut row = |label: &str, text: String| {
+        out.push_str(&format!("  {label:<LABEL_WIDTH$} {text}\n"));
+    };
+    for (i, command) in stop.iter().enumerate() {
+        row(if i == 0 { "Stop" } else { "" }, shell(command, show));
+    }
+    row("Remove", show(file));
+    for (i, command) in reload.iter().enumerate() {
+        row(if i == 0 { "Then" } else { "" }, shell(command, show));
+    }
+    row("Keep", format!("{} (the config)", show(&service.config)));
+    row(
+        "",
+        format!(
+            "{} (the usage log and its rotated files)",
+            show(&service.usage_log)
+        ),
+    );
+    row("", format!("{} (the message log)", show(&service.messages)));
+    out
+}
+
 /// `command` as a shell line, home paths shortened.
 pub(super) fn shell(command: &[String], show: &dyn Fn(&Path) -> String) -> String {
     command

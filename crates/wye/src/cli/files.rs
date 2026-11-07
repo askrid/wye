@@ -26,6 +26,15 @@ pub fn home(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
         .or_else(|| set("HOME").map(|home| Path::new(&home).join(".wye")))
 }
 
+/// The config a command reads without `-c`: `$WYE_CONFIG`, else `wye.toml`
+/// in the home directory; `None` without a home.
+pub fn default_config(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    env("WYE_CONFIG")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home(env).map(|home| home.join(CONFIG_FILE)))
+}
+
 /// The config a command reads: `--config`, else `$WYE_CONFIG`, else
 /// `wye.toml` in the home directory.
 ///
@@ -105,8 +114,24 @@ pub fn config_dir(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("."))
 }
 
+/// The gateway token a client presents: the one in the file `token_file`
+/// (`--token-file`), else the one in `$WYE_TOKEN`, where an empty one is an
+/// error rather than no token.
+pub fn caller_token(
+    token_file: Option<&str>,
+    env: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<String>, String> {
+    match token_file {
+        Some(path) => read_token(path).map(Some),
+        None => match env("WYE_TOKEN") {
+            Some(token) if token.is_empty() => Err("the gateway token is empty".into()),
+            token => Ok(token),
+        },
+    }
+}
+
 /// The gateway token in the file `path`.
-pub fn read_token(path: &str) -> Result<String, String> {
+fn read_token(path: &str) -> Result<String, String> {
     let token = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {path}: {e}"))?
         .trim()

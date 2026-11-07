@@ -48,7 +48,7 @@ fn a_config_in_the_working_directory_applies_only_when_named() {
         );
     }
     let doctor = setup.run(&["doctor", "-c", "wye.toml"]);
-    assert_eq!(doctor.status.code(), Some(3));
+    assert_eq!(doctor.status.code(), Some(1));
     assert!(
         out(&doctor).starts_with("config: wye.toml\n"),
         "{}",
@@ -74,6 +74,53 @@ fn a_service_installs_the_users_own_config() {
     for written in ["Library", ".config/systemd/user"] {
         assert!(!setup.home.join(written).exists(), "{written}");
     }
+}
+
+/// `uninstall` shows what it stops, removes, and keeps, and asks first; a
+/// definition is written by hand here, so no service manager is touched.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn uninstall_shows_what_it_removes_and_asks_first() {
+    use wye::cli::service::{Manager, Service};
+
+    let setup = Setup::with_subscription();
+    let none = setup.run(&["service", "uninstall"]);
+    assert_eq!(none.status.code(), Some(0), "{}", err(&none));
+    assert_eq!(err(&none), "Not installed; nothing changed.\n");
+    let manager = Manager::here().unwrap();
+    let file = manager.file(&setup.home);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let files = setup.home.join(".wye");
+    let service = Service {
+        program: "/usr/local/bin/wye".into(),
+        config: files.join("wye.toml"),
+        usage_log: files.join("usage.jsonl"),
+        messages: files.join("wye.log"),
+        stop_secs: 35,
+    };
+    std::fs::write(&file, service.definition(manager).unwrap()).unwrap();
+
+    let plan = setup.run(&["service", "uninstall", "--dry-run"]);
+    assert!(plan.status.success(), "{}", err(&plan));
+    let removed = file.strip_prefix(&*setup.home).unwrap().display();
+    for line in [
+        format!("  Remove    ~/{removed}\n"),
+        "  Keep      ~/.wye/wye.toml (the config)\n".to_owned(),
+    ] {
+        assert!(out(&plan).contains(&line), "{line}---\n{}", out(&plan));
+    }
+    assert_eq!(err(&plan), "", "a dry run only shows");
+    // Without a terminal to ask on, the command line must say.
+    let asked = setup.run(&["service", "uninstall"]);
+    assert_eq!(asked.status.code(), Some(2), "{}", err(&asked));
+    assert!(
+        err(&asked).contains("uninstall with --yes"),
+        "{}",
+        err(&asked)
+    );
+    assert!(file.exists(), "nothing changed");
+    // Installed, and nothing answers at its port: a problem, not a state.
+    assert_eq!(setup.run(&["service", "status"]).status.code(), Some(1));
 }
 
 #[test]

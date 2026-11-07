@@ -45,7 +45,11 @@ pub struct InitOptions {
     pub setup: Setup,
     /// Also serve OpenAI Responses and Chat Completions (for Codex).
     pub openai: bool,
-    pub out: PathBuf,
+    /// The config to create (`-c`).
+    pub config: PathBuf,
+    /// The config later commands read without `-c`
+    /// ([`files::default_config`]).
+    pub found: Option<PathBuf>,
     /// Wye's home directory, where `--shared` keeps the signing key.
     pub home: Option<PathBuf>,
 }
@@ -175,29 +179,25 @@ impl InitOptions {
             .ok_or_else(|| "no home directory for the signing key: set WYE_HOME".to_owned())
     }
 
-    /// ` -c <out>` when the default lookup would not find the config.
+    /// ` -c <config>` when the default lookup would not find the config.
     fn config_flag(&self) -> String {
-        let found = self
-            .home
-            .as_ref()
-            .is_some_and(|h| h.join(CONFIG_FILE) == self.out);
-        if found {
+        if self.found.as_ref() == Some(&self.config) {
             String::new()
         } else {
-            format!(" -c {}", self.out.display())
+            format!(" -c {}", self.config.display())
         }
     }
 
     /// Where the sample policy tests go: next to the config, where
     /// `wye policy-test` looks.
     fn tests_dir(&self) -> PathBuf {
-        files::config_dir(&self.out).join(POLICY_TESTS_DIR)
+        files::config_dir(&self.config).join(POLICY_TESTS_DIR)
     }
 
     /// What to run next: each step's words, and its command, if any.
     pub fn next_steps(&self, show: impl Fn(&Path) -> String) -> String {
         let c = self.config_flag();
-        let dir = self.out.parent().unwrap_or(Path::new("."));
+        let dir = files::config_dir(&self.config);
         let mut steps: Vec<(String, String)> = vec![];
         let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
         let mut keys = Vec::new();
@@ -296,24 +296,27 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result
         (true, false) => Setup::ProviderKey,
         (false, false) => Setup::Passthrough,
     };
+    let found = files::default_config(env);
     // A shared gateway's config belongs in the repository it is reviewed in.
-    let out = match (parsed.value("out"), setup) {
-        (Some(out), _) => PathBuf::from(out),
-        (None, Setup::Shared) => PathBuf::from(CONFIG_FILE),
-        (None, _) => files::in_home(CONFIG_FILE, "pass --out", env)?,
+    let config = match (parsed.value("config"), setup, &found) {
+        (Some(config), _, _) => PathBuf::from(config),
+        (None, Setup::Shared, _) => PathBuf::from(CONFIG_FILE),
+        (None, _, Some(found)) => found.clone(),
+        (None, _, None) => return Err("no home directory: pass -c <path>".into()),
     };
     init(
         &InitOptions {
             setup,
             openai: parsed.flag("openai"),
-            out,
+            config,
+            found,
             home: files::home(env),
         },
         env,
     )
 }
 
-/// Writes the starter config to `options.out`, never over an existing file
+/// Writes the starter config to `options.config`, never over an existing file
 /// (or through a symlink); with `--shared`, also the signing key, unless one is
 /// there to reuse; then the sample policy tests, keeping any that exist.
 pub fn init(
@@ -321,12 +324,12 @@ pub fn init(
     env: &impl Fn(&str) -> Option<String>,
 ) -> Result<String, String> {
     let show = |path: &Path| files::tilde(path, env);
-    let path = &options.out;
+    let path = &options.config;
     // Checked first so a refused run creates no key; `create_new` below
     // still refuses a file that appears in between.
     if path.symlink_metadata().is_ok() {
         return Err(format!(
-            "{} exists; choose another path with --out",
+            "{} exists; choose another path with -c",
             show(path)
         ));
     }
@@ -405,7 +408,7 @@ fn write_new(path: &Path, text: &str, show: &impl Fn(&Path) -> String) -> Result
         .open(path)
         .map_err(|e| match e.kind() {
             std::io::ErrorKind::AlreadyExists => {
-                format!("{} exists; choose another path with --out", show(path))
+                format!("{} exists; choose another path with -c", show(path))
             }
             _ => format!("cannot write {}: {e}", show(path)),
         })?;
@@ -421,12 +424,13 @@ mod tests {
 
     const SETUPS: [Setup; 3] = [Setup::Passthrough, Setup::ProviderKey, Setup::Shared];
 
-    fn options(setup: Setup, openai: bool, out: &Path) -> InitOptions {
+    fn options(setup: Setup, openai: bool, config: &Path) -> InitOptions {
         InitOptions {
             setup,
             openai,
-            out: out.to_owned(),
-            home: Some(out.parent().unwrap().to_owned()),
+            config: config.to_owned(),
+            found: Some(config.parent().unwrap().join(CONFIG_FILE)),
+            home: Some(config.parent().unwrap().to_owned()),
         }
     }
 
@@ -558,14 +562,25 @@ mod tests {
 
     #[test]
     fn the_next_steps_name_a_config_the_lookup_would_not_find() {
-        let steps = |out: &str| {
+        let steps = |config: &str| {
             let options = InitOptions {
+                found: Some("/h/wye.toml".into()),
                 home: Some("/h".into()),
-                ..options(Setup::Shared, false, Path::new(out))
+                ..options(Setup::Shared, false, Path::new(config))
             };
             options.next_steps(|p| p.display().to_string())
         };
         assert!(steps("/h/wye.toml").contains("\n     wye doctor\n"));
+        // $WYE_CONFIG names another: the home's needs -c.
+        let elsewhere = InitOptions {
+            found: Some("/etc/wye.toml".into()),
+            ..options(Setup::Passthrough, false, Path::new("/h/wye.toml"))
+        };
+        assert!(
+            elsewhere
+                .next_steps(|p| p.display().to_string())
+                .contains("\n     wye doctor -c /h/wye.toml\n")
+        );
         let repo = steps("wye.toml");
         assert!(repo.contains("\n     wye doctor -c wye.toml\n"), "{repo}");
         assert!(

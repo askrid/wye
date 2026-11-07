@@ -36,7 +36,7 @@ Linux and macOS archives are on the [releases page](https://github.com/askrid/wy
 - **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`.
 - **Shared** (`--shared`): the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `./wye.toml`, for the repository it is reviewed in.
 
-`--out` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
+`-c <path>` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
 
 With passthrough, a login counts against your plan and an API key bills the API. As without Wye, an exported `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` takes over from your login.
 
@@ -109,7 +109,7 @@ OPENAI_BASE_URL=https://wye.example.com/v1 OPENAI_API_KEY=<key> node app.js
 
 Wye stands between your backend and the provider, never in front of your users: they sign in to your backend, which keeps their authentication and quotas, and only it calls Wye. Two places to run it:
 
-- **Beside the app** (`wye init --provider-key --out <path>`): a sidecar on the same host or pod, on loopback, holding the provider key. No tokens to manage; without `[auth]`, records name no subject, so there are no per-service model permissions, output-token ceilings, or canaries by subject. A sidecar has [not yet run in production](operations.md#deployment).
+- **Beside the app** (`wye init --provider-key -c <path>`): a sidecar on the same host or pod, on loopback, holding the provider key. No tokens to manage; without `[auth]`, records name no subject, so there are no per-service model permissions, output-token ceilings, or canaries by subject. A sidecar has [not yet run in production](operations.md#deployment).
 - **One internal gateway for several services** (`wye init --shared`): each service gets its own gateway token, so permissions, ceilings, aliases, and usage are per service; deploy it as in [using it for a team](#using-it-for-a-team).
 
 The app's API key, by setup:

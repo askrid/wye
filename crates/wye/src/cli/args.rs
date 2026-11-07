@@ -43,13 +43,13 @@ impl Opt {
     }
 }
 
-/// What the overview says about the environment; docs/operations.md has the
-/// full table.
+/// Every variable a user sets, each beaten by its flag; docs/operations.md
+/// has the full table, with those set only by tests and agents.
 const ENVIRONMENT: &str = "Environment:
   WYE_CONFIG   The config, when -c is not given
   WYE_HOME     Your files (default: ~/.wye)
   WYE_URL      The gateway for claude, codex, and probe
-  WYE_TOKEN    The gateway token for claude and codex
+  WYE_TOKEN    The gateway token for claude, codex, and explain
   NO_COLOR     No color, even on a terminal
 ";
 
@@ -306,10 +306,10 @@ pub fn overview() -> String {
     out.push_str(ENVIRONMENT);
     out.push('\n');
     out.push_str(&wrap(
-        "`wye <command> --help` shows a command's options. Exit status: 1 for an error, \
-         including a config that does not parse; 3 when a check found what it looks for: a \
-         problem, a refused request, a failed policy test, widened access, or a service \
-         that is not running.",
+        "`wye <command> --help` shows a command's options. Exit status: 0 done; 1 failed, \
+         or a check found problems; 2 wrong usage; 3 done, with something to act on: \
+         explain's request would be refused, policy-diff found widened access, or service \
+         status found nothing installed.",
         0,
     ));
     out
