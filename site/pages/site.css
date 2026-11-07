@@ -298,24 +298,21 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 
 /* A figure in a stop: a real artifact, still, in the page's three colours.
    A gateway token as wye token issue writes it, its claims (bright) between
-   header and signature, then decoded; an alias as a fork; an upstream's 64
-   connections (LANES in upstream/pool.rs); a real stream's bytes as Wye's
-   usage scanner reads them: newlines found (inverted), prefixes checked,
-   the one line that carries usage parsed (bright), the rest skipped. */
-.token, .lanes { margin: 0; display: grid; gap: 1rem; }
-.jwt, .claims, .fork, .hex { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
+   header and signature, then decoded; an alias as a fork; the config's two
+   upstreams sharing sessions by weight, one session failing over. */
+.token, .routes { margin: 0; display: grid; gap: 1rem; }
+.jwt, .claims, .fork { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
 .fork .d { color: var(--graphite); }
-.lanes svg { display: block; width: 100%; max-width: 40rem; height: auto; }
-.lanes .lane { fill: none; stroke: var(--ink); stroke-width: 0.8; opacity: 0.45; }
-.lanes .trunk { fill: none; stroke: var(--ink); stroke-width: 3; }
-.lanes circle { fill: var(--ink); }
-.hex { overflow-x: auto; color: var(--graphite); }
-.hex .o, .hex .p { color: var(--graphite); }
-.hex .s { color: var(--edge); }
-.hex .r { color: var(--ink); font-weight: 600; }
-.hex .n { background: var(--ink); color: var(--paper); }
+.routes svg { display: block; width: 100%; max-width: 40rem; height: auto; }
+.routes .session { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.4; }
+.routes .node, .routes rect { fill: var(--ink); }
+.routes .tried, .routes .sent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.routes .tried { stroke-dasharray: 3 4; }
+.routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
+.routes .w { fill: var(--graphite); }
+.routes .code { fill: var(--accent); }
 
 /* Sections and stops */
 .part { display: grid; gap: 1.375rem; padding-block: clamp(2rem, 5vw, 3.75rem); }
