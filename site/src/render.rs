@@ -28,6 +28,8 @@
 //!   starts with START, rendered.
 //! - `{{numbers FILE|HEADING|FIRST}}`: that section's table whose first column
 //!   is headed FIRST, as a table of figures.
+//! - `{{relative FILE|HEADING|ROW}}`: a bar chart of the table row that
+//!   starts with ROW, each gateway column's figure as a multiple of Wye's.
 //! - `{{ratios FILE|HEADING|COLUMN}}`: a bar chart of that section's table
 //!   column of multiples of Wye ("7×").
 
@@ -38,11 +40,24 @@ use crate::{chart, markdown};
 mod sources;
 
 /// The documents directives may read, relative to the repository root.
-const DOCUMENTS: [&str; 3] = ["README.md", "CHANGELOG.md", "docs/operations.md"];
+const DOCUMENTS: [&str; 4] = [
+    "README.md",
+    "CHANGELOG.md",
+    "docs/operations.md",
+    "docs/benchmarks.md",
+];
 
 /// The directives whose first two arguments name a document and one of its
 /// headings.
-const HEADED: [&str; 6] = ["section", "item", "rest", "paragraph", "numbers", "ratios"];
+const HEADED: [&str; 7] = [
+    "section",
+    "item",
+    "rest",
+    "paragraph",
+    "numbers",
+    "ratios",
+    "relative",
+];
 
 /// Everything a page may draw from the repository, read once per build.
 pub struct Sources {
@@ -173,6 +188,9 @@ impl Sources {
                 markdown::numbers(self.section(file, heading)?, first).ok_or_else(|| {
                     format!("{file}: no table under \"## {heading}\" has a first column {first:?}")
                 })
+            }
+            ("relative", [file, heading, row]) => {
+                chart::relative(self.section(file, heading)?, row)
             }
             ("ratios", [file, heading, column]) => {
                 chart::ratios(self.section(file, heading)?, column)

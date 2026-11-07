@@ -54,6 +54,87 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
     Ok(draw(bars, 1.0, RATIO_CELLS))
 }
 
+/// A chart of one row of a table whose columns are gateways, Wye among them:
+/// each gateway's first figure ("282 µs" of "282 µs (230-367)") as a multiple
+/// of Wye's, units normalized. A cell without a figure ("not run") is left
+/// out.
+pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
+    let (header, row) = markdown::tables(text)
+        .into_iter()
+        .find_map(|rows| {
+            let header = rows.first()?.clone();
+            let row = rows
+                .iter()
+                .skip(1)
+                .find(|row| row.first().is_some_and(|cell| cell.starts_with(row_start)))?
+                .clone();
+            Some((header, row))
+        })
+        .ok_or_else(|| format!("no table row starts with {row_start:?}"))?;
+    let figures: Vec<(String, f64)> = header
+        .iter()
+        .zip(&row)
+        .skip(1)
+        .filter_map(|(name, cell)| Some((name.clone(), measure(cell)?)))
+        .collect();
+    let wye = figures
+        .iter()
+        .find(|(name, _)| name == "Wye")
+        .map(|(_, value)| *value)
+        .filter(|value| *value > 0.0)
+        .ok_or_else(|| format!("{row_start:?}: no figure for Wye"))?;
+    let bars: Vec<Bar> = figures
+        .into_iter()
+        .map(|(name, value)| {
+            let times = value / wye;
+            Bar {
+                us: name == "Wye",
+                label: multiple(times),
+                name,
+                value: times,
+            }
+        })
+        .collect();
+    if bars.len() < 2 {
+        return Err(format!("{row_start:?}: no figure beside Wye's"));
+    }
+    Ok(draw(bars, 1.0, RATIO_CELLS))
+}
+
+/// A cell's first figure in base units: "1.0 ms (0.7-1.1)" is 0.001.
+fn measure(cell: &str) -> Option<f64> {
+    let mut words = cell.split(' ');
+    let value = number(words.next()?)?;
+    let scale = match words.next()? {
+        "ns" => 1e-9,
+        "µs" => 1e-6,
+        "ms" => 1e-3,
+        "s" => 1.0,
+        "KB" => 1e3,
+        "MB" => 1e6,
+        "GB" => 1e9,
+        _ => return None,
+    };
+    Some(value * scale)
+}
+
+/// A multiple as the comparison table prints one: "1×", "3.5×", "1,738×".
+fn multiple(times: f64) -> String {
+    if times < 9.95 {
+        let text = format!("{times:.1}");
+        return format!("{}×", text.strip_suffix(".0").unwrap_or(&text));
+    }
+    let whole = format!("{}", times.round() as u64);
+    let mut grouped = String::new();
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("{grouped}×")
+}
+
 /// One line per bar, shortest first: the name, the value as printed, and the
 /// bar, `per_cell` to a cell. Bars are hidden from screen readers, which
 /// read the names and values.
@@ -130,6 +211,19 @@ mod tests {
         | [agentgateway](https://x) 1.7 (Rust) | 7× | 2.9× |\n\
         | [LiteLLM](https://y) 1.105 (Python) | 170× | 320× (at idle) |\n\
         | [KrakenD](https://z) 3.0 CE (Go) | 1.4× | cannot stream |\n";
+
+    #[test]
+    fn draws_a_row_relative_to_wye() {
+        let text = "| TLS | Wye | Bifrost | KrakenD | LiteLLM |\n|---|---|---|---|---|\n\
+                    | Delay p99 | 282 µs (230-367) | 132 ms (94-145) | 1.0 ms (0.7-1.1) | not run |\n";
+        let chart = relative(text, "Delay p99").unwrap();
+        assert!(chart.contains("Wye        1×"), "{chart}");
+        assert!(chart.contains("KrakenD  3.5×"), "{chart}");
+        assert!(chart.contains("Bifrost  468×"), "{chart}");
+        assert!(!chart.contains("LiteLLM"));
+        assert!(relative(text, "Nothing").is_err());
+        assert_eq!(multiple(1738.3), "1,738×");
+    }
 
     #[test]
     fn draws_multiples_with_wye_as_one() {

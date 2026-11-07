@@ -96,16 +96,24 @@
       <section class="part stop" id="access" aria-labelledby="access-h">
         <h2 id="access-h"><a href="#access"><span class="hash" aria-hidden="true">#</span> access</a></h2>
         {{item README.md|What it does|Gives}}
+        <figure class="token" role="img" aria-label="A gateway token as wye token issue writes it, header, claims, and signature, and its claims decoded"><pre class="jwt" aria-hidden="true"><span>eyJhbGciOiJFZERTQSIsImtpZCI6ImsxIiwidHlwIjoiSldUIn0</span>.<span class="claims-part">eyJpc3MiOiJ3eWUiLCJzdWIiOiJhbGljZSIsImF1ZCI6Ind5ZS1wcm9kIiwiaWF0IjoxNzk0MDQ4NzQ1LCJleHAiOjE3OTQ2NTM1NDUsIm1vZGVscyI6WyJjbGF1ZGUtc29ubmV0LSoiXSwibWF4X291dHB1dF90b2tlbnMiOjgwMDB9</span>.<span>OsT_Aw2RCTFrsYl-9Fv6uORQkYHVBUNw4MlxESZjU7BJkaLeunM_rVrlFv_jnLZzacDS16GWR3qS6tycH43GBA</span></pre><pre class="claims" aria-hidden="true">{
+  &quot;iss&quot;: &quot;wye&quot;, &quot;sub&quot;: &quot;alice&quot;, &quot;aud&quot;: &quot;wye-prod&quot;,
+  &quot;iat&quot;: 1794048745, &quot;exp&quot;: 1794653545,
+  &quot;models&quot;: [&quot;claude-sonnet-*&quot;], &quot;max_output_tokens&quot;: 8000
+}</pre></figure>
       </section>
 
       <section class="part stop" id="model" aria-labelledby="model-h">
         <h2 id="model-h"><a href="#model"><span class="hash" aria-hidden="true">#</span> model</a></h2>
         {{item README.md|What it does|Changes models}}
+        <pre class="fork" role="img" aria-label="The alias claude-coding serves claude-sonnet-5, and claude-sonnet-5-5 to subjects matching team-canary-*"><span aria-hidden="true">claude-coding ─┬─ claude-sonnet-5
+               └─ claude-sonnet-5-5  <span class="d">team-canary-*</span></span></pre>
       </section>
 
       <section class="part stop" id="upstream" aria-labelledby="upstream-h">
         <h2 id="upstream-h"><a href="#upstream"><span class="hash" aria-hidden="true">#</span> upstream</a></h2>
         {{item README.md|What it does|Spreads load}}
+        <figure class="lanes" role="img" aria-label="One line splits into 64: an upstream's 64 HTTP/2 connections"><svg viewBox="0 0 640 200" aria-hidden="true"><path class="lane" d="M60 100L636 4.0M60 100L636 7.0M60 100L636 10.1M60 100L636 13.1M60 100L636 16.2M60 100L636 19.2M60 100L636 22.3M60 100L636 25.3M60 100L636 28.4M60 100L636 31.4M60 100L636 34.5M60 100L636 37.5M60 100L636 40.6M60 100L636 43.6M60 100L636 46.7M60 100L636 49.7M60 100L636 52.8M60 100L636 55.8M60 100L636 58.9M60 100L636 61.9M60 100L636 65.0M60 100L636 68.0M60 100L636 71.0M60 100L636 74.1M60 100L636 77.1M60 100L636 80.2M60 100L636 83.2M60 100L636 86.3M60 100L636 89.3M60 100L636 92.4M60 100L636 95.4M60 100L636 98.5M60 100L636 101.5M60 100L636 104.6M60 100L636 107.6M60 100L636 110.7M60 100L636 113.7M60 100L636 116.8M60 100L636 119.8M60 100L636 122.9M60 100L636 125.9M60 100L636 129.0M60 100L636 132.0M60 100L636 135.0M60 100L636 138.1M60 100L636 141.1M60 100L636 144.2M60 100L636 147.2M60 100L636 150.3M60 100L636 153.3M60 100L636 156.4M60 100L636 159.4M60 100L636 162.5M60 100L636 165.5M60 100L636 168.6M60 100L636 171.6M60 100L636 174.7M60 100L636 177.7M60 100L636 180.8M60 100L636 183.8M60 100L636 186.9M60 100L636 189.9M60 100L636 193.0M60 100L636 196.0"/><path class="trunk" d="M0 100H60"/><circle cx="60" cy="100" r="4"/></svg></figure>
       </section>
 
       <section class="part stop" id="stream" aria-labelledby="stream-h">
@@ -114,6 +122,10 @@
         <figure class="chart">
           <figcaption>Added latency per request (p50, TLS). Shorter is better.</figcaption>
           {{ratios README.md|Performance|Added latency (p50)}}
+        </figure>
+        <figure class="chart">
+          <figcaption>Delay per event with 2,000 token-paced streams open (p99), in multiples of Wye's. Shorter is better.</figcaption>
+          {{relative docs/benchmarks.md|Results|Delay per event, 2,000 paced streams, p99}}
         </figure>
         {{paragraph README.md|Performance|Under load}}
         {{paragraph README.md|Performance|Where others lead}}
@@ -124,6 +136,21 @@
       <section class="part stop" id="record" aria-labelledby="record-h">
         <h2 id="record-h"><a href="#record"><span class="hash" aria-hidden="true">#</span> record</a></h2>
         {{item README.md|What it does|Shows usage}}
+        <pre class="hex" tabindex="0" role="img" aria-label="The bytes of a real stream as Wye reads them: each newline found, each line's prefix checked, one line parsed for usage, the rest skipped"><span aria-hidden="true"><span class="o">0000</span>  <span class="p">65 76 65 6e 74 3a 20 63 6f 6e 74 65 6e 74 5f 62</span>  <span class="o">event: content_b</span>
+<span class="o">0010</span>  <span class="p">6c 6f 63 6b 5f 64 65 6c 74 61</span> <span class="n">0a</span> <span class="p">64 61 74 61 3a</span>  <span class="o">lock_delta.data:</span>
+<span class="o">0020</span>  <span class="s">20 7b 22 74 79 70 65 22 3a 22 63 6f 6e 74 65 6e</span>  <span class="o"> {&quot;type&quot;:&quot;conten</span>
+<span class="o">0030</span>  <span class="s">74 5f 62 6c 6f 63 6b 5f 64 65 6c 74 61 22 2c 22</span>  <span class="o">t_block_delta&quot;,&quot;</span>
+<span class="o">0040</span>  <span class="s">69 6e 64 65 78 22 3a 30 2c 22 64 65 6c 74 61 22</span>  <span class="o">index&quot;:0,&quot;delta&quot;</span>
+<span class="o">0050</span>  <span class="s">3a 7b 22 74 79 70 65 22 3a 22 74 65 78 74 5f 64</span>  <span class="o">:{&quot;type&quot;:&quot;text_d</span>
+<span class="o">0060</span>  <span class="s">65 6c 74 61 22 2c 22 74 65 78 74 22 3a 22 6f 6b</span>  <span class="o">elta&quot;,&quot;text&quot;:&quot;ok</span>
+<span class="o">0070</span>  <span class="s">22 7d 7d</span> <span class="n">0a 0a</span> <span class="p">65 76 65 6e 74 3a 20 6d 65 73 73</span>  <span class="o">&quot;}}..event: mess</span>
+<span class="o">0080</span>  <span class="p">61 67 65 5f 64 65 6c 74 61</span> <span class="n">0a</span> <span class="p">64 61 74 61 3a</span> <span class="r">20</span>  <span class="o">age_delta.data: </span>
+<span class="o">0090</span>  <span class="r">7b 22 74 79 70 65 22 3a 22 6d 65 73 73 61 67 65</span>  <span class="o">{&quot;type&quot;:&quot;message</span>
+<span class="o">00a0</span>  <span class="r">5f 64 65 6c 74 61 22 2c 22 64 65 6c 74 61 22 3a</span>  <span class="o">_delta&quot;,&quot;delta&quot;:</span>
+<span class="o">00b0</span>  <span class="r">7b 22 73 74 6f 70 5f 72 65 61 73 6f 6e 22 3a 22</span>  <span class="o">{&quot;stop_reason&quot;:&quot;</span>
+<span class="o">00c0</span>  <span class="r">65 6e 64 5f 74 75 72 6e 22 7d 2c 22 75 73 61 67</span>  <span class="o">end_turn&quot;},&quot;usag</span>
+<span class="o">00d0</span>  <span class="r">65 22 3a 7b 22 6f 75 74 70 75 74 5f 74 6f 6b 65</span>  <span class="o">e&quot;:{&quot;output_toke</span>
+<span class="o">00e0</span>  <span class="r">6e 73 22 3a 33 38 7d 7d</span> <span class="n">0a 0a</span>                    <span class="o">ns&quot;:38}}..</span></span></pre>
         {{fence README.md|$ wye report}}
         {{fence docs/operations.md|{}}
       </section>
