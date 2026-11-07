@@ -218,7 +218,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
    line on the upstream weighted rendezvous hashing gives it, so a bundle is
    as thick as its weight; one line is turned back from its bundle (dashed)
    and resent to the next one. Drawn
-   once (site/pages/index.html), stacked as layers so each can breathe. */
+   once (site/pages/index.html), stacked as layers, so each can move later. */
 .art { margin: 0; display: grid; min-width: 0; }
 .art > svg { grid-area: 1 / 1; display: block; width: 100%; height: auto; }
 .art .layer { opacity: 0.38; }
@@ -228,28 +228,6 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 /* The attempt the upstream rejected: drawn, but not arrived. */
 .art .detour .tried { stroke-dasharray: 3 4; }
 .art .detour circle { fill: var(--accent); }
-/* The node's own point, so it swells in place. */
-.art .node { transform-origin: 44.12% 50%; }
-
-/* Breathing: slow fades and one slow swell, opacity and transform of whole
-   layers only, so the compositor does the work. Paused on the first frame,
-   the full drawing, when the system asks for reduced motion; the m key
-   plays or pauses it either way, and on localhost a button does (site.js). */
-.breathe {
-  animation: 7s ease-in-out infinite alternate paused;
-}
-.art .b1, .art .b2, .art .b3 { animation-name: wye-breathe; }
-.art .b2 { animation-delay: -2.3s; }
-.art .b3 { animation-delay: -4.6s; }
-.art .detour { animation-name: wye-glow; animation-duration: 5s; }
-.art .node { animation-name: wye-swell; animation-duration: 5s; }
-@keyframes wye-breathe { from { opacity: 0.4; } to { opacity: 0.08; } }
-@keyframes wye-glow { from { opacity: 1; } to { opacity: 0.3; } }
-@keyframes wye-swell { from { transform: scale(1); } to { transform: scale(2); } }
-@media (prefers-reduced-motion: no-preference) {
-  :root:not([data-motion="off"]) .breathe { animation-play-state: running; }
-}
-:root[data-motion="on"] .breathe { animation-play-state: running; }
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
