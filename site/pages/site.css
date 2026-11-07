@@ -198,6 +198,13 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 /* README's line under the headline. */
 .lede p { max-width: 54ch; margin: 0; line-height: 1.6; }
+/* README's Quick start blocks, install then set up then use, one task to a
+   block so each copies on its own; stacked tight, they read as one. */
+.steps { display: grid; gap: 2px; width: fit-content; max-width: 100%; min-width: 0; }
+/* As wide as the widest, each copy button beside its commands, not above. */
+.steps .code-wrap, .steps pre.code { width: auto; margin: 0; }
+.steps pre.code[data-lang="bash"] { padding-top: 1.1875rem; padding-right: 6.5rem; }
+.steps .copy { top: 50%; transform: translateY(-50%); }
 /* One line of facts, the changelog last. */
 .facts { color: var(--graphite); font-family: var(--mono); font-size: var(--caption); }
 .facts a { color: var(--text); }

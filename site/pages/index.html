@@ -49,7 +49,11 @@
     </div>
 
     <div class="hero-install">
-      {{fence README.md|cargo install}}
+      <div class="steps">
+        {{fence README.md|cargo install}}
+        {{fence README.md|wye init}}
+        {{fence README.md|wye claude}}
+      </div>
       <p class="facts">{{release}} · {{license}} · <a href="#status">status</a> · <a href="{{repo}}/blob/{{commit}}/CHANGELOG.md">changelog</a></p>
     </div>
 
