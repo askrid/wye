@@ -10,13 +10,24 @@ Small, fast, and stateless: one binary, one TOML file, under a millisecond per r
 
 Prerelease, tested on one machine ([status](#status)).
 
-```bash
-cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked   # Rust 1.99+
+Install (Rust 1.99+):
 
-wye init              # writes ~/.wye/wye.toml; needs no key
-wye service install   # shows what it sets up and asks; runs the gateway in the background
-wye claude            # Claude Code through the gateway, signed in as usual
-wye report            # what it recorded
+```bash
+cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
+```
+
+Write a config and run the gateway in the background; neither needs a key, and the service install shows what it sets up before it asks:
+
+```bash
+wye init
+wye service install
+```
+
+Then use Claude Code as usual, and see what went through:
+
+```bash
+wye claude
+wye report
 ```
 
 By default Wye uses your own Claude login or API key, listens only on this machine, and stores no key. Linux and macOS binaries are on the [releases page](https://github.com/askrid/wye/releases) ([verifying one](SECURITY.md#releases)); a shared gateway for a team or an app is in the [guide](docs/guide.md).
