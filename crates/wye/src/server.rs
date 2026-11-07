@@ -14,7 +14,11 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{Gateway, auth::ConnectionAuth, usage_log::UsageLog};
+use crate::{
+    Gateway,
+    auth::ConnectionAuth,
+    usage_log::{UsageLog, UsageOut},
+};
 
 mod write_timeout;
 
@@ -70,7 +74,7 @@ pub async fn serve(
     listener: TcpListener,
     gateway: Arc<Gateway>,
     shutdown: impl Future<Output = ()>,
-    usage_out: impl AsyncWrite + Send + Unpin + 'static,
+    usage_out: UsageOut<impl AsyncWrite + Send + Unpin + 'static>,
 ) -> bool {
     let (log, writer) = UsageLog::start(usage_out, gateway.sinks());
     let graceful = GracefulShutdown::new();

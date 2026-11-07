@@ -31,6 +31,7 @@ async fn completed_stream_logs_usage_without_changing_bytes() {
 
     let record = h.usage_record().await;
     assert_eq!(record["event"], "request");
+    assert_eq!(record["v"], 1, "the record format's version");
     assert_eq!(record["path"], "/v1/messages");
     assert_eq!(record["status"], 200);
     assert_eq!(record["outcome"], "completed");
@@ -696,5 +697,6 @@ async fn spans_a_collector_refuses_are_counted_as_lost() {
     // The shutdown summary follows the request's record.
     let summary = h.usage_record().await;
     assert_eq!(summary["event"], "otlp_dropped", "{summary}");
+    assert_eq!(summary["v"], 1, "{summary}");
     assert_eq!(summary["records"], 1, "{summary}");
 }

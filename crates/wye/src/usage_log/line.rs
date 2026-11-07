@@ -18,6 +18,11 @@ use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
 /// `count_tokens`, a content type that is neither SSE nor JSON.
 const NO_USAGE: &str = "none";
 
+/// The record format's version, every line's `v`: raised by any change that
+/// renames a field or changes its meaning, so a reader can tell formats
+/// apart. Added fields keep it.
+pub(super) const RECORD_VERSION: u8 = 1;
+
 /// What the writer adds to every record: keys, prices, upgrade targets.
 pub(super) struct Context<'a> {
     pub(super) prompt_key: Option<&'a HashKey>,
@@ -30,6 +35,8 @@ pub(super) struct Context<'a> {
 #[derive(Serialize)]
 pub(super) struct Line<'a> {
     pub(super) event: &'static str,
+    /// [`RECORD_VERSION`]; the JSON line only, not OTLP.
+    pub(super) v: u8,
     pub(super) unix_ms: u64,
     pub(super) path: &'a str,
     /// `gen_ai.provider.name` in OTLP; the JSON line has the `upstream`
@@ -122,6 +129,7 @@ impl Line<'_> {
     pub(super) fn blank() -> Self {
         Line {
             event: "request",
+            v: RECORD_VERSION,
             unix_ms: 0,
             path: "/v1/messages",
             provider_name: "anthropic",
@@ -201,6 +209,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     let headers = &r.info.agent;
     Line {
         event: "request",
+        v: RECORD_VERSION,
         unix_ms: r.unix_ms,
         path: r.info.endpoint.path,
         provider_name: r.info.provider.otel_name(),
@@ -309,5 +318,22 @@ impl Serialize for RejectedAttempt {
         map.serialize_entry("upstream", &self.upstream.as_deref())?;
         map.serialize_entry("reason", self.reason.as_str())?;
         map.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Readers find the format's version right after the event.
+    #[test]
+    fn the_version_follows_the_event() {
+        let mut buf = Vec::new();
+        push_line(&mut buf, &Line::blank());
+        let text = String::from_utf8_lossy(&buf);
+        assert!(
+            text.starts_with(r#"{"event":"request","v":1,"unix_ms":0,"#),
+            "{text}"
+        );
     }
 }

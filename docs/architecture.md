@@ -336,6 +336,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | A held body's longest silence and total time to `model` ([timeouts](#timeouts)) |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer; more are dropped and counted |
 | `WRITE_BATCH` | `wye/src/usage_log/writer.rs` | Records formatted into one write, which bounds the write buffer (below) |
+| `ROTATE_BYTES` | `wye/src/usage_log/file.rs` | A `--usage-log` file's size before the writer renames it and starts a new one (64 MiB) |
 | `MAX_BATCH_RECORDS`, `EXPORT_QUEUE`, `EXPORT_TIMEOUT` | `wye/src/usage_log/otlp.rs` | OTLP batch size, batches waiting, one export attempt |
 | `OTLP_FLUSH_INTERVAL`, `OTLP_METRICS_INTERVAL` | `wye/src/usage_log/writer.rs` | Export of a partial batch and of the metrics |
 | `MAX_SERIES` | `wye/src/usage_log/metrics.rs` | Attribute sets per OTLP metric |

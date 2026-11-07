@@ -5,7 +5,7 @@ Report a vulnerability privately: [github.com/askrid/wye/security/advisories/new
 ## What a running gateway holds and reaches
 
 - Secrets: the provider keys and OTLP headers its config names, read from environment variables or files at startup. The passthrough setup holds none. `wye serve` never loads the signing key that issues Wye tokens.
-- Disk: `wye serve` writes nothing; usage records go to stdout.
+- Disk: `wye serve` writes only the usage log named by `--usage-log` (`wye service` sets `~/.wye/usage.jsonl`), mode 600 when it creates it, and its rotated files; without the flag, usage records go to stdout and it writes nothing.
 - Network: `wye serve` connects only to its configured upstreams and, with `[telemetry]`, its OTLP endpoint. No update check, no telemetry home, no crash reporting; identity providers' keys are read from files, never fetched. A request cannot choose the host: four API paths are forwarded, to the base URLs in config.
 - Endpoints: those four paths, `/healthz`, `/readyz`, `HEAD /api/hello` (Claude Code's warm-up probe: an empty `200`, no upstream), and `GET /v1/models` with `[discovery]`. No admin API, UI, or database.
 - Gateway tokens: each issuer's algorithm is fixed in config, claims are read only after the signature verifies, and a gateway token never reaches a provider.

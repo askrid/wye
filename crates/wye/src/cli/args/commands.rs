@@ -31,9 +31,18 @@ pub const COMMANDS: &[Command] = &[
         id: Id::Serve,
         name: "serve",
         summary: "Run the gateway in the foreground",
-        options: &[CONFIG],
-        notes: "One JSON usage record per request on stdout; messages on stderr. Keep them \
-                with `wye serve >> ~/.wye/usage.jsonl`.",
+        options: &[
+            CONFIG,
+            Opt::value(
+                "usage-log",
+                "path",
+                "Append usage records to this file, not stdout (default: stdout)",
+            ),
+        ],
+        notes: "One JSON usage record per request on stdout, or in the --usage-log file, \
+                which at 64 MiB is renamed beside itself with the UTC time and never \
+                deleted. Messages go to stderr. `wye service install` passes \
+                --usage-log ~/.wye/usage.jsonl.",
         ..BASE
     },
     Command {
@@ -116,10 +125,19 @@ pub const COMMANDS: &[Command] = &[
         id: Id::Report,
         name: "report",
         summary: "Summarize a usage log",
-        args: "[<usage-log>]",
-        arity: (0, 1),
-        notes: "Reads ~/.wye/usage.jsonl, the usage log `wye service install` keeps, \
-                unless given another; `-` reads standard input.",
+        args: "[<usage-log>...]",
+        arity: (0, usize::MAX),
+        options: &[
+            Opt::value(
+                "since",
+                "when",
+                "Records from then on: 30m, 24h, or 7d ago, or a UTC date (2026-11-01)",
+            ),
+            Opt::value("until", "when", "Records before then, written the same way"),
+        ],
+        notes: "Reads ~/.wye/usage.jsonl, the usage log `wye service install` keeps, and \
+                its rotated files (usage-*.jsonl), unless given others; `-` reads \
+                standard input, as in `cat replica-*.jsonl | wye report -`.",
         ..BASE
     },
     Command {

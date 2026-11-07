@@ -4,12 +4,13 @@
 //! bytes to the API's [`UsageScanner`](gateway_core::usage::UsageScanner)
 //! without changing or delaying them and emits one [`Record`] when the body is
 //! dropped: after completion, error, or client disconnect. Records go through
-//! a bounded channel to one writer task, which writes them as JSON lines and,
-//! with `[telemetry]`, exports them as OTLP logs, metrics, and spans; when the
-//! channel is full the record is dropped and counted, so a slow sink never
-//! slows a stream.
+//! a bounded channel to one writer task, which writes them as JSON lines to
+//! stdout or a [`UsageFile`] and, with `[telemetry]`, exports them as OTLP
+//! logs, metrics, and spans; when the channel is full the record is dropped
+//! and counted, so a slow sink never slows a stream.
 
 mod agent;
+mod file;
 mod line;
 mod metrics;
 mod observed;
@@ -34,11 +35,16 @@ use gateway_core::{
     usage::{ToolCalls, Usage, UsageStatus},
 };
 use http::{HeaderValue, Response, StatusCode};
-use tokio::{io::AsyncWrite, sync::mpsc, task::JoinHandle};
+use tokio::{
+    io::{AsyncWrite, AsyncWriteExt},
+    sync::mpsc,
+    task::JoinHandle,
+};
 
 use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
 
 pub(crate) use agent::AgentHeaders;
+pub use file::UsageFile;
 use line::Line;
 pub(crate) use observed::Observed;
 pub(crate) use otlp::OtlpTarget;
@@ -170,6 +176,27 @@ pub(crate) struct Sinks {
     pub(crate) upgrade_targets: Option<Arc<[Box<str>]>>,
 }
 
+/// Where the usage log goes.
+pub enum UsageOut<W> {
+    /// A stream, such as stdout, written as it is.
+    Stream(W),
+    /// A file of its own, rotated at a size (`wye serve --usage-log`).
+    File(UsageFile),
+}
+
+impl<W: AsyncWrite + Unpin> UsageOut<W> {
+    /// Writes and flushes `lines`, whole JSON lines.
+    async fn write(&mut self, lines: &[u8]) -> std::io::Result<()> {
+        match self {
+            Self::Stream(out) => {
+                out.write_all(lines).await?;
+                out.flush().await
+            }
+            Self::File(file) => file.write_lines(lines).await,
+        }
+    }
+}
+
 /// Cloneable handle that queues records for the writer task.
 #[derive(Clone)]
 pub(crate) struct UsageLog {
@@ -179,7 +206,7 @@ pub(crate) struct UsageLog {
 
 impl UsageLog {
     /// Starts the writer task. It ends after every handle is dropped and the queue is written.
-    pub(crate) fn start<W>(out: W, sinks: Sinks) -> (Self, JoinHandle<()>)
+    pub(crate) fn start<W>(out: UsageOut<W>, sinks: Sinks) -> (Self, JoinHandle<()>)
     where
         W: AsyncWrite + Send + Unpin + 'static,
     {

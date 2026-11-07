@@ -40,13 +40,13 @@ Exit: a team runs Claude Code through a shared Wye with per-developer gateway to
 
 ### M1b: agent-aware visibility
 
-Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md#usage-and-cost), cache-miss reasons, session traces, `wye report`, and tool calls.
+Built: retry headers, `GET /v1/models`, spend by [request class](glossary.md#usage-and-cost), cache-miss reasons, session traces, `wye report` (over a time window too), and tool calls.
 
 Open:
 
 - Report-only secret detection, sampled per session. It needs a dependency decision and a measured overhead per MB, and values never leave the process ([background](research.md#what-the-request-scanner-could-also-find)).
 - Usage records gain the time to first token, the config version (to see a rollout's mixed window), and the provider's request id (for support tickets).
-- `wye report` by subject and by model, and over a time window (`--since`).
+- `wye report` by subject and by model.
 
 Exit: a team sees, in its own OpenTelemetry backend or with `wye report`, each Claude Code session as a structure (prompts, subagents, compactions, tools) with cost by request class and every unexpected cache miss flagged, with no gateway state and no gated metric worse.
 

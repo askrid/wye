@@ -1,5 +1,12 @@
 use super::*;
 
+/// The report of one usage log, all of it.
+fn report(input: impl BufRead, paint: Paint) -> std::io::Result<String> {
+    let mut summary = Summary::default();
+    summary.read(input)?;
+    Ok(render(&summary, paint))
+}
+
 /// `out` with runs of whitespace as one space: lines wrap at 80 columns.
 fn flat(out: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -132,7 +139,10 @@ fn a_log_without_requests_says_where_they_come_from() {
         "{out}"
     );
     assert!(
-        flat(&out).contains("`wye service install` keeps them"),
+        flat(&out).contains(
+            "to stdout, or to the file named by `wye serve --usage-log`; \
+             `wye service install` keeps them"
+        ),
         "{out}"
     );
 }
@@ -322,4 +332,122 @@ fn outcomes_of_older_logs_are_shown_as_written() {
         "{out}"
     );
     assert!(!out.contains("upstream errors"), "{out}");
+}
+
+/// 2026-11-07 09:15:00 UTC.
+const NOW: u64 = 1_794_042_900;
+
+#[test]
+fn a_window_reads_durations_back_from_now_and_utc_dates() {
+    let window = |since, until| Window::parse(since, until, NOW);
+    assert_eq!(window(None, None), Ok(Window::default()));
+    assert_eq!(
+        window(Some("7d"), None),
+        Ok(Window {
+            since: Some((NOW - 7 * 86_400) * 1000),
+            until: None
+        })
+    );
+    assert_eq!(
+        window(Some("2026-11-01"), Some("30m")),
+        Ok(Window {
+            since: Some(1_793_491_200_000),
+            until: Some((NOW - 1800) * 1000)
+        })
+    );
+    assert_eq!(
+        window(Some("1w"), None),
+        Err("--since 1w: write it as 30m, 24h, or 7d ago, or as a UTC date, 2026-11-01".into())
+    );
+    assert_eq!(
+        window(None, Some("2026-02-30")).unwrap_err(),
+        "--until 2026-02-30: write it as 30m, 24h, or 7d ago, or as a UTC date, 2026-11-01"
+    );
+    assert_eq!(
+        window(Some("1h"), Some("2h")),
+        Err("--since 1h is not before --until 2h".into())
+    );
+}
+
+#[test]
+fn records_outside_the_window_are_left_out_and_counted() {
+    // `unix_ms` 1000 to 5000 in LOG; the window keeps 2000 to 4999.
+    let mut summary = Summary {
+        window: Window {
+            since: Some(2000),
+            until: Some(5000),
+        },
+        ..Summary::default()
+    };
+    summary.read(LOG.as_bytes()).unwrap();
+    let out = flat(&render(&summary, Paint::OFF));
+    assert!(
+        out.starts_with(
+            "2 requests in 2 sessions since 1970-01-01 00:00:02 UTC, before \
+             1970-01-01 00:00:05 UTC (2 records outside it, 1 gateway notice and 2 other \
+             lines skipped); outcomes: completed 1, refused 1 "
+        ),
+        "{out}"
+    );
+    let mut empty = Summary {
+        window: Window {
+            since: Some(9000),
+            until: None,
+        },
+        ..Summary::default()
+    };
+    empty.read(LOG.as_bytes()).unwrap();
+    let out = flat(&render(&empty, Paint::OFF));
+    assert!(
+        out.starts_with(
+            "No request records since 1970-01-01 00:00:09 UTC (4 records outside it, 1 \
+             gateway notice and 2 other lines skipped)."
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn several_logs_add_up_with_or_without_a_format_version() {
+    let versioned = LOG.replace(r#"{"event":"request","#, r#"{"event":"request","v":1,"#);
+    assert!(versioned.contains(r#""v":1,"unix_ms":1000"#));
+    let mut summary = Summary::default();
+    summary.read(versioned.as_bytes()).unwrap();
+    summary.read(LOG.as_bytes()).unwrap();
+    let out = flat(&render(&summary, Paint::OFF));
+    assert!(
+        out.starts_with(
+            "8 requests in 2 sessions (2 gateway notices and 4 other lines skipped); \
+             outcomes: completed 6, refused 2 "
+        ),
+        "{out}"
+    );
+}
+
+#[test]
+fn the_home_log_is_read_after_its_rotated_files() {
+    let home = wye_testkit::TempDir::new("report-home");
+    let env = {
+        let home = home.display().to_string();
+        move |name: &str| (name == "WYE_HOME").then(|| home.clone())
+    };
+    let missing = home_logs(&env).unwrap_err();
+    assert!(
+        missing.contains("`wye serve --usage-log ") && missing.contains("wye service install"),
+        "{missing}"
+    );
+    let newer = home.join("usage-20261102T000000Z.jsonl");
+    let older = home.join("usage-20261101T235959Z.jsonl");
+    for file in [
+        &newer,
+        &older,
+        &home.join("wye.log"),
+        &home.join("usage.jsonl.bak"),
+    ] {
+        std::fs::write(file, "").unwrap();
+    }
+    assert_eq!(home_logs(&env).unwrap(), [older.clone(), newer.clone()]);
+    let log = home.join("usage.jsonl");
+    std::fs::write(&log, "").unwrap();
+    assert_eq!(home_logs(&env).unwrap(), [older, newer, log]);
 }

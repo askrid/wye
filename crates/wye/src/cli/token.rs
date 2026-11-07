@@ -216,7 +216,7 @@ fn issuer(config: &Config) -> Result<(&Auth, &OwnIssuer), &'static str> {
 }
 
 /// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.
-fn duration_secs(text: &str) -> Option<u64> {
+pub(super) fn duration_secs(text: &str) -> Option<u64> {
     let (digits, unit) = match text.char_indices().last()? {
         (i, c) if c.is_ascii_alphabetic() => (text.get(..i)?, c),
         _ => (text, 's'),

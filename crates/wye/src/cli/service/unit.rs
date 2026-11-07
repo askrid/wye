@@ -80,10 +80,13 @@ impl Manager {
 pub struct Service {
     pub program: PathBuf,
     pub config: PathBuf,
-    /// The usage log: where the gateway's stdout is appended.
+    /// The usage log: the gateway's `--usage-log`, which it rotates. A
+    /// definition an older wye wrote appends stdout to it instead.
     pub usage_log: PathBuf,
     /// The message log: where its stderr is appended, such as why it failed
-    /// to start or stopped.
+    /// to start or stopped. Its stdout goes there too: with `--usage-log` it
+    /// writes nothing there, and anything it ever did would be a message
+    /// worth keeping beside the others, where `/dev/null` would lose it.
     pub messages: PathBuf,
     /// How long the manager waits for it to stop: the config's drain delay
     /// and shutdown grace, and a margin.
@@ -110,10 +113,11 @@ impl Service {
                  \x20 <key>Label</key><string>{LABEL}</string>\n\
                  \x20 <key>ProgramArguments</key>\n\x20 <array>\n\
                  \x20   <string>{}</string>\n\x20   <string>serve</string>\n\
-                 \x20   <string>--config</string>\n\x20   <string>{}</string>\n\x20 </array>\n\
+                 \x20   <string>--config</string>\n\x20   <string>{}</string>\n\
+                 \x20   <string>--usage-log</string>\n\x20   <string>{}</string>\n\x20 </array>\n\
                  \x20 <key>RunAtLoad</key><true/>\n\x20 <key>KeepAlive</key><true/>\n\
-                 \x20 <key>StandardOutPath</key><string>{}</string>\n\
-                 \x20 <key>StandardErrorPath</key><string>{}</string>\n\
+                 \x20 <key>StandardOutPath</key><string>{messages}</string>\n\
+                 \x20 <key>StandardErrorPath</key><string>{messages}</string>\n\
                  \x20 <key>ExitTimeOut</key><integer>{}</integer>\n\
                  \x20 <key>SoftResourceLimits</key>\n\x20 <dict>\n\
                  \x20   <key>NumberOfFiles</key><integer>{OPEN_FILES}</integer>\n\x20 </dict>\n\
@@ -123,8 +127,8 @@ impl Service {
                 xml(&program),
                 xml(&config),
                 xml(&log),
-                xml(&messages),
-                self.stop_secs
+                self.stop_secs,
+                messages = xml(&messages),
             ),
             Manager::Systemd => {
                 for path in [&program, &config, &log, &messages] {
@@ -139,24 +143,26 @@ impl Service {
                 format!(
                     "# Written by wye service install; removed by wye service uninstall.\n\
                      [Unit]\nDescription=Wye gateway\n\n\
-                     [Service]\nExecStart={} serve --config {}\nRestart=on-failure\n\
-                     StandardOutput=append:{}\nStandardError=append:{}\nTimeoutStopSec={}\n\
-                     LimitNOFILE={OPEN_FILES}\n\n\
+                     [Service]\nExecStart={} serve --config {} --usage-log {}\n\
+                     Restart=on-failure\n\
+                     StandardOutput=append:{messages}\nStandardError=append:{messages}\n\
+                     TimeoutStopSec={}\nLimitNOFILE={OPEN_FILES}\n\n\
                      [Install]\nWantedBy=default.target\n",
                     escape(&program),
                     escape(&config),
                     escape(&log),
-                    escape(&messages),
-                    self.stop_secs
+                    self.stop_secs,
+                    messages = escape(&messages),
                 )
             }
         })
     }
 
     /// What a definition `install` wrote runs; `None` for one it did not
-    /// write. The open-file limit is not read back: every definition this
-    /// wye writes has the same one, one an older wye wrote without it is
-    /// still ours, and `restart` rewrites a definition whose text differs.
+    /// write. One an older wye wrote is still ours, and `restart` rewrites a
+    /// definition whose text differs: without `--usage-log`, the gateway's
+    /// stdout was the usage log; the open-file limit is not read back, as
+    /// every definition this wye writes has the same one.
     pub fn parse(manager: Manager, text: &str) -> Option<Self> {
         match manager {
             Manager::Launchd => {
@@ -165,9 +171,25 @@ impl Service {
                     .skip(1)
                     .filter_map(|s| s.split_once("</string>").map(|(v, _)| unxml(v)))
                     .collect();
-                let [label, program, serve, flag, config, log, messages] = strings.as_slice()
-                else {
-                    return None;
+                let (label, program, serve, flag, config, log, messages) = match strings.as_slice()
+                {
+                    [
+                        label,
+                        program,
+                        serve,
+                        flag,
+                        config,
+                        log_flag,
+                        log,
+                        _,
+                        messages,
+                    ] if log_flag == "--usage-log" => {
+                        (label, program, serve, flag, config, log, messages)
+                    }
+                    [label, program, serve, flag, config, log, messages] => {
+                        (label, program, serve, flag, config, log, messages)
+                    }
+                    _ => return None,
                 };
                 if label != LABEL || serve != "serve" || flag != "--config" {
                     return None;
@@ -196,16 +218,20 @@ impl Service {
                         .map(|v| v.replace("%%", "%"))
                 };
                 let exec = line("ExecStart=")?;
-                let mut words = exec.split(' ');
-                let (program, serve, flag, config) =
-                    (words.next()?, words.next()?, words.next()?, words.next()?);
-                if serve != "serve" || flag != "--config" || words.next().is_some() {
-                    return None;
-                }
+                let words: Vec<&str> = exec.split(' ').collect();
+                let (program, config, log) = match words.as_slice() {
+                    [program, "serve", "--config", config, "--usage-log", log] => {
+                        (program, config, (*log).to_owned())
+                    }
+                    [program, "serve", "--config", config] => {
+                        (program, config, line("StandardOutput=append:")?)
+                    }
+                    _ => return None,
+                };
                 Some(Self {
                     program: program.into(),
                     config: config.into(),
-                    usage_log: line("StandardOutput=append:")?.into(),
+                    usage_log: log.into(),
                     messages: line("StandardError=append:")?.into(),
                     stop_secs: line("TimeoutStopSec=")?.parse().ok()?,
                 })

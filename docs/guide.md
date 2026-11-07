@@ -55,16 +55,16 @@ A service does not inherit your shell's environment, so it refuses a config with
 In a terminal:
 
 ```bash
-wye serve >> ~/.wye/usage.jsonl   # usage records; messages go to stderr
+wye serve --usage-log ~/.wye/usage.jsonl   # messages go to stderr
 ```
 
 Then start your agent with `wye claude` or `wye codex`, which set its base URL and leave its own settings alone. `wye claude --bg "task"` starts a background session that goes through the gateway too.
 
 ## Reading `wye report`
 
-`wye report` summarizes `~/.wye/usage.jsonl`, or a file you name (`-` for standard input), with no OpenTelemetry backend. The [README](../README.md#quick-start) shows a sample.
+`wye report` summarizes `~/.wye/usage.jsonl` and its rotated files, or the files you name (`-` for standard input), with no OpenTelemetry backend; `--since 7d` keeps the last week ([options](operations.md#commands)). The [README](../README.md#quick-start) shows a sample.
 
-- **First lines:** requests, sessions, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
+- **First lines:** requests, sessions, the window if one was given, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
 - **Cache misses:** a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
 - **Failovers, upgrade issues:** when records have them.

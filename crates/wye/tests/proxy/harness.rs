@@ -31,7 +31,7 @@ pub(crate) use tokio::{
     sync::{Mutex, mpsc, oneshot},
     task::JoinHandle,
 };
-pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources};
+pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources, UsageOut};
 pub(crate) use wye_testkit::{TestCa, ed25519_keypair as keypair};
 
 pub(crate) const API_KEY: &str = "sk-test-provider-key";
@@ -222,7 +222,7 @@ impl Harness {
             async move {
                 let _ = shutdown_rx.await;
             },
-            usage_out,
+            UsageOut::Stream(usage_out),
         ));
         Self {
             gateway: addr,

@@ -13,7 +13,7 @@ use std::{
 
 use gateway_core::config::Config;
 use wye::{
-    Gateway, Resources,
+    Gateway, Resources, UsageFile, UsageOut,
     cli::{
         Agent,
         args::{self, ArgsError, Command, Id},
@@ -84,7 +84,11 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     match command.id {
         Id::Serve => {
             let path = config_path()?;
-            serve(files::load(&path)?, &path)?;
+            serve(
+                files::load(&path)?,
+                &path,
+                parsed.value("usage-log").map(Path::new),
+            )?;
             Ok(0)
         }
         Id::ServiceInstall => {
@@ -228,13 +232,24 @@ fn unknown(args: &[&str]) -> String {
     }
 }
 
-fn serve(config: Config, path: &Path) -> Result<(), Box<dyn Error>> {
+fn serve(config: Config, path: &Path, usage_log: Option<&Path>) -> Result<(), Box<dyn Error>> {
     let config_dir = files::config_dir(path);
     let resources = files::named(path, Resources::resolve(&config, config_dir))?;
     for warning in wye::key_file_warnings(&config, config_dir) {
         eprintln!("wye: warning: {warning}");
     }
     let gateway = Arc::new(files::named(path, Gateway::new(&config, resources))?);
+    let (usage_out, usage_shown) = match usage_log {
+        Some(log) => {
+            let file = UsageFile::open(log)
+                .map_err(|e| format!("cannot open the usage log {}: {e}", log.display()))?;
+            (
+                UsageOut::File(file),
+                format!(", usage log {}", log.display()),
+            )
+        }
+        None => (UsageOut::Stream(tokio::io::stdout()), String::new()),
+    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -249,11 +264,11 @@ fn serve(config: Config, path: &Path) -> Result<(), Box<dyn Error>> {
                 _ => format!("cannot listen on {listen}: {e}"),
             })?;
         eprintln!(
-            "wye: listening on http://{} (config {})",
+            "wye: listening on http://{} (config {}{usage_shown})",
             listener.local_addr()?,
             path.display()
         );
-        let flushed = wye::serve(listener, gateway, shutdown_signal(), tokio::io::stdout()).await;
+        let flushed = wye::serve(listener, gateway, shutdown_signal(), usage_out).await;
         Ok::<_, Box<dyn Error>>(flushed)
     })?;
     // A write to a stdout nobody reads blocks its thread for good: dropping the

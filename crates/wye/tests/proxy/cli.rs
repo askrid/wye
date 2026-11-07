@@ -282,6 +282,91 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
     assert_eq!(record["path"], "/v1/messages");
 }
 
+/// With `--usage-log`, records go to that file, created readable only by
+/// its owner, and stdout stays empty.
+#[tokio::test]
+async fn serve_writes_records_to_the_usage_log_it_is_given() {
+    let (upstream, _) = spawn_counted(ok()).await;
+    let dir = TempDir::new("usage-log");
+    let config = dir.join("wye.toml");
+    let log = dir.join("usage.jsonl");
+    std::fs::write(
+        &config,
+        format!(
+            "[server]\nlisten = \"127.0.0.1:0\"\n\
+             [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+        ),
+    )
+    .unwrap();
+    let mut command = wye();
+    command.args([
+        "serve",
+        "-c",
+        config.to_str().unwrap(),
+        "--usage-log",
+        log.to_str().unwrap(),
+    ]);
+    let mut running = Running::spawn(command);
+    let file = log.clone();
+    let (message, record, stdout) = tokio::task::spawn_blocking(move || {
+        let message = running.stderr_line();
+        let addr: SocketAddr = message
+            .strip_prefix("wye: listening on http://")
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or_else(|| panic!("{message}"))
+            .parse()
+            .unwrap();
+        let mut request = std::net::TcpStream::connect(addr).unwrap();
+        std::io::Write::write_all(
+            &mut request,
+            b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\nx-api-key: k\r\n\
+              content-length: 2\r\nconnection: close\r\n\r\n{}",
+        )
+        .unwrap();
+        let _ = std::io::copy(&mut request, &mut std::io::sink());
+        // The writer task writes the record shortly after the response.
+        let deadline = std::time::Instant::now() + OUTPUT_WAIT;
+        let record = loop {
+            let text = std::fs::read_to_string(&file).unwrap_or_default();
+            if text.ends_with('\n') {
+                break text;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no record in {file:?}"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let _ = running.0.kill();
+        let _ = running.0.wait();
+        let mut stdout = String::new();
+        running
+            .0
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut stdout)
+            .unwrap();
+        (message, record, stdout)
+    })
+    .await
+    .unwrap();
+    assert!(
+        message.contains(&format!(", usage log {})", log.display())),
+        "{message}"
+    );
+    let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+    assert_eq!(record["event"], "request");
+    assert_eq!(record["v"], 1);
+    assert_eq!(stdout, "", "records go to the file only");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&log).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+    }
+}
+
 /// The policy tests of the team and app examples pass against their configs.
 #[test]
 fn example_policy_tests_pass() {

@@ -59,7 +59,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Session**: the client's session id: a whole Claude Code or Codex conversation.
 - **Request class**: what a request is for: `main`, `subagent`, `workflow`, `compaction`, `auxiliary` (small background requests), or `other`. Not: work type.
 - **Usage record**: one JSON line per request with its tokens, cost, served model, session, request class, and outcome; with `[telemetry]`, also an OTLP log record and span. Not: request record, log line, event.
-- **Usage log**: where usage records go: stdout, or `~/.wye/usage.jsonl` under `wye service`. The *message log* (`~/.wye/wye.log`) holds Wye's own messages. Not: the log (alone), stdout log.
+- **Usage log**: where usage records go: stdout, or the file `wye serve --usage-log` names (`~/.wye/usage.jsonl` under `wye service`). When it reaches its [size limit](operations.md#commands), that file becomes a *rotated file* beside it (`usage-20261107T091500Z.jsonl`), which Wye never deletes. The *message log* (`~/.wye/wye.log`) holds Wye's own messages. Not: the log (alone), stdout log.
 - **Cost**: dollars computed per request from the price table; *spend*: cost over time. *Overhead*: what Wye itself uses (latency, CPU, memory). Not: cost (for Wye's CPU or memory).
 - **Price table**: `[pricing]`: prices per model and upstream, with a version every record carries. A model the table does not name costs `unknown`, never $0. Not: pricing metadata.
 - **Cache miss**: a request that wrote the prompt cache and read nothing from it, recorded with its reason (`compaction`, `after_compaction`, `unexplained`); `wye report` counts session and subagent starts as expected.

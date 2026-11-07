@@ -1,5 +1,6 @@
-//! `wye report`: a summary of a usage log (the JSON lines `wye serve` writes
-//! to stdout), offline and with no telemetry backend.
+//! `wye report`: a summary of usage logs (the JSON lines `wye serve` writes
+//! to stdout or its `--usage-log`), offline and with no telemetry backend,
+//! optionally of a time window.
 //!
 //! It answers what the gateway cannot per request: totals per Claude Code
 //! session and prompt, spend by request class, and which cache misses are
@@ -7,7 +8,11 @@
 //! (a conversation of its own) is expected; one request cannot know it is
 //! first, but the whole log can.
 
-use std::{collections::HashMap, io::BufRead, path::Path};
+use std::{
+    collections::HashMap,
+    io::BufRead,
+    path::{Path, PathBuf},
+};
 
 use gateway_core::{
     agent::CacheMiss,
@@ -19,7 +24,9 @@ use super::{
     args::Parsed,
     files::{self, USAGE_LOG_FILE},
     paint::Paint,
+    token::duration_secs,
 };
+use crate::log_files;
 
 /// Rows shown in the session and prompt rankings.
 const TOP: usize = 10;
@@ -179,8 +186,72 @@ struct Session {
 /// (no agent id) or one of its subagents.
 type Conversation = (String, Option<String>);
 
+/// The records a report covers, by `unix_ms`: from `since` on, and before
+/// `until`.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct Window {
+    since: Option<u64>,
+    until: Option<u64>,
+}
+
+impl Window {
+    /// The window `--since` and `--until` name, `now` in Unix seconds.
+    fn parse(since: Option<&str>, until: Option<&str>, now: u64) -> Result<Self, String> {
+        let at = |flag: &str, when: Option<&str>| {
+            when.map(|when| {
+                log_files::midnight(when)
+                    .or_else(|| duration_secs(when).map(|ago| now.saturating_sub(ago)))
+                    .map(|secs| secs.saturating_mul(1000))
+                    .ok_or_else(|| {
+                        format!(
+                            "--{flag} {when}: write it as 30m, 24h, or 7d ago, or as a UTC \
+                             date, 2026-11-01"
+                        )
+                    })
+            })
+            .transpose()
+        };
+        let window = Self {
+            since: at("since", since)?,
+            until: at("until", until)?,
+        };
+        if let (Some(from), Some(to)) = (window.since, window.until)
+            && from >= to
+        {
+            return Err(format!(
+                "--since {} is not before --until {}",
+                since.unwrap_or_default(),
+                until.unwrap_or_default()
+            ));
+        }
+        Ok(window)
+    }
+
+    fn contains(self, unix_ms: u64) -> bool {
+        self.since.is_none_or(|since| unix_ms >= since)
+            && self.until.is_none_or(|until| unix_ms < until)
+    }
+
+    /// The window in words, `since 2026-11-01 00:00:00 UTC`; `None` for all
+    /// records.
+    fn show(self) -> Option<String> {
+        let at = |ms: u64| log_files::readable(ms / 1000);
+        match (self.since, self.until) {
+            (None, None) => None,
+            (Some(since), None) => Some(format!("since {}", at(since))),
+            (None, Some(until)) => Some(format!("before {}", at(until))),
+            (Some(since), Some(until)) => {
+                Some(format!("since {}, before {}", at(since), at(until)))
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct Summary {
+    window: Window,
+    /// Records outside the window.
+    outside: u64,
     total: Group,
     /// Lines `wye serve` prints about itself (`wye: listening on ...`).
     notices: u64,
@@ -303,49 +374,78 @@ struct Starts {
     subagents: u64,
 }
 
-/// `wye report`: the usage log it was given, or the one in the home
-/// directory.
+impl Summary {
+    /// Adds a usage log's records in the window. Lines that are not request
+    /// records (shutdown notices, other output) are skipped and counted.
+    /// Records of every format version are read: those without `v` too.
+    fn read(&mut self, input: impl BufRead) -> std::io::Result<()> {
+        for line in input.lines() {
+            let line = line?;
+            match serde_json::from_str::<Record>(&line) {
+                Ok(r) if r.event == "request" && self.window.contains(r.unix_ms) => self.add(r),
+                Ok(r) if r.event == "request" => self.outside += 1,
+                _ if line.starts_with("wye: ") => self.notices += 1,
+                _ => self.skipped += 1,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `wye report`: the usage logs it was given, or the one in the home
+/// directory with its rotated files.
 pub fn run(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
     paint: Paint,
 ) -> Result<String, String> {
-    let open = |path: &Path| {
-        std::fs::File::open(path)
-            .map(std::io::BufReader::new)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))
+    let mut summary = Summary {
+        window: Window::parse(
+            parsed.value("since"),
+            parsed.value("until"),
+            super::unix_secs()?,
+        )?,
+        ..Summary::default()
     };
-    let written = match parsed.positional.first() {
-        Some(&"-") => report(std::io::stdin().lock(), paint),
-        Some(path) => report(open(Path::new(path))?, paint),
-        None => {
-            let path = files::in_home(USAGE_LOG_FILE, "pass a usage log", env)?;
-            if !path.exists() {
-                let log = files::tilde(&path, env);
-                return Err(format!(
-                    "no usage log at {log}: `wye service install` keeps one, as does \
-                     `wye serve >> {log}`; or pass a usage log, or - for standard input"
-                ));
-            }
-            report(open(&path)?, paint)
-        }
+    let paths = match parsed.positional.as_slice() {
+        [] => home_logs(env)?,
+        given => given.iter().map(PathBuf::from).collect(),
     };
-    written.map_err(|e| e.to_string())
-}
-
-/// Summarizes a usage log. Lines that are not request records (shutdown
-/// notices, other output) are skipped and counted.
-fn report(input: impl BufRead, paint: Paint) -> std::io::Result<String> {
-    let mut summary = Summary::default();
-    for line in input.lines() {
-        let line = line?;
-        match serde_json::from_str::<Record>(&line) {
-            Ok(r) if r.event == "request" => summary.add(r),
-            _ if line.starts_with("wye: ") => summary.notices += 1,
-            _ => summary.skipped += 1,
-        }
+    for path in paths {
+        let read = if path == Path::new("-") {
+            summary.read(std::io::stdin().lock())
+        } else {
+            std::fs::File::open(&path).and_then(|file| summary.read(std::io::BufReader::new(file)))
+        };
+        read.map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     }
     Ok(render(&summary, paint))
+}
+
+/// The usage log in the home directory and its rotated files, oldest first:
+/// rotated ones by name (their UTC times), then the log itself.
+fn home_logs(env: &impl Fn(&str) -> Option<String>) -> Result<Vec<PathBuf>, String> {
+    let log = files::in_home(USAGE_LOG_FILE, "pass a usage log", env)?;
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(log.parent().unwrap_or(Path::new(".")))
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name();
+            log_files::is_rotated(&log, name.to_str()?).then(|| entry.path())
+        })
+        .collect();
+    paths.sort();
+    if log.exists() {
+        paths.push(log);
+    } else if paths.is_empty() {
+        let log = files::tilde(&log, env);
+        return Err(format!(
+            "no usage log at {log}: `wye service install` keeps one, as does \
+             `wye serve --usage-log {log}`; or pass a usage log, or - for standard input"
+        ));
+    }
+    Ok(paths)
 }
 
 mod render;

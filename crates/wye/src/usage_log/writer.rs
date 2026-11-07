@@ -1,6 +1,6 @@
 //! The writer task: formats queued records into the JSON-lines log and,
 //! with `[telemetry]`, exports them over OTLP, without letting a blocked log
-//! stop the export.
+//! stop the export. A log file is rotated here too, between lines.
 
 use std::{
     sync::{
@@ -10,14 +10,11 @@ use std::{
     time::Duration,
 };
 
-use tokio::{
-    io::{AsyncWrite, AsyncWriteExt},
-    sync::mpsc,
-};
+use tokio::{io::AsyncWrite, sync::mpsc};
 
 use super::{
-    QUEUE_CAPACITY, Record, Sinks,
-    line::{self, line, push_line},
+    QUEUE_CAPACITY, Record, Sinks, UsageOut,
+    line::{self, RECORD_VERSION, line, push_line},
     metrics, otlp, unix_nanos,
 };
 
@@ -33,7 +30,7 @@ const OTLP_METRICS_INTERVAL: Duration = Duration::from_secs(10);
 
 pub(super) async fn write_records<W>(
     mut rx: mpsc::Receiver<Record>,
-    mut out: W,
+    mut out: UsageOut<W>,
     dropped: Arc<AtomicU64>,
     sinks: Sinks,
 ) where
@@ -127,10 +124,7 @@ pub(super) async fn write_records<W>(
                 // OTLP export: records and ticks are served while the write
                 // waits. Cancel safety: the write is never dropped before it
                 // completes, and `recv` loses nothing.
-                let write = async {
-                    out.write_all(&buf).await?;
-                    out.flush().await
-                };
+                let write = out.write(&buf);
                 tokio::pin!(write);
                 log_open = loop {
                     tokio::select! {
@@ -171,9 +165,10 @@ pub(super) async fn write_records<W>(
     // which a slow collector can hold past shutdown's flush.
     let count = dropped.load(Ordering::Relaxed);
     if count > 0 && log_open {
-        let line = format!("{{\"event\":\"usage_log_dropped\",\"records\":{count}}}\n");
-        let _ = out.write_all(line.as_bytes()).await;
-        let _ = out.flush().await;
+        let line = format!(
+            "{{\"event\":\"usage_log_dropped\",\"v\":{RECORD_VERSION},\"records\":{count}}}\n"
+        );
+        let _ = out.write(line.as_bytes()).await;
     }
     if let Some((mut batch, metrics)) = otlp {
         batch.flush();
@@ -186,9 +181,10 @@ pub(super) async fn write_records<W>(
         // After the exporter: the last exports' failures count too.
         let otlp_dropped = otlp_lost.load(Ordering::Relaxed);
         if otlp_dropped > 0 && log_open {
-            let line = format!("{{\"event\":\"otlp_dropped\",\"records\":{otlp_dropped}}}\n");
-            let _ = out.write_all(line.as_bytes()).await;
+            let line = format!(
+                "{{\"event\":\"otlp_dropped\",\"v\":{RECORD_VERSION},\"records\":{otlp_dropped}}}\n"
+            );
+            let _ = out.write(line.as_bytes()).await;
         }
     }
-    let _ = out.flush().await;
 }

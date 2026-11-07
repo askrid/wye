@@ -17,10 +17,13 @@ const TOOL: usize = 36;
 
 pub(super) fn render(s: &Summary, paint: Paint) -> String {
     let mut out = String::new();
+    // The window, when one was given: ` since 2026-11-01 00:00:00 UTC`.
+    let window = s.window.show().map(|w| format!(" {w}")).unwrap_or_default();
     if s.total.requests == 0 {
         out.push_str(&wrap(
             &format!(
-                "No request records ({}). The gateway writes one per request to stdout; \
+                "No request records{window} ({}). The gateway writes one per request to \
+                 stdout, or to the file named by `wye serve --usage-log`; \
                  `wye service install` keeps them.",
                 skipped(s),
             ),
@@ -35,7 +38,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     };
     out.push_str(&wrap(
         &format!(
-            "{} in {} ({}); outcomes: {}",
+            "{} in {}{window} ({}); outcomes: {}",
             plural(s.total.requests, "request", "requests"),
             plural(s.sessions.len() as u64, "session", "sessions"),
             skipped(s),
@@ -251,7 +254,20 @@ impl Columns {
 }
 
 /// What the report skipped: the gateway's own notices and anything else.
+/// What was left out: records outside the window, when one was given, and
+/// lines that are not records.
 fn skipped(s: &Summary) -> String {
+    let lines = skipped_lines(s);
+    match s.window.show() {
+        Some(_) => format!(
+            "{} outside it, {lines}",
+            plural(s.outside, "record", "records")
+        ),
+        None => lines,
+    }
+}
+
+fn skipped_lines(s: &Summary) -> String {
     let others = plural(s.skipped, "other line", "other lines");
     match s.notices {
         0 => format!("{others} skipped"),

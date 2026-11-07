@@ -24,7 +24,7 @@ A user's files live in `~/.wye`, or `$WYE_HOME`:
 |---|---|---|---|
 | `wye.toml` | The config | `wye init` | every command that takes `-c` |
 | `policy-tests/` | Sample requests and the decisions they expect, next to the config | `wye init` | `wye policy-test`, `wye explain` |
-| `usage.jsonl` | The usage log: usage records | `wye service`, or your redirect | `wye report` |
+| `usage.jsonl`, `usage-*.jsonl` | The usage log and its rotated files: usage records | `wye service`, or `wye serve --usage-log` | `wye report` |
 | `wye.log` | The message log: the background gateway's messages | `wye service` | you, when it does not answer |
 | `signing.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
 | `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
@@ -73,6 +73,8 @@ What `--help` does not say.
 
 Run with no argument, every command does what its name says on the config it finds, or fails with one line that says what to run next: `wye explain` names a sample from `policy-tests/`, `wye claude` and `wye probe` say to run `wye init` when nothing answers and there is no config, and `wye token keygen` refuses to replace the key `wye token issue` signs with.
 
+**`wye serve`** writes usage records to stdout, or with `--usage-log <path>` to that file, appended, and created with mode 600. At 64 MiB the gateway finishes the line it is writing, renames the file beside itself with the UTC time (`usage.jsonl` becomes `usage-20261107T091500Z.jsonl`), and starts a new one at the path, so a record never spans two files and the names sort in the order written. Rotated files are never deleted: remove them when you no longer need their records. A rename that fails is reported once in the message log, and records keep going to the current file. A container or a replica keeps stdout for its platform's log collector.
+
 **`wye init`**: [choosing a setup](guide.md#choosing-a-setup). Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
@@ -107,7 +109,13 @@ A refusal prints the status and error the gateway would send. The body is read a
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
 
-**`wye report`**: [reading it](guide.md#reading-wye-report).
+**`wye report [<usage-log>...]`** reads the files it is given, in order (`-` for standard input); with none, `~/.wye/usage.jsonl` and its rotated files, oldest first. `--since` and `--until` take a time back from now (`30m`, `24h`, `7d`) or a UTC date (`2026-11-01`, its midnight UTC); a record counts from `--since` on and before `--until`, by its `unix_ms`, and the first line names the window and how many records fell outside it. Lines that are not records are skipped and counted. [Reading it](guide.md#reading-wye-report).
+
+```bash
+wye report --since 7d                     # the last week, rotated files included
+wye report --since 2026-11-01 --until 2026-11-08
+cat replica-*.jsonl | wye report -        # usage logs collected from replicas
+```
 
 **`wye probe [<url>]`** sends one `GET` and exits 0 only for a 2xx answer within 5 s. A URL without a path names a gateway and asks its `/healthz` (the gateway's `/` serves nothing). A path is asked as given, such as `/readyz` for a load balancer's view.
 
@@ -150,7 +158,7 @@ Whatever sits in front must not buffer event streams (nginx: `proxy_buffering of
 
 On one machine, `wye service install` keeps the gateway running across logins and restarts it if it stops (on Linux, if it fails), through the operating system's own service manager, as you. It needs no sudo and changes nothing outside your home directory.
 
-It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config>` with stdout appended to the usage log `usage.jsonl` and stderr to the message log `wye.log`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
+It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macOS or a systemd user unit (`~/.config/systemd/user/wye.service`) on Linux, which runs `wye serve --config <config> --usage-log <home>/usage.jsonl` (the usage log, [rotated](#commands)), with stdout and stderr appended to the message log `wye.log`. With `--usage-log` nothing else goes to stdout; anything that ever did would be a message, kept there rather than lost in `/dev/null`. `--dry-run` prints the plan and the file and changes nothing. Before it changes anything it shows what it will do and asks; `--yes` skips the question (required without a terminal).
 
 Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment.
 
@@ -165,7 +173,7 @@ wye service restart     # after a config edit or a new wye
 wye service uninstall   # stops it and removes the file; the config, the usage log, and the message log stay
 ```
 
-`restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.
+`restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. A definition an older `wye` wrote, which appended stdout to `usage.jsonl`, is rewritten to pass `--usage-log` with the same file. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.
 
 Replacing a running service waits for its gateway to finish its requests, up to the stop timeout: the config's drain delay and shutdown grace plus 5 s (35 s by default). New connections are refused until then. Open streams end after that grace; Claude Code retries them.
 
@@ -173,7 +181,7 @@ The definition sets the service's open-file limit to 65536, soft and hard (launc
 
 `wye serve` run by hand or in a container keeps the limit it inherits: the shell's (`ulimit -n`, often 256 on macOS and 1024 on Linux; raise it with `ulimit -n 65536`) or the container runtime's (Docker's default is far higher; Kubernetes inherits the node runtime's).
 
-On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`). The usage log grows without limit: rotate it, or truncate it after `wye report`.
+On Linux, a user service stops when you log out unless lingering is on (`loginctl enable-linger`). The usage log is rotated at 64 MiB and its rotated files are kept until you delete them ([`wye serve`](#commands)).
 
 ### Token renewal
 
@@ -250,13 +258,14 @@ Give the platform a stop timeout (Kubernetes: `terminationGracePeriodSeconds`) a
 
 ## Usage records and telemetry
 
-One usage record per request, written as a JSON line to the usage log (stdout) and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
+One usage record per request, written as a JSON line to the usage log (stdout, or the file `--usage-log` names) and, with `[telemetry] otlp_endpoint`, exported as OTLP over HTTP with JSON encoding: a log record and a span per request, plus cumulative metrics. No Prometheus endpoint; a collector is optional. Records never contain prompts, completions, or credentials. Records and metrics are not a quota ledger: records can be lost and counters reset ([policy.md](policy.md#state-boundary)).
 
 An example, from a Claude Code session that failed over:
 
 ```json
 {
   "event": "request",
+  "v": 1,
   "unix_ms": 1793178637975,
   "path": "/v1/messages",
   "status": 200,
@@ -291,6 +300,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 ### Request and outcome
 
 - `event`, `unix_ms`, `path`, `status`: `request`, time, endpoint, HTTP status.
+- `v`: the record format's version, `1`, right after `event` on every line, the `usage_log_dropped` and `otlp_dropped` events included. It goes up with any change that renames a field or changes its meaning; a new field leaves it. Lines written before it have none, and `wye report` reads both. Not exported over OTLP.
 - `outcome`: recorded when the response body is dropped, so every outcome is counted. An upstream's answer, error statuses included, is `completed`, `cancelled`, or `truncated`; Wye's own answer is `refused`, `upstream_error`, or `gateway_error`:
   - `completed`: the upstream's response body ended.
   - `cancelled`: the client left first; one that leaves before the response headers has `status` `499`.

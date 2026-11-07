@@ -10,6 +10,7 @@ mod discovery;
 mod failover;
 mod gateway;
 mod gauge;
+mod log_files;
 mod request_body;
 mod scanned_body;
 mod server;
@@ -26,6 +27,7 @@ pub use gateway::Gateway;
 pub use server::serve;
 pub(crate) use startup::StartupError;
 pub use startup::{Resources, UpstreamAuth, UpstreamResources, key_file_warnings, verifier};
+pub use usage_log::{UsageFile, UsageOut};
 
 /// An error from a request body or the connection under it.
 pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;

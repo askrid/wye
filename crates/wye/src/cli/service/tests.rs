@@ -28,14 +28,32 @@ fn a_definition_reads_back_as_written() {
         "{plist}"
     );
     assert!(plist.contains("<key>ExitTimeOut</key><integer>35</integer>"));
+    // The gateway writes and rotates the usage log itself; its stdout,
+    // empty, goes to the message log with its stderr.
+    assert!(
+        plist.contains(
+            "    <string>--config</string>\n    <string>/Users/a&amp;b/.wye/wye.toml</string>\n    \
+             <string>--usage-log</string>\n    <string>/Users/a&amp;b/.wye/usage.jsonl</string>\n"
+        ),
+        "{plist}"
+    );
+    for key in ["StandardOutPath", "StandardErrorPath"] {
+        assert!(
+            plist.contains(&format!(
+                "<key>{key}</key><string>/Users/a&amp;b/.wye/wye.log</string>\n"
+            )),
+            "{plist}"
+        );
+    }
     let unit = service("/home/a%b").definition(Manager::Systemd).unwrap();
     assert!(
         unit.contains(
-            "ExecStart=/home/a%%b/.cargo/bin/wye serve --config /home/a%%b/.wye/wye.toml\n"
+            "ExecStart=/home/a%%b/.cargo/bin/wye serve --config /home/a%%b/.wye/wye.toml \
+             --usage-log /home/a%%b/.wye/usage.jsonl\n"
         ),
         "{unit}"
     );
-    assert!(unit.contains("StandardOutput=append:/home/a%%b/.wye/usage.jsonl\n"));
+    assert!(unit.contains("StandardOutput=append:/home/a%%b/.wye/wye.log\n"));
     assert!(unit.contains("StandardError=append:/home/a%%b/.wye/wye.log\n"));
     // Room for a client and an upstream connection per max_connections.
     assert!(unit.contains("\nLimitNOFILE=65536\n"), "{unit}");
@@ -66,6 +84,78 @@ fn a_definition_without_the_open_file_limit_reads_back() {
         };
         assert!(!older.contains("65536"), "{older}");
         assert_eq!(Service::parse(manager, &older), Some(written), "{older}");
+    }
+}
+
+/// What wye 0.1.0-rc.2 wrote: stdout appended to the usage log, no
+/// `--usage-log`.
+const OLDER_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+<!-- Written by wye service install; removed by wye service uninstall. -->
+<plist version=\"1.0\">
+<dict>
+  <key>Label</key><string>dev.wye.gateway</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/home/a/.cargo/bin/wye</string>
+    <string>serve</string>
+    <string>--config</string>
+    <string>/home/a/.wye/wye.toml</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/home/a/.wye/usage.jsonl</string>
+  <key>StandardErrorPath</key><string>/home/a/.wye/wye.log</string>
+  <key>ExitTimeOut</key><integer>35</integer>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key><integer>65536</integer>
+  </dict>
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key><integer>65536</integer>
+  </dict>
+</dict>
+</plist>
+";
+
+const OLDER_UNIT: &str = "# Written by wye service install; removed by wye service uninstall.
+[Unit]
+Description=Wye gateway
+
+[Service]
+ExecStart=/home/a/.cargo/bin/wye serve --config /home/a/.wye/wye.toml
+Restart=on-failure
+StandardOutput=append:/home/a/.wye/usage.jsonl
+StandardError=append:/home/a/.wye/wye.log
+TimeoutStopSec=35
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target
+";
+
+/// A definition an older wye wrote, which appended stdout to the usage log,
+/// is still ours with the same files: `uninstall` removes it, and `restart`,
+/// finding text other than its own, rewrites it to pass `--usage-log`.
+#[test]
+fn a_definition_that_appended_stdout_to_the_usage_log_is_rewritten() {
+    for (manager, older) in [
+        (Manager::Launchd, OLDER_PLIST),
+        (Manager::Systemd, OLDER_UNIT),
+    ] {
+        let installed = Service::parse(manager, older);
+        assert_eq!(installed.as_ref(), Some(&service("/home/a")), "{older}");
+        let rewritten = installed.unwrap().definition(manager).unwrap();
+        assert_ne!(rewritten, older, "restart's text comparison finds it stale");
+        assert!(rewritten.contains("--usage-log"), "{rewritten}");
+        assert!(!rewritten.contains("append:/home/a/.wye/usage.jsonl"));
+        assert!(!rewritten.contains("<key>StandardOutPath</key><string>/home/a/.wye/usage"));
+        assert_eq!(
+            Service::parse(manager, &rewritten),
+            Some(service("/home/a")),
+            "{rewritten}"
+        );
     }
 }
 
