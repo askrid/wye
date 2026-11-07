@@ -6,9 +6,10 @@
 #   uv pip compile --generate-hashes --python-version 3.12 \
 #     --python-platform x86_64-manylinux_2_28 --exclude-newer 2026-10-15T00:00:00Z
 # from `litellm[proxy]==1.105.0`, then cut to the hashes of the wheels that
-# platform can install. Two pins moved past that date for security fixes
-# (Dependabot, 2026-11-05): certifi 2026.10.18 (bundled CAs with
-# compromised intermediate keys) and filelock 4.2.1 (local lock races).
+# platform can install. Pins moved past that date for security fixes
+# (Dependabot): certifi 2026.10.18 (bundled CAs with compromised
+# intermediate keys) and filelock 4.2.1 (local lock races), 2026-11-05;
+# oauthlib 4.0.1 (device-flow token disclosure), 2026-11-07.
 --index-url https://pypi.org/simple
 
 aiohappyeyeballs==2.7.1 \
@@ -274,8 +275,8 @@ multidict==7.1.0 \
 numpy==2.5.4 \
     --hash=sha256:fbde6962867ee75b48b0ee29b2b9372ec5d617799dbaf38e82dc0596f2f7738a
     # via soundfile
-oauthlib==4.0.0 \
-    --hash=sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd
+oauthlib==4.0.1 \
+    --hash=sha256:498a298876e996301950a5b053d12c31628bb7b895db03666430c69ce182eb61
     # via fastapi-sso
 openai==2.54.0 \
     --hash=sha256:89089789197ccdb87f173a03145ed1598d00795220c93e96cf712b1cbf5e5f2b
