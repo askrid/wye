@@ -1,5 +1,13 @@
 // Copy buttons on command and config blocks, a convenience the page works
-// without: with scripts off the text stays selectable.
+// without: with scripts off the text stays selectable. A shell block is
+// copied without its comments: zsh, macOS's shell, runs a pasted "# ..." as
+// arguments unless interactivecomments is set.
+const uncommented = (text) =>
+  text
+    .split("\n")
+    .map((line) => line.replace(/\s+#\s.*$/, ""))
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
 for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.code[data-lang="toml"]')) {
   const wrap = document.createElement("div");
   wrap.className = "code-wrap";
@@ -18,7 +26,7 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
   button.addEventListener("click", async () => {
     clearTimeout(reset);
     try {
-      await navigator.clipboard.writeText(pre.innerText);
+      await navigator.clipboard.writeText(pre.dataset.lang === "bash" ? uncommented(pre.innerText) : pre.innerText);
       button.textContent = "[copied]";
       status.textContent = "Copied";
     } catch {
