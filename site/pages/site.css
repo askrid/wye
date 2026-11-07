@@ -47,7 +47,9 @@
 }
 
 /* Dark only: the page is one terminal, whatever the system's theme.
-   White on black; amber only for failover, red only for rejections. */
+   Three colours: black, white (and greys between them), and one orange
+   accent, used sparingly: the failover line in the hero and Wye's bar in
+   the charts. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -59,9 +61,7 @@
   --ink: #ededed;
   --text: #c9c9c9;
   --graphite: #8f8f8f;
-  /* The request's line and links are ink; its failover branch is amber. */
-  --branch: #f2b544;
-  --signal: #ff6b6b;
+  --accent: #f2b544;
 
   --mono: "Wye Mono", "Wye Mono fallback", Menlo, Consolas, monospace;
   --display: var(--mono);
@@ -175,10 +175,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* First screen, in source order: what Wye is, how to start it, and the
-   path a request takes through it. Once the page is wide enough for both
-   to keep their size, the trace stands beside the copy as a figure, both
-   on one top edge, and the install block spans the page below so its
-   comments stay on their lines. */
+   drawing. Once the page is wide enough for both to keep their size, the
+   drawing stands beside the copy, both on one top edge, and the install
+   block spans the page below so its comments stay on their lines. */
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -191,7 +190,7 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); grid-template-areas: "copy trace" "install install"; }
 }
 .hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
-.hero .junction { grid-area: trace; }
+.hero .art { grid-area: trace; }
 .hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
@@ -208,43 +207,47 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .hero .code .c { display: none; }
 }
 
-/* The trace, drawn as a terminal would: one request through every stop,
-   each with what Wye decided there, the failover a fork at the upstream,
-   the record at the end. The request's path is a heavy trunk; what happens
-   beside it (the rejection, the failover) branches off in light strokes.
-   Every row keeps three columns: the line from 0, names from 3, what
-   happened from 14, so a name never runs into its decision. The grid is 46
-   characters by 13 lines, sized to its container: 46 advances of 0.6 em
-   are 27.6 em, and dividing by 28 leaves 1.4% for rounding, so the trace
-   never scrolls. A narrow container gets the same
-   trace 35 characters wide (21 em, / 21.3), each decision under its name:
-   13.5 px on a 320 px phone. It stays still: it reads top to bottom in the
-   order things happen. */
-.junction { margin: 0; min-width: 0; }
-.junction-art { min-width: 0; overflow-x: auto; container-type: inline-size; }
-.junction pre {
-  margin: 0;
-  width: 46ch;
-  font-family: var(--display);
-  font-size: min(1.125rem, 100cqi / 28);
-  /* Plex Mono's box-drawing glyphs are 1.3 em tall, so at this line height
-     the strokes of one line meet those of the next. */
-  line-height: 1.3;
-  color: var(--ink);
+/* The drawing: a hundred lines meet at Wye and leave as ten bundles, each
+   line on the upstream weighted rendezvous hashing gives it, so a bundle is
+   as thick as its weight; one line is turned back from its bundle (dashed)
+   and resent to the next one. Drawn
+   once (site/pages/index.html), stacked as layers so each can breathe. */
+.art { margin: 0; display: grid; min-width: 0; }
+.art > svg { grid-area: 1 / 1; display: block; width: 100%; height: auto; }
+.art .layer { opacity: 0.38; }
+.art .layer path { fill: none; stroke: var(--ink); stroke-width: 0.9; }
+.art .ends, .art .node { fill: var(--ink); }
+.art .detour path { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+/* The attempt the upstream rejected: drawn, but not arrived. */
+.art .detour .tried { stroke-dasharray: 3 4; }
+.art .detour circle { fill: var(--accent); }
+/* The node's own point, so it swells in place. */
+.art .node { transform-origin: 44.12% 50%; }
+
+/* Breathing: slow fades and one slow swell, opacity and transform of whole
+   layers only, so the compositor does the work. Paused on the first frame,
+   the full drawing, when the system asks for reduced motion; the m key
+   plays or pauses it either way, and on localhost a button does (site.js). */
+.breathe {
+  animation: 7s ease-in-out infinite alternate paused;
 }
-.junction .trace-narrow { display: none; width: 35ch; font-size: min(1.125rem, 100cqi / 21.3); }
-@container (max-width: 28rem) {
-  .junction .trace-wide { display: none; }
-  .junction .trace-narrow { display: block; }
+.art .b1, .art .b2, .art .b3 { animation-name: wye-breathe; }
+.art .b2 { animation-delay: -2.3s; }
+.art .b3 { animation-delay: -4.6s; }
+.art .detour { animation-name: wye-glow; animation-duration: 5s; }
+.art .node { animation-name: wye-swell; animation-duration: 5s; }
+@keyframes wye-breathe { from { opacity: 0.4; } to { opacity: 0.08; } }
+@keyframes wye-glow { from { opacity: 1; } to { opacity: 0.3; } }
+@keyframes wye-swell { from { transform: scale(1); } to { transform: scale(2); } }
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion="off"]) .breathe { animation-play-state: running; }
 }
-.junction .d { color: var(--graphite); }
-.junction .no { color: var(--signal); }
-.junction .r2 { color: var(--branch); }
+:root[data-motion="on"] .breathe { animation-play-state: running; }
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
-   plain names in two groups set apart by space (the hero's trace is the
-   page's one drawing). */
+   plain names in two groups set apart by space (the hero's drawing is the
+   page's one picture). */
 .path {
   display: grid;
   grid-template-columns: 13rem minmax(0, 1fr);
@@ -482,7 +485,8 @@ pre.code code { font: inherit; }
   line-height: 1.75;
 }
 .bars .fill { color: var(--graphite); }
-.bars .us, .bars .us .fill { color: var(--ink); }
+.bars .us { color: var(--ink); }
+.bars .us .fill { color: var(--accent); }
 @media (max-width: 40rem) {
   .bars { font-size: 0.8125rem; }
 }
