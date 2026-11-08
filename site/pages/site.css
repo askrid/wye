@@ -302,6 +302,8 @@ html, body { overflow-x: clip; }
    header and signature, then decoded; an alias as a fork; the config's two
    upstreams sharing sessions by weight, one session failing over. */
 .token, .routes { margin: 0; display: grid; gap: 1rem; min-width: 0; }
+/* Literal data sits in a panel, as code does; drawings stand bare. */
+.token { width: fit-content; max-width: 100%; padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
 /* Lines that must keep their shape scroll in their own box on a phone. */
 .claims, .fork { overflow-x: auto; }
 .jwt, .claims, .fork { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
@@ -310,7 +312,8 @@ html, body { overflow-x: clip; }
 .fork .d { color: var(--graphite); }
 /* Sessions per upstream, one square each, and the record of the one that
    failed over; the failover is the accent in both. */
-.routes svg { display: block; width: 100%; max-width: 28rem; height: auto; }
+/* 26.5rem sets its 13-unit labels at the figures' 15 px. */
+.routes svg { display: block; width: 100%; max-width: 26.5rem; height: auto; }
 .routes rect { fill: var(--ink); }
 .routes .sent { fill: var(--accent); }
 .routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
