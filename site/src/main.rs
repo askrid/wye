@@ -65,11 +65,26 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
         let target = to.join(name);
         if entry.is_dir() {
             copy_dir(&entry, &target)?;
+        } else if entry.extension().is_some_and(|ext| ext == "js") {
+            let script = fs::read_to_string(&entry).map_err(|e| io_error(&entry, e))?;
+            fs::write(&target, compact_script(&script)).map_err(|e| io_error(&target, e))?;
         } else {
             fs::copy(&entry, &target).map_err(|e| io_error(&entry, e))?;
         }
     }
     Ok(())
+}
+
+/// A script as the browser needs it: no comment lines, indentation, or
+/// blank lines. The source keeps its comments on lines of their own and
+/// no template literal spans lines, so lines are safe to cut this way.
+fn compact_script(script: &str) -> String {
+    script
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A directory's entries in name order, so builds are reproducible.
@@ -85,4 +100,19 @@ fn sorted_entries(dir: &Path) -> Result<Vec<PathBuf>, String> {
 
 fn io_error(path: &Path, error: std::io::Error) -> String {
     format!("{}: {error}", path.display())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compacts_a_script() {
+        assert_eq!(
+            compact_script(
+                "// what\nconst a = 1;\n\n  if (a) {\n    // why\n    go(\"//x\");\n  }\n"
+            ),
+            "const a = 1;\nif (a) {\ngo(\"//x\");\n}"
+        );
+    }
 }
