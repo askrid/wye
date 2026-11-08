@@ -56,12 +56,19 @@ jobs:
         with:
           workspaces: site
       - run: site/check.sh
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          manifest-path: site/Cargo.toml
-          # A global option, so it goes before `check`; one token, because the
-          # action passes each input as a single argument.
-          arguments: --config=deny.toml
+      # cargo-deny 0.20.2, the release cargo-deny-action v2.1.1 ran, fetched
+      # with the workflow's token: the action's anonymous download from the
+      # runners returned no archive on 2026-11-08, three runs in a row. The
+      # archive is checked against its published SHA-256 before it runs.
+      - name: cargo deny
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DENY: cargo-deny-0.20.2-x86_64-unknown-linux-musl
+        run: |
+          gh release download 0.20.2 --repo EmbarkStudios/cargo-deny --pattern "$DENY.tar.gz" --dir "$RUNNER_TEMP"
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $RUNNER_TEMP/$DENY.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$DENY.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/$DENY/cargo-deny" --manifest-path site/Cargo.toml --config deny.toml check
       - if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
