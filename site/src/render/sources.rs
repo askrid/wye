@@ -19,7 +19,8 @@ impl Sources {
         let site_manifest = read("site/Cargo.toml")?;
         let mut documents = HashMap::new();
         for name in DOCUMENTS {
-            documents.insert(name, read(name)?);
+            // Windows line ends would hide paragraph and section breaks.
+            documents.insert(name, read(name)?.replace("\r\n", "\n"));
         }
         Ok(Self {
             version: manifest_field(&crate_manifest, "version")
@@ -59,22 +60,17 @@ fn commit(repo: &Path) -> Result<String, String> {
     Ok(sha)
 }
 
-/// The value of the first `key = "value"` line in a Cargo manifest.
+/// The value of the first `key = "value"` line in a Cargo manifest, a
+/// comment after it allowed; a first `key` line in another form is `None`,
+/// never a later line's value.
 fn manifest_field(manifest: &str, key: &str) -> Option<String> {
-    manifest.lines().find_map(|line| {
-        let value = line
-            .trim_start()
-            .strip_prefix(key)?
-            .trim_start()
-            .strip_prefix('=')?;
-        Some(
-            value
-                .trim()
-                .strip_prefix('"')?
-                .strip_suffix('"')?
-                .to_owned(),
-        )
-    })
+    let rest = manifest.lines().find_map(|line| {
+        let rest = line.trim_start().strip_prefix(key)?;
+        rest.starts_with([' ', '=', '.']).then_some(rest)
+    })?;
+    let value = rest.trim_start().strip_prefix('=')?;
+    let (value, _) = value.trim_start().strip_prefix('"')?.split_once('"')?;
+    Some(value.to_owned())
 }
 
 #[cfg(test)]
@@ -89,5 +85,14 @@ mod tests {
             manifest_field(manifest, "version").as_deref(),
             Some("0.1.0-rc.1")
         );
+        // A comment after the value is allowed; a first line in another form
+        // never falls through to a later table's value.
+        let commented = "version = \"0.2.0\" # next\n[dependencies.x]\nversion = \"9\"\n";
+        assert_eq!(
+            manifest_field(commented, "version").as_deref(),
+            Some("0.2.0")
+        );
+        let inline = "version.workspace = true\n[dependencies.x]\nversion = \"9\"\n";
+        assert_eq!(manifest_field(inline, "version"), None);
     }
 }

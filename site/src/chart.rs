@@ -43,6 +43,9 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
         let (Some(first), Some(cell)) = (row.first(), row.get(index)) else {
             continue;
         };
+        if name(first) == "Wye" {
+            continue;
+        }
         let label = cell.split(' ').next().unwrap_or(cell);
         let Some(value) = label.strip_suffix('×').and_then(number) else {
             continue;
@@ -57,7 +60,7 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
     if bars.len() < 2 {
         return Err(format!("the {column:?} column holds no multiples"));
     }
-    Ok(draw(bars))
+    draw(bars)
 }
 
 /// A chart of one row of a table whose columns are gateways, Wye among them:
@@ -93,6 +96,7 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
         .into_iter()
         .map(|(name, value)| {
             let times = value / wye;
+            let name = self::name(&name);
             Bar {
                 us: name == "Wye",
                 label: multiple(times),
@@ -104,7 +108,7 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
     if bars.len() < 2 {
         return Err(format!("{row_start:?}: no figure beside Wye's"));
     }
-    Ok(draw(bars))
+    draw(bars)
 }
 
 /// A cell's first figure in base units: "1.0 ms (0.7-1.1)" is 0.001.
@@ -144,7 +148,18 @@ fn multiple(times: f64) -> String {
 /// One line per bar, shortest first: the name, the value as printed, and the
 /// bar on the log scale, then the scale's axis. Bars and axis are hidden
 /// from screen readers, which read the names and values.
-fn draw(mut bars: Vec<Bar>) -> String {
+fn draw(mut bars: Vec<Bar>) -> Result<String, String> {
+    // The scale starts at Wye's 1×: a gateway ahead of Wye would draw as a
+    // sliver like Wye's, so it is an error, not a bar.
+    if let Some(bar) = bars
+        .iter()
+        .find(|bar| bar.value.is_nan() || bar.value < 1.0)
+    {
+        return Err(format!(
+            "{} is below Wye ({}); the scale starts at 1×",
+            bar.name, bar.label
+        ));
+    }
     bars.sort_by(|a, b| a.value.total_cmp(&b.value));
     let name_width = bars
         .iter()
@@ -189,24 +204,24 @@ fn draw(mut bars: Vec<Bar>) -> String {
             line
         })
         .collect();
-    // The axis: each tenfold up to the longest bar, under where its bar ends.
+    // The axis: each tenfold up to the first at or above the longest bar.
     let top = bars
         .last()
         .map_or(0.0, |bar| bar.value.log10().min(DECADES));
     let mut axis = " ".repeat(name_width + 2 + label_width + 2);
     let start = axis.chars().count();
-    for decade in 0..=top.ceil() as u32 {
+    for decade in 0..=(top - 1e-9).ceil() as u32 {
         let at = start + (DECADE_CELLS as usize) * decade as usize;
         let pad = at.saturating_sub(axis.chars().count());
         axis.push_str(&" ".repeat(pad.max(if decade == 0 { 0 } else { 1 })));
         axis.push_str(&multiple(10f64.powi(decade as i32)));
     }
     // Focusable, so a keyboard can scroll a chart wider than the page.
-    format!(
+    Ok(format!(
         "<pre class=\"bars\" tabindex=\"0\">{}\n<span class=\"axis\" aria-hidden=\"true\">{}</span></pre>",
         lines.join("\n"),
         axis.trim_end()
-    )
+    ))
 }
 
 /// A gateway's name from its table cell: a link's text, or the cell up to
@@ -243,7 +258,39 @@ mod tests {
         assert!(chart.contains("Bifrost    468×"), "{chart}");
         assert!(!chart.contains("LiteLLM"));
         assert!(relative(text, "Nothing").is_err());
+    }
+
+    #[test]
+    fn prints_multiples_as_the_tables_do() {
+        assert_eq!(multiple(1.0), "1×");
+        assert_eq!(multiple(3.54), "3.5×");
         assert_eq!(multiple(1738.3), "1,738×");
+    }
+
+    #[test]
+    fn refuses_a_gateway_ahead_of_wye() {
+        let text = "| TLS | Wye | Fast |\n|---|---|---|\n| Delay | 282 µs | 10 µs |\n";
+        assert!(
+            relative(text, "Delay")
+                .unwrap_err()
+                .contains("Fast is below Wye")
+        );
+    }
+
+    #[test]
+    fn ends_the_axis_at_the_tenfold_reached_and_cuts_past_the_scale() {
+        let text = "| TLS | Wye | Ten | Huge |\n|---|---|---|---|\n\
+                    | Delay | 1 ms | 10 ms | 20 s |\n";
+        let chart = relative(text, "Delay").unwrap();
+        assert!(chart.contains("»"), "{chart}");
+        let axis = chart.lines().last().unwrap();
+        assert!(
+            axis.contains("10,000×") && !axis.contains("100,000×"),
+            "{chart}"
+        );
+        let tens = "| TLS | Wye | Ten |\n|---|---|---|\n| Delay | 1 ms | 10 ms |\n";
+        let axis = relative(tens, "Delay").unwrap();
+        assert!(axis.contains("10×") && !axis.contains("100×"), "{axis}");
     }
 
     #[test]

@@ -75,9 +75,9 @@ pub fn list_items(section: &str) -> Vec<String> {
         if let Some(text) = line.strip_prefix("- ") {
             items.push(text.to_owned());
         } else if let Some(item) = items.last_mut() {
-            if line.starts_with("  ") {
+            if let Some(line) = line.strip_prefix("  ") {
                 item.push('\n');
-                item.push_str(line.trim_start());
+                item.push_str(line);
             } else if !line.trim().is_empty() {
                 break;
             }
@@ -94,6 +94,22 @@ pub fn opening(doc: &str) -> Option<(&str, Option<&str>)> {
     let first = paragraphs.find(|p| p.starts_with("**"))?;
     let tagline = first.strip_prefix("**")?.split_once("**")?.0;
     Some((tagline, paragraphs.find(|p| !p.is_empty())))
+}
+
+/// `html` with each `word` in its text, never inside a tag, wrapped in the
+/// accent span; and how many it wrapped.
+pub fn mark(html: &str, word: &str) -> (String, usize) {
+    let marked = format!("<span class=\"accent\">{word}</span>");
+    let (mut out, mut count, mut rest) = (String::with_capacity(html.len()), 0, html);
+    while !rest.is_empty() {
+        let (text, tag) = rest.split_at(rest.find('<').unwrap_or(rest.len()));
+        count += text.matches(word).count();
+        out.push_str(&text.replace(word, &marked));
+        let end = tag.find('>').map_or(tag.len(), |i| i + 1);
+        out.push_str(&tag[..end]);
+        rest = &tag[end..];
+    }
+    (out, count)
 }
 
 /// The first paragraph of `text` that starts with `start`, trimmed.
@@ -154,7 +170,9 @@ pub fn numbers(text: &str, first: &str) -> Option<String> {
             continue;
         };
         out.push_str(&format!("<tr><th scope=\"row\">{}</th>", escape(name)));
-        for (column, value) in header.iter().skip(1).zip(values) {
+        // A short row's missing cells read as not measured, not as a shift.
+        for (i, column) in header.iter().enumerate().skip(1) {
+            let value = values.get(i - 1).map_or("", String::as_str);
             if value.is_empty() {
                 out.push_str(
                     "<td class=\"n na\"><span aria-hidden=\"true\">–</span>\
@@ -400,6 +418,17 @@ mod tests {
         assert_eq!(
             items.iter().map(|i| lead(i)).collect::<Vec<_>>(),
             [Some("One."), Some("Two."), None]
+        );
+        // A nested list keeps its depth.
+        assert_eq!(list_items("- a\n  - b\n    - c\n"), ["a\n- b\n  - c"]);
+    }
+
+    #[test]
+    fn a_short_row_reads_as_not_measured() {
+        let html = numbers("| What | A | B |\n|---|---|---|\n| x | 1 |\n", "What").unwrap();
+        assert!(
+            html.contains("data-path=\"A\">1</td><td class=\"n na\">"),
+            "{html}"
         );
     }
 

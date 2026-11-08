@@ -12,10 +12,11 @@
 //!   a move changes one line.
 //! - `{{stylesheet}}`: site/pages/site.css as it is, for a `<style>`
 //!   element, so the page draws without waiting for a second file.
-//! - `{{fence FILE|PREFIX}}`: the first fenced block in FILE whose first line
-//!   starts with PREFIX, highlighted.
+//! - `{{fence FILE|PREFIX|WORD}}`: the first fenced block in FILE whose first
+//!   line starts with PREFIX, highlighted; WORD, if given, in the accent
+//!   wherever it appears in the block's text.
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
-//!   object.
+//!   object; a dotted KEY reaches inside (`failovers.0.reason`).
 //! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
 //!   paragraph without the closing period; the paragraph after it, rendered
 //!   (`lede`) or as plain `text`.
@@ -77,6 +78,27 @@ struct Page {
     anchors: markdown::Anchors,
 }
 
+/// Every directive's name, so one with the wrong arguments says so.
+const DIRECTIVES: [&str; 17] = [
+    "version",
+    "release",
+    "commit",
+    "license",
+    "repo",
+    "homepage",
+    "stylesheet",
+    "fence",
+    "field",
+    "opening",
+    "section",
+    "item",
+    "rest",
+    "paragraph",
+    "numbers",
+    "relative",
+    "ratios",
+];
+
 /// A directive's name and its `|`-separated arguments, trimmed.
 fn parse(directive: &str) -> (&str, Vec<&str>) {
     let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
@@ -106,16 +128,19 @@ impl Sources {
             ("fence", [file, prefix, marks @ ..]) if marks.len() <= 1 => {
                 let (lang, code) = self.fence(file, prefix)?;
                 let mut html = markdown::highlight(lang, &code);
-                // A third argument marks that word wherever it appears (the
-                // accent).
+                // A third argument marks that word in the block's text (the
+                // accent), never inside the highlighting's own tags; every
+                // occurrence in the source must be marked.
                 if let [mark] = marks {
-                    let word = markdown::escape(mark);
-                    if !html.contains(&word) {
+                    let (marked, count) = markdown::mark(&html, &markdown::escape(mark));
+                    let wanted = code.matches(mark).count();
+                    if count == 0 || count != wanted {
                         return Err(format!(
-                            "{file}: no {mark:?} in the block starting with {prefix:?} to mark"
+                            "{file}: {mark:?} occurs {wanted} times in the block starting with \
+                             {prefix:?}, and {count} can be marked"
                         ));
                     }
-                    html = html.replace(&word, &format!("<span class=\"accent\">{word}</span>"));
+                    html = marked;
                 }
                 Ok(format!(
                     // Focusable, so a keyboard can scroll a block wider
@@ -205,6 +230,9 @@ impl Sources {
             }
             ("ratios", [file, heading, column]) => {
                 chart::ratios(self.section(file, heading)?, column)
+            }
+            (name, args) if DIRECTIVES.contains(&name) => {
+                Err(format!("{name} does not take {} arguments", args.len()))
             }
             _ => Err("unknown directive".to_owned()),
         }
@@ -387,10 +415,17 @@ mod tests {
     fn marks_a_word_in_a_block() {
         let html = render("{{fence README.md|{|0.0181}}", &sources()).unwrap();
         assert!(html.contains("<span class=\"accent\">0.0181</span>"));
+        // The highlighting's own markup and entities are never marked.
+        let k = render("{{fence README.md|{|k}}", &sources()).unwrap();
+        assert!(
+            k.contains("<span class=\"k\">") && !k.contains("class=\"<span"),
+            "{k}"
+        );
+        assert!(render("{{fence README.md|{|quot}}", &sources()).is_err());
         assert!(
             render("{{fence README.md|{|0.0182}}", &sources())
                 .unwrap_err()
-                .contains("to mark")
+                .contains("occurs 0 times")
         );
     }
 
@@ -531,6 +566,11 @@ mod tests {
             render("{{section docs/guide.md|Status}}", &s)
                 .unwrap_err()
                 .contains("not a site source")
+        );
+        assert!(
+            render("{{item README.md|What it does}}", &s)
+                .unwrap_err()
+                .contains("item does not take 2 arguments")
         );
         assert!(
             render("{{nonsense}}", &s)
