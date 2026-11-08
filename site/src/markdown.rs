@@ -86,21 +86,14 @@ pub fn list_items(section: &str) -> Vec<String> {
     items
 }
 
-/// The paragraph that opens a document, before its first section, split at
-/// its bold tagline: `**LLM gateway without bloat.** Wye sits…` gives the
-/// tagline and the rest.
-pub fn opening(doc: &str) -> Option<(&str, &str)> {
-    let first = paragraph(doc.split("\n## ").next()?, "**")?;
-    let (tagline, rest) = first.strip_prefix("**")?.split_once("**")?;
-    Some((tagline, rest.trim()))
-}
-
-/// The paragraph after the bold tagline, before the first section: what the
-/// document's subject is, in one breath.
-pub fn opening_lede(doc: &str) -> Option<&str> {
+/// The opening of a document, before its first section: the bold tagline
+/// of its first paragraph (`**LLM gateway without bloat.**`), and the
+/// paragraph after it, if any.
+pub fn opening(doc: &str) -> Option<(&str, Option<&str>)> {
     let mut paragraphs = doc.split("\n## ").next()?.split("\n\n").map(str::trim);
-    paragraphs.find(|p| p.starts_with("**"))?;
-    paragraphs.find(|p| !p.is_empty())
+    let first = paragraphs.find(|p| p.starts_with("**"))?;
+    let tagline = first.strip_prefix("**")?.split_once("**")?.0;
+    Some((tagline, paragraphs.find(|p| !p.is_empty())))
 }
 
 /// The first paragraph of `text` that starts with `start`, trimmed.

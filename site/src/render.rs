@@ -17,8 +17,8 @@
 //! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
 //!   object.
 //! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
-//!   paragraph without the closing period; the list after it, rendered
-//!   (`lede`); or that paragraph as plain `text`.
+//!   paragraph without the closing period; the paragraph after it, rendered
+//!   (`lede`) or as plain `text`.
 //! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
 //! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
 //!   lead starts with LEAD, rendered.
@@ -77,13 +77,19 @@ struct Page {
     anchors: markdown::Anchors,
 }
 
+/// A directive's name and its `|`-separated arguments, trimmed.
+fn parse(directive: &str) -> (&str, Vec<&str>) {
+    let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
+    let args = match args.trim() {
+        "" => Vec::new(),
+        args => args.split('|').map(str::trim).collect(),
+    };
+    (name, args)
+}
+
 impl Sources {
     fn expand(&self, directive: &str, page: &mut Page) -> Result<String, String> {
-        let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
-        let args: Vec<&str> = match args.trim() {
-            "" => Vec::new(),
-            args => args.split('|').map(str::trim).collect(),
-        };
+        let (name, args) = parse(directive);
         match (name, args.as_slice()) {
             ("version", []) => Ok(markdown::escape(&self.version)),
             ("release", []) => Ok(if self.version.contains('-') {
@@ -139,7 +145,7 @@ impl Sources {
                 }))
             }
             ("opening", [file, part]) => {
-                let (tagline, _) = markdown::opening(self.document(file)?).ok_or_else(|| {
+                let (tagline, lede) = markdown::opening(self.document(file)?).ok_or_else(|| {
                     format!(
                         "{file}: no opening paragraph with a bold tagline before its first section"
                     )
@@ -147,27 +153,19 @@ impl Sources {
                 match *part {
                     "tagline" => Ok(markdown::escape(tagline.trim_end_matches('.'))),
                     "lede" | "text" => {
-                        let lede = markdown::opening_lede(self.document(file)?)
-                            .ok_or_else(|| format!("{file}: no paragraph after the tagline"))?;
+                        let lede =
+                            lede.ok_or_else(|| format!("{file}: no paragraph after the tagline"))?;
                         if *part == "lede" {
-                            return Ok(markdown::to_html(
-                                lede,
-                                &self.files_url(),
-                                file,
-                                &page.anchors,
-                            ));
+                            return Ok(self.html(lede, file, &page.anchors));
                         }
                         Ok(markdown::escape(&markdown::plain(lede)))
                     }
                     other => Err(format!("{other:?} is not tagline, text, or lede")),
                 }
             }
-            ("section", [file, heading]) => Ok(markdown::to_html(
-                self.section(file, heading)?,
-                &self.files_url(),
-                file,
-                &page.anchors,
-            )),
+            ("section", [file, heading]) => {
+                Ok(self.html(self.section(file, heading)?, file, &page.anchors))
+            }
             ("item", [file, heading, prefix]) => {
                 let items = self.items(file, heading)?;
                 let item = items
@@ -195,12 +193,7 @@ impl Sources {
                     .ok_or_else(|| {
                         format!("{file}: no paragraph under \"## {heading}\" starts with {start:?}")
                     })?;
-                Ok(markdown::to_html(
-                    paragraph,
-                    &self.files_url(),
-                    file,
-                    &page.anchors,
-                ))
+                Ok(self.html(paragraph, file, &page.anchors))
             }
             ("numbers", [file, heading, first]) => {
                 markdown::numbers(self.section(file, heading)?, first).ok_or_else(|| {
@@ -234,8 +227,13 @@ impl Sources {
     fn item_html(&self, item: &str, file: &str, anchors: &markdown::Anchors) -> String {
         format!(
             "<div class=\"item\">{}</div>",
-            markdown::to_html(item, &self.files_url(), file, anchors)
+            self.html(item, file, anchors)
         )
+    }
+
+    /// Markdown from `file`, rendered, its links resolved for this page.
+    fn html(&self, markdown: &str, file: &str, anchors: &markdown::Anchors) -> String {
+        markdown::to_html(markdown, &self.files_url(), file, anchors)
     }
 
     /// Where the repository's files are at the page's commit.
@@ -293,12 +291,8 @@ fn anchors(template: &str) -> markdown::Anchors {
             let Some((directive, _)) = opened.split_once("}}") else {
                 continue;
             };
-            let directive = directive.trim();
-            let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
-            let mut args = args.split('|').map(str::trim);
-            if let (true, Some(file), Some(heading)) =
-                (HEADED.contains(&name), args.next(), args.next())
-            {
+            let (name, args) = parse(directive.trim());
+            if let (true, [file, heading, ..]) = (HEADED.contains(&name), args.as_slice()) {
                 let key = format!("{file}#{}", markdown::slug(heading));
                 found.entry(key).or_default().insert(id);
             }
