@@ -106,9 +106,10 @@
       <section class="part stop" id="model" aria-labelledby="model-h">
         <h2 id="model-h"><a href="#model"><span class="hash" aria-hidden="true">#</span> model</a></h2>
         {{item README.md|What it does|Changes models}}
-        <figure class="alias"><pre class="fork" role="img" aria-label="The alias claude-coding serves claude-sonnet-5, and claude-sonnet-5-5 to subjects matching team-canary-*"><span aria-hidden="true">claude-coding ─┬─ claude-sonnet-5
-               └─ claude-sonnet-5-5  <span class="d">team-canary-*</span></span></pre>
-          {{fence docs/guide.md|[[aliases]]|what runs today}}</figure>
+        <figure class="check">
+          <figcaption>Checked against claude-sonnet-5-5, forwarded unchanged.</figcaption>
+          <div class="lines"><code>{</code><span class="n"></span><code>  "model": "claude-coding",</code><span class="n">served as claude-sonnet-5</span><code>  "max_tokens": 2048,</code><span class="n"></span><code>  "thinking": {</code><span class="n"></span><code>    "type": "enabled",</code><span class="n"></span><code><span class="hit">    "budget_tokens": 1024</span></code><span class="n">budget_tokens: use adaptive thinking</span><code>  },</code><span class="n"></span><code><span class="hit">  "temperature": 0.2,</span></code><span class="n">sampling: omit it</span><code>  "messages": [</code><span class="n"></span><code>    { "role": "user",</code><span class="n"></span><code>      "content": "Fix it." },</code><span class="n"></span><code><span class="hit">    { "role": "assistant",</span></code><span class="n">prefill: end with a user turn</span><code><span class="hit">      "content": "Summary:" }</span></code><span class="n"></span><code>  ]</code><span class="n"></span><code>}</code><span class="n"></span></div>
+        </figure>
       </section>
 
       <section class="part stop" id="upstream" aria-labelledby="upstream-h">

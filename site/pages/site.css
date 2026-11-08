@@ -302,17 +302,40 @@ html, body { overflow-x: clip; }
 
 /* A figure in a stop: a real artifact, still, in the page's three colours.
    A gateway token as wye token issue writes it, its claims (bright) between
-   header and signature, then decoded; an alias as a fork; the config's two
-   upstreams sharing sessions by weight, one session failing over. */
-.token, .routes, .alias { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
+   header and signature, then decoded; a request read against the next
+   model; the config's two upstreams sharing sessions by weight, one session
+   failing over. */
+.token, .routes, .check { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
 /* Literal data sits in a panel, as code does; drawings stand bare. */
 .token { padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
 /* Lines that must keep their shape scroll in their own box on a phone. */
-.claims, .fork { overflow-x: auto; }
-.jwt, .claims, .fork { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
+.claims { overflow-x: auto; }
+.jwt, .claims { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
-.jwt .claims-part, .claims, .fork { color: var(--ink); }
-.fork .d { color: var(--graphite); }
+.jwt .claims-part, .claims { color: var(--ink); }
+/* A request beside what the next model would say to it: the fields it
+   would reject in the accent, each fix beside its line, as wye explain
+   reports them. On a phone each fix goes under its line. */
+.check figcaption { color: var(--graphite); font-size: var(--caption); }
+.lines {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2.5rem;
+  padding: 1.1875rem 1.4375rem;
+  background: var(--ground);
+  border-left: 2px solid var(--rule);
+  font-family: var(--mono);
+  font-size: var(--output);
+  line-height: 1.65;
+}
+.lines code { font: inherit; color: var(--ink); white-space: pre; }
+.lines .n { color: var(--graphite); }
+.lines .hit { color: var(--accent); }
+@media (max-width: 40rem) {
+  .lines { grid-template-columns: minmax(0, 1fr); overflow-x: auto; padding-inline: 1rem; }
+  .lines .n:empty { display: none; }
+  .lines .n { padding-left: 4ch; }
+}
 /* The APIs that pass through, each beside the clients that send it. */
 .apis { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: var(--output); }
 .apis td { padding: 0.6rem 1.5rem 0.6rem 0; border-bottom: 1px dashed var(--rule); color: var(--graphite); vertical-align: baseline; }

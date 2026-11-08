@@ -14,7 +14,6 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
-      - docs/guide.md
       - docs/operations.md
       - docs/benchmarks.md
       - Cargo.toml
@@ -27,7 +26,6 @@ on:
       - "site/**"
       - README.md
       - CHANGELOG.md
-      - docs/guide.md
       - docs/operations.md
       - docs/benchmarks.md
       - Cargo.toml
