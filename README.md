@@ -36,7 +36,7 @@ After a short Claude Code session:
 
 ```console
 $ wye report
-3 requests in 1 session (0 other lines skipped); outcomes: completed 3
+3 requests in 1 session; outcomes: completed 3
 
 By request class
                                       cache  cache                   time  time
