@@ -76,8 +76,9 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// A script as the browser needs it: no comment lines, indentation, or
-/// blank lines. The source keeps its comments on lines of their own and
-/// no template literal spans lines, so lines are safe to cut this way.
+/// blank lines. The source keeps its comments on lines of their own, and
+/// its only multi-line template literals are shader source, where
+/// indentation means nothing, so lines are safe to cut this way.
 fn compact_script(script: &str) -> String {
     script
         .lines()
