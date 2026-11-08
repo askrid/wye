@@ -230,7 +230,7 @@ html, body { overflow-x: clip; }
   width: 17.857em;
   height: 7.143em;
 }
-.period .line { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
+.period .lines path { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
 .period .thread { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .period circle { fill: var(--ink); }
 
