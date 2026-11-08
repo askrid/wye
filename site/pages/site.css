@@ -179,8 +179,11 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* First screen, in source order: what Wye is, then how to start it. The
-   drawing is the headline's period (below). */
+   drawing is the headline's period (below). Its own stacking context: the
+   text over the strings' canvas is then composited as a layer the size of
+   the hero, not of the whole page. */
 .hero {
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "copy" "install";
