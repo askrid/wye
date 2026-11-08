@@ -230,8 +230,14 @@ html, body { overflow-x: clip; }
   width: 17.857em;
   height: 7.143em;
 }
-.period .strands path { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
-.period .thread { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+/* The fade is the strokes' own paint, a gradient from the dot to nothing
+   before the drawing's edges, not a mask: a redrawn line repaints only
+   lines, so the motion can run every frame. */
+.period .strands path { fill: none; stroke: url(#period-fade); stroke-width: 0.9; opacity: 0.2; }
+.period .thread { fill: none; stroke: url(#period-fade-thread); stroke-width: 1.6; }
+.period stop { stop-color: var(--ink); }
+.period #period-fade-thread stop { stop-color: var(--accent); }
+.period stop.end { stop-opacity: 0; }
 .period circle { fill: var(--ink); }
 
 /* A request's path: the stops, the sections in the order a request meets
