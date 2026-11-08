@@ -79,7 +79,7 @@
      gateway" over "without bloat.". The longer line is 14 advances of
      0.58 em (0.6 less the tracking), 8.12 em: / 11.3 sets it across about
      72% of the column, / 8.6 on a phone (below) about 94%. */
-  --h1: min(3.25rem, 100cqi / 11.3);
+  --h1: min(5.25rem, 100cqi / 11.3);
   /* 64 zeros of Wye Text: about 70 characters of prose. */
   --measure: 64ch;
   --gutter: clamp(1rem, 4vw, 2.5rem);
@@ -145,6 +145,7 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 
 /* Header */
 .bar {
+  background: var(--paper);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -174,23 +175,17 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .bar nav a { color: var(--graphite); text-decoration: none; }
 .bar nav a:hover { color: var(--ink); text-decoration: underline; }
 
-/* First screen, in source order: what Wye is, how to start it, and the
-   drawing. Once the page is wide enough for both to keep their size, the
-   drawing stands beside the copy, both on one top edge, and the install
-   block spans the page below so its comments stay on their lines. */
+/* First screen, in source order: what Wye is, then how to start it. The
+   drawing is the headline's period (below). */
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "copy" "install" "trace";
+  grid-template-areas: "copy" "install";
   align-items: start;
   gap: 2.5rem clamp(2.5rem, 5vw, 4.5rem);
   padding-block: clamp(2rem, 4vw, 3.5rem) clamp(2.5rem, 5vw, 4rem);
 }
-@media (min-width: 80rem) {
-  .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 34rem); grid-template-areas: "copy trace" "install install"; }
-}
 .hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
-.hero .art { grid-area: trace; }
 .hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
@@ -214,20 +209,28 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .hero .code .c { display: none; }
 }
 
-/* The drawing: a hundred lines meet at Wye and leave as ten bundles, each
-   line on the upstream weighted rendezvous hashing gives it, so a bundle is
-   as thick as its weight; one line is turned back from its bundle (dashed)
-   and resent to the next one. Drawn
-   once (site/pages/index.html), stacked as layers, so each can move later. */
-.art { margin: 0; display: grid; min-width: 0; }
-.art > svg { grid-area: 1 / 1; display: block; width: 100%; height: auto; }
-.art .layer { opacity: 0.38; }
-.art .layer path { fill: none; stroke: var(--ink); stroke-width: 0.9; }
-.art .ends, .art .node { fill: var(--ink); }
-.art .detour path { fill: none; stroke: var(--accent); stroke-width: 1.6; }
-/* The attempt the upstream rejected: drawn, but not arrived. */
-.art .detour .tried { stroke-dasharray: 3 4; }
-.art .detour circle { fill: var(--accent); }
+/* The drawing is the headline's period: a hundred lines meet at the dot and
+   leave as ten bundles, each line on the upstream weighted rendezvous
+   hashing gives it, so a bundle is as thick as its weight; one line is
+   turned back from its bundle (dashed) and resent to the next one. Drawn
+   once, in em, so it scales with the headline and stays on its period;
+   behind the text, and clipped at the window's edges (html). The header and
+   the code blocks are opaque, so the lines show only in the open. */
+html { overflow-x: clip; }
+.period { position: relative; display: inline-block; width: 0.26em; height: 0.26em; margin-left: 0.04em; }
+.period svg {
+  position: absolute;
+  z-index: -1;
+  left: calc(0.13em - 10.714em);
+  top: calc(0.13em - 3.571em);
+  width: 17.857em;
+  height: 7.143em;
+}
+.period .line { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.15; }
+.period .tried, .period .sent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.period .tried { stroke-dasharray: 3 4; }
+.period rect { fill: var(--ink); opacity: 0.8; }
+.period circle { fill: var(--ink); }
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
