@@ -304,11 +304,13 @@ html { overflow-x: clip; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
 .fork .d { color: var(--graphite); }
-.routes svg { display: block; width: 100%; max-width: 40rem; height: auto; }
-.routes .session { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.4; }
-.routes .node, .routes rect { fill: var(--ink); }
-.routes .tried, .routes .sent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
-.routes .tried { stroke-dasharray: 3 4; }
+/* Sessions per upstream, one square each; the rejected one is an outline,
+   and the failover lands in the accent. */
+.routes svg { display: block; width: 100%; max-width: 28rem; height: auto; }
+.routes rect { fill: var(--ink); }
+.routes .tried { fill: none; stroke: var(--accent); stroke-dasharray: 2 2; }
+.routes .sent { fill: var(--accent); }
+.routes .over { fill: none; stroke: var(--accent); stroke-width: 1.2; }
 .routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
 .routes .w { fill: var(--graphite); }
 .routes .code { fill: var(--accent); }
