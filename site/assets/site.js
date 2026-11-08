@@ -77,28 +77,46 @@ if (strings) {
     }
     return null;
   };
-  let running = false, visible = false, frame = 0, last = 0, previous = null;
+  let running = false, visible = false, frame = 0, timer = 0, last = 0, previous = null;
+  // The sway moves at most about a pixel a second, so four redraws a second
+  // show no steps, and each repaints the whole drawing: at rest the page
+  // wakes four times a second, on a timer, not every frame. A plucked line
+  // is redrawn every frame until it settles. A line is only rewritten when
+  // its shape changed. Returns whether a line still rings.
   const draw = (now) => {
-    frame = requestAnimationFrame(draw);
-    if (now - last < 32) return; // about 30 frames a second is enough
-    last = now;
+    let ringing = false;
+    const swaying = now - last >= 250;
+    if (swaying) last = now;
     for (const line of lines) {
-      // The orange thread only moves when plucked.
-      if (line.thread && !line.amp) continue;
+      if (!line.amp && (line.thread || !swaying)) continue;
       const sway = line.thread ? 0 : 1.4 * Math.sin((2 * Math.PI * now) / line.period + line.phase);
       let ring = 0;
       if (line.amp) {
         const age = now - line.since;
         ring = line.amp * Math.exp(-age / 750) * Math.sin((2 * Math.PI * 2.6 * age) / 1000);
+        line.el.style.opacity = line.thread ? "" : (0.2 + Math.min(0.45, Math.abs(ring) / 10)).toFixed(2);
         if (age > 3500) {
           line.amp = 0;
           line.el.style.opacity = "";
-        }
+        } else ringing = true;
       }
-      const dy = sway + ring;
-      line.el.setAttribute("d", `M${line.x0} ${line.y0}C${line.x1} ${(line.y1 + dy).toFixed(1)} ${line.x2} ${(line.y2 + dy).toFixed(1)} ${line.x3} ${line.y3}${line.tail ? "H" + line.tail : ""}`);
-      if (line.amp && !line.thread) line.el.style.opacity = (0.2 + Math.min(0.45, Math.abs(ring) / 10)).toFixed(2);
+      const dy = (sway + ring).toFixed(1);
+      if (dy === line.dy) continue;
+      line.dy = dy;
+      line.el.setAttribute("d", `M${line.x0} ${line.y0}C${line.x1} ${(line.y1 + +dy).toFixed(1)} ${line.x2} ${(line.y2 + +dy).toFixed(1)} ${line.x3} ${line.y3}${line.tail ? "H" + line.tail : ""}`);
     }
+    return ringing;
+  };
+  const step = (now) => {
+    frame = 0;
+    if (!running) return;
+    if (draw(now)) frame = requestAnimationFrame(step);
+    else timer = setTimeout(() => (frame = requestAnimationFrame(step)), 250);
+  };
+  const wake = () => {
+    if (!running || frame) return;
+    clearTimeout(timer);
+    frame = requestAnimationFrame(step);
   };
   const pluck = (event) => {
     const screen = strings.getScreenCTM();
@@ -112,6 +130,7 @@ if (strings) {
         if (Math.sign(previous.y - before) !== Math.sign(point.y - after)) {
           line.amp = speed * Math.sign(point.y - previous.y || 1);
           line.since = performance.now();
+          wake();
         }
       }
     }
@@ -127,18 +146,21 @@ if (strings) {
     if (on === running) return;
     running = on;
     if (on) {
-      frame = requestAnimationFrame(draw);
+      frame = requestAnimationFrame(step);
       addEventListener("pointermove", pluck, { passive: true });
       addEventListener("scroll", forget, { passive: true });
       document.documentElement.addEventListener("pointerleave", forget);
     } else {
       cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      frame = 0;
       removeEventListener("pointermove", pluck);
       removeEventListener("scroll", forget);
       document.documentElement.removeEventListener("pointerleave", forget);
       previous = null;
       for (const line of lines) {
         line.amp = 0;
+        line.dy = "0.0";
         line.el.setAttribute("d", line.d);
         line.el.style.opacity = "";
       }
