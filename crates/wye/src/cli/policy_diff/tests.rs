@@ -8,7 +8,7 @@ fn config(listen: &str, auth: Option<&str>, rest: &str) -> Config {
     let auth = auth.map_or(String::new(), |auth| format!("[auth]\n{auth}\n"));
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"{listen}\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
          {auth}{rest}"
     ))
     .unwrap()
@@ -193,21 +193,21 @@ fn identity_provider_grants_compare_per_claim_value() {
 fn routes_are_reported_without_widening() {
     let route = |extra: &str| {
         Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"A\" }}\n{extra}"
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [[upstreams]]\nid = \"a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"A\" }}\n{extra}"
         ))
         .unwrap()
     };
     let old = route("");
     let new = route(
-        "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
+        "[[upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
          base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key = { env = \"B\" }\n",
     );
     let diff = policy_diff(&old, &new);
     assert!(!diff.widens());
     assert!(
         diff.report().contains(
-            "changes: routes.claude: upstream bedrock added (https://bedrock-mantle.us-east-1.api.aws/anthropic)"
+            "changes: upstreams \"bedrock\" added (https://bedrock-mantle.us-east-1.api.aws/anthropic)"
         ),
         "{}",
         diff.report()
@@ -215,7 +215,38 @@ fn routes_are_reported_without_widening() {
     assert!(
         policy_diff(&new, &old)
             .report()
-            .contains("changes: routes.claude: upstream bedrock removed")
+            .contains("changes: upstreams \"bedrock\" removed")
+    );
+    // A new provider moves an upstream to its route, and a standby is
+    // listed: neither changes who may send requests.
+    let moved = route(
+        "[[upstreams]]\nid = \"bedrock\"\nprovider = \"openai\"\nstandby = false\n\
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key = { env = \"B\" }\n",
+    );
+    let report = policy_diff(&new, &moved).report();
+    assert!(
+        report.contains(
+            "changes: upstreams \"bedrock\": provider bedrock -> openai, from the Claude \
+             route to the OpenAI route"
+        ),
+        "{report}"
+    );
+    let standby = route(
+        "[[upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\nstandby = true\n\
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key = { env = \"B\" }\n",
+    );
+    let diff = policy_diff(&new, &standby);
+    assert!(!diff.widens());
+    assert!(
+        diff.report()
+            .contains("changes: upstreams \"bedrock\": now standby"),
+        "{}",
+        diff.report()
+    );
+    assert!(
+        policy_diff(&standby, &new)
+            .report()
+            .contains("changes: upstreams \"bedrock\": no longer standby")
     );
 }
 
@@ -234,28 +265,24 @@ fn exposure_new_routes_and_the_operators_key_widen() {
     let both = config(
         "127.0.0.1:8080",
         None,
-        "[routes.openai]
-[[routes.openai.upstreams]]
-id = \"openai\"
-provider = \"openai\"
-\
+        "[[upstreams]]\nprovider = \"openai\"\n\
          base_url = \"https://api.openai.com\"\nprovider_key = { env = \"O\" }\n",
     );
     let report = policy_diff(&claude, &both).report();
     assert!(
-        report.contains("widens: routes.openai added: its API now reaches a provider"),
+        report.contains("widens: the OpenAI route added: its requests now reach a provider"),
         "{report}"
     );
     let report = policy_diff(&both, &claude).report();
     assert!(
-        report.contains("narrows: routes.openai removed"),
+        report.contains("narrows: the OpenAI route removed: its requests are no longer served"),
         "{report}"
     );
 
     let upstream = |credential: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
+             [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
         ))
         .unwrap()
     };
@@ -263,13 +290,15 @@ provider = \"openai\"
     let keyed = upstream("provider_key = { env = \"K\" }");
     let report = policy_diff(&forwarded, &keyed).report();
     assert!(
-        report.contains("widens: routes.claude: upstream anthropic sends a provider key, where callers brought their own"),
+        report.contains(
+            "widens: upstreams \"anthropic\" sends a provider key, where callers brought their own"
+        ),
         "{report}"
     );
     assert!(!policy_diff(&keyed, &forwarded).widens());
     let report = policy_diff(&keyed, &upstream("provider_key = { env = \"OTHER\" }")).report();
     assert!(
-        report.contains("changes: routes.claude: upstream anthropic provider key: $K -> $OTHER"),
+        report.contains("changes: upstreams \"anthropic\" provider key: $K -> $OTHER"),
         "{report}"
     );
     let report = policy_diff(
@@ -278,9 +307,7 @@ provider = \"openai\"
     )
     .report();
     assert!(
-        report.contains(
-            "changes: routes.claude: upstream anthropic provider key: $K -> anthropic.key"
-        ),
+        report.contains("changes: upstreams \"anthropic\" provider key: $K -> anthropic.key"),
         "{report}"
     );
     assert!(!policy_diff(&keyed, &upstream("provider_key = { env = \"K\" }")).widens());

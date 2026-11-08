@@ -34,7 +34,7 @@ pub enum Variant {
     /// `[auth]` and model permissions in config and credential: every request
     /// is held until its `model` is read, and its body checked.
     Models,
-    /// `[routes.openai]`: OpenAI Responses requests, framed as Responses
+    /// An OpenAI upstream: OpenAI Responses requests, framed as Responses
     /// streams by the mock, through the Responses usage scanner.
     Openai,
     /// A Claude route to a Bedrock upstream: every request is held until its

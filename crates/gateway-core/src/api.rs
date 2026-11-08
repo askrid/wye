@@ -4,12 +4,12 @@
 /// A native API, served by its own route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Api {
-    /// Anthropic Messages (`[routes.claude]`): Claude Code and the Anthropic
+    /// Anthropic Messages (the Claude route): Claude Code and the Anthropic
     /// SDKs.
     Messages,
-    /// OpenAI Responses (`[routes.openai]`): Codex and the OpenAI SDKs.
+    /// OpenAI Responses (the OpenAI route): Codex and the OpenAI SDKs.
     Responses,
-    /// OpenAI Chat Completions (`[routes.openai]`): OpenAI SDK clients and
+    /// OpenAI Chat Completions (the OpenAI route): OpenAI SDK clients and
     /// OpenAI-compatible agents.
     ChatCompletions,
 }
@@ -89,55 +89,33 @@ impl Api {
 }
 
 /// A route: the upstreams that serve one provider family's native APIs.
+/// Each `[[upstreams]]` entry serves the route its provider speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteId {
-    /// `[routes.claude]`: Anthropic Messages.
+    /// Anthropic Messages: providers `anthropic`, `claude-platform-aws`, and
+    /// `bedrock`.
     Claude,
-    /// `[routes.openai]`: OpenAI Responses and Chat Completions.
+    /// OpenAI Responses and Chat Completions: provider `openai`.
     OpenAi,
 }
 
 impl RouteId {
     pub const ALL: [Self; 2] = [Self::Claude, Self::OpenAi];
 
-    /// Its name in config (`[routes.<name>]`) and in messages.
-    pub fn name(self) -> &'static str {
+    /// Its name in messages: `the Claude route`.
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Claude => "claude",
-            Self::OpenAi => "openai",
+            Self::Claude => "Claude",
+            Self::OpenAi => "OpenAI",
         }
     }
 
-    /// The config section that gives it upstreams, for messages that say
-    /// what to add.
-    pub fn section(self) -> &'static str {
+    /// The config entry that gives it an upstream, for messages that say
+    /// what to add: an entry without a provider serves Claude.
+    pub fn entry(self) -> &'static str {
         match self {
-            Self::Claude => "[routes.claude]",
-            Self::OpenAi => "[routes.openai]",
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn proxied_endpoints_and_their_apis() {
-        let messages = endpoint("/v1/messages").unwrap();
-        assert_eq!((messages.api, messages.generates), (Api::Messages, true));
-        let count = endpoint("/v1/messages/count_tokens").unwrap();
-        assert_eq!((count.api, count.generates), (Api::Messages, false));
-        let responses = endpoint("/v1/responses").unwrap();
-        assert_eq!((responses.api, responses.generates), (Api::Responses, true));
-        let chat = endpoint("/v1/chat/completions").unwrap();
-        assert_eq!((chat.api, chat.generates), (Api::ChatCompletions, true));
-        assert_eq!(
-            Api::ChatCompletions.output_token_field(),
-            "max_completion_tokens"
-        );
-        for other in ["/v1/completions", "/v1/models", "/v1/responses/abc", "/"] {
-            assert_eq!(endpoint(other), None, "{other}");
+            Self::Claude => "an [[upstreams]] entry",
+            Self::OpenAi => "an [[upstreams]] entry with provider = \"openai\"",
         }
     }
 }

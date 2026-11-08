@@ -192,7 +192,7 @@ mod tests {
     fn reports_passing_and_failing_cases() {
         let dir = wye_testkit::TempDir::new("policy");
         let config = Config::from_toml_str(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
              provider_key = { env = \"K\" }\n[auth]\naudience = \"wye\"\nmodels = [\"claude-*\"]\n\
              signing_keys = [\"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"]",
         )
@@ -249,9 +249,9 @@ mod tests {
     fn checks_the_upstream_a_session_reaches() {
         let dir = wye_testkit::TempDir::new("policy-route");
         let config = Config::from_toml_str(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-             [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"A\" }\n\
-             [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"B\" }\n",
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [[upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"A\" }\n\
+             [[upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"B\" }\n",
         )
         .unwrap();
         let route = config.routes.claude.as_ref().unwrap();

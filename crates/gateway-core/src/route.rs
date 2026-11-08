@@ -5,9 +5,11 @@
 //! shared state. Prompt caches are per provider account, so a session stays
 //! on one upstream: weighted rendezvous hashing keyed by the session id (or
 //! the gateway token's subject) sends a key to the upstream with the highest
-//! score, and a key moves only when its upstream leaves the route. With
-//! several upstreams, the rest of the ranking is the order of failover's
-//! next attempts, the same on every replica too.
+//! score, and a key moves only when its upstream leaves the route. Standby
+//! upstreams take no keys. With several upstreams, the rest of the ranking
+//! is the order of failover's next attempts, the same on every replica too:
+//! the others that are not standby by falling score, then the standbys in
+//! config order.
 
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
@@ -17,16 +19,6 @@ use crate::config::Upstream;
 pub const MAX_UPSTREAMS: usize = 16;
 /// Largest `weight`.
 pub const MAX_WEIGHT: u32 = 1000;
-
-/// How a request picks its upstream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Select {
-    /// Weighted rendezvous hashing by affinity key: a session stays on one
-    /// upstream.
-    CacheAffine,
-    /// The first upstream in config order; the others only on failover.
-    Ordered,
-}
 
 /// Largest request body a route with several upstreams keeps for
 /// resending: larger ones go without failover. A Claude Code turn is 1-8 MB.
@@ -105,22 +97,40 @@ pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> 
 /// The upstreams that serve one API, and how a request picks one.
 #[derive(Debug, Clone)]
 pub struct Route {
-    /// Non-empty, ids unique.
+    /// Non-empty, ids unique, at least one not standby.
     upstreams: Box<[Upstream]>,
     /// Per upstream, the hash seed derived from its id.
     seeds: Box<[u64]>,
-    select: Select,
+    /// Upstream indexes, those that are not standby first, then the
+    /// standbys, each in config order.
+    order: [u8; MAX_UPSTREAMS],
+    /// How many of `order` are not standby: the ones that share keys.
+    sharing: usize,
 }
 
 impl Route {
     /// `upstreams` is validated: non-empty, at most [`MAX_UPSTREAMS`], ids
-    /// unique.
-    pub(crate) fn new(upstreams: Vec<Upstream>, select: Select) -> Self {
+    /// unique, at least one not standby.
+    pub(crate) fn new(upstreams: Vec<Upstream>) -> Self {
         let seeds = upstreams.iter().map(|u| xxh3_64(u.id.as_bytes())).collect();
+        let of = |standby: bool| {
+            upstreams
+                .iter()
+                .enumerate()
+                .filter(move |(_, u)| u.standby == standby)
+                .map(|(i, _)| i)
+        };
+        let mut order = [0u8; MAX_UPSTREAMS];
+        for (slot, i) in order.iter_mut().zip(of(false).chain(of(true))) {
+            // At most MAX_UPSTREAMS (16): fits a byte.
+            *slot = i as u8;
+        }
+        let sharing = of(false).count();
         Self {
             upstreams: upstreams.into(),
             seeds,
-            select,
+            order,
+            sharing,
         }
     }
 
@@ -137,8 +147,10 @@ impl Route {
             .any(|u| u.provider.model_prefix().is_some())
     }
 
-    pub fn select(&self) -> Select {
-        self.select
+    /// How many upstreams share the route's affinity keys: those that are
+    /// not standby.
+    pub fn sharing(&self) -> usize {
+        self.sharing
     }
 
     /// Whether a rejected request moves to the next upstream: with two or
@@ -149,24 +161,21 @@ impl Route {
     }
 
     /// Every upstream in the order a request with affinity `key` tries
-    /// them: [`Self::pick`] first, then (for failover) by falling score, or
-    /// in config order with [`Select::Ordered`].
+    /// them: [`Self::pick`] first, then (for failover) the others that are
+    /// not standby by falling score, then the standbys in config order.
     pub fn rank(&self, key: &[u8]) -> Ranking {
         let len = self.upstreams.len().min(MAX_UPSTREAMS);
-        let mut order = [0u8; MAX_UPSTREAMS];
-        for (i, slot) in order.iter_mut().enumerate().take(len) {
-            // At most MAX_UPSTREAMS (16): fits a byte.
-            *slot = i as u8;
-        }
-        if self.select == Select::CacheAffine && len > 1 {
+        let mut order = self.order;
+        if self.sharing > 1 {
             let mut scores = [0f64; MAX_UPSTREAMS];
             for (score, (upstream, seed)) in scores
                 .iter_mut()
                 .zip(self.upstreams.iter().zip(&self.seeds))
+                .filter(|(_, (upstream, _))| !upstream.standby)
             {
                 *score = f64::from(upstream.weight) / -unit(xxh3_64_with_seed(key, *seed)).ln();
             }
-            let used = order.get_mut(..len).unwrap_or_default();
+            let used = order.get_mut(..self.sharing).unwrap_or_default();
             // Highest score first; equal scores keep config order (stable).
             used.sort_by(|&a, &b| {
                 let (a, b) = (usize::from(a), usize::from(b));
@@ -180,10 +189,10 @@ impl Route {
     /// The index of the upstream for a request with affinity `key` (the
     /// session id, else the gateway token's subject, else empty).
     ///
-    /// Each upstream scores `weight / -ln(u)`, with `u` uniform in (0, 1)
-    /// from a hash of the key seeded by the upstream's id; the highest score
-    /// wins. A key then lands on an upstream with probability proportional
-    /// to its weight. Floating point only ranks; an exact tie, which needs
+    /// Each upstream that is not standby scores `weight / -ln(u)`, with `u`
+    /// uniform in (0, 1) from a hash of the key seeded by the upstream's id;
+    /// the highest score wins. A key then lands on an upstream with
+    /// probability proportional to its weight. Floating point only ranks; an exact tie, which needs
     /// equal 53-bit hashes, goes to the earlier upstream.
     pub fn pick(&self, key: &[u8]) -> usize {
         self.rank(key).first()

@@ -7,7 +7,6 @@ use std::{
 };
 
 use gateway_core::{
-    api::RouteId,
     config::{Config, IdentityProvider, ProviderKey, Secret, Upstream},
     prompt::HashKey,
     token::{IssuerKeys, KeySetError, Verifier},
@@ -86,16 +85,12 @@ impl fmt::Display for StartupError {
 impl std::error::Error for StartupError {}
 
 impl StartupError {
-    /// A file error of `upstream` (in `route`) with its setting named by
-    /// its place in the config, as validation errors name it.
-    fn in_upstream(self, route: RouteId, upstream: &Upstream) -> Self {
+    /// A file error of `upstream` with its setting named by its place in
+    /// the config, as validation errors name it.
+    fn in_upstream(self, upstream: &Upstream) -> Self {
         match self {
             Self::File { what, path, reason } => Self::File {
-                what: format!(
-                    "routes.{}.upstreams {:?}: {what}",
-                    route.name(),
-                    upstream.id
-                ),
+                what: format!("upstreams {:?}: {what}", upstream.id),
                 path,
                 reason,
             },
@@ -140,12 +135,8 @@ impl Resources {
     /// Loads what `config` references. Relative paths resolve against `config_dir`.
     pub fn resolve(config: &Config, config_dir: &Path) -> Result<Self, StartupError> {
         let mut upstreams = Vec::with_capacity(config.routes.upstreams().count());
-        for (route, upstream) in config
-            .routes
-            .iter()
-            .flat_map(|(id, route)| route.upstreams().iter().map(move |u| (id, u)))
-        {
-            let located = |e: StartupError| e.in_upstream(route, upstream);
+        for upstream in config.routes.upstreams() {
+            let located = |e: StartupError| e.in_upstream(upstream);
             let auth = upstream_auth(upstream, config_dir).map_err(located)?;
             let extra_roots = upstream_roots(upstream, config_dir).map_err(located)?;
             upstreams.push(UpstreamResources { auth, extra_roots });
@@ -477,18 +468,18 @@ mod tests {
                 .unwrap_err()
                 .to_string()
         };
-        let unnamed = error("[[routes.claude.upstreams]]\n");
+        let unnamed = error("[[upstreams]]\n");
         assert!(
             unnamed.starts_with(
-                "routes.claude.upstreams \"anthropic\": provider_key \
+                "upstreams \"anthropic\": provider_key \
                  /nonexistent-wye-dir/missing.key: "
             ),
             "{unnamed}"
         );
-        let entry = error("[routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n");
+        let entry = error("[[upstreams]]\nid = \"a\"\n");
         assert!(
             entry.starts_with(
-                "routes.claude.upstreams \"a\": provider_key \
+                "upstreams \"a\": provider_key \
                  /nonexistent-wye-dir/missing.key: "
             ),
             "{entry}"
@@ -501,7 +492,7 @@ mod tests {
     fn the_hash_key_and_otlp_headers_come_from_files_too() {
         let dir = wye_testkit::TempDir::new("secret-files");
         let config = Config::from_toml_str(
-            "[[routes.claude.upstreams]]\nforward_caller_credential = true\n\
+            "[[upstreams]]\nforward_caller_credential = true\n\
              [cache_diagnostics]\nhash_key = { file = \"hash.key\" }\n\
              [telemetry]\notlp_endpoint = \"http://127.0.0.1:4318\"\n\
              otlp_headers = { file = \"otlp.headers\" }\n",

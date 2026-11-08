@@ -167,11 +167,10 @@ impl Harness {
         Self::launch(&base_url, "", &extra, resources, hits).await
     }
 
-    /// Gateway whose only route is `[routes.<route>]`, with one upstream:
-    /// the mock serving `handler`, with `upstream_lines` and `auth`.
+    /// Gateway with one upstream, whose provider (in `upstream_lines`)
+    /// makes its only route: the mock serving `handler`, with `auth`.
     pub(crate) async fn single_route(
         handler: Handler,
-        route: &str,
         server_extra: &str,
         upstream_lines: &str,
         auth: UpstreamAuth,
@@ -179,7 +178,7 @@ impl Harness {
         let (upstream, hits) = spawn_counted(handler).await;
         let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
-             [routes.{route}]\n[[routes.{route}.upstreams]]\n{upstream_lines}\n\
+             [[upstreams]]\n{upstream_lines}\n\
              base_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
         );
         let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
@@ -195,7 +194,7 @@ impl Harness {
     ) -> Self {
         let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
-             [[routes.claude.upstreams]]\nbase_url = \"{base_url}\"\n{upstream_extra}"
+             [[upstreams]]\nbase_url = \"{base_url}\"\n{upstream_extra}"
         );
         Self::launch_config(&config, resources, upstream_hits).await
     }

@@ -66,17 +66,17 @@ pub(crate) struct WyeOptions<'a> {
     pub(crate) cache_diagnostics: bool,
     /// `[telemetry]` exporting to this OTLP endpoint.
     pub(crate) otlp_endpoint: Option<&'a str>,
-    /// `[routes.openai]` instead of `[routes.claude]`: requests go to
+    /// An OpenAI upstream instead of a Claude one: requests go to
     /// `/v1/responses`, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) openai: bool,
     /// The Claude route's one upstream on Bedrock instead of Anthropic:
     /// model ids get the provider's prefix, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) bedrock: bool,
-    /// `[routes.claude]` with two accounts (both the mock), which fail
+    /// The Claude route with two accounts (both the mock), which fail
     /// over: every request body is kept for resending.
     pub(crate) failover: bool,
     /// With `failover`: the first account is this upstream instead, tried
-    /// first (`select = "ordered"`).
+    /// first (the second is `standby = true`).
     pub(crate) refusing_upstream: Option<&'a str>,
 }
 
@@ -97,22 +97,20 @@ pub(crate) fn wye_config(
         "forward_caller_credential = true".to_owned()
     };
     let upstream = if options.openai {
-        "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"".to_owned()
+        "[[upstreams]]\nprovider = \"openai\"\nid = \"openai\"".to_owned()
     } else if options.bedrock {
-        "[routes.claude]\n[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\""
-            .to_owned()
+        "[[upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"".to_owned()
     } else if options.failover {
-        let (select, first) = match options.refusing_upstream {
-            Some(url) => ("select = \"ordered\"\n", url),
-            None => ("", upstream_base_url),
+        let (first, standby) = match options.refusing_upstream {
+            Some(url) => (url, "\nstandby = true"),
+            None => (upstream_base_url, ""),
         };
         format!(
-            "[routes.claude]\n{select}\
-             [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{first}\"\n{credential}\n\
-             [[routes.claude.upstreams]]\nid = \"b\""
+            "[[upstreams]]\nid = \"a\"\nbase_url = \"{first}\"\n{credential}\n\
+             [[upstreams]]\nid = \"b\"{standby}"
         )
     } else {
-        "[[routes.claude.upstreams]]".to_owned()
+        "[[upstreams]]".to_owned()
     };
     let mut config = format!(
         "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace = \"0s\"\n\n\

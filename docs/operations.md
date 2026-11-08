@@ -63,7 +63,7 @@ Set for the agent by `wye claude` and `wye codex`:
 | `ANTHROPIC_BASE_URL` | The gateway |
 | `ANTHROPIC_AUTH_TOKEN` | The gateway token, if there is one |
 | `CLAUDE_CODE_GATEWAY_HINT_HEADERS` | `1`, unless you set it |
-| `WYE_CODEX_TOKEN` | The token Codex sends |
+| `WYE_CODEX_TOKEN` | The token Codex sends: the gateway token, else your `OPENAI_API_KEY` ([`wye codex`](#agent-wrapper)) |
 
 With a gateway token, `ANTHROPIC_API_KEY` is removed, since Claude Code would prefer it.
 
@@ -139,7 +139,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 - The URL and the hint setting also go to Claude Code as `--settings`, because background sessions (`wye claude --bg "task"`) are started by its daemon, which does not inherit the wrapper's environment. The gateway token never goes that way, since other local users can read a command line; a background session behind `[auth]` gets its token from [`apiKeyHelper`](#token-renewal).
 - `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` makes Claude Code's `/model` picker read `GET /v1/models` when the config has `[discovery]`.
 
-**`wye codex`** takes the same options and environment. The gateway needs `[routes.openai]`; with `[auth]`, use a gateway token without an [output-token ceiling](policy.md#per-request-ceilings). It runs `codex` with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it. Without a gateway token, `WYE_CODEX_TOKEN` is a placeholder, which a gateway without `[auth]` replaces with its OpenAI provider key. `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). What Codex sends: [architecture.md](architecture.md#codex-integration).
+**`wye codex`** takes the same options and environment. The gateway needs an OpenAI upstream (`provider = "openai"`); with `[auth]`, use a gateway token without an [output-token ceiling](policy.md#per-request-ceilings). It runs `codex` with command-line config overrides that define a provider `wye` (`base_url` = the gateway plus `/v1`, `wire_api = "responses"`, `env_key = "WYE_CODEX_TOKEN"`) and select it. `WYE_CODEX_TOKEN` holds the gateway token; without one, for a gateway on this machine, your own `OPENAI_API_KEY`, which a passthrough gateway forwards and one with a provider key replaces; otherwise a placeholder. A ChatGPT sign-in talks to another service and cannot pass through a gateway, so Codex needs an API key here. `~/.codex/config.toml` is not touched; arguments after wye's own go to Codex (`wye codex exec "fix the tests"`). What Codex sends: [architecture.md](architecture.md#codex-integration).
 
 ## Deployment
 
@@ -339,7 +339,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 ### Cache
 
 - `cache_miss` (`compaction` | `after_compaction` | `unexplained`): a cache write with no cache read; the first cache write of a session or a subagent also reads `unexplained`.
-- `prompt_hashes`: keyed prompt hashes, with [`[cache_diagnostics]`](architecture.md#cache-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags.
+- `prompt_hashes`: keyed prompt hashes, with [`[cache_diagnostics]`](architecture.md#cache-diagnostics), sampled sessions only: `status`, `tools` and `system` (`count`, `hash`), `messages`, `breakpoint_count`, up to 4 `breakpoints`, the last 8 `message_prefixes`; 16-hex HMAC-SHA256 tags. No Wye command reads them yet; [cache-break forensics](research.md#what-the-request-scanner-could-also-find) is the planned reader.
 
 ### OTLP logs
 

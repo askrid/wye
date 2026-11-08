@@ -12,14 +12,13 @@ const PUBLIC_KEY: &str = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
 
 fn parse(upstream: &str) -> Result<Config, ConfigError> {
     Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n\n[[routes.claude.upstreams]]\n{upstream}"
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\n[[upstreams]]\n{upstream}"
     ))
 }
 
-/// `error` in the Claude route's only upstream, named by its provider.
+/// `error` in the only upstream, named by its provider.
 fn in_upstream(error: ConfigError) -> ConfigError {
-    ConfigError::RouteUpstream {
-        route: "claude",
+    ConfigError::Upstream {
         id: "anthropic".into(),
         error: Box::new(error),
     }
@@ -28,7 +27,7 @@ fn in_upstream(error: ConfigError) -> ConfigError {
 /// A forwarding gateway with extra `[server]` lines.
 fn server(lines: &str) -> Result<Config, ConfigError> {
     Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n{lines}\n[[routes.claude.upstreams]]\n{FORWARDING}"
+        "[server]\nlisten = \"127.0.0.1:8080\"\n{lines}\n[[upstreams]]\n{FORWARDING}"
     ))
 }
 
@@ -55,8 +54,7 @@ fn minimal_config_gets_defaults() {
 
 #[test]
 fn server_is_optional_and_listens_on_loopback_port_8080() {
-    let bare =
-        Config::from_toml_str(&format!("[[routes.claude.upstreams]]\n{FORWARDING}")).unwrap();
+    let bare = Config::from_toml_str(&format!("[[upstreams]]\n{FORWARDING}")).unwrap();
     assert_eq!(bare.server.listen.to_string(), DEFAULT_LISTEN);
     assert_eq!(DEFAULT_LISTEN, "127.0.0.1:8080");
     let written = server("").unwrap();
@@ -64,9 +62,7 @@ fn server_is_optional_and_listens_on_loopback_port_8080() {
         format!("{:?}", bare.server),
         format!("{:?}", written.server)
     );
-    let empty = Config::from_toml_str(&format!(
-        "[server]\n[[routes.claude.upstreams]]\n{FORWARDING}"
-    ));
+    let empty = Config::from_toml_str(&format!("[server]\n[[upstreams]]\n{FORWARDING}"));
     assert_eq!(empty.unwrap().server.listen, bare.server.listen);
 }
 
@@ -83,7 +79,7 @@ fn base_path_keeps_prefix_without_trailing_slash() {
 #[test]
 fn rejects_non_loopback_listen() {
     let err = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"0.0.0.0:8080\"\n[[routes.claude.upstreams]]\n{FORWARDING}"
+        "[server]\nlisten = \"0.0.0.0:8080\"\n[[upstreams]]\n{FORWARDING}"
     ))
     .unwrap_err();
     assert!(matches!(err, ConfigError::NonLoopbackListen(_)));
@@ -93,7 +89,7 @@ fn rejects_non_loopback_listen() {
 fn auth_allows_network_listen_and_validates_keys() {
     let with_auth = |listen: &str, upstream: &str, auth: &str| {
         Config::from_toml_str(&format!(
-            "[server]\nlisten = \"{listen}\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
+            "[server]\nlisten = \"{listen}\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
              {upstream}\n[auth]\naudience = \"wye-prod\"\n{auth}"
         ))
     };
@@ -152,7 +148,7 @@ fn auth_allows_network_listen_and_validates_keys() {
 fn gateway_token_lifetimes_are_capped_at_30_days() {
     let with_ttl = |ttl: &str| {
         Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
              base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
              [auth]\naudience = \"wye-prod\"\nmax_gateway_token_ttl = \"{ttl}\"\n\
              signing_keys = [\"{PUBLIC_KEY}\"]"
@@ -182,7 +178,7 @@ fn gateway_token_lifetimes_are_capped_at_30_days() {
 fn auth_models_are_validated_patterns() {
     let with_models = |models: &str| {
         Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
              provider_key = {{ env = \"K\" }}\n[auth]\naudience = \"wye-prod\"\n{models}\n\
              signing_keys = [\"{PUBLIC_KEY}\"]"
         ))
@@ -235,12 +231,12 @@ fn credential_must_be_exactly_one() {
     };
     assert_eq!(
         error(""),
-        "routes.claude.upstreams \"anthropic\": set provider_key = { env = \"NAME\" } or \
+        "upstreams \"anthropic\": set provider_key = { env = \"NAME\" } or \
          { file = \"path\" }, or forward_caller_credential = true"
     );
     assert_eq!(
         error("provider_key = { env = \"K\" }\nforward_caller_credential = true"),
-        "routes.claude.upstreams \"anthropic\": set provider_key or \
+        "upstreams \"anthropic\": set provider_key or \
          forward_caller_credential, not both"
     );
     assert_eq!(
@@ -360,7 +356,7 @@ fn internal_bounds_are_derived_not_configured() {
 
 #[test]
 fn cache_diagnostics_require_a_key() {
-    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
+    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
                 base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
     assert!(
         Config::from_toml_str(base)
@@ -478,7 +474,7 @@ fn rejects_zero_timeouts_and_timers_past_a_day() {
 
 #[test]
 fn telemetry_endpoint_gets_the_logs_path() {
-    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
+    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
                 base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
     let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
     let telemetry = with("otlp_endpoint = \"http://localhost:4318\"")
@@ -567,7 +563,7 @@ fn a_provider_key_comes_from_the_environment_or_a_file() {
     };
     assert_eq!(
         error("provider_key = { file = \"k\", env = \"K\" }"),
-        "routes.claude.upstreams \"anthropic\": provider_key must name one source: \
+        "upstreams \"anthropic\": provider_key must name one source: \
          { env = \"NAME\" } or { file = \"path\" }"
     );
     assert_eq!(
@@ -601,7 +597,7 @@ fn discovery_lists_unique_model_names() {
     let with = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
+             [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
              [discovery]\nmodels = [{models}]"
         ))
     };
@@ -633,7 +629,7 @@ fn discovery_lists_unique_model_names() {
 fn identity_provider_issuers_are_validated() {
     let parse_auth = |auth: &str| {
         Config::from_toml_str(&format!(
-            "[server]\nlisten = \"0.0.0.0:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
+            "[server]\nlisten = \"0.0.0.0:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
              provider_key = {{ env = \"K\" }}\n[auth]\n{auth}"
         ))
     };

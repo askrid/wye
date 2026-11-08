@@ -1,5 +1,5 @@
 //! The upstreams a route sends requests to: their providers, base URLs,
-//! and provider keys.
+//! provider keys, and shares of the route's sessions.
 
 use super::*;
 
@@ -8,8 +8,12 @@ pub struct Upstream {
     /// Names the upstream in usage records, telemetry, prices, and `wye
     /// explain`: as written, else its provider's name ([`Provider::as_str`]).
     pub id: Box<str>,
-    /// Share of affinity keys, relative to the route's other upstreams.
+    /// Share of affinity keys, relative to the route's other upstreams that
+    /// are not standby; 1, and unused, for a standby.
     pub weight: u32,
+    /// Takes requests only when failover has moved past every upstream of
+    /// the route that is not standby, in config order.
+    pub standby: bool,
     pub provider: Provider,
     /// The `anthropic-workspace-id` sent with every request; set exactly
     /// for [`Provider::ClaudePlatformAws`].
@@ -46,8 +50,31 @@ pub enum Provider {
 }
 
 impl Provider {
-    /// The provider a route's upstream has unless it names one, and that a
-    /// request refused before an upstream was chosen is recorded under.
+    /// The provider an upstream has unless it names one.
+    pub const DEFAULT: Self = Self::Anthropic;
+
+    /// The provider `name` is in config.
+    pub fn parse(name: &str) -> Option<Self> {
+        [
+            Self::Anthropic,
+            Self::ClaudePlatformAws,
+            Self::Bedrock,
+            Self::OpenAi,
+        ]
+        .into_iter()
+        .find(|p| p.as_str() == name)
+    }
+
+    /// The route whose API the provider speaks.
+    pub fn route(self) -> RouteId {
+        match self {
+            Self::Anthropic | Self::ClaudePlatformAws | Self::Bedrock => RouteId::Claude,
+            Self::OpenAi => RouteId::OpenAi,
+        }
+    }
+
+    /// The provider that a request refused before an upstream was chosen is
+    /// recorded under: the first that speaks `route`'s API.
     pub fn of_route(route: RouteId) -> Self {
         match route {
             RouteId::Claude => Self::Anthropic,

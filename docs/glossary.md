@@ -13,13 +13,13 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 
 - **Endpoint**: an API path Wye serves, such as `/v1/messages` or `/v1/responses`. Not: route (for a path).
 - **Native API**: a provider's own API, passed through without translation: Anthropic Messages, OpenAI Responses, OpenAI Chat Completions.
-- **Route**: the upstreams that serve one native API: `[routes.claude]` and `[routes.openai]`, one `[[routes.<route>.upstreams]]` entry per upstream.
-- **Upstream**: one provider account a route sends requests to: an `id` (by default its provider's name), a provider, a base URL (by default the provider's API, for `anthropic` and `openai`), and its provider key. Not: account (except to explain it), key, candidate, backend.
+- **Route**: the upstreams that serve one native API, derived from their providers: the *Claude route* (Anthropic Messages: `anthropic`, `claude-platform-aws`, `bedrock`) and the *OpenAI route* (Responses and Chat Completions: `openai`). Not: a config section (there is none; upstreams are one `[[upstreams]]` list).
+- **Upstream**: one provider account a route sends requests to, one `[[upstreams]]` entry: an `id` (by default its provider's name, unique across all upstreams), a provider, a base URL (by default the provider's API, for `anthropic` and `openai`), and its provider key. Not: account (except to explain it), key, candidate, backend.
 - **Provider**: who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai`. Not: provider for an identity provider.
 - **Base URL**: where an upstream's requests go. Not: endpoint (for an upstream).
 - **Provider key**: the key Wye presents to an upstream, an upstream's `provider_key` secret. Not: credential, the operator's key, bare "key".
-- **Upstream selection**: how a route picks the upstream for a request: `cache_affine` (the default) or `ordered`. Not: routing (for this).
-- **Cache affinity**: the `cache_affine` selection: each session, else each subject, stays on one upstream, so its prompt cache stays warm. Its input is the *affinity key* (the session id, else the subject). Not: session affinity, sticky.
+- **Upstream selection**: how a route picks the upstream for a request: by cache affinity among its upstreams that are not standby. A *standby* (`standby = true`) takes a request only when failover has moved past every other, in config order. Not: routing (for this), ordered, primary.
+- **Cache affinity**: how a route shares sessions among its upstreams that are not standby, by `weight`: each session, else each subject, stays on one upstream, so its prompt cache stays warm. Its input is the *affinity key* (the session id, else the subject). Not: session affinity, sticky.
 - **Rejection**: an attempt's result that proves the upstream did not process the request: `429`, `529`, or a connection that failed before the body was delivered whole. Failover acts on it. Not: refusal (that is Wye's).
 - **Upstream error**: a request's outcome when no upstream gave a usable answer, so Wye answers `502` or `504` itself; its kind is `connect` (no connection or TLS handshake), `timeout` (no response headers in time), or `reset` (the request failed after connecting). A rejected connection that is not failed over ends as one. Not: refusal.
 - **Failover**: resending a rejected request to the route's next upstream, before any output; every route of two or more upstreams does it. The rejection's kind is the *failover reason* (`429`, `529`, `connect`). Not: retry, fallback.

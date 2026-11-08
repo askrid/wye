@@ -50,8 +50,7 @@ fn the_examples_parse_as_they_stand() {
 /// shows: it must run exactly as its required line alone.
 #[test]
 fn the_reference_sets_only_defaults() {
-    const REQUIRED: &str =
-        "[[routes.claude.upstreams]]\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n";
+    const REQUIRED: &str = "[[upstreams]]\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n";
     let reference = Config::from_toml_str(REFERENCE).unwrap();
     let required = Config::from_toml_str(REQUIRED).unwrap();
     assert_eq!(

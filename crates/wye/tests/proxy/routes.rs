@@ -24,9 +24,9 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
     let b = named_upstream("team-b", &hits).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
-         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
+         \
+         [[upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
+         [[upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
     );
     let route = Config::from_toml_str(&config)
         .unwrap()
@@ -66,7 +66,6 @@ async fn claude_platform_on_aws_gets_a_bearer_key_and_the_workspace() {
     let (handler, mut rx) = recording(|seen| seen.headers);
     let h = Harness::single_route(
         handler,
-        "claude",
         "",
         "id = \"aws\"\nprovider = \"claude-platform-aws\"\nworkspace_id = \"wrkspc_01AbCd\"",
         UpstreamAuth::bearer("aws-short-term-key").unwrap(),
@@ -88,7 +87,6 @@ async fn bedrock_gets_an_api_key_and_its_own_model_ids() {
     let (handler, mut rx) = recording(|seen| (seen.headers, seen.body));
     let h = Harness::single_route(
         handler,
-        "claude",
         "",
         "id = \"bedrock\"\nprovider = \"bedrock\"",
         UpstreamAuth::api_key("bedrock-key").unwrap(),

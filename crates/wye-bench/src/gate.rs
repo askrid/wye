@@ -105,7 +105,7 @@ const GATES: &[(&str, f64, f64)] = &[
     ("diag_upload_failed_requests", 0.0, 0.0),
     ("diag_agent_upload_failed_requests", 0.0, 0.0),
     // CPU per token-sized event, unpaced (plain path): the Messages usage
-    // scanner, and Wye on `[routes.openai]` with the mock framing OpenAI
+    // scanner, and Wye on an OpenAI upstream with the mock framing OpenAI
     // Responses streams and JSON (the Responses scanners).
     ("sse_cpu_us_per_event", 0.25, 0.5),
     ("openai_sse_cpu_us_per_event", 0.25, 0.5),

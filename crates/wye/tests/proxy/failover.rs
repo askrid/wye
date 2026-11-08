@@ -40,13 +40,13 @@ fn base_url(addr: SocketAddr) -> String {
     format!("base_url = \"http://{addr}\"")
 }
 
-/// The config of two upstreams tried in order, each given as its own lines.
+/// The config of two upstreams tried in order, each given as its own
+/// lines: the second a standby.
 fn config(max_body: usize, a: &str, b: &str) -> String {
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = {max_body}\n\
-         [routes.claude]\nselect = \"ordered\"\n\
-         [[routes.claude.upstreams]]\nid = \"a\"\n{a}\nprovider_key = {{ env = \"UNUSED\" }}\n\
-         [[routes.claude.upstreams]]\nid = \"b\"\n{b}\nprovider_key = {{ env = \"UNUSED\" }}\n"
+         [[upstreams]]\nid = \"a\"\n{a}\nprovider_key = {{ env = \"UNUSED\" }}\n\
+         [[upstreams]]\nid = \"b\"\nstandby = true\n{b}\nprovider_key = {{ env = \"UNUSED\" }}\n"
     )
 }
 
@@ -425,7 +425,7 @@ async fn a_route_with_one_upstream_answers_its_rejection() {
     let (a, _seen_a) = counted(StatusCode::TOO_MANY_REQUESTS, &hits).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[routes.claude.upstreams]]\n{}\nprovider_key = {{ env = \"UNUSED\" }}\n",
+         [[upstreams]]\n{}\nprovider_key = {{ env = \"UNUSED\" }}\n",
         base_url(a)
     );
     let h =

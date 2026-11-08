@@ -78,7 +78,8 @@ pub const DEFAULT_SAMPLE_PERCENT: u8 = 100;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub server: Server,
-    /// Where each API's requests go; at least one route.
+    /// Where each API's requests go, from `[[upstreams]]`; at least one
+    /// route.
     pub routes: Routes,
     /// Gateway tokens callers must present. Without it, Wye listens on
     /// loopback only.
@@ -98,12 +99,15 @@ pub struct Config {
 }
 
 /// One route per native API: the config's [`Route`]s, or what a runtime
-/// builds from each.
+/// builds from each. Each `[[upstreams]]` entry is in the route its
+/// provider serves ([`Provider::route`]).
 #[derive(Debug, Clone)]
 pub struct Routes<T = Route> {
-    /// Anthropic Messages: `[routes.claude]`.
+    /// Anthropic Messages: the upstreams of providers `anthropic`,
+    /// `claude-platform-aws`, and `bedrock`.
     pub claude: Option<T>,
-    /// OpenAI Responses and Chat Completions: `[routes.openai]`.
+    /// OpenAI Responses and Chat Completions: the upstreams of provider
+    /// `openai`.
     pub openai: Option<T>,
 }
 
@@ -274,16 +278,15 @@ pub enum ConfigError {
     },
     Percent(&'static str),
     Invalid(&'static str),
-    /// A problem with a field of `[routes.<route>]` itself; the error
-    /// starts with the field's name.
+    /// A problem with the upstreams that serve one route, named by its
+    /// label ([`RouteId::label`]).
     Route {
         route: &'static str,
-        error: Box<ConfigError>,
+        problem: &'static str,
     },
-    /// A problem in one `[[routes.<route>.upstreams]]` entry, named by its
-    /// id, written or by default.
-    RouteUpstream {
-        route: &'static str,
+    /// A problem in one `[[upstreams]]` entry, named by its id, written or
+    /// by default.
+    Upstream {
         id: String,
         error: Box<ConfigError>,
     },
@@ -324,10 +327,10 @@ impl fmt::Display for ConfigError {
             }
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
-            Self::Route { route, error } => write!(f, "routes.{route}.{error}"),
-            Self::RouteUpstream { route, id, error } => {
-                write!(f, "routes.{route}.upstreams {id:?}: {error}")
+            Self::Route { route, problem } => {
+                write!(f, "upstreams: the {route} route {problem}")
             }
+            Self::Upstream { id, error } => write!(f, "upstreams {id:?}: {error}"),
         }
     }
 }
@@ -356,7 +359,7 @@ impl Config {
         let raw: RawConfig =
             toml::from_str(source).map_err(|e| ConfigError::Parse(e.to_string()))?;
         let auth = raw.auth.map(validate_auth).transpose()?;
-        let routes = validate_routes(raw.routes)?;
+        let routes = validate_routes(raw.upstreams)?;
         if auth.is_some()
             && routes
                 .upstreams()
@@ -384,7 +387,7 @@ impl Config {
         let discovery = raw.discovery.map(validate_discovery).transpose()?;
         let aliases = validate_aliases(raw.aliases)?;
         let pricing = raw.pricing.map(validate_pricing).transpose()?;
-        // A price scoped to an upstream the routes do not have would never apply.
+        // A price scoped to an upstream the config does not have would never apply.
         if let Some(pricing) = &pricing
             && pricing
                 .entries
@@ -393,7 +396,7 @@ impl Config {
                 .any(|id| !routes.upstreams().any(|u| u.id == *id))
         {
             return Err(ConfigError::Invalid(
-                "pricing.prices.upstreams: every id must name a route upstream",
+                "pricing.prices.upstreams: every id must name one of [[upstreams]]",
             ));
         }
         let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;

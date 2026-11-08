@@ -32,11 +32,11 @@ drain_delay = "10s"
 # replicas), so its prompt cache stays warm; a request one key rejects with
 # 429 or 529 moves to the other before any output. Both at Anthropic's API,
 # the default base_url; two of one provider each need an id.
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "anthropic-a"
 provider_key = { env = "ANTHROPIC_KEY_A" }
 
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "anthropic-b"
 provider_key = { env = "ANTHROPIC_KEY_B" }
 
@@ -116,12 +116,6 @@ input = "0.10"
 output = "0.50"
 # cache_read and the cache writes: until set, requests that use the cache
 # cost "partial".
-
-# Why a prompt cache missed, for one session in ten:
-# export WYE_CACHE_HASH_KEY="$(openssl rand -hex 32)", the same on every replica.
-[cache_diagnostics]
-hash_key = { env = "WYE_CACHE_HASH_KEY" }
-sample_percent = 10
 
 # Usage records, metrics, and a trace per Claude Code session to an
 # OpenTelemetry collector beside each replica (a sidecar). Plain http reaches

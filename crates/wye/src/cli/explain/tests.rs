@@ -23,7 +23,7 @@ fn session(path: &str, id: &str) -> HeaderMap {
 fn config(key: &ring::signature::Ed25519KeyPair, extra_auth: &str) -> Config {
     Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\nmax_request_body_bytes = 200\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"ANTHROPIC_API_KEY\" }}\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"ANTHROPIC_API_KEY\" }}\n\
          [auth]\naudience = \"wye-prod\"\nsigning_keys = [\"{}\"]\n{extra_auth}\n\
          [cache_diagnostics]\nhash_key = {{ env = \"K\" }}",
         token::encode_public_key(key.public_key().as_ref())
@@ -192,7 +192,7 @@ fn explains_forwarding_and_each_refusal() {
 fn explains_alias_resolution_before_permissions() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -209,7 +209,7 @@ fn explains_alias_resolution_before_permissions() {
 fn explains_upgrade_issues_per_target_without_refusing() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
          [upgrade_check]\ntargets = [\"claude-opus-4-7\"]\n",
     )
     .unwrap();
@@ -246,9 +246,9 @@ fn explains_upgrade_issues_per_target_without_refusing() {
 #[test]
 fn shows_the_upstream_a_session_goes_to() {
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://a.example\"\nprovider_key = { env = \"A\" }\n\
-         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://b.example\"\nprovider_key = { env = \"B\" }\n",
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"team-a\"\nbase_url = \"https://a.example\"\nprovider_key = { env = \"A\" }\n\
+         [[upstreams]]\nid = \"team-b\"\nbase_url = \"https://b.example\"\nprovider_key = { env = \"B\" }\n",
     )
     .unwrap();
     for session in ["s-1", "s-2", "s-3", "s-4"] {
@@ -267,7 +267,7 @@ fn shows_the_upstream_a_session_goes_to() {
         let report = out.report();
         assert!(
             report.contains(&format!(
-                "selection: upstream {id} of 2 (cache_affine by session id)"
+                "selection: upstream {id} of 2 (cache affinity by session id)"
             )),
             "{report}"
         );
@@ -288,8 +288,8 @@ fn shows_the_upstream_a_session_goes_to() {
 #[test]
 fn shows_the_providers_own_model_id() {
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
          base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key = { env = \"B\" }\n",
     )
     .unwrap();
@@ -322,7 +322,7 @@ fn explains_responses_on_the_openai_route() {
         "[server]\nlisten = \"127.0.0.1:8080\"\n[auth]\naudience = \"wye\"\n\
          max_output_tokens = 1000\n\
          signing_keys = [\"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"]\n\
-         [routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
+         [[upstreams]]\nprovider = \"openai\"\nid = \"oa\"\n\
          base_url = \"https://api.openai.com\"\nprovider_key = { env = \"OPENAI_API_KEY\" }\n",
     )
     .unwrap();
@@ -377,16 +377,16 @@ fn explains_responses_on_the_openai_route() {
     );
     assert_eq!(
         no_claude.refused.as_ref().map(|r| r.2.as_str()),
-        Some("no route serves /v1/messages: add [routes.claude]")
+        Some("no route serves /v1/messages: add an [[upstreams]] entry")
     );
 }
 
 #[test]
 fn shows_the_price_that_applies_at_the_upstream() {
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\nselect = \"ordered\"\n\
-         [[routes.claude.upstreams]]\nid = \"aws\"\nbase_url = \"https://a.example\"\nprovider_key = { env = \"A\" }\n\
-         [[routes.claude.upstreams]]\nid = \"direct\"\nbase_url = \"https://b.example\"\nprovider_key = { env = \"B\" }\n\
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"aws\"\nbase_url = \"https://a.example\"\nprovider_key = { env = \"A\" }\n\
+         [[upstreams]]\nid = \"direct\"\nstandby = true\nbase_url = \"https://b.example\"\nprovider_key = { env = \"B\" }\n\
          [pricing]\nversion = \"v1\"\n\
          [[pricing.prices]]\nmodels = [\"claude-opus-*\"]\nupstreams = [\"aws\"]\n\
          input = \"5.50\"\noutput = \"27.50\"\n\
@@ -396,6 +396,15 @@ fn shows_the_price_that_applies_at_the_upstream() {
     .unwrap();
     let report = |body: &[u8]| explain_messages(&config, CallerToken::None, body).report();
     let priced = report(br#"{"model":"claude-opus-5-5"}"#);
+    // The standby takes requests only on failover.
+    assert!(
+        priced.contains(
+            "\nselection: upstream aws of 2 (the only one not standby)\n\
+             failover: on 429, 529, connect to direct (standby) in that order, for bodies \
+             up to 8 MiB\n"
+        ),
+        "{priced}"
+    );
     assert!(
         priced.contains(
             "price: claude-opus-5-5 at aws: input $5.50, output $27.50 per million tokens \
@@ -414,7 +423,7 @@ fn shows_the_price_that_applies_at_the_upstream() {
 fn reads_the_body_in_the_servers_order() {
     let aliased = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
     )
     .unwrap();
@@ -463,9 +472,9 @@ fn reads_the_body_in_the_servers_order() {
 #[test]
 fn chat_completions_carries_no_session_to_route_by() {
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.openai]\n\
-         [[routes.openai.upstreams]]\nid = \"a\"\nbase_url = \"https://api.openai.com\"\nprovider_key = { env = \"A\" }\n\
-         [[routes.openai.upstreams]]\nid = \"b\"\nbase_url = \"https://api.openai.com\"\nprovider_key = { env = \"B\" }\n",
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nprovider = \"openai\"\nid = \"a\"\nbase_url = \"https://api.openai.com\"\nprovider_key = { env = \"A\" }\n\
+         [[upstreams]]\nprovider = \"openai\"\nid = \"b\"\nbase_url = \"https://api.openai.com\"\nprovider_key = { env = \"B\" }\n",
     )
     .unwrap();
     let report = explain(
@@ -480,7 +489,7 @@ fn chat_completions_carries_no_session_to_route_by() {
     )
     .report();
     assert!(
-        report.contains("cache_affine by nothing: no session id or token"),
+        report.contains("cache affinity by nothing: no session id or token"),
         "{report}"
     );
 }
@@ -489,7 +498,7 @@ fn chat_completions_carries_no_session_to_route_by() {
 fn a_passthrough_names_the_callers_credential() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
     )
     .unwrap();
     let report = explain_messages(&config, CallerToken::None, b"{}").report();
@@ -513,7 +522,7 @@ fn a_passthrough_names_the_callers_credential() {
 fn a_web_pages_request_is_refused_without_auth() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nforward_caller_credential = true\n",
     )
     .unwrap();
     let with = |lines: &[&str]| {

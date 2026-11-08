@@ -36,9 +36,9 @@ Linux and macOS archives are on the [releases page](https://github.com/askrid/wy
 - **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`.
 - **Shared** (`--shared`): the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `~/.wye/wye.toml`; for a config repository, where it is reviewed, `-c wye.toml` there ([for a team](#using-it-for-a-team)).
 
-`-c <path>` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
+`-c <path>` names another path. `--openai` adds an OpenAI upstream for Codex and the OpenAI SDKs, with the setup's credential: the caller's own `OPENAI_API_KEY` (passthrough), the key in `openai.key` next to the config (`--provider-key`), or `OPENAI_API_KEY` in the deployment (`--shared`).
 
-With passthrough, a login counts against your plan and an API key bills the API. As without Wye, an exported `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` takes over from your login.
+With passthrough, a login counts against your plan and an API key bills the API. As without Wye, an exported `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` takes over from your login. Codex needs an exported `OPENAI_API_KEY`, which `wye codex` sends: a ChatGPT sign-in talks to another service and cannot pass through a gateway.
 
 ## Running it
 
@@ -66,7 +66,7 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 - **First lines:** requests, sessions, the window if one was given, lines skipped if any, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go)** (with two or more): tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
-- **Cache misses**, when there are any: a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
+- **Cache misses**, when there are any: a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look.
 - **Failovers, upgrade issues:** when records have them.
 - **Tools:** calls the model requested, and calls and time Claude Code reported.
 - **Top sessions and prompts:** the ten with the most tokens.
@@ -94,7 +94,7 @@ wye claude
 - Without installing Wye, Claude Code takes `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`.
 - `wye token issue --models` and `--max-output-tokens` narrow what one token may do; it can never widen the config ([gateway tokens](policy.md#gateway-tokens)).
 - A token cannot be revoked, only outlived, so keep lifetimes short ([revocation](policy.md#revocation)). `apiKeyHelper` and CI identity avoid pasting tokens ([token renewal](operations.md#token-renewal)).
-- `wye codex` needs `[routes.openai]`: `wye init --shared --openai`, and `-e OPENAI_API_KEY` for the container.
+- `wye codex` needs an OpenAI upstream: `wye init --shared --openai`, and `-e OPENAI_API_KEY` for the container.
 - `wye policy-diff` in CI flags a config change that widens access.
 - [examples/team/](../examples/team) is a complete team config with its policy tests: developers through SSO, CI jobs through GitHub Actions tokens, two Anthropic keys with failover, prices, and telemetry.
 
@@ -124,15 +124,15 @@ Streamed chat completions report usage only with `stream_options={"include_usage
 
 ## Several upstreams
 
-When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[routes.claude.upstreams]]` entry. An upstream is named by its provider (`anthropic`, `bedrock`) unless it has an `id`, which two of one provider each need:
+When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[upstreams]]` entry. Its `provider` decides the route it serves: `anthropic` (the default), `claude-platform-aws`, and `bedrock` serve Claude, `openai` serves OpenAI. An upstream is named by its provider unless it has an `id`, which two of one provider each need:
 
 ```toml
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "key-a"
 weight = 2                     # twice the sessions of key-b
 provider_key = { env = "ANTHROPIC_KEY_A" }
 
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "key-b"
 provider_key = { env = "ANTHROPIC_KEY_B" }
 ```
@@ -140,8 +140,8 @@ provider_key = { env = "ANTHROPIC_KEY_B" }
 - Each session stays on one upstream, chosen from its session id (SDK callers without one: from the gateway token's subject), so its prompt cache keeps hitting ([cache affinity](architecture.md#cache-affinity)). Without either, as for a local app with no gateway token, every request goes to the same upstream.
 - Weights share sessions, not tokens. Adding an upstream moves only the sessions it now wins; removing one moves only its own, and their next turn writes the cache again at the new upstream.
 - A [rejected](glossary.md#requests-and-where-they-go) request goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). With one upstream, a `429` goes back to the client, whose retry reaches the same upstream.
-- `select = "ordered"` makes the first upstream primary and the others standby.
-- Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI upstreams the same way.
+- `standby = true` keeps an upstream out of the session split: it takes a request only when every upstream of its route that is not standby rejected it, standbys in config order. A standby takes no `weight`, and a route needs one upstream that is not standby.
+- Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and several OpenAI upstreams (`provider = "openai"`) work the same way.
 - A route of several upstreams holds their provider keys, so it does not combine with passthrough, which needs a route with one upstream. Under `wye service`, read each provider key from a file, `provider_key = { file = "anthropic-a.key" }` ([why](operations.md#running-as-a-service)).
 - `wye explain --session <id>` shows which upstream a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
@@ -200,7 +200,7 @@ Startup failures and the gateway's messages go to stderr, the message log (`~/.w
 - `cannot listen on ...: the port is in use`: another gateway, perhaps. Stop it, or change `server.listen` and set `WYE_URL`.
 - `401 invalid or missing gateway token`: one message for every gateway-token failure, on purpose. `wye explain --token-file <file> request.json` says which: expired, wrong audience, unknown key. Any other `401` is the provider's.
 - `403 permission_error`: the gateway token may not use that model, or the request asks for more than its output-token ceiling. Run `wye explain`; see [permissions](policy.md#model-permissions).
-- `404 no route serves ...`: no route for that API. Add the section it names, such as `[routes.openai]`.
+- `404 no route serves ...`: no route for that API. Add the entry it names, such as an `[[upstreams]]` entry with `provider = "openai"`.
 - `408 request body stalled`: while Wye read `model`, the client sent nothing for 60 s, or had not reached it after 5 minutes. Check the client's network.
 - `415 the request body must...`: a compressed or non-UTF-8 body during [the hold](glossary.md#requests-and-where-they-go). Send plain UTF-8 JSON.
 - `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests`, or past the bytes it may hold while reading `model` (twice `max_request_body_bytes`). Otherwise it comes from the provider. Clients retry on their own; if it persists, raise the limit.

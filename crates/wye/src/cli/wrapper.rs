@@ -18,9 +18,14 @@ pub(crate) const DEFAULT_GATEWAY: &str = concat!("http://", gateway_core::defaul
 /// The environment variable Codex reads its bearer token from (the Codex
 /// provider's `env_key`).
 const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";
-/// Sent by Codex when the gateway takes no gateway token: Codex needs a token,
-/// and a gateway without `[auth]` replaces it with the provider key.
+/// Sent by Codex when the gateway takes no gateway token and the caller has
+/// no OpenAI key: Codex needs a token, and a gateway without `[auth]`
+/// replaces it with the provider key.
 const CODEX_NO_TOKEN: &str = "wye-loopback";
+/// The caller's own OpenAI API key, which Codex sends to a gateway on this
+/// machine that takes no gateway token: a passthrough gateway forwards it,
+/// and one with a provider key replaces it.
+const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 /// Makes Claude Code send its request class, prompt id, and tool times,
 /// which it sends a custom base URL only when asked.
 const HINT_HEADERS_ENV: &str = "CLAUDE_CODE_GATEWAY_HINT_HEADERS";
@@ -68,6 +73,9 @@ pub struct Launch {
     /// Claude Code's own login (subscription passthrough), or lets Codex
     /// reach a gateway without `[auth]`.
     pub token: Option<String>,
+    /// What Codex sends as its bearer token without a gateway token: the
+    /// caller's `OPENAI_API_KEY` ([`codex_key`]); `None` sends a placeholder.
+    pub codex_key: Option<String>,
     /// Claude Code's `CLAUDE_CODE_GATEWAY_HINT_HEADERS`: the caller's, or
     /// `1`, since the gateway is the caller's choice and the usage log
     /// needs the hints.
@@ -99,6 +107,7 @@ impl Launch {
         Ok(Self {
             gateway,
             token,
+            codex_key: None,
             hint_headers: env(HINT_HEADERS_ENV).unwrap_or_else(|| "1".to_owned()),
             args: args.iter().map(|a| (*a).to_owned()).collect(),
         })
@@ -148,15 +157,33 @@ impl Launch {
                         .arg("-c")
                         .arg(format!("{key}={}", toml_string(value)));
                 }
+                let bearer = self.token.as_ref().or(self.codex_key.as_ref());
                 command.env(
                     CODEX_TOKEN_ENV,
-                    self.token.as_deref().unwrap_or(CODEX_NO_TOKEN),
+                    bearer.map_or(CODEX_NO_TOKEN, String::as_str),
                 );
             }
         }
         command.args(&self.args);
         command
     }
+}
+
+/// The OpenAI key Codex sends without a gateway token: the caller's own
+/// `OPENAI_API_KEY`, to a gateway on this machine only, so the key never
+/// travels to another. A passthrough gateway forwards it; one with a
+/// provider key replaces it.
+pub fn codex_key(launch: &Launch, env: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    let local = launch
+        .gateway
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(is_loopback_host))
+        .unwrap_or(false);
+    if launch.token.is_some() || !local {
+        return None;
+    }
+    env(OPENAI_KEY_ENV).filter(|key| !key.is_empty())
 }
 
 /// `value` as a TOML basic string, as Codex parses `-c` values.
@@ -181,12 +208,15 @@ pub fn run(
     parsed: &Parsed<'_>,
     env: impl Fn(&str) -> Option<String>,
 ) -> Result<i32, String> {
-    let launch = Launch::resolve(
+    let mut launch = Launch::resolve(
         parsed.value("url"),
         parsed.value("token-file"),
         &parsed.positional,
         &env,
     )?;
+    if agent == Agent::Codex {
+        launch.codex_key = codex_key(&launch, &env);
+    }
     super::probe_blocking(&super::health_url(&launch.gateway))
         .map_err(|why| no_gateway(&launch.gateway, &why, "--url", &env))?;
     let program = agent.program();
@@ -308,6 +338,7 @@ mod tests {
         let launch = Launch {
             gateway: "http://gw".into(),
             token: Some("tok".into()),
+            codex_key: None,
             hint_headers: "1".into(),
             args: vec!["-p".into()],
         };
@@ -334,6 +365,7 @@ mod tests {
         let launch = Launch {
             gateway: "http://gw:9000".into(),
             token: None,
+            codex_key: None,
             hint_headers: "1".into(),
             args: vec!["exec".into(), "fix tests".into()],
         };
@@ -362,5 +394,47 @@ mod tests {
         let envs: Vec<_> = command.get_envs().collect();
         assert!(envs.contains(&("WYE_CODEX_TOKEN".as_ref(), Some("wye-loopback".as_ref()))));
         assert_eq!(toml_string(r#"a"b\c"#), r#""a\"b\\c""#);
+        // The caller's own key, when there is one; a gateway token wins.
+        let bearer = |token: Option<&str>| {
+            let launch = Launch {
+                token: token.map(str::to_owned),
+                codex_key: Some("sk-mine".into()),
+                ..Launch::resolve(Some("http://127.0.0.1:8080"), None, &[], |_| None).unwrap()
+            };
+            let command = launch.command(Agent::Codex, "codex");
+            let value = command
+                .get_envs()
+                .find(|(name, _)| *name == CODEX_TOKEN_ENV)
+                .and_then(|(_, value)| value)
+                .map(|v| v.to_str().unwrap().to_owned());
+            value.unwrap()
+        };
+        assert_eq!(bearer(None), "sk-mine");
+        assert_eq!(bearer(Some("tok")), "tok");
+    }
+
+    /// Without a gateway token, Codex sends the caller's OPENAI_API_KEY to a
+    /// gateway on this machine, and to no other.
+    #[test]
+    fn codex_sends_the_callers_openai_key_only_to_this_machine() {
+        let with_key = |name: &str| (name == "OPENAI_API_KEY").then(|| "sk-mine".to_owned());
+        let empty = |name: &str| (name == "OPENAI_API_KEY").then(String::new);
+        let launch = |url: &str, token: Option<&str>| Launch {
+            token: token.map(str::to_owned),
+            ..Launch::resolve(Some(url), None, &[], |_| None).unwrap()
+        };
+        let local = launch("http://127.0.0.1:8080", None);
+        assert_eq!(codex_key(&local, &with_key).as_deref(), Some("sk-mine"));
+        assert_eq!(codex_key(&local, &|_: &str| None), None);
+        assert_eq!(codex_key(&local, &empty), None);
+        // A gateway token goes instead; another machine never gets the key.
+        assert_eq!(
+            codex_key(&launch("http://127.0.0.1:8080", Some("tok")), &with_key),
+            None
+        );
+        assert_eq!(
+            codex_key(&launch("https://gw.example.com", None), &with_key),
+            None
+        );
     }
 }

@@ -26,8 +26,8 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setup {
     /// One developer: each caller's own credential goes through, whether
-    /// Claude Code's login or an API key, so the gateway holds no secret for
-    /// Claude.
+    /// Claude Code's login or an API key, and Codex's OPENAI_API_KEY, so the
+    /// gateway holds no secret.
     Passthrough,
     /// A local gateway that holds an Anthropic API key, read from a file
     /// next to the config, so a background service finds it too: one
@@ -76,7 +76,9 @@ impl InitOptions {
                 "# Each caller's own credential goes through, whether Claude Code's\n\
                  # login or an API key: this machine only, no [auth].\n\
                  forward_caller_credential = true",
-                "provider_key = { file = \"openai.key\" }",
+                "# Each caller's own OPENAI_API_KEY goes through (`wye codex` sends it;\n\
+                 # a ChatGPT sign-in cannot pass through a gateway).\n\
+                 forward_caller_credential = true",
             ),
             Setup::ProviderKey => (
                 "",
@@ -93,12 +95,12 @@ impl InitOptions {
         let mut text = format!(
             "# Written by `wye init`. Every field, with its default and limits:\n\
              # {REPO_AT_RELEASE}/examples/wye.toml\n\n\
-             {server}[[routes.claude.upstreams]]\n{credential}\n"
+             {server}[[upstreams]]\n{credential}\n"
         );
         if self.openai {
             text.push_str(&format!(
                 "\n# OpenAI Responses and Chat Completions (wye codex, OpenAI SDKs at /v1).\n\
-                 [[routes.openai.upstreams]]\n{openai_key}\n"
+                 [[upstreams]]\nprovider = \"openai\"\n{openai_key}\n"
             ));
         }
         if self.setup == Setup::Shared {
@@ -203,7 +205,7 @@ impl InitOptions {
         if self.setup == Setup::ProviderKey {
             keys.push(key("Anthropic API key", "anthropic.key"));
         }
-        if self.openai && self.setup != Setup::Shared {
+        if self.openai && self.setup == Setup::ProviderKey {
             keys.push(key("OpenAI key", "openai.key"));
         }
         if !keys.is_empty() {
@@ -265,8 +267,10 @@ impl InitOptions {
                      ANTHROPIC_API_KEY takes over from your login, and bills the API):"
                 }
                 (Setup::Passthrough, true) => {
-                    "Start Claude Code, or Codex, through it (an exported \
-                     ANTHROPIC_API_KEY takes over from your login, and bills the API):"
+                    "Start Claude Code, or Codex with `wye codex`, through it (an exported \
+                     ANTHROPIC_API_KEY takes over from your Claude login, and bills the \
+                     API; Codex sends your OPENAI_API_KEY, since a ChatGPT sign-in cannot \
+                     pass through a gateway):"
                 }
                 (_, true) => "Start Claude Code, or Codex, through it:",
                 (_, false) => "Start Claude Code through it:",
@@ -419,6 +423,8 @@ fn write_new(path: &Path, text: &str, show: &impl Fn(&Path) -> String) -> Result
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use gateway_core::config::{ProviderKey, Secret};
+
     use super::*;
     use crate::cli::files::CONFIG_FILE;
 
@@ -447,7 +453,7 @@ mod tests {
                 assert_eq!(config.auth.is_some(), setup == Setup::Shared);
                 // What a default gives is not written: the providers' own
                 // URLs, the upstreams' ids, and a local listen address.
-                for line in ["base_url", "id = \"openai\"", "[routes.openai]\n"] {
+                for line in ["base_url", "id = \"openai\"", "[routes", "standby"] {
                     assert!(!text.contains(line), "{setup:?}: {text}");
                 }
                 assert_eq!(
@@ -639,6 +645,41 @@ mod tests {
             "{steps}"
         );
         assert!(!steps.contains("wye doctor"), "{steps}");
+    }
+
+    /// `--openai` passes Codex's key through by default, like Claude's
+    /// credential; only `--provider-key` and `--shared` hold an OpenAI key.
+    #[test]
+    fn the_openai_upstream_takes_the_setups_credential() {
+        for (setup, credential) in [
+            (Setup::Passthrough, ProviderKey::ForwardCaller),
+            (
+                Setup::ProviderKey,
+                ProviderKey::Secret(Secret::File("openai.key".into())),
+            ),
+            (
+                Setup::Shared,
+                ProviderKey::Secret(Secret::Env("OPENAI_API_KEY".into())),
+            ),
+        ] {
+            let options = options(setup, true, Path::new("/h/wye.toml"));
+            let config = Config::from_toml_str(&options.config(&"A".repeat(43)).unwrap()).unwrap();
+            let openai = config.routes.openai.as_ref().unwrap();
+            assert_eq!(openai.upstreams()[0].provider_key, credential, "{setup:?}");
+            let steps = options.next_steps(|p| p.display().to_string());
+            assert_eq!(
+                steps.contains("openai.key"),
+                setup == Setup::ProviderKey,
+                "{steps}"
+            );
+        }
+        let steps = options(Setup::Passthrough, true, Path::new("/h/wye.toml"))
+            .next_steps(|p| p.display().to_string());
+        let flat = steps.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.contains("Codex sends your OPENAI_API_KEY, since a ChatGPT sign-in cannot pass"),
+            "{steps}"
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use gateway_core::{
     policy,
     pricing::{Pico, PriceEntry, Usd},
     prompt,
-    route::{self, FAILOVER_MAX_BODY_BYTES, FailoverReason, Route, Select},
+    route::{self, FAILOVER_MAX_BODY_BYTES, FailoverReason, Route},
     token::{Identity, Verifier},
     upgrade::{self, UpgradeScanner},
 };
@@ -375,12 +375,12 @@ impl Explanation {
         };
         let id = &upstream.id;
         self.upstream = Some(id.to_string());
-        let how = match (route.select(), session, identity) {
+        let how = match (route.sharing(), session, identity) {
             _ if upstreams.len() == 1 => "the route's only one",
-            (Select::Ordered, _, _) => "ordered: the first in config",
-            (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
-            (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
-            (Select::CacheAffine, None, None) => "cache_affine by nothing: no session id or token",
+            (1, _, _) => "the only one not standby",
+            (_, Some(_), _) => "cache affinity by session id",
+            (_, None, Some(_)) => "cache affinity by token subject",
+            (_, None, None) => "cache affinity by nothing: no session id or token",
         };
         if upstreams.len() == 1 {
             self.step(format!("selection: upstream {id}, {how}"));
@@ -391,10 +391,14 @@ impl Explanation {
             ));
         }
         if route.fails_over() {
-            let next: Vec<&str> = ranking
+            let next: Vec<String> = ranking
                 .iter()
                 .skip(1)
-                .filter_map(|i| upstreams.get(i).map(|u| &*u.id))
+                .filter_map(|i| upstreams.get(i))
+                .map(|u| match u.standby {
+                    true => format!("{} (standby)", u.id),
+                    false => u.id.to_string(),
+                })
                 .collect();
             let reasons: Vec<&str> = FailoverReason::ALL
                 .into_iter()

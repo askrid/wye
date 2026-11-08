@@ -10,10 +10,9 @@ use std::path::Path;
 
 use gateway_core::{
     api::RouteId,
-    config::{Auth, Config, IdentityProvider, OwnIssuer, ProviderKey},
+    config::{Auth, Config, IdentityProvider, OwnIssuer, ProviderKey, Upstream},
     duration::show,
     policy::ModelPattern,
-    route::Route,
 };
 
 use super::{
@@ -118,13 +117,19 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
         (None, None) => {}
     }
     for id in RouteId::ALL {
-        route(
-            &mut diff,
-            id.name(),
-            old.routes.route(id),
-            new.routes.route(id),
-        );
+        match (old.routes.route(id), new.routes.route(id)) {
+            (None, Some(_)) => diff.widens.push(format!(
+                "the {} route added: its requests now reach a provider",
+                id.label()
+            )),
+            (Some(_), None) => diff.narrows.push(format!(
+                "the {} route removed: its requests are no longer served",
+                id.label()
+            )),
+            _ => {}
+        }
     }
+    upstreams(&mut diff, old, new);
     diff
 }
 
@@ -303,47 +308,48 @@ fn models(
     }
 }
 
-/// Where requests go. A route for an API that had none widens, and so does
-/// an upstream that starts sending a provider key where callers brought
-/// their own; other changes are listed for review, since where requests go
-/// is not who may send them.
-fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Route>) {
-    match (old, new) {
-        (None, Some(_)) => diff.widens.push(format!(
-            "routes.{name} added: its API now reaches a provider"
-        )),
-        (Some(_), None) => diff.narrows.push(format!(
-            "routes.{name} removed: its API is no longer served"
-        )),
-        _ => {}
-    }
-    // Where each upstream is, for the report.
-    let upstreams = |route: Option<&Route>| -> Vec<(String, String, ProviderKey)> {
-        route
-            .map(|r| {
-                r.upstreams()
-                    .iter()
-                    .map(|u| {
-                        (
-                            format!("routes.{name}: upstream {}", u.id),
-                            u.base_url(),
-                            u.provider_key.clone(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    let (before, after) = (upstreams(old), upstreams(new));
-    for (at, url, credential) in &after {
-        let Some((_, was, was_credential)) = before.iter().find(|(i, ..)| i == at) else {
+/// Where requests go. A route for an API that had none widens (above), and
+/// so does an upstream that starts sending a provider key where callers
+/// brought their own; other changes are listed for review, since where
+/// requests go is not who may send them. Ids are unique across all
+/// upstreams, so an upstream keeps its id when its provider moves it to
+/// another route.
+fn upstreams(diff: &mut PolicyDiff, old: &Config, new: &Config) {
+    let before: Vec<&Upstream> = old.routes.upstreams().collect();
+    for u in new.routes.upstreams() {
+        let at = format!("upstreams {:?}", u.id);
+        let (url, credential) = (u.base_url(), &u.provider_key);
+        let Some(was) = before.iter().find(|w| w.id == u.id) else {
             diff.changes.push(format!("{at} added ({url})"));
             continue;
         };
-        if was != url {
-            diff.changes.push(format!("{at}: {was} -> {url}"));
+        if was.provider != u.provider {
+            let (from, to) = (was.provider.route(), u.provider.route());
+            let moved = if from == to {
+                String::new()
+            } else {
+                format!(
+                    ", from the {} route to the {} route",
+                    from.label(),
+                    to.label()
+                )
+            };
+            diff.changes.push(format!(
+                "{at}: provider {} -> {}{moved}",
+                was.provider.as_str(),
+                u.provider.as_str()
+            ));
         }
-        match (was_credential, credential) {
+        if was.base_url() != url {
+            diff.changes
+                .push(format!("{at}: {} -> {url}", was.base_url()));
+        }
+        match (was.standby, u.standby) {
+            (false, true) => diff.changes.push(format!("{at}: now standby")),
+            (true, false) => diff.changes.push(format!("{at}: no longer standby")),
+            _ => {}
+        }
+        match (&was.provider_key, credential) {
             (ProviderKey::ForwardCaller, ProviderKey::ForwardCaller) => {}
             (ProviderKey::ForwardCaller, _) => diff.widens.push(format!(
                 "{at} sends a provider key, where callers brought their own"
@@ -355,9 +361,9 @@ fn route(diff: &mut PolicyDiff, name: &str, old: Option<&Route>, new: Option<&Ro
             _ => {}
         }
     }
-    for (at, ..) in &before {
-        if !after.iter().any(|(i, ..)| i == at) {
-            diff.changes.push(format!("{at} removed"));
+    for was in before {
+        if !new.routes.upstreams().any(|u| u.id == was.id) {
+            diff.changes.push(format!("upstreams {:?} removed", was.id));
         }
     }
 }

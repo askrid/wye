@@ -188,14 +188,14 @@ fn the_uninstall_plan_says_what_stops_goes_and_stays() {
 fn secrets_from_the_environment_are_named() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n\
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n\
          [cache_diagnostics]\nhash_key = { env = \"WYE_HASH_KEY\" }\n",
     )
     .unwrap();
     assert_eq!(env_secrets(&config), ["ANTHROPIC_API_KEY", "WYE_HASH_KEY"]);
     let file = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { file = \"anthropic.key\" }\n",
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { file = \"anthropic.key\" }\n",
     )
     .unwrap();
     assert!(env_secrets(&file).is_empty());
@@ -206,7 +206,7 @@ fn secrets_from_the_environment_are_named() {
 #[test]
 fn a_service_reads_its_secrets_from_files() {
     let dir = wye_testkit::TempDir::new("service-secrets");
-    let upstream = "[[routes.claude.upstreams]]\nprovider_key = { file = \"anthropic.key\" }\n";
+    let upstream = "[[upstreams]]\nprovider_key = { file = \"anthropic.key\" }\n";
     let files = format!(
         "{upstream}[cache_diagnostics]\nhash_key = {{ file = \"hash.key\" }}\n\
          [telemetry]\notlp_endpoint = \"http://127.0.0.1:4318\"\n\
@@ -290,7 +290,7 @@ fn a_restart_brings_the_stop_timeout_up_to_the_config() {
     let installed = service("/Users/a");
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\ndrain_delay = \"10s\"\nshutdown_grace = \"1m\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n",
+         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n",
     )
     .unwrap();
     let refreshed = refreshed(&installed, &config);

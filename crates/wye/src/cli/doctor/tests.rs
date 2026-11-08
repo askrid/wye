@@ -13,9 +13,9 @@ async fn reports_each_problem_and_what_works() {
     // Setting variables is unsafe in edition 2024: PATH stands in for a set
     // key, a surely unset name for a missing one.
     let config = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"up\"\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"PATH\" }}\n\
-         [[routes.claude.upstreams]]\nid = \"down\"\nbase_url = \"http://127.0.0.1:1\"\n\
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"up\"\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"PATH\" }}\n\
+         [[upstreams]]\nid = \"down\"\nbase_url = \"http://127.0.0.1:1\"\n\
          provider_key = {{ env = \"WYE_DOCTOR_SURELY_UNSET\" }}\n"
     ))
     .unwrap();
@@ -46,10 +46,10 @@ async fn reports_each_problem_and_what_works() {
 async fn a_bedrock_upstream_needs_the_anthropic_path() {
     // Nothing listens on port 1: only the path check is asserted.
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"right\"\nprovider = \"bedrock\"\n\
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"right\"\nprovider = \"bedrock\"\n\
          base_url = \"http://127.0.0.1:1/anthropic\"\nprovider_key = { env = \"PATH\" }\n\
-         [[routes.claude.upstreams]]\nid = \"wrong\"\nprovider = \"bedrock\"\n\
+         [[upstreams]]\nid = \"wrong\"\nprovider = \"bedrock\"\n\
          base_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"PATH\" }\n",
     )
     .unwrap();
@@ -82,7 +82,7 @@ async fn a_key_file_open_to_others_is_a_problem() {
     std::fs::write(&signing, "not checked for its contents\n").unwrap();
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { file = \"key\" }\n\
+         [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { file = \"key\" }\n\
          [cache_diagnostics]\nhash_key = { file = \"hash.key\" }\n",
     )
     .unwrap();
@@ -159,7 +159,7 @@ async fn a_key_serve_would_refuse_fails_the_check() {
     std::fs::write(dir.join("key"), "sk-\u{1}broken\n").unwrap();
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { file = \"key\" }\n",
+         [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { file = \"key\" }\n",
     )
     .unwrap();
     let (report, ok) = doctor(&config, &dir, None).await;

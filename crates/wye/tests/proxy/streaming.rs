@@ -210,7 +210,7 @@ async fn client_that_stops_reading_is_disconnected() {
     let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\n\
+         [[upstreams]]\nbase_url = \"http://{upstream}\"\n\
          provider_key = {{ env = \"UNUSED\" }}\n"
     );
     // The timeout is fixed at a minute; a second here.

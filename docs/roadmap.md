@@ -98,7 +98,7 @@ Exit: on real logs, every line of waste the report names comes with a priced fix
 
 ### M3: Codex
 
-Built: `[routes.openai]`, Responses and Chat Completions passthrough, refusals in the OpenAI error shape, model permissions and output-token ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, and stored responses reaching their upstream by cache affinity ([upstream-held state](architecture.md#upstream-held-state)).
+Built: the OpenAI route, Responses and Chat Completions passthrough (with a provider key or the caller's own OpenAI API key), refusals in the OpenAI error shape, model permissions and output-token ceilings, usage and cost on all three APIs including non-streaming JSON, `wye codex` ([architecture.md](architecture.md#codex-integration)), Codex's headers mapped onto the same record fields, and stored responses reaching their upstream by cache affinity ([upstream-held state](architecture.md#upstream-held-state)).
 
 Open:
 
@@ -111,7 +111,7 @@ Exit: a team runs Claude Code and Codex through one Wye, under one policy, and s
 
 ### M4: Claude across providers and accounts
 
-Built: routes with several [upstreams](glossary.md#requests-and-where-they-go), `cache_affine` or `ordered`, failover before output, and Claude Platform on AWS and Bedrock with API keys ([selection and failover](architecture.md#upstream-selection-and-failover), [providers](architecture.md#claude-across-providers)).
+Built: routes with several [upstreams](glossary.md#requests-and-where-they-go), cache affinity with standby upstreams, failover before output, and Claude Platform on AWS and Bedrock with API keys ([selection and failover](architecture.md#upstream-selection-and-failover), [providers](architecture.md#claude-across-providers)).
 
 Open (the auth questions are in [open design decisions](architecture.md#open-design-decisions)):
 

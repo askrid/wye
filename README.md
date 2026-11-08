@@ -101,12 +101,12 @@ A route with two upstreams, which fail over to each other, and a price table:
 [server]
 listen = "127.0.0.1:8080"
 
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "anthropic"
 weight = 2         # twice the sessions of the other
 provider_key = { env = "ANTHROPIC_API_KEY" }
 
-[[routes.claude.upstreams]]
+[[upstreams]]
 id = "bedrock-us"
 provider = "bedrock"
 base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
@@ -123,7 +123,7 @@ cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 ```
 
-Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way ([details](docs/guide.md#several-upstreams)). Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
+Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way, and `standby = true` keeps an upstream for failover only ([details](docs/guide.md#several-upstreams)). Each upstream serves its `provider`'s API: Claude's for `anthropic` (the default), `bedrock`, and `claude-platform-aws`; OpenAI's for `openai`. Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
 
 `wye explain` shows what this config decides for one request, offline, through the gateway's own functions:
 
@@ -134,7 +134,7 @@ endpoint: POST /v1/messages
 gateway token: not required (no [auth]); a local client: a loopback Host, no Origin
 body: 88 bytes (limit 32 MiB)
 model: claude-opus-5-5; allowed by config: any; by token: any
-selection: upstream bedrock-us of 2 (cache_affine by session id)
+selection: upstream bedrock-us of 2 (cache affinity by session id)
 failover: on 429, 529, connect to anthropic in that order, for bodies up to 8 MiB
 upstream: POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages
 provider key: x-api-key from $BEDROCK_API_KEY

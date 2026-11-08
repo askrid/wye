@@ -7,9 +7,9 @@
 #   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 #
-# Only a provider key (or forward_caller_credential) is required, and a
-# base_url for providers whose URL names a region (claude-platform-aws,
-# bedrock). Unknown fields are an error at startup.
+# Only an [[upstreams]] entry with a provider key (or
+# forward_caller_credential) is required, and a base_url for providers whose
+# URL names a region (claude-platform-aws, bedrock). Unknown fields are an error at startup.
 # Durations are a whole number and a unit: "30s", "10m", "8h", "7d"; timers
 # are at most "1d".
 # Paths are relative to this file. Secrets are never written here: each is
@@ -39,28 +39,30 @@ max_concurrent_requests = 10000
 drain_delay = "0s"
 shutdown_grace = "30s"                 # then remaining requests are cancelled
 
-# The Claude route: Anthropic Messages, for Claude Code and the Anthropic
-# SDKs. Here one upstream, one Anthropic account; several accounts or
-# providers are one upstream each (below). Each Claude Code session stays on
-# one upstream, chosen from the session id the same way on every replica, so
-# its prompt cache stays warm. With two or more upstreams, a request the
-# upstream rejects before processing it (429, 529, or a connection refused
-# or cut before the body was sent whole) goes to the session's next upstream
-# in the same turn: never after a response byte, and never a body over
-# 8 MiB.
-[routes.claude]
-# "cache_affine" spreads sessions by weight; "ordered" uses the first
-# upstream and the others only on failover:
-select = "cache_affine"
-
-# Up to 16 upstreams, one [[routes.claude.upstreams]] entry each.
-[[routes.claude.upstreams]]
-# Names the upstream in usage records, OTLP, and prices; unique. Default:
-# the provider's name ("anthropic"); required when two upstreams of a route
-# share a provider:
+# Upstreams: one [[upstreams]] entry per provider account. Each serves the
+# route its provider speaks: anthropic, claude-platform-aws, and bedrock the
+# Claude route (Anthropic Messages, for Claude Code and the Anthropic SDKs);
+# openai the OpenAI route (Responses and Chat Completions, for Codex and the
+# OpenAI SDKs). Up to 16 per route. Here one upstream, one Anthropic account.
+# The upstreams of a route that are not standby share its sessions by
+# weight: each Claude Code or Codex session stays on one, chosen from the
+# session id the same way on every replica, so its prompt cache stays warm.
+# With two or more, a request the upstream rejects before processing it
+# (429, 529, or a connection refused or cut before the body was sent whole)
+# goes to the session's next upstream in the same turn, then to the
+# standbys in config order: never after a response byte, and never a body
+# over 8 MiB.
+[[upstreams]]
+# Names the upstream in usage records, OTLP, and prices; unique across all
+# upstreams. Default: the provider's name ("anthropic"); required when two
+# upstreams share a provider:
 # id = "main"
-provider = "anthropic"                 # or "claude-platform-aws", "bedrock" (below)
+provider = "anthropic"                 # or "claude-platform-aws", "bedrock", "openai" (below)
 weight = 1                             # share of sessions, 1 to 1000
+# Takes requests only on failover past every upstream of its route that is
+# not standby, in config order; takes no weight. A route needs one that is
+# not standby:
+standby = false
 # Without /v1; http only for loopback hosts. Default: the provider's API
 # for anthropic (this) and openai; claude-platform-aws and bedrock name a
 # region, so set it:
@@ -69,8 +71,8 @@ provider_key = { env = "ANTHROPIC_API_KEY" }
 # Or from a mounted secret file (Docker or Kubernetes secrets, systemd
 # credentials, or one next to this config, as `wye init` writes it):
 # provider_key = { file = "/run/secrets/anthropic_api_key" }
-# Or forward each caller's own credential: a claude.ai login, or an API key,
-# which bills the API (a route with one upstream, loopback only, no [auth];
+# Or forward each caller's own credential: a claude.ai login or an API key,
+# which bills the API (its route's only upstream, loopback only, no [auth];
 # `wye init` writes this):
 # forward_caller_credential = true
 connect_timeout = "10s"                # TCP and the TLS handshake together
@@ -87,35 +89,37 @@ http_version = "auto"
 # Several accounts or providers: one more entry each, with an id where two
 # share a provider. Each takes every field above except
 # forward_caller_credential.
-# [[routes.claude.upstreams]]
+# [[upstreams]]
 # id = "team-a"
 # weight = 2
 # base_url = "https://api.anthropic.com"
 # provider_key = { env = "ANTHROPIC_KEY_TEAM_A" }
 #
-# [[routes.claude.upstreams]]
+# [[upstreams]]
 # id = "aws-us-west-2"
 # provider = "claude-platform-aws"     # the provider key goes as a bearer token
 # workspace_id = "wrkspc_01AbCdEf23GhIj"   # required for this provider
 # base_url = "https://aws-external-anthropic.us-west-2.api.aws"
 # provider_key = { env = "CLAUDE_PLATFORM_AWS_KEY" }
 #
-# [[routes.claude.upstreams]]
+# [[upstreams]]
 # id = "bedrock-us-east-1"
 # provider = "bedrock"                 # model ids go upstream as anthropic.<model>
+# standby = true                       # only when the others reject
 # base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
 # provider_key = { env = "BEDROCK_API_KEY" }
 
-# OpenAI Responses and Chat Completions, for Codex (`wye codex`) and the
-# OpenAI SDKs, beside or instead of the Claude route. Clients use base URL
-# http://<gateway>/v1; the provider key goes upstream as
-# Authorization: Bearer. Several upstreams, `select`, `weight`, and
-# failover work as above.
-# [routes.openai]
-# [[routes.openai.upstreams]]
-# provider = "openai"                  # the default here
-# base_url = "https://api.openai.com"  # the default here; without /v1
+# The OpenAI route, beside or instead of the Claude route: clients use base
+# URL http://<gateway>/v1; the provider key goes upstream as
+# Authorization: Bearer. Several upstreams, weight, standby, and failover
+# work as above. forward_caller_credential works as above too, with the
+# caller's OPENAI_API_KEY (`wye codex` sends it): a ChatGPT sign-in talks to
+# another service and cannot pass through a gateway.
+# [[upstreams]]
+# provider = "openai"
+# base_url = "https://api.openai.com"  # the default; without /v1
 # provider_key = { env = "OPENAI_API_KEY" }
+# forward_caller_credential = true
 
 # Gateway tokens; incompatible with forward_caller_credential. `wye init
 # --shared` writes this section and a signing key; issue gateway tokens with
@@ -165,8 +169,10 @@ http_version = "auto"
 
 # Cache diagnostics: keyed hashes of a request's prompt sections, naming which
 # section changed before a cache miss (docs/architecture.md, "Cache
-# diagnostics"). Scanning adds CPU time per uploaded MB; sample_percent
-# diagnoses that share of Claude Code sessions, each completely. The key
+# diagnostics"). No Wye command reads the hashes yet; cache-break forensics
+# in docs/research.md is the planned reader. Scanning adds CPU time per
+# uploaded MB; sample_percent diagnoses that share of Claude Code sessions,
+# each completely. The key
 # (required, at least 32 bytes: `openssl rand -hex 32`) and sample_percent
 # must match on every replica. The key, like every secret, is { env } or
 # { file }:

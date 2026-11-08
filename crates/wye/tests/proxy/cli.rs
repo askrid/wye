@@ -84,7 +84,7 @@ impl Setup {
         std::fs::write(
             repo.join("wye.toml"),
             "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
+             [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
         )
         .unwrap();
         Self { home, repo }
@@ -96,7 +96,7 @@ impl Setup {
         std::fs::write(
             setup.home.join(".wye/wye.toml"),
             "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n",
+             [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n",
         )
         .unwrap();
         setup
@@ -253,7 +253,7 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
         &config,
         format!(
             "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+             [[upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
         ),
     )
     .unwrap();
@@ -297,7 +297,7 @@ async fn serve_writes_records_to_the_usage_log_it_is_given() {
         &config,
         format!(
             "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+             [[upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
         ),
     )
     .unwrap();
@@ -428,12 +428,12 @@ fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
     let loopback = write(
         "loopback.toml",
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n",
+         [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nforward_caller_credential = true\n",
     );
     let keyed = write(
         "keyed.toml",
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
+         [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
     );
     let request = write("request.json", r#"{"messages":[]}"#);
     let status = |args: &[&str]| {
@@ -468,7 +468,7 @@ fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
     let idp = write(
         "idp.toml",
         "[server]\nlisten = \"0.0.0.0:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n\
+         [[upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n\
          [auth]\n[[auth.identity_providers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
          algorithm = \"RS256\"\njwks_file = \"idp.jwks\"\n",
     );

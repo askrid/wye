@@ -3,10 +3,10 @@ use crate::config::Config;
 
 /// A route with one upstream per `(id, weight)`.
 fn route(upstreams: &[(&str, u32)]) -> Route {
-    let mut toml = String::from("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n");
+    let mut toml = String::from("[server]\nlisten = \"127.0.0.1:8080\"\n");
     for (id, weight) in upstreams {
         toml.push_str(&format!(
-            "[[routes.claude.upstreams]]\nid = \"{id}\"\nweight = {weight}\n\
+            "[[upstreams]]\nid = \"{id}\"\nweight = {weight}\n\
              base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n"
         ));
     }
@@ -97,11 +97,12 @@ fn choice_is_pinned_across_versions() {
 }
 const PINNED: [usize; 7] = [0, 2, 2, 2, 2, 2, 2];
 
-fn route_with(extra: &str, upstreams: &[&str]) -> Route {
-    let mut toml = format!("[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n{extra}\n");
-    for id in upstreams {
+/// A route with one upstream per `(id, extra lines)`.
+fn route_with(upstreams: &[(&str, &str)]) -> Route {
+    let mut toml = String::from("[server]\nlisten = \"127.0.0.1:8080\"\n");
+    for (id, extra) in upstreams {
         toml.push_str(&format!(
-            "[[routes.claude.upstreams]]\nid = \"{id}\"\n\
+            "[[upstreams]]\nid = \"{id}\"\n{extra}\n\
              base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n"
         ));
     }
@@ -137,21 +138,35 @@ fn failover_moves_to_the_next_ranked_upstream_not_the_next_in_config() {
 }
 
 #[test]
-fn ordered_selection_goes_in_config_order() {
-    let route = route_with("select = \"ordered\"", &["first", "second", "third"]);
-    assert_eq!(route.select(), Select::Ordered);
+fn standbys_come_after_the_others_in_config_order() {
+    let standby = "standby = true";
+    let route = route_with(&[("first", ""), ("second", standby), ("third", standby)]);
+    assert_eq!(route.sharing(), 1);
     for key in ["", "s-1", "alice"] {
         assert_eq!(
             route.rank(key.as_bytes()).iter().collect::<Vec<_>>(),
             [0, 1, 2]
         );
     }
+    // The others share keys as if the standbys were not there, and a
+    // standby written first still comes last.
+    let mixed = route_with(&[("s", standby), ("a", ""), ("b", ""), ("t", standby)]);
+    let alone = route_with(&[("a", ""), ("b", "")]);
+    assert_eq!(mixed.sharing(), 2);
+    for i in 0..500 {
+        let key = format!("session-{i}");
+        let ranking: Vec<usize> = mixed.rank(key.as_bytes()).iter().collect();
+        let shared: Vec<usize> = alone.rank(key.as_bytes()).iter().map(|i| i + 1).collect();
+        assert_eq!(ranking[..2], shared[..], "{key}");
+        assert_eq!(ranking[2..], [0, 3], "{key}");
+    }
 }
 
 #[test]
 fn several_upstreams_fail_over_and_one_cannot() {
-    assert!(route_with("", &["a", "b"]).fails_over());
-    assert!(!route_with("", &["a"]).fails_over());
+    assert!(route_with(&[("a", ""), ("b", "")]).fails_over());
+    assert!(route_with(&[("a", ""), ("b", "standby = true")]).fails_over());
+    assert!(!route_with(&[("a", "")]).fails_over());
     assert_eq!(
         FailoverReason::of_status(429),
         Some(FailoverReason::RateLimited)
@@ -164,9 +179,8 @@ fn several_upstreams_fail_over_and_one_cannot() {
     assert_eq!(FailoverReason::of_status(500), None);
     let parse = |extra: &str| {
         let toml = format!(
-            "[routes.claude]\n{extra}\n[[routes.claude.upstreams]]\nid = \"a\"\n\
-             provider_key = {{ env = \"K\" }}\n[[routes.claude.upstreams]]\nid = \"b\"\n\
-             provider_key = {{ env = \"K\" }}\n"
+            "[[upstreams]]\nid = \"a\"\n{extra}\nprovider_key = {{ env = \"K\" }}\n\
+             [[upstreams]]\nid = \"b\"\nprovider_key = {{ env = \"K\" }}\n"
         );
         Config::from_toml_str(&toml)
             .map(|_| ())
@@ -177,10 +191,8 @@ fn several_upstreams_fail_over_and_one_cannot() {
     for field in ["failover = [\"429\"]", "failover_max_body_bytes = 10"] {
         assert!(parse(field).contains("unknown field"), "{field}");
     }
-    assert_eq!(
-        parse("select = \"random\""),
-        "routes.claude.select must be \"cache_affine\" or \"ordered\""
-    );
+    // Selection is not configured either: standby is per upstream.
+    assert!(parse("select = \"ordered\"").contains("unknown field"));
 }
 
 #[test]

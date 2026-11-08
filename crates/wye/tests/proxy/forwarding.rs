@@ -211,12 +211,15 @@ async fn local_endpoints_and_unknown_paths() {
             .starts_with(br#"{"type":"error","error":{"type":"not_found_error""#)
     );
     // A known endpoint without a route gets its own API's shape, naming the
-    // section that would serve it.
+    // entry that would serve it.
     let res = h.send(Request::post("/v1/chat/completions"), "{}").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body = String::from_utf8(read_body(res).await.to_vec()).unwrap();
     assert!(body.starts_with(r#"{"error":{"#), "{body}");
-    assert!(body.contains("add [routes.openai]"), "{body}");
+    assert!(
+        body.contains("add an [[upstreams]] entry with provider = \\\"openai\\\""),
+        "{body}"
+    );
     assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
 }
 
@@ -270,7 +273,7 @@ async fn a_provider_key_from_a_file_is_read_relative_to_the_config_and_trimmed()
     let (handler, mut rx) = recording(|seen| seen.headers);
     let (upstream, hits) = spawn_counted(handler).await;
     let config = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\n\
+        "[server]\nlisten = \"127.0.0.1:0\"\n[[upstreams]]\nbase_url = \"http://{upstream}\"\n\
          provider_key = {{ file = \"secrets/provider-key\" }}"
     ))
     .unwrap();

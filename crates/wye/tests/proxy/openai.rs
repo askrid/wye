@@ -6,10 +6,13 @@ use super::harness::*;
 const OPENAI_KEY: &str = "sk-openai-test";
 const EVENTS: &str = "event: response.created\ndata: {\"type\":\"response.created\"}\n\n";
 
-/// A gateway with only `[routes.openai]` (plus `extra` config) in front of `handler`.
+/// The upstream lines of the gateway's only upstream.
+const UPSTREAM: &str = "id = \"openai\"\nprovider = \"openai\"";
+
+/// A gateway with only the OpenAI route (plus `extra` config) in front of `handler`.
 async fn gateway(handler: Handler, extra: &str) -> Harness {
     let auth = UpstreamAuth::bearer(OPENAI_KEY).unwrap();
-    Harness::single_route(handler, "openai", extra, "id = \"openai\"", auth).await
+    Harness::single_route(handler, extra, UPSTREAM, auth).await
 }
 
 /// [`gateway`] whose upstream reports what it received and answers with an SSE stream.
@@ -76,7 +79,28 @@ async fn responses_reach_openai_with_the_provider_key() {
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     let body = String::from_utf8(read_body(res).await.to_vec()).unwrap();
-    assert!(body.contains("add [routes.claude]"), "{body}");
+    assert!(body.contains("add an [[upstreams]] entry"), "{body}");
+}
+
+/// Passthrough: the caller's own OpenAI key, and its choice of organization
+/// and project, reach OpenAI unchanged.
+#[tokio::test]
+async fn a_passthrough_upstream_forwards_the_callers_key() {
+    let (handler, mut seen) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, EVENTS)));
+    let (upstream, hits) = spawn_counted(handler).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\n[[upstreams]]\n{UPSTREAM}\n\
+         base_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+    );
+    let resources = with_upstreams(vec![UpstreamResources::new(UpstreamAuth::ForwardCaller)]);
+    let h = Harness::launch_config(&config, resources, hits).await;
+    let req = responses_as("sk-caller").header("openai-project", "proj_mine");
+    let res = h.send(req, BODY).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    read_body(res).await;
+    let got = seen.recv().await.unwrap();
+    assert_eq!(got.headers["authorization"], "Bearer sk-caller");
+    assert_eq!(got.headers["openai-project"], "proj_mine");
 }
 
 #[tokio::test]
