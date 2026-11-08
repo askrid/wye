@@ -69,7 +69,7 @@
   --display: var(--mono);
   --text-face: "Wye Text", "Wye Text fallback", Menlo, Consolas, monospace;
   /* Type roles, in rem so a reader's text size scales them all: body text;
-     each stop's lead; section headings; output (code, charts,
+     each stop's bold lead; section headings; output (code, charts,
      tables); captions (facts, footer, chart captions, the version,
      buttons); the rail. */
   --body: 1.0625rem;
@@ -106,7 +106,7 @@ html {
 }
 body { margin: 0; color: var(--text); font-size: var(--body); line-height: 1.68; }
 h1, h2, h3 { margin: 0; color: var(--ink); font-family: var(--display); font-weight: 600; text-wrap: balance; }
-strong, b { color: var(--ink); font-family: var(--mono); font-weight: 600; }
+strong { color: var(--ink); font-family: var(--mono); font-weight: 600; }
 p, ul, ol { margin: 0; }
 p, li { text-wrap: pretty; }
 a {
@@ -230,7 +230,7 @@ html, body { overflow-x: clip; }
   width: 17.857em;
   height: 7.143em;
 }
-.period .lines path { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
+.period .strands path { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
 .period .thread { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .period circle { fill: var(--ink); }
 
@@ -382,9 +382,6 @@ html, body { overflow-x: clip; }
 .part h2 a { color: inherit; text-decoration: none; }
 .hash { color: var(--graphite); }
 .part h2 a:is(:hover, :focus-visible) .hash { color: var(--ink); }
-/* Every block of a section takes the one column; what is wider wraps or
-   scrolls inside it. */
-.part > *, .prose > * { max-width: var(--column); }
 .prose { display: grid; gap: 1rem; }
 .prose ul { padding-left: 2ch; display: grid; gap: 0.4rem; list-style: "- "; }
 /* A README table, such as "How it compares": rules, no boxes. */
@@ -402,14 +399,7 @@ html, body { overflow-x: clip; }
 .prose td:first-child { color: var(--ink); }
 /* On a phone each row stacks: the need, then the answer under it. */
 @media (max-width: 40rem) {
-  .prose thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+  .prose thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .prose tbody tr {
     display: grid;
     gap: 0.25rem;
@@ -454,9 +444,10 @@ pre.code code { font: inherit; }
 .long-lines { min-width: 0; }
 .long-lines pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
 /* Copy buttons, added by assets/site.js; without it the text stays
-   selectable. The button takes a line of its own above the first line at
-   every width, so it never covers a command, and the room for it is kept
-   before the script runs, so nothing moves when it arrives. */
+   selectable. The button takes a line of its own above the first line (in
+   the hero it sits beside the commands, in room kept for it), so it never
+   covers a command, and the room is kept before the script runs, so
+   nothing moves when it arrives. */
 .code-wrap { position: relative; width: 100%; }
 @media (scripting: enabled) {
   pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
@@ -490,14 +481,7 @@ pre.code code { font: inherit; }
 .numbers tbody th { font-weight: 400; }
 /* On a phone each row stacks: the measurement, then its values by path. */
 @media (max-width: 40rem) {
-  .numbers thead {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
+  .numbers thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .numbers tbody tr {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -555,5 +539,5 @@ pre.code code { font: inherit; }
 .bars .us .fill { color: var(--accent); }
 .bars .axis { color: var(--graphite); }
 @media (max-width: 40rem) {
-  .bars { font-size: 0.8125rem; }
+  .bars { font-size: var(--caption); }
 }

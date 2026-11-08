@@ -50,7 +50,7 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 const strings = document.querySelector(".period svg");
 if (strings) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-  const lines = [...strings.querySelectorAll(".lines path, .thread")].map((el, i) => {
+  const lines = [...strings.querySelectorAll(".strands path, .thread")].map((el, i) => {
     const d = el.getAttribute("d");
     const [x0, y0, x1, y1, x2, y2, x3, y3, tail] = d.match(/-?[\d.]+/g).map(Number);
     // Points along the line at rest, to find where the pointer crosses it.
