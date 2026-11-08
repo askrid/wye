@@ -1,6 +1,7 @@
-//! Bar charts drawn in block characters, from tables in the repository's
-//! Markdown: other gateways beside Wye, on a log scale (each tenfold the same
-//! width, an axis under the bars), so 1× and 1,738× both fit a column.
+//! Bar charts, as tables of bars that CSS sizes, from tables in the
+//! repository's Markdown: other gateways beside Wye, on a log scale (each
+//! tenfold the same width, an axis under the bars), so 1× and 1,738× both fit
+//! a column.
 
 use crate::markdown;
 
@@ -39,7 +40,8 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
         let (Some(first), Some(cell)) = (row.first(), row.get(index)) else {
             continue;
         };
-        if name(first) == "Wye" {
+        let gateway = name(first);
+        if gateway == "Wye" {
             continue;
         }
         let label = cell.split(' ').next().unwrap_or(cell);
@@ -47,7 +49,7 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
             continue;
         };
         bars.push(Bar {
-            name: name(first),
+            name: gateway,
             label: label.to_owned(),
             value,
             us: false,
@@ -64,21 +66,21 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
 /// of Wye's, units normalized. A cell without a figure ("not run") is left
 /// out.
 pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
-    let (header, row) = markdown::tables(text)
-        .into_iter()
+    let tables = markdown::tables(text);
+    let (header, row) = tables
+        .iter()
         .find_map(|rows| {
-            let header = rows.first()?.clone();
+            let header = rows.first()?;
             let row = rows
                 .iter()
                 .skip(1)
-                .find(|row| row.first().is_some_and(|cell| cell.starts_with(row_start)))?
-                .clone();
+                .find(|row| row.first().is_some_and(|cell| cell.starts_with(row_start)))?;
             Some((header, row))
         })
         .ok_or_else(|| format!("no table row starts with {row_start:?}"))?;
     let figures: Vec<(String, f64)> = header
         .iter()
-        .zip(&row)
+        .zip(row)
         .skip(1)
         .filter_map(|(name, cell)| Some((name.clone(), measure(cell)?)))
         .collect();
@@ -90,9 +92,9 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{row_start:?}: no figure for Wye"))?;
     let bars: Vec<Bar> = figures
         .into_iter()
-        .map(|(name, value)| {
+        .map(|(column, value)| {
             let times = value / wye;
-            let name = self::name(&name);
+            let name = name(&column);
             Bar {
                 us: name == "Wye",
                 label: multiple(times),

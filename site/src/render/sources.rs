@@ -39,8 +39,9 @@ impl Sources {
 }
 
 /// The stylesheet as a browser needs it: no comments, and no whitespace
-/// beyond one space where CSS needs one. Its only strings are font names,
-/// which hold spaces but none of the punctuation trimmed here.
+/// beyond one space where CSS needs one. Its strings (font names, attribute
+/// selectors, list-style and content text) hold none of the punctuation
+/// trimmed here.
 fn minify_css(css: &str) -> String {
     let mut text = String::with_capacity(css.len());
     let mut rest = css;

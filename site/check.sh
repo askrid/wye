@@ -21,8 +21,7 @@ cargo run --locked --quiet
 
 # What a first visit to one page downloads, compressed as a server sends it:
 # the page with its stylesheet inline, and every other stylesheet, script, and
-# SVG, gzipped, the fonts as they are. The footer of pages/index.html states
-# this budget.
+# SVG, gzipped, the fonts as they are.
 shopt -s nullglob
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }

@@ -92,7 +92,7 @@ pub fn list_items(section: &str) -> Vec<String> {
 pub fn opening(doc: &str) -> Option<(&str, Option<&str>)> {
     let mut paragraphs = doc.split("\n## ").next()?.split("\n\n").map(str::trim);
     let first = paragraphs.find(|p| p.starts_with("**"))?;
-    let tagline = first.strip_prefix("**")?.split_once("**")?.0;
+    let tagline = lead(first)?;
     Some((tagline, paragraphs.find(|p| !p.is_empty())))
 }
 
@@ -222,7 +222,8 @@ pub fn plain(markdown: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The bold lead that opens a list item: `**Shows usage and cost.** One…`.
+/// The bold lead that opens a list item or paragraph: `**Shows usage and
+/// cost.** One…`.
 pub fn lead(item: &str) -> Option<&str> {
     item.strip_prefix("**")?
         .split_once("**")

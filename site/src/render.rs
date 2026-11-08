@@ -10,8 +10,8 @@
 //! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
 //! - `{{homepage}}`: the site's own address, `homepage` in site/Cargo.toml, so
 //!   a move changes one line.
-//! - `{{stylesheet}}`: site/pages/site.css as it is, for a `<style>`
-//!   element, so the page draws without waiting for a second file.
+//! - `{{stylesheet}}`: site/pages/site.css minified (render/sources.rs),
+//!   for a `<style>` element, so the page draws without waiting for a second file.
 //! - `{{fence FILE|PREFIX|WORD}}`: the first fenced block in FILE whose first
 //!   line starts with PREFIX, highlighted; WORD, if given, in the accent
 //!   wherever it appears in the block's text.
@@ -260,8 +260,8 @@ impl Sources {
     }
 
     /// Markdown from `file`, rendered, its links resolved for this page.
-    fn html(&self, markdown: &str, file: &str, anchors: &markdown::Anchors) -> String {
-        markdown::to_html(markdown, &self.files_url(), file, anchors)
+    fn html(&self, text: &str, file: &str, anchors: &markdown::Anchors) -> String {
+        markdown::to_html(text, &self.files_url(), file, anchors)
     }
 
     /// Where the repository's files are at the page's commit.

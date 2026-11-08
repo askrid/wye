@@ -2,7 +2,7 @@
 //! itself (no request to another origin, so nothing tracks a reader), every
 //! local link and anchor resolves, and no directive is left unexpanded.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -25,9 +25,7 @@ pub fn check(out: &Path) -> Result<(), String> {
 }
 
 fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| crate::io_error(dir, e))?;
-    for entry in entries {
-        let path = entry.map_err(|e| crate::io_error(dir, e))?.path();
+    for path in crate::sorted_entries(dir)? {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -114,7 +112,7 @@ fn check_link(files: &Files, from: &str, target: &str, found: &mut Vec<String>) 
         .get(&page)
         .and_then(Option::as_deref)
         .unwrap_or_default();
-    if !ids(text).contains(anchor) {
+    if !attribute_values(text, "id").contains(&anchor) {
         found.push(format!("{from}: the link {target} names a missing anchor"));
     }
 }
@@ -198,10 +196,6 @@ fn attribute_values<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
                 .map(|(value, _)| value)
         })
         .collect()
-}
-
-fn ids(html: &str) -> BTreeSet<&str> {
-    attribute_values(html, "id").into_iter().collect()
 }
 
 /// The text of each `<style>` element in a page.
