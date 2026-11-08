@@ -86,7 +86,11 @@
       <section class="part stop" id="client" aria-labelledby="client-h">
         <h2 id="client-h"><a href="#client"><span class="hash" aria-hidden="true">#</span> client</a></h2>
         {{item README.md|What it does|Works with}}
-        {{fence docs/guide.md|ANTHROPIC_BASE_URL}}
+        <table class="apis">
+          <tr><td><code>POST /v1/messages</code></td><td>Claude Code, Anthropic SDKs</td></tr>
+          <tr><td><code>POST /v1/responses</code></td><td>Codex, OpenAI SDKs</td></tr>
+          <tr><td><code>POST /v1/chat/completions</code></td><td>OpenAI SDKs, compatible agents</td></tr>
+        </table>
       </section>
 
       <section class="part stop" id="access" aria-labelledby="access-h">

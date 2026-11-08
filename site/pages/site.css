@@ -313,6 +313,18 @@ html, body { overflow-x: clip; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
 .fork .d { color: var(--graphite); }
+/* The APIs that pass through, each beside the clients that send it. */
+.apis { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: var(--output); }
+.apis td { padding: 0.6rem 1.5rem 0.6rem 0; border-bottom: 1px dashed var(--rule); color: var(--graphite); vertical-align: baseline; }
+.apis tr:first-child td { border-top: 1px dashed var(--rule); }
+.apis td:first-child { width: 1%; white-space: nowrap; }
+.apis code { color: var(--ink); font-size: 1em; }
+/* On a phone each endpoint stands over its clients. */
+@media (max-width: 40rem) {
+  .apis tr { display: grid; padding-block: 0.6rem; border-bottom: 1px dashed var(--rule); }
+  .apis tr:first-child { border-top: 1px dashed var(--rule); }
+  .apis td, .apis tr:first-child td { padding: 0; border: 0; width: auto; }
+}
 /* Sessions per upstream, one square each, and the record of the one that
    failed over, the section's point, in the accent. */
 .shares {
