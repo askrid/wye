@@ -53,7 +53,7 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 // out of view, or in a hidden tab; without WebGL the drawing stays still.
 const period = document.querySelector(".period");
 const canvas = document.createElement("canvas");
-const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power", desynchronized: true });
+const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
 if (gl) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   canvas.setAttribute("aria-hidden", "true");
@@ -112,7 +112,9 @@ if (gl) {
       float glow = dot(u_glow[i], m);
       v_pos = p;
       v_alpha = u_solid > 0.5 ? min(1.0, glow * 1.8) : glow;
-      gl_Position = vec4(p.x / 750.0 - 1.0, 1.0 - p.y / 300.0, 0.0, 1.0);
+      // A string at rest is not drawn at all: all its points fall outside
+      // the view, so the GPU fills no pixel for it.
+      gl_Position = glow == 0.0 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p.x / 750.0 - 1.0, 1.0 - p.y / 300.0, 0.0, 1.0);
     }`, `
     precision mediump float;
     uniform vec3 u_colour;
@@ -148,8 +150,6 @@ if (gl) {
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
   const pulseBuffer = gl.createBuffer();
   const pulseData = new Float32Array((24 * 10 + 1) * 4);
-  gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
-  gl.bufferData(gl.ARRAY_BUFFER, pulseData.byteLength, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(0);
   gl.enable(gl.BLEND);
   const where = (p, name) => gl.getUniformLocation(p, name);
@@ -270,7 +270,7 @@ if (gl) {
     launched = 0;
     if (pending) sense(now);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
-    // second; its copy glows in over 60 ms and out over 700, to nothing.
+    // second; its copy glows in over 60 ms and out over 450, to nothing.
     let ringing = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], age = now - line.since;
@@ -278,7 +278,7 @@ if (gl) {
       if (!line.amp) continue;
       ringing = true;
       if (age < 0) continue;
-      const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 700);
+      const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 450);
       if (age > 300 && glow < 0.002) {
         line.amp = 0;
         continue;
@@ -327,7 +327,9 @@ if (gl) {
     gl.useProgram(pulses);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, pulseData.subarray(0, n * 4));
+    // Fresh storage each frame, so the GPU never makes the page wait for it
+    // to finish reading last frame's.
+    gl.bufferData(gl.ARRAY_BUFFER, pulseData.subarray(0, n * 4), gl.STREAM_DRAW);
     gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
     gl.uniform1f(u.density, density);
     gl.uniform3fv(u.pulseColour, ink);
