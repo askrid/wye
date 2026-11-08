@@ -53,7 +53,7 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 // out of view, or in a hidden tab; without WebGL the drawing stays still.
 const period = document.querySelector(".period");
 const canvas = document.createElement("canvas");
-const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
+const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power", desynchronized: true });
 if (gl) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   canvas.setAttribute("aria-hidden", "true");
@@ -147,7 +147,7 @@ if (gl) {
   gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
   const pulseBuffer = gl.createBuffer();
-  const pulseData = new Float32Array((48 * 10 + 1) * 4);
+  const pulseData = new Float32Array((24 * 10 + 1) * 4);
   gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, pulseData.byteLength, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(0);
@@ -179,12 +179,12 @@ if (gl) {
     accent = rgb("--accent");
   };
   // Requests: a string in, then its string out. In, they gather speed into
-  // the dot; out, they ease off. At most 48 at once, 6 new a frame.
+  // the dot; out, they ease off. At most 24 at once, 2 new a frame.
   const flight = [];
   const IN = 1500, OUT = 1900;
   let launched = 0;
   const launch = (i, out, t) => {
-    if (flight.length < 48 && launched < 6) {
+    if (flight.length < 24 && launched < 2) {
       flight.push({ i, out, t });
       launched++;
     }
@@ -209,24 +209,36 @@ if (gl) {
     line.amp = amp;
     line.since = now;
   };
-  // Once a frame: every string the pointer crossed since the last frame is
-  // plucked, and sends a request on from where it was plucked.
+  // Once a frame, the strings the pointer crossed since the last frame are
+  // plucked, within a budget, as a real strum is: at most 8 a frame, spread
+  // evenly over those crossed, their swing shared out so a fast sweep is one
+  // even ripple, not every string at full swing. Only a slow touch, three
+  // strings or fewer, wakes the neighbours. Each plucked string sends a
+  // request on from where it was plucked.
+  const crossed = [];
   const sense = (now) => {
     pending = false;
     if (!box) box = canvas.getBoundingClientRect();
     if (!box.width) return;
     const x = ((pointerX - box.left) / box.width) * 1500, y = ((pointerY - box.top) / box.height) * 600;
     if (havePrevious) {
-      const amp = Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1);
+      crossed.length = 0;
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i], before = yAt(line, previousX), after = yAt(line, x);
-        if (before === null || after === null || Math.sign(previousY - before) === Math.sign(y - after)) continue;
+        const before = yAt(lines[i], previousX), after = yAt(lines[i], x);
+        if (before !== null && after !== null && Math.sign(previousY - before) !== Math.sign(y - after)) crossed.push(i);
+      }
+      const count = Math.min(crossed.length, 8);
+      const amp = (Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1) * Math.sqrt(count / Math.max(crossed.length, 1)));
+      for (let c = 0; c < count; c++) {
+        const i = crossed[Math.floor(((c + 0.5) * crossed.length) / count)], line = lines[i];
         line.amp = amp;
         line.since = now;
-        ring(i - 1, amp * 0.35, now + 40);
-        ring(i + 1, amp * 0.35, now + 40);
-        ring(i - 2, amp * 0.12, now + 80);
-        ring(i + 2, amp * 0.12, now + 80);
+        if (crossed.length <= 3) {
+          ring(i - 1, amp * 0.35, now + 40);
+          ring(i + 1, amp * 0.35, now + 40);
+          ring(i - 2, amp * 0.12, now + 80);
+          ring(i + 2, amp * 0.12, now + 80);
+        }
         const at = line.at, t = (x - at[0][0]) / (at[at.length - 1][0] - at[0][0]);
         if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)));
         else launch(i === thread ? 59 : i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)));
