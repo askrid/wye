@@ -308,16 +308,14 @@ html { overflow-x: clip; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
 .fork .d { color: var(--graphite); }
-/* Sessions per upstream, one square each; the rejected one is an outline,
-   and the failover lands in the accent. */
+/* Sessions per upstream, one square each, and the record of the one that
+   failed over; the failover is the accent in both. */
 .routes svg { display: block; width: 100%; max-width: 28rem; height: auto; }
 .routes rect { fill: var(--ink); }
-.routes .tried { fill: none; stroke: var(--accent); stroke-dasharray: 2 2; }
 .routes .sent { fill: var(--accent); }
-.routes .over { fill: none; stroke: var(--accent); stroke-width: 1.2; }
 .routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
 .routes .w { fill: var(--graphite); }
-.routes .code { fill: var(--accent); }
+.routes .failover { color: var(--accent); }
 
 /* Sections and stops */
 .part { display: grid; gap: 1.375rem; padding-block: clamp(2rem, 5vw, 3.75rem); }

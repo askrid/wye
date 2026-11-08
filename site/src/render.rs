@@ -112,9 +112,16 @@ impl Sources {
                 let object: serde_json::Value = serde_json::from_str(&code).map_err(|e| {
                     format!("{file}: the block starting with {prefix:?} is not JSON: {e}")
                 })?;
-                let value = object.get(key).ok_or_else(|| {
-                    format!("{file}: the block starting with {prefix:?} has no {key:?}")
-                })?;
+                // A dotted path reaches inside: "failovers.0.reason".
+                let value = key
+                    .split('.')
+                    .try_fold(&object, |value, step| match step.parse::<usize>() {
+                        Ok(index) => value.get(index),
+                        Err(_) => value.get(step),
+                    })
+                    .ok_or_else(|| {
+                        format!("{file}: the block starting with {prefix:?} has no {key:?}")
+                    })?;
                 Ok(markdown::escape(&match value {
                     serde_json::Value::String(text) => text.clone(),
                     other => other.to_string(),
@@ -320,7 +327,7 @@ mod tests {
                 "# Wye\n\n**LLM gateway without bloat.**\n\n\
                  Small and [fast](#performance): one\n`binary`.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
-                 ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12\n}\n```\n\n\
+                 ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12,\n  \"failovers\": [{ \"upstream\": \"a\", \"reason\": \"429\" }]\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
                  ## Performance\n\nNumbers.\n\n\
                  | What Wye adds | Plain | TLS & h2 |\n|---|---|---|\n| Latency | 0.28 ms | |\n\n\
@@ -380,6 +387,10 @@ mod tests {
             )
             .unwrap(),
             "12 in, $0.0181"
+        );
+        assert_eq!(
+            render("{{field README.md|{|failovers.0.reason}}", &sources()).unwrap(),
+            "429"
         );
         assert!(
             render("{{field README.md|{|model}}", &sources())
