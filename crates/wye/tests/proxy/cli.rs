@@ -282,7 +282,7 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
     .unwrap();
     let record: serde_json::Value = serde_json::from_str(&record).unwrap();
     assert_eq!(record["event"], "request");
-    assert_eq!(record["path"], "/v1/messages");
+    assert_eq!(record["endpoint"], "/v1/messages");
 }
 
 /// With `--usage-log`, records go to that file, created readable only by
@@ -360,7 +360,7 @@ async fn serve_writes_records_to_the_usage_log_it_is_given() {
     );
     let record: serde_json::Value = serde_json::from_str(&record).unwrap();
     assert_eq!(record["event"], "request");
-    assert_eq!(record["v"], 1);
+    assert_eq!(record["v"], 2);
     assert_eq!(stdout, "", "records go to the file only");
     #[cfg(unix)]
     {
@@ -463,6 +463,33 @@ fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
         status(&["policy-test", "--config", &keyed, &cases]),
         Some(1)
     );
+    // policy-test reads what the gateway reads at startup but secrets: an
+    // identity provider's key set missing fails it, with no key set.
+    let idp = write(
+        "idp.toml",
+        "[server]\nlisten = \"0.0.0.0:8080\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"WYE_TEST_UNSET\"\n\
+         [auth]\n[[auth.identity_providers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
+         algorithm = \"RS256\"\njwks_file = \"idp.jwks\"\n",
+    );
+    std::fs::write(
+        dir.join("cases/wrong.expect.toml"),
+        "decision = \"refuse\"\nstatus = 401\n",
+    )
+    .unwrap();
+    let missing = wye()
+        .args(["policy-test", "--config", &idp, &cases])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        err(&missing).contains("idp.toml: auth.identity_providers.jwks_file "),
+        "{}",
+        err(&missing)
+    );
+    let key = wye_testkit::jwt::IdpKey::rs256();
+    write("idp.jwks", &wye_testkit::jwt::jwks(&[(&key, "k1")]));
+    assert_eq!(status(&["policy-test", "--config", &idp, &cases]), Some(0));
     // The provider key is not set.
     assert_eq!(status(&["doctor", "--config", &keyed]), Some(1));
     // A flag's value the command cannot read is wrong usage.
@@ -539,7 +566,6 @@ fn the_defaults_work_on_a_fresh_home() {
         "{config}"
     );
     printed.borrow_mut().push_str(&config);
-    assert!(run(&["validate"]).status.success());
     // Its policy tests pass with no argument.
     let tested = run(&["policy-test"]);
     assert!(tested.status.success(), "{}{}", out(&tested), err(&tested));
@@ -558,9 +584,17 @@ fn the_defaults_work_on_a_fresh_home() {
     assert!(issue.contains("it has no [auth]"), "{issue}");
     assert!(issue.contains("`wye init --shared`"), "{issue}");
 
-    // `init --shared` writes where its reviewers see it, and keeps the key out.
+    // `init --shared` takes -c as every command does: here, a config
+    // repository's wye.toml, where its reviewers see it; the key stays out.
+    let home_taken = run(&["init", "--shared"]);
+    assert_eq!(home_taken.status.code(), Some(1));
+    assert!(
+        err(&home_taken).starts_with("wye: ~/.wye/wye.toml exists"),
+        "{}",
+        err(&home_taken)
+    );
     std::fs::remove_file(setup.repo.join("wye.toml")).unwrap();
-    let shared = run(&["init", "--shared"]);
+    let shared = run(&["init", "--shared", "-c", "wye.toml"]);
     assert!(shared.status.success(), "{}", err(&shared));
     assert!(
         err(&shared).contains(
@@ -596,7 +630,7 @@ fn the_defaults_work_on_a_fresh_home() {
     let named = run(&["init", "-c", "other/wye.toml"]);
     assert!(named.status.success(), "{}", err(&named));
     assert!(
-        err(&named).contains("\n     wye doctor -c other/wye.toml\n"),
+        err(&named).contains("\n     wye service install -c other/wye.toml\n"),
         "{}",
         err(&named)
     );

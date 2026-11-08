@@ -53,7 +53,7 @@ async fn responses_reach_openai_with_the_provider_key() {
     assert_eq!(got.headers["session-id"], "codex-session-1");
     assert_eq!(got.body, BODY);
     let record = h.usage_record().await;
-    assert_eq!(record["path"], "/v1/responses");
+    assert_eq!(record["endpoint"], "/v1/responses");
     assert_eq!(record["session_id"], "codex-session-1");
     assert_eq!(record["upstream"], "openai");
     // The main thread of a Codex session.
@@ -190,7 +190,7 @@ data: [DONE]\n\n";
         "forwarded unchanged: no include_usage rewrite"
     );
     let record = h.usage_record().await;
-    assert_eq!(record["path"], "/v1/chat/completions");
+    assert_eq!(record["endpoint"], "/v1/chat/completions");
     assert_eq!(record["usage_status"], "complete");
     assert_eq!(record["input_tokens"], 20);
     assert_eq!(record["cache_read_input_tokens"], 10);

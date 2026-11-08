@@ -138,7 +138,7 @@ pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> 
 /// The upstreams that serve one API, and how a request picks one.
 #[derive(Debug, Clone)]
 pub struct Route {
-    /// Non-empty, ids unique when there are several.
+    /// Non-empty, ids unique.
     upstreams: Box<[Upstream]>,
     /// Per upstream, the hash seed derived from its id.
     seeds: Box<[u64]>,
@@ -154,10 +154,7 @@ impl Route {
         select: Select,
         failover: Option<Failover>,
     ) -> Self {
-        let seeds = upstreams
-            .iter()
-            .map(|u| xxh3_64(u.id.as_deref().unwrap_or_default().as_bytes()))
-            .collect();
+        let seeds = upstreams.iter().map(|u| xxh3_64(u.id.as_bytes())).collect();
         Self {
             upstreams: upstreams.into(),
             seeds,

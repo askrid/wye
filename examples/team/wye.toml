@@ -4,8 +4,10 @@
 # company's SSO, CI jobs use GitHub's own token, and the Anthropic keys live
 # only in the deployment.
 #
-# Before the first start, fetch the two key sets this file names (and again
-# when an identity provider rotates its keys; Wye never fetches them):
+# github.jwks and sso.jwks here are placeholders: keys whose private halves
+# were thrown away, so as shipped this config accepts no token. Before the
+# first start, replace them with the real key sets (and again when an
+# identity provider rotates its keys; Wye never fetches them):
 #
 #   curl -o github.jwks https://token.actions.githubusercontent.com/.well-known/jwks
 #   curl -o sso.jwks https://acme.okta.com/oauth2/default/v1/keys
@@ -32,14 +34,14 @@ drain_delay_secs = 10
 [routes.claude]
 failover = ["429", "529", "connect"]
 
+# Both at Anthropic's API, the default base_url; two of one provider each
+# need an id.
 [[routes.claude.upstreams]]
 id = "anthropic-a"
-base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_KEY_A"
 
 [[routes.claude.upstreams]]
 id = "anthropic-b"
-base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_KEY_B"
 
 [auth]

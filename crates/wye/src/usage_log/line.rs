@@ -20,8 +20,8 @@ const NO_USAGE: &str = "none";
 
 /// The record format's version, every line's `v`: raised by any change that
 /// renames a field or changes its meaning, so a reader can tell formats
-/// apart. Added fields keep it.
-pub(super) const RECORD_VERSION: u8 = 1;
+/// apart. Added fields keep it. 2: `path` became `endpoint`.
+pub(super) const RECORD_VERSION: u8 = 2;
 
 /// What the writer adds to every record: keys, prices, upgrade targets.
 pub(super) struct Context<'a> {
@@ -38,7 +38,8 @@ pub(super) struct Line<'a> {
     /// [`RECORD_VERSION`]; the JSON line only, not OTLP.
     pub(super) v: u8,
     pub(super) unix_ms: u64,
-    pub(super) path: &'a str,
+    /// The endpoint, such as `/v1/messages`; `http.route` in OTLP.
+    pub(super) endpoint: &'a str,
     /// `gen_ai.provider.name` in OTLP; the JSON line has the `upstream`
     /// id, which config maps to its provider.
     #[serde(skip)]
@@ -53,7 +54,7 @@ pub(super) struct Line<'a> {
     pub(super) duration_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) response_headers_ms: Option<f64>,
-    /// The route upstream, when the route names its upstreams.
+    /// The route upstream; absent when refused before one was chosen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upstream: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,7 +132,7 @@ impl Line<'_> {
             event: "request",
             v: RECORD_VERSION,
             unix_ms: 0,
-            path: "/v1/messages",
+            endpoint: "/v1/messages",
             provider_name: "anthropic",
             status: 200,
             outcome: Outcome::Completed,
@@ -211,7 +212,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         event: "request",
         v: RECORD_VERSION,
         unix_ms: r.unix_ms,
-        path: r.info.endpoint.path,
+        endpoint: r.info.endpoint.path,
         provider_name: r.info.provider.otel_name(),
         status: r.status.as_u16(),
         outcome: r.outcome,
@@ -315,7 +316,7 @@ impl Serialize for RejectedAttempt {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("upstream", &self.upstream.as_deref())?;
+        map.serialize_entry("upstream", &*self.upstream)?;
         map.serialize_entry("reason", self.reason.as_str())?;
         map.end()
     }
@@ -332,7 +333,7 @@ mod tests {
         push_line(&mut buf, &Line::blank());
         let text = String::from_utf8_lossy(&buf);
         assert!(
-            text.starts_with(r#"{"event":"request","v":1,"unix_ms":0,"#),
+            text.starts_with(r#"{"event":"request","v":2,"unix_ms":0,"endpoint":"#),
             "{text}"
         );
     }

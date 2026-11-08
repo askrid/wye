@@ -13,7 +13,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Endpoint**: an API path Wye serves, such as `/v1/messages` or `/v1/responses`. Not: route (for a path).
 - **Native API**: a provider's own API, passed through without translation: Anthropic Messages, OpenAI Responses, OpenAI Chat Completions.
 - **Route**: the upstreams that serve one native API: `[routes.claude]` and `[routes.openai]`, one `[[routes.<route>.upstreams]]` entry per upstream.
-- **Upstream**: one provider account a route sends requests to: an `id` (optional for a route's only upstream), a provider, a base URL, and its provider key. Not: account (except to explain it), key, candidate, backend.
+- **Upstream**: one provider account a route sends requests to: an `id` (by default its provider's name), a provider, a base URL (by default the provider's API, for `anthropic` and `openai`), and its provider key. Not: account (except to explain it), key, candidate, backend.
 - **Provider**: who serves an upstream: `anthropic`, `claude-platform-aws`, `bedrock`, or `openai`. Not: provider for an identity provider.
 - **Base URL**: where an upstream's requests go. Not: endpoint (for an upstream).
 - **Provider key**: the key Wye presents to an upstream, read from an environment variable or a file. Not: credential, the operator's key, bare "key".
@@ -51,7 +51,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Admission**: the checks before forwarding (gateway token, model permissions, output-token ceiling, body bounds) that end in a decision.
 - **Decision**: what Wye does with one request: *forward* it, or *refuse* it with an error the client reads. Not: reject (that is the upstream's).
 - **Refusal**: Wye's own error answer, in the endpoint's error shape: `400`, `401`, `403`, `404`, `408`, `413`, or `415`, or `529`/`503` when it is overloaded.
-- **Checks**: the offline commands that show or test what the gateway would do: `wye explain` (one request's decision), `wye policy-test` (expected decisions in CI), `wye policy-diff` (whether a config change widens access), `wye doctor` (secrets, files, and upstreams), `wye validate`.
+- **Checks**: the offline commands that show or test what the gateway would do: `wye explain` (one request's decision), `wye policy-test` (expected decisions, and the key sets, in CI), `wye policy-diff` (whether a config change widens access), `wye doctor` (secrets, files, and upstreams).
 
 ## Usage and cost
 
@@ -61,7 +61,7 @@ One name for each thing Wye does. The docs, the website, the CLI, and the code u
 - **Usage record**: one JSON line per request with its tokens, cost, served model, session, request class, and outcome; with `[telemetry]`, also an OTLP log record and span. Not: request record, log line, event.
 - **Usage log**: where usage records go: stdout, or the file `wye serve --usage-log` names (`~/.wye/usage.jsonl` under `wye service`). When it reaches its [size limit](operations.md#commands), that file becomes a *rotated file* beside it (`usage-20261107T091500Z.jsonl`), which Wye never deletes. The *message log* (`~/.wye/wye.log`) holds Wye's own messages. Not: the log (alone), stdout log.
 - **Cost**: dollars computed per request from the price table; *spend*: cost over time. *Overhead*: what Wye itself uses (latency, CPU, memory). Not: cost (for Wye's CPU or memory).
-- **Price table**: `[pricing]`: prices per model and upstream, with a version every record carries. A model the table does not name costs `unknown`, never $0. Not: pricing metadata.
+- **Price table**: `[pricing]`: prices per model and upstream, with a version every record carries (written, or a hash of the prices). A model the table does not name costs `unknown`, never $0. Not: pricing metadata.
 - **Cache miss**: a request that wrote the prompt cache and read nothing from it, recorded with its reason (`compaction`, `after_compaction`, `unexplained`); `wye report` counts session and subagent starts as expected.
 - **Cache diagnostics**: `[cache_diagnostics]`: keyed hashes of a request's prompt sections, sampled per session, that name which section changed before a cache miss.
 - **Telemetry**: OTLP export of usage records, metrics, and traces (`[telemetry]`), to your *OpenTelemetry backend*. Not: telemetry (for the usage log), observability backend, OTel backend.

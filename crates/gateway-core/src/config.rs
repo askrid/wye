@@ -30,6 +30,16 @@ use validate::{
     validate_pricing, validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
 };
 
+/// The default `server.listen`, as a literal for `concat!`: also the
+/// gateway the CLI's clients use without `--url` or `$WYE_URL`.
+#[macro_export]
+macro_rules! default_listen {
+    () => {
+        "127.0.0.1:8080"
+    };
+}
+/// The default `server.listen`: this machine only, port 8080.
+pub const DEFAULT_LISTEN: &str = default_listen!();
 const DEFAULT_MAX_TOTAL_HELD_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
@@ -257,10 +267,10 @@ pub enum ConfigError {
         error: Box<ConfigError>,
     },
     /// A problem in one `[[routes.<route>.upstreams]]` entry, named by its
-    /// id, or by `[0]` for a route's only upstream that has none.
+    /// id, written or by default.
     RouteUpstream {
         route: &'static str,
-        id: Option<String>,
+        id: String,
         error: Box<ConfigError>,
     },
 }
@@ -290,16 +300,9 @@ impl fmt::Display for ConfigError {
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
             Self::Route { route, error } => write!(f, "routes.{route}.{error}"),
-            Self::RouteUpstream {
-                route,
-                id: Some(id),
-                error,
-            } => write!(f, "routes.{route}.upstreams {id:?}: {error}"),
-            Self::RouteUpstream {
-                route,
-                id: None,
-                error,
-            } => write!(f, "routes.{route}.upstreams[0]: {error}"),
+            Self::RouteUpstream { route, id, error } => {
+                write!(f, "routes.{route}.upstreams {id:?}: {error}")
+            }
         }
     }
 }
@@ -362,7 +365,7 @@ impl Config {
                 .entries
                 .iter()
                 .flat_map(|e| &e.upstreams)
-                .any(|id| !routes.upstreams().any(|u| u.id.as_deref() == Some(&**id)))
+                .any(|id| !routes.upstreams().any(|u| u.id == *id))
         {
             return Err(ConfigError::Invalid(
                 "pricing.prices.upstreams: every id must name a route upstream",

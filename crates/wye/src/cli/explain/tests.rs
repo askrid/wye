@@ -75,6 +75,12 @@ fn explains_forwarding_and_each_refusal() {
         "{report}"
     );
     assert!(report.contains("by token: claude-haiku-*"), "{report}");
+    // A route's only upstream is named by its provider.
+    assert!(
+        report.contains("\nselection: upstream anthropic, the route's only one\n"),
+        "{report}"
+    );
+    assert_eq!(ok.upstream.as_deref(), Some("anthropic"));
     assert!(
         report.contains("upstream: POST https://api.anthropic.com/v1/messages"),
         "{report}"
@@ -247,7 +253,7 @@ fn shows_the_upstream_a_session_goes_to() {
     for session in ["s-1", "s-2", "s-3", "s-4"] {
         let route = config.routes.claude.as_ref().unwrap();
         let picked = &route.upstreams()[route.pick(session.as_bytes())];
-        let id = picked.id.as_deref().unwrap();
+        let id = &*picked.id;
         let out = explain(
             &config,
             "/v1/messages",

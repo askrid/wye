@@ -54,6 +54,7 @@ pub struct PriceEntry {
 /// `[pricing]`: a versioned price table.
 #[derive(Debug, Clone)]
 pub struct Pricing {
+    /// `pricing.version`, else a hash of the entries (`content_version`).
     pub version: Box<str>,
     pub entries: Box<[PriceEntry]>,
 }
@@ -192,6 +193,61 @@ impl PriceEntry {
         }
         p
     }
+}
+
+/// The version of a price table that names none: 16 hex digits of a hash
+/// of its parsed entries, in order. Every replica and every run of one
+/// table computes the same, and a comment or a reformatted line leaves it,
+/// while any price, model, upstream, or tier changes it.
+pub(crate) fn content_version(entries: &[PriceEntry]) -> String {
+    let mut bytes = Vec::new();
+    // Length-prefixed, and an absent price tagged apart from any value, so
+    // two different tables cannot encode alike.
+    let text = |bytes: &mut Vec<u8>, text: &str| {
+        bytes.extend_from_slice(&(text.len() as u64).to_le_bytes());
+        bytes.extend_from_slice(text.as_bytes());
+    };
+    let price = |bytes: &mut Vec<u8>, price: Option<Pico>| match price {
+        Some(p) => {
+            bytes.push(1);
+            bytes.extend_from_slice(&p.to_le_bytes());
+        }
+        None => bytes.push(0),
+    };
+    for entry in entries {
+        bytes.extend_from_slice(&(entry.models.len() as u64).to_le_bytes());
+        for model in &entry.models {
+            text(&mut bytes, &model.to_string());
+        }
+        bytes.extend_from_slice(&(entry.upstreams.len() as u64).to_le_bytes());
+        for upstream in &entry.upstreams {
+            text(&mut bytes, upstream);
+        }
+        let p = entry.prices;
+        for value in [
+            Some(p.input),
+            Some(p.output),
+            p.cache_read,
+            p.cache_write_5m,
+            p.cache_write_1h,
+        ] {
+            price(&mut bytes, value);
+        }
+        bytes.extend_from_slice(&(entry.tiers.len() as u64).to_le_bytes());
+        for t in &entry.tiers {
+            bytes.extend_from_slice(&t.above_prompt_tokens.to_le_bytes());
+            for value in [
+                t.input,
+                t.output,
+                t.cache_read,
+                t.cache_write_5m,
+                t.cache_write_1h,
+            ] {
+                price(&mut bytes, value);
+            }
+        }
+    }
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(&bytes))
 }
 
 /// Pico-USD in one USD: costs are integers in this unit.

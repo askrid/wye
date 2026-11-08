@@ -116,7 +116,7 @@ Prices are declarative, versioned, and live in `wye.toml` next to the policy tha
 
 ```toml
 [pricing]
-version = "anthropic-2026-11-01"     # required; recorded with every cost
+version = "anthropic-2026-11-01"     # optional; recorded with every cost
 
 # USD per million tokens, as decimal strings.
 [[pricing.prices]]
@@ -155,11 +155,13 @@ input = "0.50"
 output = "2.50"
 ```
 
+Every record carries the table's version as `pricing_version`. Without `version`, it is 16 hex digits of a hash of the parsed entries in order: the same on every replica and run, unchanged by comments and layout, and changed by any price, model pattern, upstream, or tier. A name of your own reads better in a report.
+
 Which price applies:
 
 - **Tiers**: a tier lists the prices that change above `above_prompt_tokens` (input plus cache reads and writes) and inherits the rest from its entry; tiers are sorted by threshold, and the highest one the request reaches applies to the whole request.
 - **Matching**: by the model the provider reports in the response, not the one requested (neither an alias nor a provider's own model id can misprice). No match: cost `unknown`, never $0.
-- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
+- **Per upstream**: Claude through another provider ([across providers](architecture.md#claude-across-providers)), or another account or region, can be billed at different prices and regional premiums. An entry names `upstreams = ["aws-east"]` ([upstream](glossary.md#requests-and-where-they-go) ids from the route config, by default the provider's name, such as `bedrock`; config refuses unknown ids); entries with `upstreams` are tried before those without for requests served there.
 
 How cost is computed:
 

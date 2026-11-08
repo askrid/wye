@@ -240,13 +240,13 @@ provider = \"openai\"
     let keyed = upstream("provider_key_env = \"K\"");
     let report = policy_diff(&forwarded, &keyed).report();
     assert!(
-        report.contains("widens: routes.claude.upstreams[0] sends a provider key, where callers brought their own"),
+        report.contains("widens: routes.claude: upstream anthropic sends a provider key, where callers brought their own"),
         "{report}"
     );
     assert!(!policy_diff(&keyed, &forwarded).widens());
     let report = policy_diff(&keyed, &upstream("provider_key_env = \"OTHER\"")).report();
     assert!(
-        report.contains("changes: routes.claude.upstreams[0] provider key: $K -> $OTHER"),
+        report.contains("changes: routes.claude: upstream anthropic provider key: $K -> $OTHER"),
         "{report}"
     );
 }

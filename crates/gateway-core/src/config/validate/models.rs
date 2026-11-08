@@ -5,7 +5,10 @@ use serde::Deserialize;
 use super::*;
 use crate::{
     alias::{Alias, AliasError},
-    pricing::{MAX_PRICE_ENTRIES, MAX_TIERS, PriceEntry, Prices, Pricing, Tier, parse_price},
+    pricing::{
+        MAX_PRICE_ENTRIES, MAX_TIERS, PriceEntry, Prices, Pricing, Tier, content_version,
+        parse_price,
+    },
 };
 
 #[derive(Deserialize)]
@@ -18,7 +21,7 @@ pub(crate) struct RawUpgradeCheck {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawPricing {
-    pub(crate) version: String,
+    pub(crate) version: Option<String>,
     pub(crate) prices: Vec<RawPriceEntry>,
 }
 
@@ -68,9 +71,10 @@ pub(crate) struct RawAliasRule {
 const MAX_PRICING_VERSION_BYTES: usize = 128;
 
 pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> {
-    if raw.version.is_empty()
-        || raw.version.len() > MAX_PRICING_VERSION_BYTES
-        || raw.version.chars().any(char::is_control)
+    if let Some(version) = &raw.version
+        && (version.is_empty()
+            || version.len() > MAX_PRICING_VERSION_BYTES
+            || version.chars().any(char::is_control))
     {
         return Err(ConfigError::Invalid(
             "pricing.version must be 1-128 printable characters",
@@ -142,9 +146,13 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
             tiers: tiers.into(),
         });
     }
+    let entries: Box<[PriceEntry]> = entries.into();
     Ok(Pricing {
-        version: raw.version.into(),
-        entries: entries.into(),
+        version: match raw.version {
+            Some(version) => version.into(),
+            None => content_version(&entries).into(),
+        },
+        entries,
     })
 }
 

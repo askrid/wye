@@ -86,7 +86,7 @@ fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
         buf,
         &[
             ("gen_ai.provider.name", Some(Value::Str(line.provider_name))),
-            (attr::ROUTE, Some(Value::Str(line.path))),
+            (attr::ROUTE, Some(Value::Str(line.endpoint))),
             (attr::STATUS, Some(Value::Int(u64::from(line.status)))),
             (attr::OUTCOME, Some(Value::Str(line.outcome.as_str()))),
             ("wye.upstream_error", line.upstream_error.map(Value::Str)),
@@ -182,11 +182,11 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         }
     };
     open_span(buf, &span_id);
-    // The path is one of the API's own, so it needs no escaping.
+    // The endpoint is one of the API's own, so it needs no escaping.
     let _ = write!(
         buf,
         r#""name":"POST {}","kind":2,"startTimeUnixNano":"{start_ns}","endTimeUnixNano":"{end_ns}","attributes":["#,
-        line.path
+        line.endpoint
     );
     write_record_attributes(buf, line);
     buf.extend_from_slice(br#"],"events":["#);

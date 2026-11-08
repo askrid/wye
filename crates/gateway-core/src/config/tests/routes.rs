@@ -21,16 +21,95 @@ fn route_upstreams_parse_with_ids_and_weights() {
     .unwrap();
     let upstreams = claude(&config).upstreams();
     assert_eq!(upstreams.len(), 2);
-    assert_eq!(upstreams[0].id.as_deref(), Some("team-a"));
+    assert_eq!(&*upstreams[0].id, "team-a");
     assert_eq!(upstreams[0].weight, 3);
-    assert_eq!(upstreams[1].id.as_deref(), Some("team-b"));
+    assert_eq!(&*upstreams[1].id, "team-b");
     assert_eq!(upstreams[1].weight, 1);
     assert_eq!(upstreams[1].provider_key, ProviderKey::File("b.key".into()));
-    // A route's only upstream needs no id; it may still have one.
+    // Without an id, an upstream is named by its provider; it may still
+    // have one.
     let alone = parse(ACCOUNT).unwrap();
-    assert_eq!(claude(&alone).upstreams()[0].id, None);
+    assert_eq!(&*claude(&alone).upstreams()[0].id, "anthropic");
     let named = parse(&format!("id = \"a\"\n{ACCOUNT}")).unwrap();
-    assert_eq!(claude(&named).upstreams()[0].id.as_deref(), Some("a"));
+    assert_eq!(&*claude(&named).upstreams()[0].id, "a");
+}
+
+#[test]
+fn an_upstream_is_named_by_its_provider_unless_another_shares_it() {
+    let bedrock = "provider = \"bedrock\"\n\
+                   base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\n\
+                   provider_key_env = \"B\"\n";
+    let mixed = parse_route(&format!(
+        "[[routes.claude.upstreams]]\n{ACCOUNT}[[routes.claude.upstreams]]\n{bedrock}"
+    ))
+    .unwrap();
+    let ids: Vec<&str> = mixed.routes.upstreams().map(|u| &*u.id).collect();
+    assert_eq!(ids, ["anthropic", "bedrock"]);
+    // Two of one provider each need an id, the one that has one too.
+    for second in ["", "id = \"b\"\n"] {
+        let err = parse_route(&format!(
+            "[[routes.claude.upstreams]]\n{ACCOUNT}[[routes.claude.upstreams]]\n{second}{ACCOUNT}"
+        ))
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "routes.claude.upstreams: entries that share a provider each need an id"
+        );
+    }
+    // A written id may not take another's default.
+    let taken = parse_route(&format!(
+        "[[routes.claude.upstreams]]\nid = \"bedrock\"\n{ACCOUNT}\
+         [[routes.claude.upstreams]]\n{bedrock}"
+    ))
+    .unwrap_err();
+    assert_eq!(
+        taken.to_string(),
+        "routes.claude.upstreams \"bedrock\": id is used twice"
+    );
+    // An entry whose provider is wrong is named by what it wrote.
+    let wrong = parse_route("[[routes.claude.upstreams]]\nprovider = \"vertex\"\n").unwrap_err();
+    assert!(
+        wrong
+            .to_string()
+            .starts_with("routes.claude.upstreams \"vertex\": provider must be"),
+        "{wrong}"
+    );
+}
+
+#[test]
+fn anthropic_and_openai_need_no_base_url_and_regional_providers_do() {
+    let config = Config::from_toml_str(
+        "[[routes.claude.upstreams]]\nforward_caller_credential = true\n\
+         [[routes.openai.upstreams]]\nprovider_key_file = \"openai.key\"\n",
+    )
+    .unwrap();
+    let base: Vec<String> = config.routes.upstreams().map(|u| u.base_url()).collect();
+    assert_eq!(
+        base,
+        ["https://api.anthropic.com", "https://api.openai.com"]
+    );
+    // Bedrock and Claude Platform on AWS URLs name a region.
+    for (provider, extra, region) in [
+        ("bedrock", "", "a Bedrock URL"),
+        (
+            "claude-platform-aws",
+            "workspace_id = \"wrkspc_1\"\n",
+            "a Claude Platform on AWS URL",
+        ),
+    ] {
+        let err = parse_route(&format!(
+            "[[routes.claude.upstreams]]\nprovider = \"{provider}\"\n{extra}\
+             provider_key_env = \"K\"\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.starts_with(&format!(
+                "routes.claude.upstreams \"{provider}\": set base_url: {region} names its region"
+            )),
+            "{err}"
+        );
+    }
 }
 
 #[test]
@@ -44,7 +123,7 @@ fn route_upstreams_are_validated() {
         ),
         (
             entry("") + &entry("id = \"a\""),
-            "routes.claude.upstreams: every entry needs an id when the route has two or more",
+            "routes.claude.upstreams: entries that share a provider each need an id",
         ),
         (entry("id = \"a b\""), "letters, digits"),
         (entry("id = \"\""), "letters, digits"),
@@ -71,7 +150,7 @@ fn route_upstreams_are_validated() {
         ),
         (
             entry("id = \"a\"\nweight = 0").replace("id = \"a\"\n", ""),
-            "routes.claude.upstreams[0]: weight must be between 1 and 1000",
+            "routes.claude.upstreams \"anthropic\": weight must be between 1 and 1000",
         ),
         (
             entry("id = \"a\"").replace("provider_key_env = \"K\"", "provider_key_env = \"1K\""),
@@ -93,7 +172,7 @@ fn route_upstreams_are_validated() {
         ),
         (
             "[[routes.claude.upstreams]]\nbase_url = \"https://x.example\"\n".into(),
-            "routes.claude.upstreams[0]: set provider_key_env, provider_key_file, or \
+            "routes.claude.upstreams \"anthropic\": set provider_key_env, provider_key_file, or \
              forward_caller_credential = true",
         ),
         (
@@ -141,7 +220,7 @@ fn only_a_claude_route_with_one_upstream_forwards_the_caller_credential() {
     .unwrap_err();
     assert_eq!(
         openai.to_string(),
-        "routes.openai.upstreams[0]: forward_caller_credential belongs to routes.claude only"
+        "routes.openai.upstreams \"openai\": forward_caller_credential belongs to routes.claude only"
     );
 }
 
@@ -165,8 +244,8 @@ fn openai_route_alone_or_beside_claude() {
     ))
     .unwrap();
     assert_eq!(claude(&both).upstreams()[0].provider, Provider::Anthropic);
-    let ids: Vec<_> = both.routes.upstreams().map(|u| u.id.as_deref()).collect();
-    assert_eq!(ids, [None, Some("oa")]);
+    let ids: Vec<_> = both.routes.upstreams().map(|u| &*u.id).collect();
+    assert_eq!(ids, ["anthropic", "oa"]);
 
     let wrong_provider = Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:8080\"\n{}",
@@ -190,7 +269,7 @@ fn base_url_ending_in_v1_is_refused() {
         let err = parse(&format!("base_url = \"{url}\"\nprovider_key_env = \"K\"")).unwrap_err();
         assert!(
             err.to_string().starts_with(&format!(
-                "routes.claude.upstreams[0]: base_url \"{url}\": drop the trailing /v1"
+                "routes.claude.upstreams \"anthropic\": base_url \"{url}\": drop the trailing /v1"
             )),
             "{err}"
         );

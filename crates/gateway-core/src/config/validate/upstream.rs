@@ -31,7 +31,7 @@ pub(crate) struct RawUpstream {
     pub(crate) provider: Option<String>,
     pub(crate) weight: Option<u32>,
     pub(crate) workspace_id: Option<String>,
-    pub(crate) base_url: String,
+    pub(crate) base_url: Option<String>,
     pub(crate) provider_key_env: Option<String>,
     pub(crate) provider_key_file: Option<PathBuf>,
     #[serde(default)]
@@ -64,14 +64,14 @@ pub(crate) fn validate_routes(routes: Option<RawRoutes>) -> Result<Routes, Confi
         route
             .iter()
             .flat_map(|r| r.upstreams())
-            .filter_map(|u| u.id.clone())
+            .map(|u| u.id.clone())
             .collect()
     };
     let claude_ids = ids(&claude);
     if let Some(id) = ids(&openai).into_iter().find(|id| claude_ids.contains(id)) {
         return Err(ConfigError::RouteUpstream {
             route: RouteId::OpenAi.name(),
-            id: Some(id.into()),
+            id: id.into(),
             error: Box::new(ConfigError::Invalid("id is used by routes.claude too")),
         });
     }
@@ -149,22 +149,42 @@ fn validate_route_upstreams(
     raw_upstreams: Vec<RawUpstream>,
     id: RouteId,
 ) -> Result<Vec<Upstream>, ConfigError> {
-    // The provider an upstream has unless it names one.
-    let (route, provider) = (id.name(), Provider::of_route(id));
+    let route = id.name();
     if raw_upstreams.is_empty() || raw_upstreams.len() > MAX_UPSTREAMS {
         return Err(in_route(id)(ConfigError::Invalid(
             "upstreams must have between 1 and 16 entries",
         )));
     }
-    // A route's only upstream needs no id to tell it apart, and only it may
-    // forward the caller's credential: several use their own provider keys.
+    // An entry's id is its provider's name unless it names one, so a label
+    // for each entry's errors is known before its provider is.
+    let label = |entry: &RawUpstream| {
+        entry
+            .id
+            .clone()
+            .or_else(|| entry.provider.clone())
+            .unwrap_or_else(|| Provider::of_route(id).as_str().to_owned())
+    };
+    let providers = raw_upstreams
+        .iter()
+        .map(|entry| {
+            provider(id, entry.provider.as_deref()).map_err(|error| ConfigError::RouteUpstream {
+                route,
+                id: label(entry),
+                error: Box::new(error),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // Only a route's only upstream may forward the caller's credential:
+    // several use their own provider keys.
     let alone = raw_upstreams.len() == 1;
     let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw_upstreams.len());
-    for mut entry in raw_upstreams {
-        let entry_id = entry.id.take();
-        if entry_id.is_none() && !alone {
+    for (mut entry, provider) in raw_upstreams.into_iter().zip(providers.iter().copied()) {
+        // The provider's name tells an upstream apart from the route's others
+        // unless they share its provider.
+        let shared = providers.iter().filter(|&&p| p == provider).count() > 1;
+        if entry.id.is_none() && shared {
             return Err(in_route(id)(ConfigError::Invalid(
-                "upstreams: every entry needs an id when the route has two or more",
+                "upstreams: entries that share a provider each need an id",
             )));
         }
         if entry.forward_caller_credential && !alone {
@@ -173,6 +193,10 @@ fn validate_route_upstreams(
                  several upstreams use their own provider keys",
             )));
         }
+        let entry_id = entry
+            .id
+            .take()
+            .unwrap_or_else(|| provider.as_str().to_owned());
         let in_entry = |error| ConfigError::RouteUpstream {
             route,
             id: entry_id.clone(),
@@ -183,34 +207,14 @@ fn validate_route_upstreams(
                 "forward_caller_credential belongs to routes.claude only",
             )));
         }
-        if let Some(entry_id) = &entry_id {
-            if !is_upstream_id(entry_id) {
-                return Err(in_entry(ConfigError::Invalid(
-                    "id must be 1-64 letters, digits, '.', '_', or '-'",
-                )));
-            }
-            if upstreams.iter().any(|u| u.id.as_deref() == Some(entry_id)) {
-                return Err(in_entry(ConfigError::Invalid("id is used twice")));
-            }
+        if !is_upstream_id(&entry_id) {
+            return Err(in_entry(ConfigError::Invalid(
+                "id must be 1-64 letters, digits, '.', '_', or '-'",
+            )));
         }
-        let provider = match (provider, entry.provider.as_deref()) {
-            (default, None) => default,
-            (Provider::Anthropic, Some("anthropic")) => Provider::Anthropic,
-            (Provider::Anthropic, Some("claude-platform-aws")) => Provider::ClaudePlatformAws,
-            (Provider::Anthropic, Some("bedrock")) => Provider::Bedrock,
-            (Provider::OpenAi, Some("openai")) => Provider::OpenAi,
-            (Provider::OpenAi, Some(_)) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "provider must be \"openai\"",
-                )));
-            }
-            (_, Some(_)) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "provider must be \"anthropic\", \"claude-platform-aws\", or \"bedrock\" \
-                     (Vertex is planned)",
-                )));
-            }
-        };
+        if upstreams.iter().any(|u| *u.id == *entry_id) {
+            return Err(in_entry(ConfigError::Invalid("id is used twice")));
+        }
         let workspace_id = match (provider, entry.workspace_id.take()) {
             (Provider::ClaudePlatformAws, Some(id)) if is_workspace_id(&id) => Some(id.into()),
             (Provider::ClaudePlatformAws, Some(_)) => {
@@ -241,12 +245,32 @@ fn validate_route_upstreams(
         };
         let can_forward = alone && id == RouteId::Claude;
         let mut upstream = validate_upstream(entry, provider, can_forward).map_err(in_entry)?;
-        upstream.id = entry_id.map(Into::into);
+        upstream.id = entry_id.into();
         upstream.weight = weight;
         upstream.workspace_id = workspace_id;
         upstreams.push(upstream);
     }
     Ok(upstreams)
+}
+
+/// The provider an entry of route `id` names, else the route's own.
+fn provider(id: RouteId, named: Option<&str>) -> Result<Provider, ConfigError> {
+    Ok(match (Provider::of_route(id), named) {
+        (default, None) => default,
+        (Provider::Anthropic, Some("anthropic")) => Provider::Anthropic,
+        (Provider::Anthropic, Some("claude-platform-aws")) => Provider::ClaudePlatformAws,
+        (Provider::Anthropic, Some("bedrock")) => Provider::Bedrock,
+        (Provider::OpenAi, Some("openai")) => Provider::OpenAi,
+        (Provider::OpenAi, Some(_)) => {
+            return Err(ConfigError::Invalid("provider must be \"openai\""));
+        }
+        (_, Some(_)) => {
+            return Err(ConfigError::Invalid(
+                "provider must be \"anthropic\", \"claude-platform-aws\", or \"bedrock\" \
+                 (Vertex is planned)",
+            ));
+        }
+    })
 }
 
 /// A Claude Platform on AWS workspace id (`wrkspc_01AbCd...`): sent as a header.
@@ -300,9 +324,25 @@ fn validate_upstream(
             }));
         }
     };
-    let (scheme, authority, path_prefix) = parse_base_url("base_url", &raw.base_url)?;
+    let base_url = match (raw.base_url, provider.default_base_url()) {
+        (Some(url), _) => url,
+        (None, Some(url)) => url.to_owned(),
+        (None, None) => {
+            return Err(ConfigError::Invalid(match provider {
+                Provider::Bedrock => {
+                    "set base_url: a Bedrock URL names its region, such as \
+                     https://bedrock-mantle.us-east-1.api.aws/anthropic"
+                }
+                _ => {
+                    "set base_url: a Claude Platform on AWS URL names its region, such as \
+                     https://aws-external-anthropic.us-west-2.api.aws"
+                }
+            }));
+        }
+    };
+    let (scheme, authority, path_prefix) = parse_base_url("base_url", &base_url)?;
     Ok(Upstream {
-        id: None,
+        id: "".into(),
         weight: 1,
         provider,
         workspace_id: None,

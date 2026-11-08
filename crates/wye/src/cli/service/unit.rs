@@ -80,8 +80,7 @@ impl Manager {
 pub struct Service {
     pub program: PathBuf,
     pub config: PathBuf,
-    /// The usage log: the gateway's `--usage-log`, which it rotates. A
-    /// definition an older wye wrote appends stdout to it instead.
+    /// The usage log: the gateway's `--usage-log`, which it rotates.
     pub usage_log: PathBuf,
     /// The message log: where its stderr is appended, such as why it failed
     /// to start or stopped. Its stdout goes there too: with `--usage-log` it
@@ -159,10 +158,8 @@ impl Service {
     }
 
     /// What a definition `install` wrote runs; `None` for one it did not
-    /// write. One an older wye wrote is still ours, and `restart` rewrites a
-    /// definition whose text differs: without `--usage-log`, the gateway's
-    /// stdout was the usage log; the open-file limit is not read back, as
-    /// every definition this wye writes has the same one.
+    /// write. The open-file limit is not read back: every definition has
+    /// the same one.
     pub fn parse(manager: Manager, text: &str) -> Option<Self> {
         match manager {
             Manager::Launchd => {
@@ -171,27 +168,25 @@ impl Service {
                     .skip(1)
                     .filter_map(|s| s.split_once("</string>").map(|(v, _)| unxml(v)))
                     .collect();
-                let (label, program, serve, flag, config, log, messages) = match strings.as_slice()
-                {
-                    [
-                        label,
-                        program,
-                        serve,
-                        flag,
-                        config,
-                        log_flag,
-                        log,
-                        _,
-                        messages,
-                    ] if log_flag == "--usage-log" => {
-                        (label, program, serve, flag, config, log, messages)
-                    }
-                    [label, program, serve, flag, config, log, messages] => {
-                        (label, program, serve, flag, config, log, messages)
-                    }
-                    _ => return None,
+                let [
+                    label,
+                    program,
+                    serve,
+                    flag,
+                    config,
+                    log_flag,
+                    log,
+                    _,
+                    messages,
+                ] = strings.as_slice()
+                else {
+                    return None;
                 };
-                if label != LABEL || serve != "serve" || flag != "--config" {
+                if label != LABEL
+                    || serve != "serve"
+                    || flag != "--config"
+                    || log_flag != "--usage-log"
+                {
                     return None;
                 }
                 let stop_secs = text
@@ -219,14 +214,9 @@ impl Service {
                 };
                 let exec = line("ExecStart=")?;
                 let words: Vec<&str> = exec.split(' ').collect();
-                let (program, config, log) = match words.as_slice() {
-                    [program, "serve", "--config", config, "--usage-log", log] => {
-                        (program, config, (*log).to_owned())
-                    }
-                    [program, "serve", "--config", config] => {
-                        (program, config, line("StandardOutput=append:")?)
-                    }
-                    _ => return None,
+                let [program, "serve", "--config", config, "--usage-log", log] = words.as_slice()
+                else {
+                    return None;
                 };
                 Some(Self {
                     program: program.into(),

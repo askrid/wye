@@ -255,12 +255,7 @@ mod tests {
         )
         .unwrap();
         let route = config.routes.claude.as_ref().unwrap();
-        let id = |session: &str| {
-            route.upstreams()[route.pick(session.as_bytes())]
-                .id
-                .clone()
-                .unwrap()
-        };
+        let id = |session: &str| route.upstreams()[route.pick(session.as_bytes())].id.clone();
         let (right, wrong) = if &*id("s-1") == "team-a" {
             ("team-a", "team-b")
         } else {

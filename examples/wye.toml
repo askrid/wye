@@ -7,8 +7,9 @@
 #   ANTHROPIC_API_KEY=... wye serve -c examples/wye.toml
 #   wye claude                  # or: ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude
 #
-# Only `listen`, `base_url`, and a provider key (or forward_caller_credential)
-# are required. Unknown fields are an error at startup, and so are timers over
+# Only a provider key (or forward_caller_credential) is required, and a
+# base_url for providers whose URL names a region (claude-platform-aws,
+# bedrock). Unknown fields are an error at startup, and so are timers over
 # 86400 seconds (a day).
 # Paths are relative to this file. Secrets are never written here: they come
 # from environment variables or files.
@@ -16,7 +17,8 @@
 [server]
 # Beyond loopback only with [auth]. Without [auth], every local user and
 # program may use the gateway, but no web page: requests need a loopback Host
-# (localhost, 127.0.0.1, [::1]) and no Origin (docs/policy.md).
+# (localhost, 127.0.0.1, [::1]) and no Origin (docs/policy.md). The address
+# `wye claude`, `wye codex`, and `wye probe` use unless told another:
 listen = "127.0.0.1:8080"
 max_request_body_bytes = 33554432      # Anthropic's request size limit
 # Request bytes held while Wye reads `model` (the hold), all requests
@@ -62,12 +64,16 @@ select = "cache_affine"
 
 # Up to 16 upstreams, one [[routes.claude.upstreams]] entry each.
 [[routes.claude.upstreams]]
-# Optional with one upstream; with two or more, required and unique. Usage
-# records and OTLP name the upstream by it:
+# Names the upstream in usage records, OTLP, and prices; unique. Default:
+# the provider's name ("anthropic"); required when two upstreams of a route
+# share a provider:
 # id = "main"
 provider = "anthropic"                 # or "claude-platform-aws", "bedrock" (below)
 weight = 1                             # share of sessions, 1 to 1000
-base_url = "https://api.anthropic.com" # without /v1; http only for loopback hosts
+# Without /v1; http only for loopback hosts. Default: the provider's API
+# for anthropic (this) and openai; claude-platform-aws and bedrock name a
+# region, so set it:
+base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_API_KEY"
 # Or read the provider key from a mounted secret file (Docker or Kubernetes
 # secrets, systemd credentials), readable only by its owner (`wye doctor`
@@ -88,8 +94,9 @@ http_version = "auto"
 # PEM file of extra trusted root certificates (a TLS-inspecting proxy):
 # ca_file = "corporate-ca.pem"
 
-# Several accounts or providers: one more entry each, every one with its id.
-# Each takes every field above except forward_caller_credential.
+# Several accounts or providers: one more entry each, with an id where two
+# share a provider. Each takes every field above except
+# forward_caller_credential.
 # [[routes.claude.upstreams]]
 # id = "team-a"
 # weight = 2
@@ -116,9 +123,8 @@ http_version = "auto"
 # `failover` work as above.
 # [routes.openai]
 # [[routes.openai.upstreams]]
-# id = "openai"
 # provider = "openai"                  # the default here
-# base_url = "https://api.openai.com"  # without /v1
+# base_url = "https://api.openai.com"  # the default here; without /v1
 # provider_key_env = "OPENAI_API_KEY"
 
 # Gateway tokens; incompatible with forward_caller_credential. `wye init
@@ -215,7 +221,9 @@ http_version = "auto"
 # unscoped match. A model no entry matches costs "unknown", never $0 (rules:
 # docs/policy.md, "Price table").
 # [pricing]
-# version = "anthropic-2026-11-01"     # recorded with every cost
+# Recorded with every cost. Default: 16 hex digits of a hash of the prices
+# below, the same on every replica and changed by any price:
+# version = "anthropic-2026-11-01"
 # [[pricing.prices]]
 # models = ["claude-opus-5-5"]
 # upstreams = ["aws-us-west-2"]        # only when one of these serves (regional prices)

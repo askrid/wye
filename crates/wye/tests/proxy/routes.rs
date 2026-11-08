@@ -42,10 +42,7 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
     let mut used = [false; 2];
     for i in 0..16 {
         let session = format!("session-{i}");
-        let expected = route.upstreams()[route.pick(session.as_bytes())]
-            .id
-            .as_deref()
-            .unwrap();
+        let expected = &*route.upstreams()[route.pick(session.as_bytes())].id;
         // Twice per session: the same upstream both times.
         for _ in 0..2 {
             let mut req = messages();

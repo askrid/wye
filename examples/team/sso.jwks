@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "sso-placeholder",
+      "n": "tdPluWYSToLhzEK7xgp4C63jO4J4kpS7b-y2PH-QGNxxJTnlEmrTrsODZXavJ43Kp7LgpWT3f3FeSiDlfwMt7_-wNOE_eAkSVXKp6oq0xu9c_M9sVCX4NFSRC3Netfqy0N4iDv2N80FduBQOq-Z7kX47uyuATrI_ZBZcsquZoFt1H6faMMfwMccrp056pE9L4pcUSyXhKRVCViweIyQe0EJ18hZOrgfYZkSWrgS5CeeYUHah99sMtT5_hr5-ynUAn1qe-oJcKFUEOgg1UmZ5zJ4CRMnVAmEu3n-1XtJxRI-xKhGaSgT0-MtNZWcbGdmBWdnA0BTQumpsOY_RyZq0UQ",
+      "e": "AQAB"
+    }
+  ]
+}

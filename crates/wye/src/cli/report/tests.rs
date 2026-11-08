@@ -138,6 +138,11 @@ fn a_log_without_requests_says_where_they_come_from() {
         out.starts_with("No request records (1 other line skipped)"),
         "{out}"
     );
+    let empty = report(&b""[..], Paint::OFF).unwrap();
+    assert!(
+        empty.starts_with("No request records. The gateway writes"),
+        "{empty}"
+    );
     assert!(
         flat(&out).contains(
             "to stdout, or to the file named by `wye serve --usage-log`; \
@@ -236,12 +241,16 @@ fn splits_cost_by_upstream_when_records_name_one() {
     };
     assert_eq!(cost("team-a"), "$0.4000");
     assert_eq!(cost("team-b"), "$0.2000");
-    // Without upstream names, no section.
+    // Without upstream names, or with one, no section: it would repeat
+    // the "all" row.
     assert!(
         !report(LOG.as_bytes(), Paint::OFF)
             .unwrap()
             .contains("By upstream")
     );
+    let one = log.replace("team-b", "team-a");
+    let out = report(one.as_bytes(), Paint::OFF).unwrap();
+    assert!(!out.contains("By upstream"), "{out}");
 }
 
 #[test]
@@ -263,6 +272,28 @@ fn counts_failovers_by_upstream_and_reason() {
         !report(LOG.as_bytes(), Paint::OFF)
             .unwrap()
             .contains("Failovers")
+    );
+}
+
+#[test]
+fn only_what_happened_is_reported() {
+    // Every line a record, none a cache miss: no count of skipped lines,
+    // and no cache-miss section.
+    let log = r#"{"event":"request","v":2,"endpoint":"/v1/messages","outcome":"completed","session_id":"s","input_tokens":5,"output_tokens":1,"cache_read_input_tokens":90}
+"#;
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
+    assert!(
+        flat(&out).starts_with("1 request in 1 session; outcomes: completed 1 By request class "),
+        "{out}"
+    );
+    assert!(!out.contains("skipped"), "{out}");
+    assert!(!out.contains("Cache misses"), "{out}");
+    // A notice alone is named alone.
+    let noticed = format!("{log}wye: stopped\n");
+    let out = report(noticed.as_bytes(), Paint::OFF).unwrap();
+    assert!(
+        out.starts_with("1 request in 1 session (1 gateway notice skipped);"),
+        "{out}"
     );
 }
 
@@ -339,61 +370,48 @@ const NOW: u64 = 1_794_042_900;
 
 #[test]
 fn a_window_reads_durations_back_from_now_and_utc_dates() {
-    let window = |since, until| Window::parse(since, until, NOW);
-    assert_eq!(window(None, None), Ok(Window::default()));
+    let window = |since| Window::parse(since, NOW);
+    assert_eq!(window(None), Ok(Window::default()));
     assert_eq!(
-        window(Some("7d"), None),
+        window(Some("7d")),
         Ok(Window {
             since: Some((NOW - 7 * 86_400) * 1000),
-            until: None
         })
     );
     assert_eq!(
-        window(Some("2026-11-01"), Some("30m")),
+        window(Some("2026-11-01")),
         Ok(Window {
             since: Some(1_793_491_200_000),
-            until: Some((NOW - 1800) * 1000)
         })
     );
     assert_eq!(
-        window(Some("1w"), None),
+        window(Some("1w")),
         Err("--since 1w: write it as a time ago (30m, 8h, 7d) or a UTC date (2026-11-01)".into())
     );
     assert_eq!(
-        window(None, Some("2026-02-30")).unwrap_err(),
-        "--until 2026-02-30: write it as a time ago (30m, 8h, 7d) or a UTC date (2026-11-01)"
-    );
-    assert_eq!(
-        window(Some("1h"), Some("2h")),
-        Err("--since 1h is not before --until 2h".into())
+        window(Some("2026-02-30")).unwrap_err(),
+        "--since 2026-02-30: write it as a time ago (30m, 8h, 7d) or a UTC date (2026-11-01)"
     );
 }
 
 #[test]
-fn records_outside_the_window_are_left_out_and_counted() {
-    // `unix_ms` 1000 to 5000 in LOG; the window keeps 2000 to 4999.
+fn records_before_the_window_are_left_out_and_counted() {
+    // `unix_ms` 1000 to 5000 in LOG; the window keeps 2000 on.
     let mut summary = Summary {
-        window: Window {
-            since: Some(2000),
-            until: Some(5000),
-        },
+        window: Window { since: Some(2000) },
         ..Summary::default()
     };
     summary.read(LOG.as_bytes()).unwrap();
     let out = flat(&render(&summary, Paint::OFF));
     assert!(
         out.starts_with(
-            "2 requests in 2 sessions since 1970-01-01 00:00:02 UTC, before \
-             1970-01-01 00:00:05 UTC (2 records outside it, 1 gateway notice and 2 other \
-             lines skipped); outcomes: completed 1, refused 1 "
+            "3 requests in 2 sessions since 1970-01-01 00:00:02 UTC (1 record outside it, \
+             1 gateway notice and 2 other lines skipped); outcomes: completed 2, refused 1 "
         ),
         "{out}"
     );
     let mut empty = Summary {
-        window: Window {
-            since: Some(9000),
-            until: None,
-        },
+        window: Window { since: Some(9000) },
         ..Summary::default()
     };
     empty.read(LOG.as_bytes()).unwrap();
@@ -407,18 +425,25 @@ fn records_outside_the_window_are_left_out_and_counted() {
     );
 }
 
+/// Logs without `v`, and of versions 1 (`path`) and 2 (`endpoint`), add up
+/// alike: a log the gateway wrote before an upgrade still counts.
 #[test]
-fn several_logs_add_up_with_or_without_a_format_version() {
-    let versioned = LOG.replace(r#"{"event":"request","#, r#"{"event":"request","v":1,"#);
-    assert!(versioned.contains(r#""v":1,"unix_ms":1000"#));
+fn several_logs_add_up_whatever_their_format_version() {
+    let v1 = LOG.replace(r#"{"event":"request","#, r#"{"event":"request","v":1,"#);
+    assert!(v1.contains(r#""v":1,"unix_ms":1000,"path":"#));
+    let v2 = LOG
+        .replace(r#"{"event":"request","#, r#"{"event":"request","v":2,"#)
+        .replace(r#""path":"#, r#""endpoint":"#);
+    assert!(v2.contains(r#""v":2,"unix_ms":1000,"endpoint":"#));
     let mut summary = Summary::default();
-    summary.read(versioned.as_bytes()).unwrap();
-    summary.read(LOG.as_bytes()).unwrap();
+    for log in [LOG, &v1, &v2] {
+        summary.read(log.as_bytes()).unwrap();
+    }
     let out = flat(&render(&summary, Paint::OFF));
     assert!(
         out.starts_with(
-            "8 requests in 2 sessions (2 gateway notices and 4 other lines skipped); \
-             outcomes: completed 6, refused 2 "
+            "12 requests in 2 sessions (3 gateway notices and 6 other lines skipped); \
+             outcomes: completed 9, refused 3 "
         ),
         "{out}"
     );

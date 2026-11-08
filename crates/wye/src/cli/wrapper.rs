@@ -12,8 +12,9 @@ use gateway_core::config::{is_cleartext_remote, is_loopback_host};
 
 use super::{args::Parsed, files};
 
-/// Gateway URL when neither `--url` nor `WYE_URL` is set.
-const DEFAULT_GATEWAY: &str = "http://127.0.0.1:8080";
+/// Gateway URL when neither `--url` nor `WYE_URL` is set: a gateway on its
+/// default listen address.
+pub(crate) const DEFAULT_GATEWAY: &str = concat!("http://", gateway_core::default_listen!());
 /// The environment variable Codex reads its bearer token from (the Codex
 /// provider's `env_key`).
 const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";

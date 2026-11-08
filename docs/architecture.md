@@ -255,7 +255,7 @@ Amazon Bedrock (implemented with API keys, [not yet checked against the live ser
 - Records, OTLP, and pricing see the model the provider reports. Whether Bedrock reports its `anthropic.` id there, which a price entry would then need to name, is part of the live check.
 - A failover resend gets the next upstream's id, in the bytes already sent or in the unread rest; a value split between the two (a rejection in the middle of the first chunk) is answered as it is.
 
-Usage and cost (implemented): records, OTLP, and `wye report` split by the upstream's `id`, which names the account; config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
+Usage and cost (implemented): records, OTLP, and `wye report` split by the upstream's `id`, which names the account (by default the provider's name); config maps it to its provider. Partner and regional prices differ, so price table entries can be scoped to upstreams ([policy.md](policy.md#price-table)).
 
 ## Model aliases and upgrade checks
 

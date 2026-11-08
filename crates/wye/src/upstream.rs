@@ -126,9 +126,8 @@ const STREAM_WINDOW: u32 = 256 * 1024;
 const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
 
 pub(crate) struct Upstream {
-    /// The route's name for it, in usage records; `None` for a route's only
-    /// upstream written without one.
-    pub(crate) id: Option<Arc<str>>,
+    /// The route's name for it, in usage records.
+    pub(crate) id: Arc<str>,
     /// `anthropic-workspace-id` for Claude Platform on AWS, built once.
     workspace: Option<HeaderValue>,
     /// Who serves it, which decides its model ids (`anthropic.` on Bedrock).
@@ -168,7 +167,7 @@ impl Upstream {
             config.connect_timeout,
         );
         Ok(Self {
-            id: config.id.as_deref().map(Arc::from),
+            id: Arc::from(&*config.id),
             provider: config.provider,
             workspace: config
                 .workspace_id

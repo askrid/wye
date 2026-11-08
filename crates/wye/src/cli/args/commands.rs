@@ -21,7 +21,11 @@ const CONFIG: Opt = Opt {
 const URL: Opt = Opt::value(
     "url",
     "url",
-    "The gateway (default: $WYE_URL, else http://127.0.0.1:8080)",
+    concat!(
+        "The gateway (default: $WYE_URL, else http://",
+        gateway_core::default_listen!(),
+        ")"
+    ),
 );
 
 /// `--token-file <path>`: the gateway token a client presents.
@@ -108,15 +112,6 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
     Command {
-        id: Id::Validate,
-        name: "validate",
-        summary: "Check a config without starting the gateway",
-        options: &[CONFIG],
-        notes: "Reads the identity providers' key sets too; secrets in the environment are \
-                left to `wye doctor`.",
-        ..BASE
-    },
-    Command {
         id: Id::Doctor,
         name: "doctor",
         summary: "Check a config's secrets, files, and upstreams",
@@ -151,18 +146,15 @@ pub const COMMANDS: &[Command] = &[
         summary: "Summarize a usage log",
         args: "[<usage-log>...]",
         arity: (0, usize::MAX),
-        options: &[
-            Opt::value(
-                "since",
-                "when",
-                concat!(
-                    "Records from then on: a time ago (",
-                    duration!(),
-                    ") or a UTC date (2026-11-01)"
-                ),
+        options: &[Opt::value(
+            "since",
+            "when",
+            concat!(
+                "Records from then on: a time ago (",
+                duration!(),
+                ") or a UTC date (2026-11-01)"
             ),
-            Opt::value("until", "when", "Records before then, written the same way"),
-        ],
+        )],
         notes: "Reads $WYE_HOME/usage.jsonl, the usage log `wye service install` keeps, and \
                 its rotated files (usage-*.jsonl), unless given others; `-` reads \
                 standard input, as in `cat replica-*.jsonl | wye report -`.",
@@ -187,9 +179,9 @@ pub const COMMANDS: &[Command] = &[
         notes: "Two choices: who can reach the gateway (this machine, or --shared) and \
                 whose credential pays (the caller's, or --provider-key). By default, \
                 for you on this machine: Claude Code's login, or any API key a caller \
-                sends, goes through, and the gateway holds no secret. With --shared, the \
-                config goes in ./wye.toml unless -c names another. Sample policy tests \
-                go in policy-tests, next to the config, for `wye policy-test`. Never \
+                sends, goes through, and the gateway holds no secret. A shared \
+                gateway's config belongs in the repository it is reviewed in: -c wye.toml \
+                there. Sample policy tests go in policy-tests, next to the config, for `wye policy-test`. Never \
                 overwrites a file.",
         ..BASE
     },
@@ -290,7 +282,8 @@ pub const COMMANDS: &[Command] = &[
         options: &[CONFIG],
         notes: "Each <name>.json is a request and <name>.expect.toml its decision. The \
                 default directory is policy-tests, next to the config, where `wye init` \
-                writes samples.",
+                writes samples. It reads the identity providers' key sets too, as the \
+                gateway does, and no secret, so CI needs no credentials.",
         ..BASE
     },
     Command {
@@ -339,13 +332,6 @@ pub(super) const GROUPS: &[(&str, &[&str])] = &[
     ("Set up", &["init", "token"]),
     (
         "Check",
-        &[
-            "validate",
-            "doctor",
-            "explain",
-            "policy-test",
-            "policy-diff",
-            "probe",
-        ],
+        &["doctor", "explain", "policy-test", "policy-diff", "probe"],
     ),
 ];

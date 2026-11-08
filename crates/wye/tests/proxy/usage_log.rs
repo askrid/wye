@@ -31,10 +31,13 @@ async fn completed_stream_logs_usage_without_changing_bytes() {
 
     let record = h.usage_record().await;
     assert_eq!(record["event"], "request");
-    assert_eq!(record["v"], 1, "the record format's version");
-    assert_eq!(record["path"], "/v1/messages");
+    assert_eq!(record["v"], 2, "the record format's version");
+    assert_eq!(record["endpoint"], "/v1/messages");
+    assert!(record.get("path").is_none(), "v2 renamed it");
     assert_eq!(record["status"], 200);
     assert_eq!(record["outcome"], "completed");
+    // A route's only upstream, named by its provider.
+    assert_eq!(record["upstream"], "anthropic");
     assert_eq!(record["session_id"], "s-1");
     assert_eq!(record["model"], "claude-test");
     assert_eq!(record["usage_status"], "complete");
@@ -153,7 +156,7 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
     let record = h.usage_record().await;
     assert_eq!(record["outcome"], "cancelled");
     assert_eq!(record["status"], 499);
-    assert_eq!(record["path"], "/v1/messages");
+    assert_eq!(record["endpoint"], "/v1/messages");
 }
 
 /// A client that leaves before the response headers also cancels the
@@ -245,7 +248,7 @@ async fn refusals_and_count_tokens_are_logged_without_usage() {
     )
     .await;
     let record = h.usage_record().await;
-    assert_eq!(record["path"], "/v1/messages/count_tokens");
+    assert_eq!(record["endpoint"], "/v1/messages/count_tokens");
     assert_eq!(record["outcome"], "completed");
     assert_eq!(record["usage_status"], "none");
 }
@@ -280,7 +283,7 @@ async fn a_body_delivered_to_its_length_is_completed_before_its_stream_ends() {
         .await;
     assert_eq!(read_body(res).await, COUNT);
     let record = h.usage_record().await;
-    assert_eq!(record["path"], "/v1/messages/count_tokens");
+    assert_eq!(record["endpoint"], "/v1/messages/count_tokens");
     assert_eq!(record["outcome"], "completed");
     assert_eq!(open.lock().unwrap().len(), 1);
 }
@@ -697,6 +700,6 @@ async fn spans_a_collector_refuses_are_counted_as_lost() {
     // The shutdown summary follows the request's record.
     let summary = h.usage_record().await;
     assert_eq!(summary["event"], "otlp_dropped", "{summary}");
-    assert_eq!(summary["v"], 1, "{summary}");
+    assert_eq!(summary["v"], 2, "{summary}");
     assert_eq!(summary["records"], 1, "{summary}");
 }

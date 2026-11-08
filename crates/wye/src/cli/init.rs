@@ -14,7 +14,7 @@ use gateway_core::config::Config;
 use super::{
     REPO_AT_RELEASE,
     args::Parsed,
-    files::{self, CONFIG_FILE, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
+    files::{self, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
     plural, token,
 };
 
@@ -68,22 +68,24 @@ impl InitOptions {
     /// The config text, validated; `public_key` is the signing key's public
     /// half, for `Setup::Shared`.
     pub fn config(&self, public_key: &str) -> Result<String, String> {
-        let (listen, credential, openai_key) = match self.setup {
+        // A local gateway listens where it does by default, 127.0.0.1:8080,
+        // and each upstream is at its provider's own API by default.
+        let (server, credential, openai_key) = match self.setup {
             Setup::Passthrough => (
-                "127.0.0.1:8080",
+                "",
                 "# Each caller's own credential goes through, whether Claude Code's\n\
                  # login or an API key: this machine only, no [auth].\n\
                  forward_caller_credential = true",
                 "provider_key_file = \"openai.key\"",
             ),
             Setup::ProviderKey => (
-                "127.0.0.1:8080",
+                "",
                 "# Read at startup from this file, next to this config:\n\
                  provider_key_file = \"anthropic.key\"",
                 "provider_key_file = \"openai.key\"",
             ),
             Setup::Shared => (
-                "0.0.0.0:8080",
+                "[server]\nlisten = \"0.0.0.0:8080\"\n\n",
                 "provider_key_env = \"ANTHROPIC_API_KEY\"",
                 "provider_key_env = \"OPENAI_API_KEY\"",
             ),
@@ -91,14 +93,12 @@ impl InitOptions {
         let mut text = format!(
             "# Written by `wye init`. Every field, with its default and limits:\n\
              # {REPO_AT_RELEASE}/examples/wye.toml\n\n\
-             [server]\nlisten = \"{listen}\"\n\n\
-             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n{credential}\n"
+             {server}[[routes.claude.upstreams]]\n{credential}\n"
         );
         if self.openai {
             text.push_str(&format!(
                 "\n# OpenAI Responses and Chat Completions (wye codex, OpenAI SDKs at /v1).\n\
-                 [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-                 base_url = \"https://api.openai.com\"\n{openai_key}\n"
+                 [[routes.openai.upstreams]]\n{openai_key}\n"
             ));
         }
         if self.setup == Setup::Shared {
@@ -224,11 +224,11 @@ impl InitOptions {
             };
             steps.push((format!("Set {keys} where the gateway runs."), String::new()));
         }
-        steps.push((
-            "Check the config's secrets, files, and upstreams:".to_owned(),
-            format!("wye doctor{c}"),
-        ));
         if self.setup == Setup::Shared {
+            steps.push((
+                "Check the config's secrets, files, and upstreams:".to_owned(),
+                format!("wye doctor{c}"),
+            ));
             steps.push((
                 "Issue a gateway token for each person or service:".to_owned(),
                 format!("wye token issue alice{c} --out alice.token"),
@@ -252,9 +252,11 @@ impl InitOptions {
                 String::new(),
             ));
         } else {
+            // Install checks the config as the service will start it.
             steps.push((
-                "Run the gateway in the background, now and at every login (it shows \
-                 what it sets up and asks first; or run `wye serve` in a terminal):"
+                "Run the gateway in the background, now and at every login (it checks \
+                 the config, shows what it sets up, and asks first; or run `wye serve` \
+                 in a terminal):"
                     .to_owned(),
                 format!("wye service install{c}"),
             ));
@@ -297,12 +299,10 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result
         (false, false) => Setup::Passthrough,
     };
     let found = files::default_config(env);
-    // A shared gateway's config belongs in the repository it is reviewed in.
-    let config = match (parsed.value("config"), setup, &found) {
-        (Some(config), _, _) => PathBuf::from(config),
-        (None, Setup::Shared, _) => PathBuf::from(CONFIG_FILE),
-        (None, _, Some(found)) => found.clone(),
-        (None, _, None) => return Err("no home directory: pass -c <path>".into()),
+    let config = match (parsed.value("config"), &found) {
+        (Some(config), _) => PathBuf::from(config),
+        (None, Some(found)) => found.clone(),
+        (None, None) => return Err("no home directory: pass -c <path>".into()),
     };
     init(
         &InitOptions {
@@ -421,6 +421,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::cli::files::CONFIG_FILE;
 
     const SETUPS: [Setup; 3] = [Setup::Passthrough, Setup::ProviderKey, Setup::Shared];
 
@@ -445,6 +446,17 @@ mod tests {
                 let config = Config::from_toml_str(&text).unwrap();
                 assert_eq!(config.routes.openai.is_some(), openai);
                 assert_eq!(config.auth.is_some(), setup == Setup::Shared);
+                // What a default gives is not written: the providers' own
+                // URLs, the upstreams' ids, and a local listen address.
+                for line in ["base_url", "id = \"openai\"", "[routes.openai]\n"] {
+                    assert!(!text.contains(line), "{setup:?}: {text}");
+                }
+                assert_eq!(
+                    text.contains("[server]\nlisten = \"0.0.0.0:8080\"\n"),
+                    setup == Setup::Shared,
+                    "{text}"
+                );
+                assert_eq!(text.contains("listen"), setup == Setup::Shared, "{text}");
             }
         }
 
@@ -579,7 +591,7 @@ mod tests {
         assert!(
             elsewhere
                 .next_steps(|p| p.display().to_string())
-                .contains("\n     wye doctor -c /h/wye.toml\n")
+                .contains("\n     wye service install -c /h/wye.toml\n")
         );
         let repo = steps("wye.toml");
         assert!(repo.contains("\n     wye doctor -c wye.toml\n"), "{repo}");
@@ -614,7 +626,12 @@ mod tests {
             flat.contains("an exported ANTHROPIC_API_KEY takes over"),
             "{steps}"
         );
-        assert!(steps.contains("  1. Check the config's secrets"), "{steps}");
+        // `service install` checks the config itself: no `doctor` first.
+        assert!(
+            steps.contains("  1. Run the gateway in the background"),
+            "{steps}"
+        );
+        assert!(!steps.contains("wye doctor"), "{steps}");
     }
 
     #[test]
@@ -623,11 +640,10 @@ mod tests {
             .next_steps(|p| p.display().to_string());
         assert!(steps.contains("/h/anthropic.key") && steps.contains("/h/openai.key"));
         assert!(
-            steps.contains(
-                "  2. Check the config's secrets, files, and upstreams:\n     wye doctor\n"
-            ),
+            steps.contains("  2. Run the gateway in the background"),
             "{steps}"
         );
+        assert!(!steps.contains("wye doctor"), "{steps}");
         assert!(!steps.contains(" -c "), "{steps}");
     }
 }

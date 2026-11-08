@@ -125,18 +125,6 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             )?;
             Ok(0)
         }
-        Id::Validate => {
-            let path = config_path()?;
-            // Key sets are files too; secrets in the environment are not checked.
-            let verified = wye::verifier(&files::load(&path)?, files::config_dir(&path));
-            files::named(&path, verified)?;
-            emit(&format!(
-                "{}: {}\n",
-                files::tilde(&path, &env),
-                Paint::stdout().green("ok")
-            ));
-            Ok(0)
-        }
         Id::Doctor => {
             let path = config_path()?;
             let config = files::load(&path)?;
@@ -182,6 +170,9 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         Id::PolicyTest => {
             let path = config_path()?;
             let config = files::load(&path)?;
+            // Key sets are files the gateway reads at startup, so CI checks
+            // them too; secrets in the environment are `doctor`'s.
+            files::named(&path, wye::verifier(&config, files::config_dir(&path)))?;
             let dir = match parsed.positional.first() {
                 Some(dir) => PathBuf::from(dir),
                 None => files::config_dir(&path).join(files::POLICY_TESTS_DIR),

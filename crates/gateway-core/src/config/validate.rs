@@ -25,6 +25,7 @@ pub(super) use upstream::{RawRoutes, validate_routes};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawConfig {
+    #[serde(default)]
     pub(super) server: RawServer,
     pub(super) routes: Option<RawRoutes>,
     pub(super) auth: Option<RawAuth>,
@@ -66,10 +67,10 @@ pub(super) struct RawCacheDiagnostics {
     pub(super) sample_percent: Option<u8>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawServer {
-    pub(super) listen: String,
+    pub(super) listen: Option<String>,
     pub(super) max_request_body_bytes: Option<u64>,
     pub(super) max_total_held_bytes: Option<u64>,
     pub(super) max_total_kept_bytes: Option<u64>,
@@ -81,10 +82,10 @@ pub(super) struct RawServer {
 }
 
 pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
-    let listen: SocketAddr = raw
-        .listen
+    let listen = raw.listen.as_deref().unwrap_or(DEFAULT_LISTEN);
+    let listen: SocketAddr = listen
         .parse()
-        .map_err(|_| ConfigError::InvalidListen(raw.listen.clone()))?;
+        .map_err(|_| ConfigError::InvalidListen(listen.to_owned()))?;
     if !listen.ip().is_loopback() && !authenticated {
         return Err(ConfigError::NonLoopbackListen(listen));
     }

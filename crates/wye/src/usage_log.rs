@@ -127,7 +127,8 @@ pub(crate) struct RequestInfo {
     pub requested_model: Option<Arc<str>>,
     /// Filled with the request body's upgrade-check findings when sampled.
     pub upgrade: Option<UpgradeSlot>,
-    /// The route upstream the request went to, when the route names them.
+    /// The route upstream the request went to; `None` when refused before
+    /// one was chosen.
     pub upstream: Option<Arc<str>>,
     /// Who serves the request: the provider of the upstream it went to, else
     /// (refused before one was chosen) the endpoint's own.
@@ -139,7 +140,7 @@ pub(crate) struct RequestInfo {
 
 /// An upstream that rejected a request, which then went to the next one.
 pub(crate) struct RejectedAttempt {
-    pub upstream: Option<Arc<str>>,
+    pub upstream: Arc<str>,
     pub reason: FailoverReason,
 }
 

@@ -1,6 +1,6 @@
 //! `wye report`: a summary of usage logs (the JSON lines `wye serve` writes
 //! to stdout or its `--usage-log`), offline and with no telemetry backend,
-//! optionally of a time window.
+//! optionally from a time on.
 //!
 //! It answers what the gateway cannot per request: totals per Claude Code
 //! session and prompt, spend by request class, and which cache misses are
@@ -33,7 +33,9 @@ use crate::log_files;
 /// Rows shown in the session and prompt rankings.
 const TOP: usize = 10;
 
-/// The usage-record fields the report reads; everything else is ignored.
+/// The usage-record fields the report reads; everything else is ignored, so
+/// every format version reads alike: v2 renamed only `path`, which the
+/// report does not read.
 #[derive(Deserialize)]
 struct Record {
     event: String,
@@ -188,68 +190,45 @@ struct Session {
 /// (no agent id) or one of its subagents.
 type Conversation = (String, Option<String>);
 
-/// The records a report covers, by `unix_ms`: from `since` on, and before
-/// `until`.
+/// The records a report covers, by `unix_ms`: from `since` on. An end is
+/// a filter for a pipe (`jq 'select(.unix_ms < ...)'`), not a flag.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 struct Window {
     since: Option<u64>,
-    until: Option<u64>,
 }
 
 impl Window {
-    /// The window `--since` and `--until` name, `now` in Unix seconds.
-    fn parse(since: Option<&str>, until: Option<&str>, now: u64) -> Result<Self, String> {
-        let at = |flag: &str, when: Option<&str>| {
-            when.map(|when| {
+    /// The window `--since` names, `now` in Unix seconds.
+    fn parse(since: Option<&str>, now: u64) -> Result<Self, String> {
+        let since = since
+            .map(|when| {
                 log_files::midnight(when)
                     .or_else(|| duration_secs(when).map(|ago| now.saturating_sub(ago)))
                     .map(|secs| secs.saturating_mul(1000))
                     .ok_or_else(|| {
                         format!(
                             concat!(
-                                "--{} {}: write it as a time ago (",
+                                "--since {}: write it as a time ago (",
                                 duration!(),
                                 ") or a UTC date (2026-11-01)"
                             ),
-                            flag, when
+                            when
                         )
                     })
             })
-            .transpose()
-        };
-        let window = Self {
-            since: at("since", since)?,
-            until: at("until", until)?,
-        };
-        if let (Some(from), Some(to)) = (window.since, window.until)
-            && from >= to
-        {
-            return Err(format!(
-                "--since {} is not before --until {}",
-                since.unwrap_or_default(),
-                until.unwrap_or_default()
-            ));
-        }
-        Ok(window)
+            .transpose()?;
+        Ok(Self { since })
     }
 
     fn contains(self, unix_ms: u64) -> bool {
         self.since.is_none_or(|since| unix_ms >= since)
-            && self.until.is_none_or(|until| unix_ms < until)
     }
 
     /// The window in words, `since 2026-11-01 00:00:00 UTC`; `None` for all
     /// records.
     fn show(self) -> Option<String> {
-        let at = |ms: u64| log_files::readable(ms / 1000);
-        match (self.since, self.until) {
-            (None, None) => None,
-            (Some(since), None) => Some(format!("since {}", at(since))),
-            (None, Some(until)) => Some(format!("before {}", at(until))),
-            (Some(since), Some(until)) => {
-                Some(format!("since {}, before {}", at(since), at(until)))
-            }
-        }
+        self.since
+            .map(|since| format!("since {}", log_files::readable(since / 1000)))
     }
 }
 
@@ -268,7 +247,7 @@ struct Summary {
     /// `upstream_error` outcomes by why.
     upstream_errors: HashMap<String, u64>,
     classes: HashMap<String, Group>,
-    /// Route upstreams, when the log names them.
+    /// Route upstreams, by the id records name them by.
     upstreams: HashMap<String, Group>,
     /// Rejections that moved requests on, by (upstream, reason).
     failovers: HashMap<(String, String), u64>,
@@ -406,12 +385,7 @@ pub fn run(
     paint: Paint,
 ) -> Result<String, Error> {
     let mut summary = Summary {
-        window: Window::parse(
-            parsed.value("since"),
-            parsed.value("until"),
-            super::unix_secs()?,
-        )
-        .map_err(Error::Usage)?,
+        window: Window::parse(parsed.value("since"), super::unix_secs()?).map_err(Error::Usage)?,
         ..Summary::default()
     };
     let paths = match parsed.positional.as_slice() {

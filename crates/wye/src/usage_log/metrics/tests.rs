@@ -1,8 +1,13 @@
 use super::*;
 
-fn line(path: &'static str, status: u16, ms: f64, model: Option<&'static str>) -> Line<'static> {
+fn line(
+    endpoint: &'static str,
+    status: u16,
+    ms: f64,
+    model: Option<&'static str>,
+) -> Line<'static> {
     Line {
-        path,
+        endpoint,
         status,
         duration_ms: ms,
         request_class: Some("main"),
@@ -218,7 +223,7 @@ fn upstream_errors_of_every_kind_are_one_outcome_series() {
 #[test]
 fn failovers_name_the_rejecting_upstream_apart_from_the_answering_one() {
     let rejected = [crate::usage_log::RejectedAttempt {
-        upstream: Some("a".into()),
+        upstream: "a".into(),
         reason: FailoverReason::RateLimited,
     }];
     let mut metrics = Metrics::new(0);

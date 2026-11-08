@@ -16,11 +16,11 @@ fn parse(upstream: &str) -> Result<Config, ConfigError> {
     ))
 }
 
-/// `error` in the Claude route's only upstream, which has no id.
+/// `error` in the Claude route's only upstream, named by its provider.
 fn in_upstream(error: ConfigError) -> ConfigError {
     ConfigError::RouteUpstream {
         route: "claude",
-        id: None,
+        id: "anthropic".into(),
         error: Box::new(error),
     }
 }
@@ -50,6 +50,23 @@ fn minimal_config_gets_defaults() {
         ProviderKey::Env("ANTHROPIC_API_KEY".into())
     );
     assert_eq!(upstream.response_header_timeout, Duration::from_secs(600));
+}
+
+#[test]
+fn server_is_optional_and_listens_on_loopback_port_8080() {
+    let bare =
+        Config::from_toml_str(&format!("[[routes.claude.upstreams]]\n{FORWARDING}")).unwrap();
+    assert_eq!(bare.server.listen.to_string(), DEFAULT_LISTEN);
+    assert_eq!(DEFAULT_LISTEN, "127.0.0.1:8080");
+    let written = server("").unwrap();
+    assert_eq!(
+        format!("{:?}", bare.server),
+        format!("{:?}", written.server)
+    );
+    let empty = Config::from_toml_str(&format!(
+        "[server]\n[[routes.claude.upstreams]]\n{FORWARDING}"
+    ));
+    assert_eq!(empty.unwrap().server.listen, bare.server.listen);
 }
 
 #[test]
@@ -192,7 +209,7 @@ fn credential_must_be_exactly_one() {
         parse("base_url = \"https://api.anthropic.com\"")
             .unwrap_err()
             .to_string(),
-        "routes.claude.upstreams[0]: set provider_key_env, provider_key_file, or \
+        "routes.claude.upstreams \"anthropic\": set provider_key_env, provider_key_file, or \
          forward_caller_credential = true"
     );
     assert_eq!(
@@ -201,7 +218,7 @@ fn credential_must_be_exactly_one() {
         )
         .unwrap_err()
         .to_string(),
-        "routes.claude.upstreams[0]: set only one of provider_key_env, provider_key_file, and \
+        "routes.claude.upstreams \"anthropic\": set only one of provider_key_env, provider_key_file, and \
          forward_caller_credential"
     );
     assert_eq!(
@@ -468,7 +485,7 @@ fn provider_key_file_is_a_third_exclusive_credential_mode() {
             .unwrap_err()
             .to_string();
         assert!(
-            err.starts_with("routes.claude.upstreams[0]: set only one of"),
+            err.starts_with("routes.claude.upstreams \"anthropic\": set only one of"),
             "{err}"
         );
     }
@@ -650,6 +667,40 @@ fn documented_pricing_example_parses() {
         one("[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n")
             .is_err()
     );
+}
+
+/// Without `version`, a price table is named by its content: the same on
+/// every replica and run, whatever its comments and layout, and another
+/// whenever a price changes.
+#[test]
+fn a_price_table_without_a_version_is_named_by_its_prices() {
+    let version = |table: &str| {
+        parse(&format!("{FORWARDING}[pricing]\n{table}"))
+            .unwrap()
+            .pricing
+            .unwrap()
+            .version
+    };
+    let table = "[[pricing.prices]]\nmodels = [\"claude-*\"]\ninput = \"1\"\noutput = \"2\"\n";
+    let hashed = version(table);
+    assert_eq!(hashed.len(), 16, "{hashed}");
+    assert!(hashed.bytes().all(|b| b.is_ascii_hexdigit()), "{hashed}");
+    let reformatted = "# Copied from the pricing page.\n[[pricing.prices]]\n\
+                       output = \"2.00\"   # per million\ninput = \"1.0\"\nmodels = [ \"claude-*\" ]\n";
+    assert_eq!(version(reformatted), hashed);
+    for changed in [
+        table.replace("\"2\"", "\"3\""),
+        table.replace("claude-*", "claude-opus-*"),
+        format!("{table}cache_read = \"0.1\"\n"),
+        format!("{table}[[pricing.prices.tiers]]\nabove_prompt_tokens = 9\n"),
+        format!("{table}[[pricing.prices]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n"),
+    ] {
+        assert_ne!(version(&changed), hashed, "{changed}");
+    }
+    // A cache read of zero is a price; an absent one is not.
+    assert_ne!(version(&format!("{table}cache_read = \"0\"\n")), hashed);
+    // A written version is kept as it is.
+    assert_eq!(&*version(&format!("version = \"v1\"\n{table}")), "v1");
 }
 
 #[test]

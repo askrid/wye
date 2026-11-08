@@ -5,9 +5,9 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub struct Upstream {
-    /// Names the upstream in telemetry and `wye explain`; `None` only for a
-    /// route's one upstream written without one.
-    pub id: Option<Box<str>>,
+    /// Names the upstream in usage records, telemetry, prices, and `wye
+    /// explain`: as written, else its provider's name ([`Provider::as_str`]).
+    pub id: Box<str>,
     /// Share of affinity keys, relative to the route's other upstreams.
     pub weight: u32,
     pub provider: Provider,
@@ -52,6 +52,26 @@ impl Provider {
         match route {
             RouteId::Claude => Self::Anthropic,
             RouteId::OpenAi => Self::OpenAi,
+        }
+    }
+
+    /// Its name in config, and the id of an upstream written without one.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::ClaudePlatformAws => "claude-platform-aws",
+            Self::Bedrock => "bedrock",
+            Self::OpenAi => "openai",
+        }
+    }
+
+    /// The base URL of an upstream written without one; `None` where the
+    /// URL names a region, so config must.
+    pub fn default_base_url(self) -> Option<&'static str> {
+        match self {
+            Self::Anthropic => Some("https://api.anthropic.com"),
+            Self::OpenAi => Some("https://api.openai.com"),
+            Self::Bedrock | Self::ClaudePlatformAws => None,
         }
     }
 

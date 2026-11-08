@@ -82,10 +82,11 @@ impl StartupError {
     fn in_upstream(self, route: RouteId, upstream: &Upstream) -> Self {
         match self {
             Self::File { what, path, reason } => Self::File {
-                what: match &upstream.id {
-                    None => format!("routes.{}.upstreams[0]: {what}", route.name()),
-                    Some(id) => format!("routes.{}.upstreams {id:?}: {what}", route.name()),
-                },
+                what: format!(
+                    "routes.{}.upstreams {:?}: {what}",
+                    route.name(),
+                    upstream.id
+                ),
                 path,
                 reason,
             },
@@ -436,7 +437,7 @@ mod tests {
         let unnamed = error("[[routes.claude.upstreams]]\n");
         assert!(
             unnamed.starts_with(
-                "routes.claude.upstreams[0]: provider_key_file \
+                "routes.claude.upstreams \"anthropic\": provider_key_file \
                  /nonexistent-wye-dir/missing.key: "
             ),
             "{unnamed}"

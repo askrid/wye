@@ -169,7 +169,7 @@ impl Gateway {
                     .headers
                     .insert(CONTENT_LENGTH, HeaderValue::from(len + prefix.len() as u64));
             }
-            info.upstream = upstream.id.clone();
+            info.upstream = Some(upstream.id.clone());
             info.provider = upstream.provider;
             // Prompt hashes and upgrade checks read the body once: on the first
             // attempt that sends it whole (a resend replays it from the start).

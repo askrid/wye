@@ -322,7 +322,7 @@ pub fn status(context: &Context) -> Result<Status, String> {
         }
         None => {
             say!(
-                "{:<LABEL_WIDTH$} its config does not parse; `wye validate -c {}`",
+                "{:<LABEL_WIDTH$} its config does not parse; `wye doctor -c {}`",
                 "State",
                 show(&service.config)
             );
@@ -346,8 +346,9 @@ pub fn restart(context: &Context) -> Result<(), String> {
     let commands = if std::fs::read_to_string(&file).ok().as_deref() == Some(&*definition) {
         restart_commands(context.manager, &uid)
     } else {
-        // An older wye wrote it, or the config's drain or grace changed: the
-        // manager loads the new one, as `install` does when replacing.
+        // This wye is at another path, or the config's drain or grace
+        // changed: the manager loads the new one, as `install` does when
+        // replacing.
         write_atomically(&file, &definition)?;
         eprintln!(
             "Updated {} for this wye and config (stop timeout {} s).",

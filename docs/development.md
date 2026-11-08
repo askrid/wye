@@ -227,13 +227,13 @@ Every command follows these, so one learned is all learned. A new flag or comman
   - `--out <path>`: the one file a command creates that holds a secret (a signing key, a gateway token), created readable only by you and never over an existing file. A redirect cannot promise either.
   - `--token-file <path>`: the gateway token a client presents, read from a file. Default `$WYE_TOKEN`.
   - `--url <url>`: the gateway a client uses. Default `$WYE_URL`, else `http://127.0.0.1:8080`.
-  - Durations are written `30m`, `8h`, `7d` (`--ttl`, `--since`, `--until`); a date is UTC `YYYY-MM-DD`.
+  - Durations are written `30m`, `8h`, `7d` (`--ttl`, `--since`); a date is UTC `YYYY-MM-DD`.
 - **Wye owns a file only when a redirect cannot do the job:** to create it safely (`--out`), or to act on it over time (`serve --usage-log`, which rotates it). Otherwise, redirect stdout.
 - **Secrets never in a flag's value.** A command line is visible to other users in `ps`. A token or key comes from a file or the environment, never `--token <value>`.
 - **An environment variable is a fact about the environment** (where the config and your files are, which gateway, which token), and its flag always beats it. Everything else is a flag only. `wye --help` lists every variable a user sets; the rest (`WYE_CLAUDE_BIN`, `WYE_CODEX_BIN`) are documented in [operations.md](operations.md#commands).
 - **No arguments do the default,** or fail with one line naming the next command to run.
 - **A command that adds or removes something outside its own new files** (a service definition) shows what it will change and asks first; `-y, --yes` skips the question and `--dry-run` only shows. `service restart` does not ask: it reloads what `install` was approved to run. Commands that only create new files (`init`, `token keygen`, `token issue --out`) do not ask: they never overwrite.
-- **Exit codes:** `0` done; `1` failed, an error or a check that found problems (`validate`, `doctor`, `policy-test`, `probe`); `2` wrong usage; `3` done, with something a script should act on (`explain`'s request would be refused, `policy-diff` found widened access, `service status` found nothing installed).
+- **Exit codes:** `0` done; `1` failed, an error or a check that found problems (`doctor`, `policy-test`, `probe`); `2` wrong usage; `3` done, with something a script should act on (`explain`'s request would be refused, `policy-diff` found widened access, `service status` found nothing installed).
 - **Colour only on a terminal,** and only where it carries meaning; never with `NO_COLOR`, `TERM=dumb`, or a pipe.
 
 ### Refactoring

@@ -109,13 +109,13 @@ impl Metrics {
             overflow,
             1,
             |k| {
-                &*k.route == line.path
+                &*k.route == line.endpoint
                     && k.upstream.as_deref() == line.upstream
                     && k.status == line.status
                     && k.outcome == outcome
             },
             || RequestKey {
-                route: line.path.into(),
+                route: line.endpoint.into(),
                 upstream: line.upstream.map(Into::into),
                 status: line.status,
                 outcome,
@@ -128,9 +128,9 @@ impl Metrics {
         let duration = series(
             &mut self.durations,
             overflow,
-            |s| &*s.route == line.path && s.outcome == outcome,
+            |s| &*s.route == line.endpoint && s.outcome == outcome,
             || DurationSeries {
-                route: line.path.into(),
+                route: line.endpoint.into(),
                 outcome,
                 buckets: [0; DURATION_BOUNDS_MS.len() + 1],
                 count: 0,
@@ -174,7 +174,7 @@ impl Metrics {
             );
         }
         for failover in line.failovers {
-            let upstream = failover.upstream.as_deref();
+            let upstream = Some(&*failover.upstream);
             bump(
                 &mut self.failovers,
                 overflow,

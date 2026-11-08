@@ -12,7 +12,7 @@ Wye is an ordinary process: IaC, DNS, certificates, infrastructure secrets, sche
 
 `wye --help` lists the commands and `wye <command> --help` a command's options. Both are generated from the table the parser reads, so help cannot drift. Options follow the GNU conventions: any order, `--name value` or `--name=value`, `-c` for `--config`, and `--` before arguments that start with a dash.
 
-A command exits 0 when done; 1 when it failed, with an error on stderr, or a check found problems (`validate`, `doctor`, `policy-test`, `probe`, and `service status` for a service that does not answer); 2 for wrong usage: an unknown command or option, a missing argument, or a value it cannot read (`--ttl 1w`); 3 when done with something a script should act on: `explain` found a refusal, `policy-diff` widened access, `service status` nothing installed.
+A command exits 0 when done; 1 when it failed, with an error on stderr, or a check found problems (`doctor`, `policy-test`, `probe`, and `service status` for a service that does not answer); 2 for wrong usage: an unknown command or option, a missing argument, or a value it cannot read (`--ttl 1w`); 3 when done with something a script should act on: `explain` found a refusal, `policy-diff` widened access, `service status` nothing installed.
 
 Help and `wye report` fit 80 columns; `explain` prints one long line per step, for `grep`. A command's result goes to stdout (a report, a token, the plan `service` shows) and messages to stderr (progress, what `init` wrote and the next steps), and a reader going away (`wye report | head`) ends a command quietly. On a terminal, color marks only what carries meaning: bold headings, cyan for a command to copy, and green or red for verdicts and errors.
 
@@ -29,7 +29,7 @@ A user's files live in `~/.wye`, or `$WYE_HOME`:
 | `signing.key` | The signing key, mode 600 | `wye init --shared`, `wye token keygen` | `wye token issue`; never the gateway |
 | `anthropic.key`, `openai.key` | Provider keys, next to a config that names them | you | the gateway |
 
-A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`; `wye init` creates it there too, except with `--shared` (`./wye.toml`). A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, `policy-test`, and `validate` print the config they read, and errors name it.
+A command that reads a config takes `-c <path>`, else `$WYE_CONFIG`, else `~/.wye/wye.toml`; `wye init` creates it there too. A `wye.toml` in the working directory is read only when named (`-c wye.toml`, or `export WYE_CONFIG=$PWD/wye.toml` in a config repository): a config decides where your credentials go, so the one in a repository you just cloned must not apply by itself. `serve`, `doctor`, `explain`, and `policy-test` print the config they read, and errors name it.
 
 ### Environment variables
 
@@ -81,21 +81,19 @@ Run with no argument, every command does what its name says on the config it fin
 
 **`wye claude`** and **`wye codex`**: [agent wrapper](#agent-wrapper).
 
-**`wye report [<usage-log>...]`** reads the files it is given, in order (`-` for standard input); with none, `~/.wye/usage.jsonl` and its rotated files, oldest first. `--since` and `--until` take a time back from now (`30m`, `24h`, `7d`) or a UTC date (`2026-11-01`, its midnight UTC); a record counts from `--since` on and before `--until`, by its `unix_ms`, and the first line names the window and how many records fell outside it. Lines that are not records are skipped and counted. [Reading it](guide.md#reading-wye-report).
+**`wye report [<usage-log>...]`** reads the files it is given, in order (`-` for standard input); with none, `~/.wye/usage.jsonl` and its rotated files, oldest first. `--since` takes a time back from now (`30m`, `24h`, `7d`) or a UTC date (`2026-11-01`, its midnight UTC); a record counts from then on, by its `unix_ms`, and the first line names the window and how many records fell before it. An end to the window is a filter in a pipe. Lines that are not records are skipped, and counted when there are any. Records of every format version are read. [Reading it](guide.md#reading-wye-report).
 
 ```bash
 wye report --since 7d                     # the last week, rotated files included
-wye report --since 2026-11-01 --until 2026-11-08
 cat replica-*.jsonl | wye report -        # usage logs collected from replicas
+jq -c 'select(.unix_ms < 1794096000000)' usage.jsonl | wye report -   # before Nov 8
 ```
 
-**`wye init`** writes the config `-c` names, else the one later commands would read (with `--shared`, `./wye.toml`): [choosing a setup](guide.md#choosing-a-setup). What it wrote and the next steps go to stderr, and the steps pass `-c` only when later commands would not find the config by themselves. Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
+**`wye init`** writes the config `-c` names, else the one later commands would read: [choosing a setup](guide.md#choosing-a-setup). It leaves out what defaults give: `[server]` with its loopback `listen` (`--shared` writes `0.0.0.0:8080`), the providers' base URLs, and the upstreams' ids. What it wrote and the next steps go to stderr, and the steps pass `-c` only when later commands would not find the config by themselves. Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
 
 **`wye token keygen`** writes a new signing key to `--out <path>`, created mode 600 and never over an existing file, and prints on stdout the `[[auth.signing_keys]]` entry for its public half. Without `--out` it writes `~/.wye/signing.key`, the key `wye token issue` signs with, unless one is there.
 
 **`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.signing_keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
-
-**`wye validate`** parses the config and reads the identity providers' key sets, without starting the gateway or resolving secrets, so CI can run it without credentials. `wye doctor` checks the rest.
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
 
@@ -118,7 +116,7 @@ Not checked yet: model availability per upstream.
 
 A refusal prints the status and error the gateway would send. The body is read as the gateway reads it: up to its `model`, then the rest when permissions or a ceiling apply. Not evaluated: run-time conditions (the concurrency and connection limits, the held-bytes budget, upstream failures) and request headers beyond `Host`, `Origin`, `Sec-Fetch-Site`, and the session id (the gateway answers a compressed or non-UTF-8 body under a policy with `415`).
 
-**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models)), `upstream`, `endpoint` (default `/v1/messages`), `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. Without `<dir>`, the cases are in `policy-tests/` next to the config, where `wye init` writes samples. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
+**`wye policy-test [<dir>]`**: `<name>.expect.toml` states the decision for the request body `<name>.json`: `decision = "forward"` or `"refuse"`, optionally `status`, `error`, `model` (the [served model](glossary.md#models)), `upstream`, `endpoint` (default `/v1/messages`), `session`, and a `[token]` table (`subject`, `models`, `max_output_tokens`). Tokens would expire in CI, so a case states the token's claims and they are taken as verified: signature, issuer, audience, key, and expiry are not checked. First it reads the identity providers' key sets, as `serve` does at startup, and no secret, so CI needs no credentials; `wye doctor` checks the secrets. Without `<dir>`, the cases are in `policy-tests/` next to the config, where `wye init` writes samples. [`examples/team/`](../examples/team) and [`examples/app/`](../examples/app) each have a config and its cases, and the test suite runs them.
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
@@ -181,7 +179,7 @@ wye service restart     # after a config edit or a new wye
 wye service uninstall   # shows what it stops and removes, and asks; your files stay
 ```
 
-`restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. A definition an older `wye` wrote, which appended stdout to `usage.jsonl`, is rewritten to pass `--usage-log` with the same file. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.
+`restart` refuses a config that would not start and leaves the running service as it was; when this `wye` or the config's drain and grace settings call for a new service definition, it writes one and has the service manager load it. For another config, or a `wye` at another path, run `wye service install` again (`-c <path>`); it replaces the definition.
 
 Replacing a running service waits for its gateway to finish its requests, up to the stop timeout: the config's drain delay and shutdown grace plus 5 s (35 s by default). New connections are refused until then. Open streams end after that grace; Claude Code retries them.
 
@@ -273,9 +271,9 @@ An example, from a Claude Code session that failed over:
 ```json
 {
   "event": "request",
-  "v": 1,
+  "v": 2,
   "unix_ms": 1793178637975,
-  "path": "/v1/messages",
+  "endpoint": "/v1/messages",
   "status": 200,
   "outcome": "completed",
   "duration_ms": 4100.42,
@@ -307,8 +305,8 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 
 ### Request and outcome
 
-- `event`, `unix_ms`, `path`, `status`: `request`, time, endpoint, HTTP status.
-- `v`: the record format's version, `1`, right after `event` on every line, the `usage_log_dropped` and `otlp_dropped` events included. It goes up with any change that renames a field or changes its meaning; a new field leaves it. Lines written before it have none, and `wye report` reads both. Not exported over OTLP.
+- `event`, `unix_ms`, `endpoint`, `status`: `request`, time, [endpoint](glossary.md#requests-and-where-they-go), HTTP status.
+- `v`: the record format's version, `2`, right after `event` on every line, the `usage_log_dropped` and `otlp_dropped` events included. It goes up with any change that renames a field or changes its meaning; a new field leaves it. Version 1 named the endpoint `path`, and lines written before versions have no `v`; `wye report` reads all three. Not exported over OTLP.
 - `outcome`: recorded when the response body is dropped, so every outcome is counted. An upstream's answer, error statuses included, is `completed`, `cancelled`, or `truncated`; Wye's own answer is `refused`, `upstream_error`, or `gateway_error`:
   - `completed`: the upstream's response body ended.
   - `cancelled`: the client left first; one that leaves before the response headers has `status` `499`.
@@ -318,7 +316,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
   - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
 - `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
 - `duration_ms`, `response_headers_ms`: milliseconds, in all and to the response headers.
-- `upstream`: the upstream's `id`; absent for a route's only upstream written without one, and for requests refused before upstream selection.
+- `upstream`: the upstream's `id` (by default its provider's name, such as `anthropic`); absent for requests refused before upstream selection.
 - `failovers`, such as `[{"upstream": "a", "reason": "429"}]`: attempts rejected before the one that answered, in order, each with its [failover reason](glossary.md#requests-and-where-they-go) ([failover](architecture.md#failover)); absent when none.
 - `subject`: the gateway token's subject, with `[auth]`.
 - `session_id`: the client's session (Claude Code's or Codex's), kept only as a bounded string (above).
@@ -328,7 +326,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
 - `requested_model`: the [alias](architecture.md#model-aliases-and-upgrade-checks) the client named, only when an alias was resolved.
 - `model`, `usage_status`: the [served model](glossary.md#models); `complete` | `partial` | `unknown` | `none`. Streaming and non-streaming (JSON) responses are read; `none` means the response carries no usage: errors, `count_tokens`, or other content types.
 - `upgrade_issues`: target model → rules it would reject, for checked requests only ([upgrade checks](architecture.md#model-aliases-and-upgrade-checks)); `{}` when none.
-- `cost_usd`, `cost_status`, `pricing_version`: an exact decimal string; `complete` | `partial` | `unknown`; `pricing.version`. With [`[pricing]`](policy.md#price-table); `cost_usd` only when a cost was computed.
+- `cost_usd`, `cost_status`, `pricing_version`: an exact decimal string; `complete` | `partial` | `unknown`; `pricing.version`, else a hash of the price table ([version](policy.md#price-table)). With [`[pricing]`](policy.md#price-table); `cost_usd` only when a cost was computed.
 - `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`: counts, as the provider reports them, except that on the OpenAI APIs the cached share of `input_tokens` (Chat: `prompt_tokens`) is moved to `cache_read_input_tokens`, so `input_tokens` excludes cache reads on every API.
 
 ### Agent
@@ -375,7 +373,7 @@ Cumulative since process start, exported every 10 s and at shutdown; at most 256
 - `wye.upgrade.issues` counts [upgrade issues](glossary.md#models): one per target model and rule a checked request breaks.
 - `wye.failovers` counts rejected attempts: `wye.failover.upstream` is the upstream that rejected one, and `wye.failover.reason` a status or `connect`.
 - `wye.records.dropped` counts records the usage log dropped, OTLP log records and spans dropped by full queues or failed exports (a request losing both counts twice), and records past the series cap.
-- `wye.upstream`, in `wye.requests`, `wye.tokens`, and `wye.cost`, is the upstream that answered; present only with a route's named upstreams (`[routes.claude]`, `[routes.openai]`).
+- `wye.upstream`, in `wye.requests`, `wye.tokens`, and `wye.cost`, is the upstream that answered; absent for requests refused before upstream selection.
 
 ### OTLP traces
 

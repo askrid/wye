@@ -65,7 +65,6 @@ pub enum Id {
     ServiceStatus,
     ServiceRestart,
     ServiceUninstall,
-    Validate,
     Doctor,
     Claude,
     Codex,

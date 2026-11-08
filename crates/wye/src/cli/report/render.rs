@@ -22,7 +22,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     if s.total.requests == 0 {
         out.push_str(&wrap(
             &format!(
-                "No request records{window} ({}). The gateway writes one per request to \
+                "No request records{window}{}. The gateway writes one per request to \
                  stdout, or to the file named by `wye serve --usage-log`; \
                  `wye service install` keeps them.",
                 skipped(s),
@@ -38,7 +38,7 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
     };
     out.push_str(&wrap(
         &format!(
-            "{} in {}{window} ({}); outcomes: {}",
+            "{} in {}{window}{}; outcomes: {}",
             plural(s.total.requests, "request", "requests"),
             plural(s.sessions.len() as u64, "session", "sessions"),
             skipped(s),
@@ -65,7 +65,8 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         columns.row(&mut out, name, group);
     }
 
-    if !s.upstreams.is_empty() {
+    // One upstream would repeat the "all" row.
+    if s.upstreams.len() > 1 {
         columns.title(&mut out, "By upstream");
         columns.header(&mut out, "upstream");
         let mut upstreams: Vec<_> = s.upstreams.iter().collect();
@@ -91,26 +92,28 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
         }
     }
 
-    let starts = s.starts();
-    let count = |k: &str| s.misses.get(k).copied().unwrap_or(0);
-    columns.title(&mut out, "Cache misses: cache written, nothing read");
-    out.push_str(&wrap(
-        &format!(
-            "{} unexplained; expected: {}, {}, {}, {} after compaction",
-            count(CacheMiss::Unexplained.as_str())
-                .saturating_sub(starts.sessions)
-                .saturating_sub(starts.subagents),
-            plural(starts.sessions, "session start", "session starts"),
-            plural(starts.subagents, "subagent start", "subagent starts"),
-            plural(
-                count(CacheMiss::Compaction.as_str()),
-                "compaction",
-                "compactions"
+    if s.misses.values().any(|&n| n > 0) {
+        let starts = s.starts();
+        let count = |k: &str| s.misses.get(k).copied().unwrap_or(0);
+        columns.title(&mut out, "Cache misses: cache written, nothing read");
+        out.push_str(&wrap(
+            &format!(
+                "{} unexplained; expected: {}, {}, {}, {} after compaction",
+                count(CacheMiss::Unexplained.as_str())
+                    .saturating_sub(starts.sessions)
+                    .saturating_sub(starts.subagents),
+                plural(starts.sessions, "session start", "session starts"),
+                plural(starts.subagents, "subagent start", "subagent starts"),
+                plural(
+                    count(CacheMiss::Compaction.as_str()),
+                    "compaction",
+                    "compactions"
+                ),
+                count(CacheMiss::AfterCompaction.as_str()),
             ),
-            count(CacheMiss::AfterCompaction.as_str()),
-        ),
-        2,
-    ));
+            2,
+        ));
+    }
 
     if !s.upgrades.is_empty() {
         columns.title(
@@ -253,31 +256,30 @@ impl Columns {
     }
 }
 
-/// What the report skipped: the gateway's own notices and anything else.
-/// What was left out: records outside the window, when one was given, and
-/// lines that are not records.
+/// What was left out, in parentheses after a space: records outside the
+/// window, when one was given, and the lines that are not records (the
+/// gateway's own notices, anything else) when there are any; empty when
+/// there is nothing to say.
 fn skipped(s: &Summary) -> String {
-    let lines = skipped_lines(s);
-    match s.window.show() {
-        Some(_) => format!(
-            "{} outside it, {lines}",
+    let mut parts = Vec::new();
+    if s.window.show().is_some() {
+        parts.push(format!(
+            "{} outside it",
             plural(s.outside, "record", "records")
-        ),
-        None => lines,
+        ));
     }
-}
-
-fn skipped_lines(s: &Summary) -> String {
+    let notices = plural(s.notices, "gateway notice", "gateway notices");
     let others = plural(s.skipped, "other line", "other lines");
-    match s.notices {
-        0 => format!("{others} skipped"),
-        n if s.skipped == 0 => {
-            format!("{} skipped", plural(n, "gateway notice", "gateway notices"))
-        }
-        n => format!(
-            "{} and {others} skipped",
-            plural(n, "gateway notice", "gateway notices")
-        ),
+    match (s.notices, s.skipped) {
+        (0, 0) => {}
+        (_, 0) => parts.push(format!("{notices} skipped")),
+        (0, _) => parts.push(format!("{others} skipped")),
+        _ => parts.push(format!("{notices} and {others} skipped")),
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join(", "))
     }
 }
 

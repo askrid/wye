@@ -94,7 +94,7 @@ async fn a_key_file_open_to_others_is_a_problem() {
         let key = key.display();
         assert!(
             report.contains(&format!(
-                "FAIL  routes.claude.upstreams[0]: provider_key_file {key} is open to group \
+                "FAIL  upstream anthropic: provider_key_file {key} is open to group \
                  or others (mode {mode:o}): chmod 600 {key}"
             )),
             "{report}"
@@ -120,7 +120,7 @@ async fn a_key_file_open_to_others_is_a_problem() {
         chmod(&signing, mode);
         let (report, _) = doctor(&config, &dir, Some(&signing)).await;
         assert!(
-            report.contains("ok    routes.claude.upstreams[0]: key read (sent as x-api-key)"),
+            report.contains("ok    upstream anthropic: key read (sent as x-api-key)"),
             "{report}"
         );
         assert!(!report.contains("signing key"), "{report}");
@@ -143,7 +143,7 @@ async fn a_key_serve_would_refuse_fails_the_check() {
     assert!(!ok, "{report}");
     assert!(
         report.contains(
-            "FAIL  routes.claude.upstreams[0]: upstream API key contains characters not allowed in an HTTP header"
+            "FAIL  upstream anthropic: upstream API key contains characters not allowed in an HTTP header"
         ),
         "{report}"
     );

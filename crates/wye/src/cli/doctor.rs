@@ -40,16 +40,11 @@ pub async fn doctor(
     signing_key: Option<&Path>,
 ) -> (String, bool) {
     let mut checks = Vec::new();
-    for (route_id, route) in config.routes.iter() {
-        for upstream in route.upstreams() {
-            let name = upstream.id.as_deref().map_or_else(
-                || format!("routes.{}.upstreams[0]", route_id.name()),
-                |id| format!("upstream {id}"),
-            );
-            checks.push(provider_key(&name, upstream, config_dir));
-            checks.extend(endpoint_path(&name, upstream));
-            checks.push(reachable(&name, upstream, config_dir).await);
-        }
+    for upstream in config.routes.upstreams() {
+        let name = format!("upstream {}", upstream.id);
+        checks.push(provider_key(&name, upstream, config_dir));
+        checks.extend(endpoint_path(&name, upstream));
+        checks.push(reachable(&name, upstream, config_dir).await);
     }
     if config.auth.is_some() {
         checks.push(match verifier(config, config_dir) {

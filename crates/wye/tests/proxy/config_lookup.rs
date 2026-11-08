@@ -12,13 +12,9 @@ fn a_config_in_the_working_directory_applies_only_when_named() {
     let line = Running::spawn(setup.wye(&["serve"])).stderr_line();
     assert!(line.starts_with("wye: listening on"), "{line}");
     assert!(line.contains(".wye/wye.toml)"), "{line}");
-    let validate = setup.run(&["validate"]);
-    assert!(validate.status.success(), "{}", err(&validate));
-    assert!(
-        out(&validate).starts_with("~/.wye/wye.toml: "),
-        "{}",
-        out(&validate)
-    );
+    // Its policy tests are looked for next to it.
+    let tested = err(&setup.run(&["policy-test"]));
+    assert!(tested.contains("/.wye/policy-tests: "), "{tested}");
     let doctor = out(&setup.run(&["doctor"]));
     assert!(doctor.starts_with("config: ~/.wye/wye.toml\n"), "{doctor}");
     assert!(!doctor.contains("WYE_TEST_UNSET"), "{doctor}");
@@ -126,7 +122,7 @@ fn uninstall_shows_what_it_removes_and_asks_first() {
 #[test]
 fn without_a_config_of_your_own_the_error_says_what_to_do() {
     let setup = Setup::new();
-    let failed = setup.run(&["validate"]);
+    let failed = setup.run(&["doctor"]);
     assert_eq!(failed.status.code(), Some(1));
     assert_eq!(
         err(&failed),

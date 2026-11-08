@@ -373,16 +373,18 @@ impl Explanation {
         let Some(upstream) = upstreams.get(ranking.first()) else {
             unreachable!("a route has at least one upstream")
         };
-        if let Some(id) = &upstream.id {
-            self.upstream = Some(id.to_string());
-            let how = match (route.select(), session, identity) {
-                (Select::Ordered, _, _) => "ordered: the first in config",
-                (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
-                (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
-                (Select::CacheAffine, None, None) => {
-                    "cache_affine by nothing: no session id or token"
-                }
-            };
+        let id = &upstream.id;
+        self.upstream = Some(id.to_string());
+        let how = match (route.select(), session, identity) {
+            _ if upstreams.len() == 1 => "the route's only one",
+            (Select::Ordered, _, _) => "ordered: the first in config",
+            (Select::CacheAffine, Some(_), _) => "cache_affine by session id",
+            (Select::CacheAffine, None, Some(_)) => "cache_affine by token subject",
+            (Select::CacheAffine, None, None) => "cache_affine by nothing: no session id or token",
+        };
+        if upstreams.len() == 1 {
+            self.step(format!("selection: upstream {id}, {how}"));
+        } else {
             self.step(format!(
                 "selection: upstream {id} of {} ({how})",
                 upstreams.len()
@@ -392,7 +394,7 @@ impl Explanation {
             let next: Vec<&str> = ranking
                 .iter()
                 .skip(1)
-                .filter_map(|i| upstreams.get(i)?.id.as_deref())
+                .filter_map(|i| upstreams.get(i).map(|u| &*u.id))
                 .collect();
             let reasons: Vec<&str> = failover.reasons().map(FailoverReason::as_str).collect();
             self.step(format!(
@@ -445,11 +447,8 @@ impl Explanation {
             ));
         }
         if let (Some(pricing), Some(model)) = (&config.pricing, &model) {
-            let at = upstream
-                .id
-                .as_deref()
-                .map_or(String::new(), |id| format!(" at {id}"));
-            self.step(match pricing.entry(model, upstream.id.as_deref()) {
+            let at = format!(" at {}", upstream.id);
+            self.step(match pricing.entry(model, Some(&upstream.id)) {
                 Some(entry) => format!(
                     "price: {model}{at}: {} (pricing version {})",
                     prices(entry),

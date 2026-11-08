@@ -34,7 +34,7 @@ Linux and macOS archives are on the [releases page](https://github.com/askrid/wy
 
 - **Passthrough** (`wye init`): the gateway holds no secret. Config: `~/.wye/wye.toml`.
 - **Provider key** (`--provider-key`): an Anthropic API key in `anthropic.key` next to the config, read at startup. It replaces whatever a caller sends. Config: `~/.wye/wye.toml`.
-- **Shared** (`--shared`): the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `./wye.toml`, for the repository it is reviewed in.
+- **Shared** (`--shared`): the gateway listens on every interface. The provider key comes from `ANTHROPIC_API_KEY` in the deployment. It creates the signing key `~/.wye/signing.key` (mode 600) unless one is there to reuse. Config: `~/.wye/wye.toml`; for a config repository, where it is reviewed, `-c wye.toml` there ([for a team](#using-it-for-a-team)).
 
 `-c <path>` names another path. `--openai` adds `[routes.openai]` for Codex and the OpenAI SDKs, with the key in `openai.key` next to the config (with `--shared`, in `OPENAI_API_KEY`).
 
@@ -64,14 +64,14 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 `wye report` summarizes `~/.wye/usage.jsonl` and its rotated files, or the files you name (`-` for standard input), with no OpenTelemetry backend; `--since 7d` keeps the last week ([options](operations.md#commands)). The [README](../README.md#quick-start) shows a sample.
 
-- **First lines:** requests, sessions, the window if one was given, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
-- **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go):** tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
-- **Cache misses:** a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
+- **First lines:** requests, sessions, the window if one was given, lines skipped if any, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
+- **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go)** (with two or more): tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
+- **Cache misses**, when there are any: a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look; [cache diagnostics](architecture.md#cache-diagnostics) can name the cause.
 - **Failovers, upgrade issues:** when records have them.
 - **Tools:** calls the model requested, and calls and time Claude Code reported.
 - **Top sessions and prompts:** the ten with the most tokens.
 
-Input lines that are not usage records are skipped and counted.
+Input lines that are not usage records are skipped and counted. Logs of every record format version are read alike.
 
 ## Using it for a team
 
@@ -79,7 +79,7 @@ No image is published yet, so build one from a clone of Wye. Then, in your confi
 
 ```bash
 docker build -t wye .                               # in the clone
-wye init --shared                                   # ./wye.toml and ~/.wye/signing.key
+wye init --shared -c wye.toml                       # and ~/.wye/signing.key
 wye token issue alice -c wye.toml --out alice.token # valid for a week
 docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 ```
@@ -124,7 +124,7 @@ Streamed chat completions report usage only with `stream_options={"include_usage
 
 ## Several upstreams
 
-When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[routes.claude.upstreams]]` entry, each with an `id`:
+When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[routes.claude.upstreams]]` entry. An upstream is named by its provider (`anthropic`, `bedrock`) unless it has an `id`, which two of one provider each need:
 
 ```toml
 [routes.claude]
@@ -133,12 +133,10 @@ failover = ["429", "529", "connect"]
 [[routes.claude.upstreams]]
 id = "key-a"
 weight = 2                     # twice the sessions of key-b
-base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_KEY_A"
 
 [[routes.claude.upstreams]]
 id = "key-b"
-base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_KEY_B"
 ```
 

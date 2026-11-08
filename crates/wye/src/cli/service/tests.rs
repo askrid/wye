@@ -68,94 +68,21 @@ fn a_definition_reads_back_as_written() {
     }
 }
 
-/// A definition an older wye wrote, without the open-file limit, is still
-/// ours: `restart` rewrites it, `uninstall` removes it.
+/// Only what `install` writes reads back: a definition in another form
+/// is someone else's, which `install` offers to replace.
 #[test]
-fn a_definition_without_the_open_file_limit_reads_back() {
+fn a_definition_without_its_usage_log_flag_is_not_ours() {
     for manager in [Manager::Launchd, Manager::Systemd] {
-        let written = service("/home/a");
-        let text = written.definition(manager).unwrap();
-        let older: String = match manager {
-            Manager::Launchd => {
-                let (head, rest) = text.split_once("  <key>SoftResourceLimits</key>").unwrap();
-                format!("{head}{}", &rest[rest.find("</dict>\n</plist>").unwrap()..])
-            }
-            Manager::Systemd => text.replace("LimitNOFILE=65536\n", ""),
+        let text = service("/home/a").definition(manager).unwrap();
+        let other = match manager {
+            Manager::Launchd => text.replace(
+                "    <string>--usage-log</string>\n    <string>/home/a/.wye/usage.jsonl</string>\n",
+                "",
+            ),
+            Manager::Systemd => text.replace(" --usage-log /home/a/.wye/usage.jsonl", ""),
         };
-        assert!(!older.contains("65536"), "{older}");
-        assert_eq!(Service::parse(manager, &older), Some(written), "{older}");
-    }
-}
-
-/// What wye 0.1.0-rc.2 wrote: stdout appended to the usage log, no
-/// `--usage-log`.
-const OLDER_PLIST: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-<!-- Written by wye service install; removed by wye service uninstall. -->
-<plist version=\"1.0\">
-<dict>
-  <key>Label</key><string>dev.wye.gateway</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/home/a/.cargo/bin/wye</string>
-    <string>serve</string>
-    <string>--config</string>
-    <string>/home/a/.wye/wye.toml</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/home/a/.wye/usage.jsonl</string>
-  <key>StandardErrorPath</key><string>/home/a/.wye/wye.log</string>
-  <key>ExitTimeOut</key><integer>35</integer>
-  <key>SoftResourceLimits</key>
-  <dict>
-    <key>NumberOfFiles</key><integer>65536</integer>
-  </dict>
-  <key>HardResourceLimits</key>
-  <dict>
-    <key>NumberOfFiles</key><integer>65536</integer>
-  </dict>
-</dict>
-</plist>
-";
-
-const OLDER_UNIT: &str = "# Written by wye service install; removed by wye service uninstall.
-[Unit]
-Description=Wye gateway
-
-[Service]
-ExecStart=/home/a/.cargo/bin/wye serve --config /home/a/.wye/wye.toml
-Restart=on-failure
-StandardOutput=append:/home/a/.wye/usage.jsonl
-StandardError=append:/home/a/.wye/wye.log
-TimeoutStopSec=35
-LimitNOFILE=65536
-
-[Install]
-WantedBy=default.target
-";
-
-/// A definition an older wye wrote, which appended stdout to the usage log,
-/// is still ours with the same files: `uninstall` removes it, and `restart`,
-/// finding text other than its own, rewrites it to pass `--usage-log`.
-#[test]
-fn a_definition_that_appended_stdout_to_the_usage_log_is_rewritten() {
-    for (manager, older) in [
-        (Manager::Launchd, OLDER_PLIST),
-        (Manager::Systemd, OLDER_UNIT),
-    ] {
-        let installed = Service::parse(manager, older);
-        assert_eq!(installed.as_ref(), Some(&service("/home/a")), "{older}");
-        let rewritten = installed.unwrap().definition(manager).unwrap();
-        assert_ne!(rewritten, older, "restart's text comparison finds it stale");
-        assert!(rewritten.contains("--usage-log"), "{rewritten}");
-        assert!(!rewritten.contains("append:/home/a/.wye/usage.jsonl"));
-        assert!(!rewritten.contains("<key>StandardOutPath</key><string>/home/a/.wye/usage"));
-        assert_eq!(
-            Service::parse(manager, &rewritten),
-            Some(service("/home/a")),
-            "{rewritten}"
-        );
+        assert_ne!(other, text);
+        assert_eq!(Service::parse(manager, &other), None, "{other}");
     }
 }
 

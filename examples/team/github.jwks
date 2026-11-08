@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "alg": "RS256",
+      "kid": "github-placeholder",
+      "n": "rqTFLwOM2ZbbdyX__z-_Diqnd-6tP5shAIzzhtVkE2gQTRkDqLKb_3BSlFNOBfi7pQW5qmEQr6FQawYukkZ0th5ZzYXzwtcq69_ppY_uX37Yvvl6nhugSIH88AB510XyPginyl_dfdcoTbekkJEF7_jAYwnh-p0v3kp5Uwr8peynVENI1EgcDsprz2GS7ToXfvj_QswU5CLWKcwv6F1ibgQZ-J_-6Q1hCfLgE-OtsPt13kvNB_cLY190yJkYEajVY-q3VhBsK2u4Zr4V3A8Rymm6bdFsZ3K-1A4FR6qamObDiCBjfKID7Y0c9lFpOtVEUjp1JDZ5sGxId4tarlf1dw",
+      "e": "AQAB"
+    }
+  ]
+}

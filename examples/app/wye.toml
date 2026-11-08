@@ -23,13 +23,12 @@ drain_delay_secs = 10
 
 # Anthropic first; Claude Platform on AWS takes a request only when Anthropic
 # rejects it (rate limit, overload, or a failed connection), before any output.
+# An upstream without an id is named by its provider, "anthropic" here.
 [routes.claude]
 select = "ordered"
 failover = ["429", "529", "connect"]
 
 [[routes.claude.upstreams]]
-id = "anthropic"
-base_url = "https://api.anthropic.com"
 provider_key_env = "ANTHROPIC_API_KEY"
 
 [[routes.claude.upstreams]]
@@ -39,11 +38,9 @@ workspace_id = "wrkspc_01AbCdEf23GhIj"
 base_url = "https://aws-external-anthropic.us-west-2.api.aws"
 provider_key_env = "CLAUDE_PLATFORM_AWS_KEY"
 
-# The search service ranks results with OpenAI Responses.
-[routes.openai]
+# The search service ranks results with OpenAI Responses, at the "openai"
+# upstream.
 [[routes.openai.upstreams]]
-id = "openai"
-base_url = "https://api.openai.com"
 provider_key_env = "OPENAI_API_KEY"
 
 [auth]
