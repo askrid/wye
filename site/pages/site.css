@@ -81,8 +81,10 @@
      0.58 em (0.6 less the tracking), 8.12 em: / 11.3 sets it across about
      72% of the column, / 8.6 on a phone (below) about 94%. */
   --h1: min(5.25rem, 100cqi / 11.3);
-  /* 64 zeros of Wye Text: about 70 characters of prose. */
-  --measure: 64ch;
+  /* The one column every section's blocks share, prose, panels, figures,
+     and tables, so their edges line up down the page: about 75 characters
+     of Wye Text, and as wide as the widest config line and report row. */
+  --column: 47.5rem;
   --gutter: clamp(1rem, 4vw, 2.5rem);
 }
 @media (max-width: 40rem) {
@@ -242,7 +244,7 @@ html, body { overflow-x: clip; }
   border-top: 1px solid var(--rule);
   timeline-scope: --client, --access, --model, --upstream, --stream, --record, --compare, --config, --status, --limits;
 }
-.stops { min-width: 0; }
+.stops { min-width: 0; max-width: var(--column); }
 .rail { position: sticky; top: 0; align-self: start; padding-block: clamp(2rem, 5vw, 3.5rem); }
 .contents {
   list-style: none;
@@ -304,7 +306,7 @@ html, body { overflow-x: clip; }
    upstreams sharing sessions by weight, one session failing over. */
 .token, .routes, .alias { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
 /* Literal data sits in a panel, as code does; drawings stand bare. */
-.token { width: fit-content; max-width: 100%; padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
+.token { padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
 /* Lines that must keep their shape scroll in their own box on a phone. */
 .claims, .fork { overflow-x: auto; }
 .jwt, .claims, .fork { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
@@ -344,8 +346,9 @@ html, body { overflow-x: clip; }
 .part h2 a { color: inherit; text-decoration: none; }
 .hash { color: var(--graphite); }
 .part h2 a:is(:hover, :focus-visible) .hash { color: var(--ink); }
-/* Prose keeps its reading measure; a table may use the section's width. */
-.part > p, .item, .prose > :not(table) { max-width: var(--measure); }
+/* Every block of a section takes the one column; what is wider wraps or
+   scrolls inside it. */
+.part > *, .prose > * { max-width: var(--column); }
 .prose { display: grid; gap: 1rem; }
 .prose ul { padding-left: 2ch; display: grid; gap: 0.4rem; list-style: "- "; }
 /* A README table, such as "How it compares": rules, no boxes. */
@@ -389,8 +392,7 @@ html, body { overflow-x: clip; }
 
 /* Code and output, as the repository has them */
 pre.code {
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   margin: 0;
   padding: 1.1875rem 1.4375rem;
   overflow-x: auto;
@@ -419,7 +421,7 @@ pre.code code { font: inherit; }
    selectable. The button takes a line of its own above the first line at
    every width, so it never covers a command, and the room for it is kept
    before the script runs, so nothing moves when it arrives. */
-.code-wrap { position: relative; width: fit-content; max-width: 100%; }
+.code-wrap { position: relative; width: 100%; }
 @media (scripting: enabled) {
   pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
 }
