@@ -40,9 +40,10 @@ use crate::{chart, markdown};
 mod sources;
 
 /// The documents directives may read, relative to the repository root.
-const DOCUMENTS: [&str; 4] = [
+const DOCUMENTS: [&str; 5] = [
     "README.md",
     "CHANGELOG.md",
+    "docs/guide.md",
     "docs/operations.md",
     "docs/benchmarks.md",
 ];

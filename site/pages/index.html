@@ -86,6 +86,7 @@
       <section class="part stop" id="client" aria-labelledby="client-h">
         <h2 id="client-h"><a href="#client"><span class="hash" aria-hidden="true">#</span> client</a></h2>
         {{item README.md|What it does|Works with}}
+        {{fence docs/guide.md|ANTHROPIC_BASE_URL}}
       </section>
 
       <section class="part stop" id="access" aria-labelledby="access-h">
@@ -101,8 +102,9 @@
       <section class="part stop" id="model" aria-labelledby="model-h">
         <h2 id="model-h"><a href="#model"><span class="hash" aria-hidden="true">#</span> model</a></h2>
         {{item README.md|What it does|Changes models}}
-        <pre class="fork" role="img" aria-label="The alias claude-coding serves claude-sonnet-5, and claude-sonnet-5-5 to subjects matching team-canary-*"><span aria-hidden="true">claude-coding ─┬─ claude-sonnet-5
+        <figure class="alias"><pre class="fork" role="img" aria-label="The alias claude-coding serves claude-sonnet-5, and claude-sonnet-5-5 to subjects matching team-canary-*"><span aria-hidden="true">claude-coding ─┬─ claude-sonnet-5
                └─ claude-sonnet-5-5  <span class="d">team-canary-*</span></span></pre>
+          {{fence docs/guide.md|[[aliases]]|what runs today}}</figure>
       </section>
 
       <section class="part stop" id="upstream" aria-labelledby="upstream-h">
