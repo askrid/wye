@@ -12,11 +12,11 @@ staged=$(git diff --cached --name-only)
 
 site_files=$(grep -E '^(site/|\.github/workflows/site\.yml$)' <<<"$staged" | grep -vE '\.md$' || true)
 if [[ -n $site_files ]] || grep -qxE \
-  'README\.md|CHANGELOG\.md|docs/operations\.md|Cargo\.toml|crates/wye/Cargo\.toml' \
+  'README\.md|CHANGELOG\.md|docs/operations\.md|docs/benchmarks\.md|Cargo\.toml|crates/wye/Cargo\.toml' \
   <<<"$staged"; then
   # site/check.sh builds the working tree too, site/ and the files it reads.
   if ! git diff --quiet -- site .github/workflows/site.yml README.md CHANGELOG.md \
-    docs/operations.md Cargo.toml crates/wye/Cargo.toml; then
+    docs/operations.md docs/benchmarks.md Cargo.toml crates/wye/Cargo.toml; then
     echo "pre-commit: unstaged changes the site reads would be checked but not" \
       "committed; stage or stash them" >&2
     exit 1
