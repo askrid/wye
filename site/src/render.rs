@@ -98,11 +98,20 @@ impl Sources {
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("homepage", []) => Ok(markdown::escape(&self.homepage)),
             ("stylesheet", []) => Ok(self.stylesheet.clone()),
-            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 1 => {
+            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 2 => {
                 let (lang, code) = self.fence(file, prefix)?;
                 let mut html = markdown::highlight(lang, &code);
-                // A third argument marks the lines that hold it (the accent).
-                if let [mark] = marks {
+                // A third argument marks the lines that hold it (the accent);
+                // with "word" after it, only the word itself.
+                if let [mark, "word"] = marks {
+                    let word = markdown::escape(mark);
+                    if !html.contains(&word) {
+                        return Err(format!(
+                            "{file}: no {mark:?} in the block starting with {prefix:?} to mark"
+                        ));
+                    }
+                    html = html.replace(&word, &format!("<span class=\"accent\">{word}</span>"));
+                } else if let [mark] = marks {
                     let lines: Vec<&str> = html.split('\n').collect();
                     if lines.len() != code.lines().count() || !code.contains(mark) {
                         return Err(format!(
@@ -402,6 +411,9 @@ mod tests {
         let html = render("{{fence README.md|{|failovers}}", &sources()).unwrap();
         assert!(html.contains("<span class=\"accent\">  <span class=\"k\">"));
         assert_eq!(html.matches("class=\"accent\"").count(), 1);
+        let word = render("{{fence README.md|{|0.0181|word}}", &sources()).unwrap();
+        assert!(word.contains("<span class=\"accent\">0.0181</span>"));
+        assert!(render("{{fence README.md|{|0.0182|word}}", &sources()).is_err());
         assert!(
             render("{{fence README.md|{|nothing}}", &sources())
                 .unwrap_err()
