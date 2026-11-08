@@ -48,8 +48,8 @@
 
 /* Dark only: the page is one terminal, whatever the system's theme.
    Three colours: black, white (and greys between them), and one orange
-   accent, used sparingly: the failover line in the hero and Wye's bar in
-   the charts. */
+   accent with one meaning, a failover: the hero's one thread, upstream's
+   failed-over session, and the record's failovers line. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -318,7 +318,6 @@ html, body { overflow-x: clip; }
 .routes .sent { fill: var(--accent); }
 .routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
 .routes .w { fill: var(--graphite); }
-.routes .failover { color: var(--accent); }
 
 /* Sections and stops */
 .part { display: grid; gap: 1.375rem; padding-block: clamp(2rem, 5vw, 3.75rem); }
@@ -395,6 +394,8 @@ pre.code code { font: inherit; }
 .code .t { color: var(--ink); font-weight: 600; }
 /* Config and JSON keys recede, so the values lead. */
 .code .k { color: var(--graphite); }
+/* The accent means one thing on the page: a failover. */
+.code .accent, .code .accent .k { color: var(--accent); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
 .code .w { white-space: nowrap; }
@@ -495,7 +496,7 @@ pre.code code { font: inherit; }
 }
 .bars .fill { color: var(--graphite); }
 .bars .us { color: var(--ink); }
-.bars .us .fill { color: var(--accent); }
+.bars .us .fill { color: var(--ink); }
 @media (max-width: 40rem) {
   .bars { font-size: 0.8125rem; }
 }

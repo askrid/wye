@@ -111,7 +111,7 @@
         <figure class="routes"><svg role="img" aria-label="Sessions per upstream: sixteen on anthropic, weight 2, and nine on bedrock-us, weight 1, one of them after anthropic answered 429." viewBox="0 0 368 44"><text x="0" y="12.5">anthropic</text><text class="w" x="96" y="12.5">weight 2</text><text x="0" y="40.5">bedrock-us</text><text class="w" x="96" y="40.5">weight 1</text><rect x="176" y="3.5" width="9" height="9"/><rect x="188" y="3.5" width="9" height="9"/><rect x="200" y="3.5" width="9" height="9"/><rect x="212" y="3.5" width="9" height="9"/><rect x="224" y="3.5" width="9" height="9"/><rect x="236" y="3.5" width="9" height="9"/><rect x="248" y="3.5" width="9" height="9"/><rect x="260" y="3.5" width="9" height="9"/><rect x="272" y="3.5" width="9" height="9"/><rect x="284" y="3.5" width="9" height="9"/><rect x="296" y="3.5" width="9" height="9"/><rect x="308" y="3.5" width="9" height="9"/><rect x="320" y="3.5" width="9" height="9"/><rect x="332" y="3.5" width="9" height="9"/><rect x="344" y="3.5" width="9" height="9"/><rect x="356" y="3.5" width="9" height="9"/><rect x="176" y="31.5" width="9" height="9"/><rect x="188" y="31.5" width="9" height="9"/><rect x="200" y="31.5" width="9" height="9"/><rect x="212" y="31.5" width="9" height="9"/><rect x="224" y="31.5" width="9" height="9"/><rect x="236" y="31.5" width="9" height="9"/><rect x="248" y="31.5" width="9" height="9"/><rect x="260" y="31.5" width="9" height="9"/><rect class="sent" x="272" y="31.5" width="9" height="9"/></svg><pre class="code"><code>{
   <span class="k">"upstream"</span>: "{{field docs/operations.md|{|upstream}}",
   <span class="c">…</span>
-  <span class="failover">"failovers": [{
+  <span class="accent">"failovers": [{
     "upstream": "{{field docs/operations.md|{|failovers.0.upstream}}",
     "reason": "{{field docs/operations.md|{|failovers.0.reason}}"
   }]</span>
@@ -139,7 +139,7 @@
         <h2 id="record-h"><a href="#record"><span class="hash" aria-hidden="true">#</span> record</a></h2>
         {{item README.md|What it does|Shows usage}}
         {{fence README.md|$ wye report}}
-        {{fence docs/operations.md|{}}
+        {{fence docs/operations.md|{|"failovers"}}
       </section>
 
       <section class="part" id="compare" aria-labelledby="compare-h">

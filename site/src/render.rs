@@ -97,14 +97,32 @@ impl Sources {
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("homepage", []) => Ok(markdown::escape(&self.homepage)),
             ("stylesheet", []) => Ok(self.stylesheet.clone()),
-            ("fence", [file, prefix]) => {
+            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 1 => {
                 let (lang, code) = self.fence(file, prefix)?;
+                let mut html = markdown::highlight(lang, &code);
+                // A third argument marks the lines that hold it (the accent).
+                if let [mark] = marks {
+                    let lines: Vec<&str> = html.split('\n').collect();
+                    if lines.len() != code.lines().count() || !code.contains(mark) {
+                        return Err(format!(
+                            "{file}: no line of the block starting with {prefix:?} to mark with {mark:?}"
+                        ));
+                    }
+                    html = code
+                        .lines()
+                        .zip(lines)
+                        .map(|(source, line)| match source.contains(mark) {
+                            true => format!("<span class=\"accent\">{line}</span>"),
+                            false => line.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
                 Ok(format!(
                     // Focusable, so a keyboard can scroll a block wider
                     // than the page.
-                    "<pre class=\"code\" data-lang=\"{}\" tabindex=\"0\"><code>{}</code></pre>",
-                    markdown::escape(lang),
-                    markdown::highlight(lang, &code)
+                    "<pre class=\"code\" data-lang=\"{}\" tabindex=\"0\"><code>{html}</code></pre>",
+                    markdown::escape(lang)
                 ))
             }
             ("field", [file, prefix, key]) => {
@@ -375,6 +393,18 @@ mod tests {
             "<p>Small and \
              <a href=\"https://github.com/askrid/wye/blob/81e7951/README.md#performance\">fast</a>: one\n\
              <code>binary</code>.</p>\n"
+        );
+    }
+
+    #[test]
+    fn marks_the_lines_of_a_block_that_hold_a_word() {
+        let html = render("{{fence README.md|{|failovers}}", &sources()).unwrap();
+        assert!(html.contains("<span class=\"accent\">  <span class=\"k\">"));
+        assert_eq!(html.matches("class=\"accent\"").count(), 1);
+        assert!(
+            render("{{fence README.md|{|nothing}}", &sources())
+                .unwrap_err()
+                .contains("to mark")
         );
     }
 
