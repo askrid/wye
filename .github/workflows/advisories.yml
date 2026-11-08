@@ -20,7 +20,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check
-          command-arguments: advisories
+      # cargo-deny 0.20.2, the release cargo-deny-action v2.1.1 ran, fetched
+      # with the workflow's token: the action's anonymous download from the
+      # runners returned no archive on 2026-11-08. The archive is checked
+      # against its published SHA-256 before it runs.
+      - name: cargo deny
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DENY: cargo-deny-0.20.2-x86_64-unknown-linux-musl
+        run: |
+          gh release download 0.20.2 --repo EmbarkStudios/cargo-deny --pattern "$DENY.tar.gz" --dir "$RUNNER_TEMP"
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $RUNNER_TEMP/$DENY.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$DENY.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/$DENY/cargo-deny" --all-features check advisories
