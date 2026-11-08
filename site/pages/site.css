@@ -209,13 +209,11 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
   .hero .code .c { display: none; }
 }
 
-/* The drawing is the headline's period: a hundred lines meet at the dot and
-   leave as ten bundles, each line on the upstream weighted rendezvous
-   hashing gives it, so a bundle is as thick as its weight; one line is
-   turned back from its bundle (dashed) and resent to the next one. Drawn
-   once, in em, so it scales with the headline and stays on its period;
-   behind the text, and clipped at the window's edges (html). The header and
-   the code blocks are opaque, so the lines show only in the open. */
+/* The drawing is the headline's period: a hundred threads meet at the dot
+   and part into ten streams, as thick as their weights; one thread leaves
+   in the accent. It fades out from the dot, so it has no edges. Drawn once,
+   in em, so it scales with the headline and stays on its period; behind the
+   text, and clipped at the window's edges (html). */
 html { overflow-x: clip; }
 .period { position: relative; display: inline-block; width: 0.26em; height: 0.26em; margin-left: 0.04em; }
 .period svg {
@@ -226,10 +224,8 @@ html { overflow-x: clip; }
   width: 17.857em;
   height: 7.143em;
 }
-.period .line { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.15; }
-.period .tried, .period .sent { fill: none; stroke: var(--accent); stroke-width: 1.6; }
-.period .tried { stroke-dasharray: 3 4; }
-.period rect { fill: var(--ink); opacity: 0.8; }
+.period .line { fill: none; stroke: var(--ink); stroke-width: 0.9; opacity: 0.2; }
+.period .thread { fill: none; stroke: var(--accent); stroke-width: 1.6; }
 .period circle { fill: var(--ink); }
 
 /* A request's path: the stops, the sections in the order a request meets
