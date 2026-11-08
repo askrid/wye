@@ -114,7 +114,6 @@ a {
   text-decoration-thickness: 1px;
   text-underline-offset: 0.2em;
 }
-a:hover { text-decoration-thickness: 2px; }
 :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 ::selection { background: var(--ink); color: var(--paper); }
 /* Read by screen readers, not shown. */
