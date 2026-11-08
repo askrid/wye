@@ -97,12 +97,12 @@ impl Sources {
             ("repo", []) => Ok(markdown::escape(&self.repo_url)),
             ("homepage", []) => Ok(markdown::escape(&self.homepage)),
             ("stylesheet", []) => Ok(self.stylesheet.clone()),
-            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 2 => {
+            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 1 => {
                 let (lang, code) = self.fence(file, prefix)?;
                 let mut html = markdown::highlight(lang, &code);
-                // A third argument marks the lines that hold it (the accent);
-                // with "word" after it, only the word itself.
-                if let [mark, "word"] = marks {
+                // A third argument marks that word wherever it appears (the
+                // accent).
+                if let [mark] = marks {
                     let word = markdown::escape(mark);
                     if !html.contains(&word) {
                         return Err(format!(
@@ -110,22 +110,6 @@ impl Sources {
                         ));
                     }
                     html = html.replace(&word, &format!("<span class=\"accent\">{word}</span>"));
-                } else if let [mark] = marks {
-                    let lines: Vec<&str> = html.split('\n').collect();
-                    if lines.len() != code.lines().count() || !code.contains(mark) {
-                        return Err(format!(
-                            "{file}: no line of the block starting with {prefix:?} to mark with {mark:?}"
-                        ));
-                    }
-                    html = code
-                        .lines()
-                        .zip(lines)
-                        .map(|(source, line)| match source.contains(mark) {
-                            true => format!("<span class=\"accent\">{line}</span>"),
-                            false => line.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
                 }
                 Ok(format!(
                     // Focusable, so a keyboard can scroll a block wider
@@ -406,15 +390,11 @@ mod tests {
     }
 
     #[test]
-    fn marks_the_lines_of_a_block_that_hold_a_word() {
-        let html = render("{{fence README.md|{|failovers}}", &sources()).unwrap();
-        assert!(html.contains("<span class=\"accent\">  <span class=\"k\">"));
-        assert_eq!(html.matches("class=\"accent\"").count(), 1);
-        let word = render("{{fence README.md|{|0.0181|word}}", &sources()).unwrap();
-        assert!(word.contains("<span class=\"accent\">0.0181</span>"));
-        assert!(render("{{fence README.md|{|0.0182|word}}", &sources()).is_err());
+    fn marks_a_word_in_a_block() {
+        let html = render("{{fence README.md|{|0.0181}}", &sources()).unwrap();
+        assert!(html.contains("<span class=\"accent\">0.0181</span>"));
         assert!(
-            render("{{fence README.md|{|nothing}}", &sources())
+            render("{{fence README.md|{|0.0182}}", &sources())
                 .unwrap_err()
                 .contains("to mark")
         );
