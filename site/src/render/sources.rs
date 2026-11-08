@@ -32,10 +32,32 @@ impl Sources {
                 .ok_or("Cargo.toml: no repository")?,
             homepage: manifest_field(&site_manifest, "homepage")
                 .ok_or("site/Cargo.toml: no homepage")?,
-            stylesheet: read("site/pages/site.css")?,
+            stylesheet: minify_css(&read("site/pages/site.css")?),
             documents,
         })
     }
+}
+
+/// The stylesheet as a browser needs it: no comments, and no whitespace
+/// beyond one space where CSS needs one. Its only strings are font names,
+/// which hold spaces but none of the punctuation trimmed here.
+fn minify_css(css: &str) -> String {
+    let mut text = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(start) = rest.find("/*") {
+        text.push_str(&rest[..start]);
+        rest = rest[start..]
+            .find("*/")
+            .map_or("", |end| &rest[start + end + 2..]);
+    }
+    text.push_str(rest);
+    let mut out = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    for mark in ["{", "}", ";", ",", ">"] {
+        out = out
+            .replace(&format!(" {mark}"), mark)
+            .replace(&format!("{mark} "), mark);
+    }
+    out.replace(": ", ":").replace(";}", "}")
 }
 
 /// The commit a page is built from, abbreviated: `GITHUB_SHA` in a GitHub
@@ -76,6 +98,15 @@ fn manifest_field(manifest: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minifies_the_stylesheet() {
+        let css = "/* a */\n.a > b, .c {\n  color: #fff; /* b */\n  font: 1em \"Wye Mono\";\n}\n@media (max-width: 40rem) { .a { margin: 0 auto; } }\n";
+        assert_eq!(
+            minify_css(css),
+            ".a>b,.c{color:#fff;font:1em \"Wye Mono\"}@media (max-width:40rem){.a{margin:0 auto}}"
+        );
+    }
 
     #[test]
     fn reads_a_manifest_field() {
