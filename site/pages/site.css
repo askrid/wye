@@ -240,12 +240,13 @@ html, body { overflow-x: clip; }
 .period stop.end { stop-opacity: 0; }
 .period circle { fill: var(--ink); }
 /* The ambient sway: each fan, the lines in and the lines out, turns a
-   fraction of a degree about the dot. Each is a layer the compositor turns,
+   fraction of a degree about the dot, eased like a pendulum (ease-in-out
+   sine). Each is a layer the compositor turns,
    so nothing is redrawn. A plucked line rings on the canvas over them
    (assets/site.js), drawn only while it rings. */
 .period canvas { pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
-  .period svg { transform-origin: 60% 50%; will-change: transform; animation: wye-sway 7s ease-in-out infinite alternate; }
+  .period svg { transform-origin: 60% 50%; will-change: transform; animation: wye-sway 7s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate; }
   .period svg.out { animation-duration: 5.5s; animation-direction: alternate-reverse; }
 }
 @keyframes wye-sway { from { transform: rotate(-0.25deg); } to { transform: rotate(0.25deg); } }

@@ -88,16 +88,19 @@ if (gl) {
   gl.attachShader(program, shader(gl.VERTEX_SHADER, `
     attribute vec4 a;
     uniform vec4 u_dy[50];
+    uniform vec4 u_glow[50];
     uniform float u_solid;
     varying vec2 v_pos;
     varying float v_alpha;
     void main() {
-      vec4 four = u_dy[int(a.w / 4.0)];
+      int i = int(a.w / 4.0);
       float k = mod(a.w, 4.0);
-      float dy = k < 0.5 ? four.x : k < 1.5 ? four.y : k < 2.5 ? four.z : four.w;
+      vec4 m = vec4(k < 0.5, k >= 0.5 && k < 1.5, k >= 1.5 && k < 2.5, k >= 2.5);
+      float dy = dot(u_dy[i], m);
+      float glow = dot(u_glow[i], m);
       vec2 p = vec2(a.x, a.y + a.z * dy);
       v_pos = p;
-      v_alpha = dy == 0.0 ? 0.0 : u_solid > 0.5 ? 1.0 : min(0.7, 0.2 + abs(dy) / 6.0);
+      v_alpha = glow == 0.0 ? 0.0 : u_solid > 0.5 ? 1.0 : 0.2 + glow;
       gl_Position = vec4(p.x / 750.0 - 1.0, 1.0 - p.y / 300.0, 0.0, 1.0);
     }`));
   gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `
@@ -119,8 +122,9 @@ if (gl) {
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   const where = (name) => gl.getUniformLocation(program, name);
-  const [uDy, uSolid, uColour] = ["u_dy", "u_solid", "u_colour"].map(where);
+  const [uDy, uGlow, uSolid, uColour] = ["u_dy", "u_glow", "u_solid", "u_colour"].map(where);
   const dys = new Float32Array(200);
+  const glows = new Float32Array(200);
   const rgb = (name) => {
     const hex = getComputedStyle(period).getPropertyValue(name).trim().slice(1);
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
@@ -136,19 +140,29 @@ if (gl) {
     ink = rgb("--ink");
     accent = rgb("--accent");
   };
-  // A plucked line rings at 7 Hz, brightens, and settles within a second and
-  // a half; when none rings, the canvas is cleared and the loop stops.
+  // A plucked line rings like a string: 3 Hz, its swing dying away over half
+  // a second, gone by 2.2 s. It brightens with that envelope, not with the
+  // swing, so it glows and fades instead of flickering at each crossing.
+  // When none rings, the canvas is cleared and the loop stops.
   const draw = (now) => {
     let ringing = false;
     lines.forEach((line, i) => {
       const age = now - line.since;
-      if (line.amp && age > 1600) line.amp = 0;
-      dys[i] = line.amp ? line.amp * Math.exp(-age / 350) * Math.sin((2 * Math.PI * 7 * age) / 1000) || 1e-6 : 0;
-      if (line.amp) ringing = true;
+      if (line.amp && age > 2200) line.amp = 0;
+      if (!line.amp || age < 0) {
+        dys[i] = glows[i] = 0;
+        if (line.amp) ringing = true;
+        return;
+      }
+      ringing = true;
+      const envelope = line.amp * Math.exp(-age / 520);
+      dys[i] = envelope * Math.sin((2 * Math.PI * 3 * age) / 1000);
+      glows[i] = Math.max(1e-6, Math.min(0.45, Math.abs(envelope) / 10));
     });
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform4fv(uDy, dys);
+    gl.uniform4fv(uGlow, glows);
     gl.uniform1f(uSolid, 0);
     gl.uniform3fv(uColour, ink);
     gl.drawArrays(gl.LINES, 0, strandVertices);
@@ -175,17 +189,30 @@ if (gl) {
     if (!box.width) return;
     const point = { x: ((event.clientX - box.left) / box.width) * 1500, y: ((event.clientY - box.top) / box.height) * 600 };
     if (previous) {
-      const speed = Math.min(8, Math.max(2, Math.abs(point.y - previous.y) * 0.6));
+      const amp = Math.min(5, Math.max(1.5, Math.abs(point.y - previous.y) * 0.4)) * Math.sign(point.y - previous.y || 1);
+      const now = performance.now();
       let plucked = false;
-      for (const line of lines) {
+      // A plucked string's neighbours pick up a faint ring, 40 ms later per
+      // string away, unless they already ring louder.
+      const ring = (j, share, delay) => {
+        const line = lines[j];
+        if (!line || j === thread || Math.abs(line.amp) > Math.abs(amp * share)) return;
+        line.amp = amp * share;
+        line.since = now + delay;
+      };
+      lines.forEach((line, i) => {
         const before = yAt(line, previous.x), after = yAt(line, point.x);
-        if (before === null || after === null) continue;
+        if (before === null || after === null) return;
         if (Math.sign(previous.y - before) !== Math.sign(point.y - after)) {
-          line.amp = speed * Math.sign(point.y - previous.y || 1);
-          line.since = performance.now();
+          line.amp = amp;
+          line.since = now;
           plucked = true;
+          for (const d of [1, 2]) {
+            ring(i - d, d === 1 ? 0.35 : 0.12, 40 * d);
+            ring(i + d, d === 1 ? 0.35 : 0.12, 40 * d);
+          }
         }
-      }
+      });
       if (plucked && !frame) frame = requestAnimationFrame(draw);
     }
     previous = point;
