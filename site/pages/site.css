@@ -313,12 +313,24 @@ html, body { overflow-x: clip; }
 .fork .d { color: var(--graphite); }
 /* Sessions per upstream, one square each, and the record of the one that
    failed over, the section's point, in the accent. */
-/* 26.5rem sets its 13-unit labels at the figures' 15 px. */
-.routes svg { display: block; width: 100%; max-width: 26.5rem; height: auto; }
-.routes rect { fill: var(--ink); }
-.routes .sent { fill: var(--accent); }
-.routes text { fill: var(--ink); font-family: var(--mono); font-size: 13px; }
-.routes .w { fill: var(--graphite); }
+.shares {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--mono);
+  font-size: var(--output);
+  color: var(--ink);
+}
+.shares .w { color: var(--graphite); }
+.shares .cells { display: flex; gap: 3px; }
+.shares i { width: 9px; height: 9px; background: var(--ink); }
+.shares .sent { background: var(--accent); }
+/* On a phone each upstream's sessions go under its name, at full size. */
+@media (max-width: 40rem) {
+  .shares { grid-template-columns: max-content 1fr; row-gap: 0.375rem; }
+  .shares .cells { grid-column: 1 / -1; margin-bottom: 0.5rem; }
+}
 
 /* Sections and stops */
 .part { display: grid; gap: 1.375rem; padding-block: clamp(2rem, 5vw, 3.75rem); }
