@@ -48,8 +48,9 @@
 
 /* Dark only: the page is one terminal, whatever the system's theme.
    Three colours: black, white (and greys between them), and one orange
-   accent with one meaning, a failover: the hero's one thread, upstream's
-   failed-over session, and the record's failovers line. */
+   accent for emphasis: at most one thing per figure, the one its section's
+   lead claims (the hero's one thread, upstream's failover, Wye's bars, a
+   request's cost); a figure that is its own point gets none. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -311,7 +312,7 @@ html, body { overflow-x: clip; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
 .fork .d { color: var(--graphite); }
 /* Sessions per upstream, one square each, and the record of the one that
-   failed over; the failover is the accent in both. */
+   failed over, the section's point, in the accent. */
 /* 26.5rem sets its 13-unit labels at the figures' 15 px. */
 .routes svg { display: block; width: 100%; max-width: 26.5rem; height: auto; }
 .routes rect { fill: var(--ink); }
@@ -394,7 +395,7 @@ pre.code code { font: inherit; }
 .code .t { color: var(--ink); font-weight: 600; }
 /* Config and JSON keys recede, so the values lead. */
 .code .k { color: var(--graphite); }
-/* The accent means one thing on the page: a failover. */
+/* The one line of a block its section is about (the palette, above). */
 .code .accent, .code .accent .k { color: var(--accent); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
@@ -481,8 +482,8 @@ pre.code code { font: inherit; }
 .foot a { color: var(--text); }
 
 /* Charts drawn in block characters (site/src/chart.rs): names and values
-   are text, the bars hidden from screen readers; Wye's line in ink, the
-   other bars in graphite. */
+   are text, the bars hidden from screen readers; Wye's line in ink and
+   its bar in the accent, the other bars in graphite. */
 .chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
 .chart figcaption { color: var(--graphite); font-size: var(--caption); }
 .bars {
@@ -496,7 +497,7 @@ pre.code code { font: inherit; }
 }
 .bars .fill { color: var(--graphite); }
 .bars .us { color: var(--ink); }
-.bars .us .fill { color: var(--ink); }
+.bars .us .fill { color: var(--accent); }
 @media (max-width: 40rem) {
   .bars { font-size: 0.8125rem; }
 }
