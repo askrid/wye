@@ -467,11 +467,13 @@ pre.code code { font: inherit; }
   }
 }
 
-/* Footer: facts about the page (site/check.sh checks its size and
-   origins) and the commit it was built from. */
+/* Footer: what this is and where it came from, then where to go next. */
 .foot {
-  display: grid;
-  gap: 0.375rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem 1.5rem;
   padding-block: 2.25rem 3.5rem;
   border-top: 1px solid var(--rule);
   color: var(--graphite);
@@ -480,6 +482,9 @@ pre.code code { font: inherit; }
   line-height: 1.6;
 }
 .foot a { color: var(--text); }
+.foot nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; }
+.foot nav a { color: var(--graphite); text-decoration: none; }
+.foot nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* Charts drawn in block characters (site/src/chart.rs): names and values
    are text, the bars hidden from screen readers; Wye's line in ink and
