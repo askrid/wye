@@ -4,7 +4,7 @@ Wye's [overhead](glossary.md#usage-and-cost) beside four other gateways, all mea
 
 ## Results
 
-Commit `7a83fae`, 2026-11-05: three runs of the [reference environment](#reference-environment), each on a fresh AWS `c7i.4xlarge` (Intel Xeon Platinum 8488C), every gateway on the same two physical cores. Each cell is the median of the three hosts with their range in parentheses; each host's figure is the median of three repeats, or for failures the worst. The upstream path is TLS + HTTP/2; the [raw results](../bench/reference/results/2026-11-05-7a83fae/) hold every metric of both paths.
+Three runs of the [reference environment](#reference-environment) measured commit `7a83fae` on 2026-11-05, each on a fresh AWS `c7i.4xlarge` (Intel Xeon Platinum 8488C), every gateway on the same two physical cores. Each cell is the median of the three hosts with their range in parentheses; each host's figure is the median of three repeats, or for failures the worst. The upstream path is TLS + HTTP/2; the [raw results](../bench/reference/results/2026-11-05-7a83fae/) hold every metric of both paths.
 
 | TLS + HTTP/2 | Wye | Bifrost | agentgateway | LiteLLM | KrakenD |
 |---|---|---|---|---|---|
@@ -21,14 +21,14 @@ Commit `7a83fae`, 2026-11-05: three runs of the [reference environment](#referen
 
 How to read it:
 
-- Added is the gateway's percentile minus the direct run's: the same client, mock, payload, and host, in the same session, so it includes everything the gateway does. A p99 can read below its p50.
+- Added is the gateway's percentile minus the direct run's (the same client, mock, payload, and host, in the same session), so it includes everything the gateway does. A p99 can read below its p50.
 - A request is a 512-byte unary reply, 32 in flight. Paced streams open over 2 s, each 100 events of 100 bytes 20 ms apart (token pace). CPU and memory are the gateway's process tree (LiteLLM's workers summed); memory is RSS, and after load means after every scenario the gateway ran.
-- KrakenD CE buffers each response, so its stream rows measure buffering: an event reaches the client when the whole stream has.
-- The stress scenarios and their failures: [failures](#failures).
+- KrakenD CE buffers each response, so its stream rows measure buffering. An event reaches the client when the whole stream has.
+- The stress scenarios and their failures are under [failures](#failures).
 
 ## What they claim, what I measured
 
-Each gateway publishes a speed claim. Each is quoted here with its stated conditions, beside the number this harness measured for the same thing. Added latency here is the whole difference between going through the gateway and going direct: same host, same payload, same session, all of the gateway's work included.
+Each gateway publishes a speed claim. Each is quoted here with its stated conditions, beside the number this harness measured for the same thing. Added latency here is the whole difference between going through the gateway and going direct (same host, same payload, same session, all of the gateway's work included).
 
 ### Bifrost
 
@@ -47,7 +47,7 @@ Each gateway publishes a speed claim. Each is quoted here with its stated condit
 
 ### agentgateway
 
-- Its site and README make no numeric claim. Its [blog](https://agentgateway.dev/blog/2026-06-26-benchmarking-agentgateway-vs-litellm) measures it against LiteLLM: p50 / p90 / p99 of 0.831 / 1.533 / 1.970 ms against 7.076 / 17.986 / 32.192 ms, with 32 connections, 1 KB payloads, 3-second runs, and no hardware stated; scripts and data are public.
+- Its site and README make no numeric claim. Its [blog](https://agentgateway.dev/blog/2026-06-26-benchmarking-agentgateway-vs-litellm) measures p50 / p90 / p99 of 0.831 / 1.533 / 1.970 ms against LiteLLM's 7.076 / 17.986 / 32.192 ms, with 32 connections, 1 KB payloads, 3-second runs, and no hardware stated; scripts and data are public.
 - Measured: agentgateway 1.7.0 added 0.91 ms at p50 and 1.7 ms at p99, LiteLLM 107 and 185 ms ([results](#results)). Its own figures for itself are close to these, and its direction, far ahead of LiteLLM, agrees.
 - Solo.io's [product page](https://www.solo.io/products/agentgateway) claims 122× lower latency ("0.09ms vs 11ms") and 35× the throughput against a gateway it does not name, citing a repository whose author works at Solo.io. Nothing there can be checked, so I set no number beside it.
 
@@ -60,9 +60,9 @@ Each gateway publishes a speed claim. Each is quoted here with its stated condit
 
 Each lead from the [raw results](../bench/reference/results/2026-11-05-7a83fae/), TLS + HTTP/2 unless noted:
 
-- **KrakenD, bulk transfer.** 3.7 GB/s against Wye's 2.4 GB/s, at 0.96 ms of CPU per MB against 1.55 ms (plain HTTP: 0.85 against 1.81 ms). It reads the whole response, then writes it in a few large writes, faster than reading it direct (2.46 GB/s); Wye relays each frame as it arrives, which streaming requires. The same buffering gives it less CPU per event when many events arrive in one buffer: 0.55 against 1.17 µs for unpaced 64-byte events (plain: 0.47 against 5.3 µs). Uploads are a tie: 1.12 ms of CPU per MB each.
+- **KrakenD, bulk transfer.** 3.7 GB/s against Wye's 2.4 GB/s, at 0.96 ms of CPU per MB against 1.55 ms (plain HTTP: 0.85 against 1.81 ms). It reads the whole response, then writes it in a few large writes, faster than reading it direct (2.46 GB/s); Wye relays each frame as it arrives, which streaming requires. The same buffering gives it less CPU per event when many events arrive in one buffer, 0.55 against 1.17 µs for unpaced 64-byte events (plain: 0.47 against 5.3 µs). Uploads are a tie at 1.12 ms of CPU per MB each.
 - **LiteLLM, memory per idle stream on plain HTTP.** 4.1 KB against Wye's 32 KB, on top of a process that holds 2.1 GB at idle (Wye: 28 MB). On TLS Wye's is lower, 17.5 against 45 KB.
-- **agentgateway, close behind on stream latency.** Its delay per event is the nearest to Wye's: 109 against 77 µs p50 with 2,000 paced streams, 233 against 165 µs on unpaced streams. It leads on cold connections (32 first requests on a new process: 1.3 against 2.3 ms added p50) and on memory beside clients that stopped reading (22 against 537 KB per stalled stream). Wye's stalled stream holds about twice its 256 KiB HTTP/2 stream window ([why that size](research.md#performance-techniques)); a smaller window would raise bulk CPU per MB.
+- **agentgateway, close behind on stream latency.** Its delay per event is the nearest to Wye's, 109 against 77 µs p50 with 2,000 paced streams, 233 against 165 µs on unpaced streams. It leads on cold connections (32 first requests on a new process: 1.3 against 2.3 ms added p50) and on memory beside clients that stopped reading (22 against 537 KB per stalled stream). Wye's stalled stream holds about twice its 256 KiB HTTP/2 stream window ([why that size](research.md#performance-techniques)); a smaller window would raise bulk CPU per MB.
 
 ## Failures
 
@@ -70,7 +70,7 @@ A request or stream fails when it errors, ends early, or takes over 30 s ([what 
 
 - **Wye**: none, in any scenario of any [variant](#variants), on either path, on all three hosts.
 - **LiteLLM**: 120, 132, and 104 failed requests and streams under the stress scenarios on the three hosts, and 1-2 failed ordinary requests per path on every host.
-- **KrakenD**: one failed stream on each host (TLS path). Its idle, cancellation, and stress scenarios are not run: a buffering gateway cannot pass the first event of a stream that then goes silent.
+- **KrakenD**: one failed stream on each host (TLS path). Its idle, cancellation, and stress scenarios are not run. A buffering gateway cannot pass the first event of a stream that then goes silent.
 - **Bifrost, agentgateway**: none.
 
 ## Current harness and baseline
@@ -96,7 +96,7 @@ A request or stream fails when it errors, ends early, or takes over 30 s ([what 
 | 2,000 token-paced streams: CPU per event, memory per stream | | 14 µs, 12.6 KB |
 | 2,000 token-paced streams: time to first byte p99 | | 742 µs |
 
-Stress, TLS path: 1,000 paced streams during 1 MiB uploads, 8 at a time, add 203 / 612 µs per event at p50 / p99 and 1.2 ms per upload at p50. Beside 200 stalled clients, events add 184 µs at p99, and each stalled stream holds 537 KB; those streams account for most of the gap between the two paths' memory after load, which is read after they close. The 32 first requests on a new process add 2.3 ms at p50 ([pre-warming](research.md#performance-techniques)).
+Under stress (TLS path), 1,000 paced streams during 1 MiB uploads, 8 at a time, add 203 / 612 µs per event at p50 / p99 and 1.2 ms per upload at p50. Beside 200 stalled clients, events add 184 µs at p99, and each stalled stream holds 537 KB; those streams account for most of the gap between the two paths' memory after load, which is read after they close. The 32 first requests on a new process add 2.3 ms at p50 ([pre-warming](research.md#performance-techniques)).
 
 Heap allocations (`alloc_`, plain path unless noted; spread across hosts under 1% per request, 2% per stream, 5% on upload counts, up to 13% on upload bytes):
 
@@ -135,13 +135,13 @@ Each variant against plain Wye, plain path ([what each runs](development.md#benc
 - **`failover_`**, a route with failover: seven more allocations per request; a Claude Code-shaped upload makes 98.9 allocations and 1.13 MB instead of 21.9 and 88 KB, because kept chunks stop hyper from reusing its read buffer ([copying instead: rejected](research.md#performance-techniques)). CPU per MB is unchanged on this host.
 - **`refused_`**, one upstream rejects one request in four: the rejected requests are resent; no failed requests.
 
-Profiles of the plain, TLS, and paced paths, memory per stream by owner, and why Wye asks upstreams for uncompressed responses: [research.md](research.md#performance-techniques).
+Profiles of the plain, TLS, and paced paths, memory per stream by owner, and why Wye asks upstreams for uncompressed responses are in [research.md](research.md#performance-techniques).
 
-TLS uploads: Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (about 2 MB/s at 30 ms) unless Anthropic grows it; `scripts/upload-latency.sh` measures that against the real API (needs an API key). The default stays HTTP/2 until it does.
+For TLS uploads, Anthropic advertises 16 MiB frames but a 64 KiB stream window, which may limit an upload to window ÷ RTT (about 2 MB/s at 30 ms) unless Anthropic grows it; `scripts/upload-latency.sh` measures that against the real API (needs an API key). The default stays HTTP/2 until it does.
 
 ## Method
 
-`wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through the gateway, a child process, and reports what the gateway adds. Two upstream paths: plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics), plus Wye variants and an allocation-counting build ([development.md](development.md#benchmark) lists them). Across the three hosts Wye's medians spread up to 12% on per-request latency and CPU, up to 18% on per-event delay and CPU, and more on paced tails and on time to first byte, whose TLS p50 is tens of µs.
+`wye-bench` runs each scenario directly against a mock Anthropic upstream (unary JSON, timestamped SSE) and through the gateway, a child process, and reports what the gateway adds. It runs on two upstream paths, plain HTTP/1.1 (low noise, best for catching regressions) and TLS + HTTP/2 (the production shape, `tls_` metrics), plus Wye variants and an allocation-counting build ([development.md](development.md#benchmark) lists them). Across the three hosts Wye's medians spread up to 12% on per-request latency and CPU, up to 18% on per-event delay and CPU, and more on paced tails and on time to first byte, whose TLS p50 is tens of µs.
 
 Fair comparisons need identical hardware, payloads, keep-alive and TLS settings, upstream behavior, and features, and record hardware, build, workload, samples, percentiles, and errors. A gateway with more middleware enabled is not a fair baseline unless the difference is stated.
 
@@ -150,9 +150,9 @@ Fair comparisons need identical hardware, payloads, keep-alive and TLS settings,
 Competitors run with `--agentgateway`, `--bifrost`, `--litellm`, or `--krakend`, each at its documented best case for this traffic, with nothing turned on that Wye does not do:
 
 - **Bifrost** v2.3.2 (Go), the official linux/amd64 binary. The request goes as Claude Code sends it (`claude-cli` user agent, a provider-qualified model), which Bifrost relays byte for byte instead of normalizing. No config or log store, request logging off, retries off; the pool and buffer sizes of Bifrost's own published benchmark (`initial_pool_size` 15,000, `buffer_size` 20,000) and 4,000 provider workers. Its upstream connection is HTTP/1.1 (fasthttp).
-- **agentgateway** 1.7.0 (Rust, Linux Foundation), the GitHub release binary (fat LTO, jemalloc). Its LLM listener with one model in `detect` passthrough (the request relayed unchanged, its usage read, as Wye does), access log off, a 32 MiB request buffer. It offers HTTP/2 to TLS upstreams, as Wye does. Unlike Wye, it does not relay a unary response's bytes: it parses the JSON and writes it again, and answers `502 failed to process LLM response` to a reply without `model`.
-- **LiteLLM** 1.105.0 on CPython 3.12, its Python proxy at its leanest: byte-level passthrough (`pass_through_endpoints`; its own `/v1/messages` translates), no database, one worker per gateway vCPU.
-- **KrakenD** CE 3.0.1 (Go) in passthrough (`no-op` encoding), access log off. CE cannot stream SSE: `no-op` buffers the whole response, and `sse` encoding is Enterprise-only.
+- **agentgateway** 1.7.0 (Rust, Linux Foundation), the GitHub release binary (fat LTO, jemalloc). Its LLM listener with one model in `detect` passthrough (the request relayed unchanged, its usage read, as Wye does), access log off, a 32 MiB request buffer. It offers HTTP/2 to TLS upstreams, as Wye does. Unlike Wye, it does not relay a unary response's bytes. It parses the JSON and writes it again, and answers `502 failed to process LLM response` to a reply without `model`.
+- **LiteLLM** 1.105.0 on CPython 3.12, its Python proxy at its leanest, with byte-level passthrough (`pass_through_endpoints`; its own `/v1/messages` translates), no database, one worker per gateway vCPU.
+- **KrakenD** CE 3.0.1 (Go) in passthrough (`no-op` encoding), access log off. CE cannot stream SSE. `no-op` buffers the whole response, and `sse` encoding is Enterprise-only.
 
 Wye writes its usage records, as it does by default. Each gateway's generated configuration is in the [raw results](../bench/reference/results/2026-11-05-7a83fae/), next to `results.json`.
 
@@ -162,16 +162,16 @@ Gateways that parse requests and events need what real traffic always has, so co
 - the Claude Code-shaped upload says `"stream":false`, since the upload scenarios get a unary reply;
 - a unary Messages reply carries `model`, `stop_reason`, and `stop_sequence`, as Anthropic's do; agentgateway refuses one without.
 
-All runs send `"stream":true` on streaming requests and name the model `anthropic/bench`. Bifrost needs two more things: the mock's control headers go as `x-bf-eh-<name>`, the only extra headers it forwards, and requests leave `anthropic-version` to it, because its Anthropic route drops forwarded headers when the request carries one.
+All runs send `"stream":true` on streaming requests and name the model `anthropic/bench`. Bifrost needs two more things. The mock's control headers go as `x-bf-eh-<name>`, the only extra headers it forwards, and requests leave `anthropic-version` to it, because its Anthropic route drops forwarded headers when the request carries one.
 
 ## Reference environment
 
-Published numbers come from one pinned cloud machine type: `bench/reference/run.sh` builds a pushed commit on a fresh EC2 instance, runs the [comparison](#comparison-runs) against every competitor there, and copies the results into the repository. It is started only by hand; nothing in CI or on a schedule creates cloud resources, and the commit gate and the pull-request benchmark run on the committer's machine and GitHub's runners ([development.md](development.md#commit-gate)).
+Published numbers come from one pinned cloud machine type. `bench/reference/run.sh` builds a pushed commit on a fresh EC2 instance, runs the [comparison](#comparison-runs) against every competitor there, and copies the results into the repository. It is started only by hand; nothing in CI or on a schedule creates cloud resources, and the commit gate and the pull-request benchmark run on the committer's machine and GitHub's runners ([development.md](development.md#commit-gate)).
 
 The machine and the split:
 
 - One `c7i.4xlarge` in `us-east-1` (Intel Xeon Platinum 8488C, Sapphire Rapids; 8 cores, 16 vCPUs; 32 GiB), on demand, fixed performance rather than burstable, with nothing else on it. Ubuntu 24.04 LTS, the image Canonical's public SSM parameter names on the day, its id recorded with the results. `--instance-type` also takes `c7i.2xlarge` and `c7i.8xlarge`.
-- The gateway runs on two physical cores with their hyperthreads (4 vCPUs: the last two cores, away from cpu0's interrupts), through `WYE_BENCH_GATEWAY_CPUS`; `wye-bench`, the load generator and the mock, runs on the other six (`taskset`). Every gateway gets the same four vCPUs, and LiteLLM one worker per vCPU. A larger instance only gives the load generator more room.
+- The gateway runs on two physical cores with their hyperthreads (4 vCPUs, the last two cores, away from cpu0's interrupts), through `WYE_BENCH_GATEWAY_CPUS`; `wye-bench`, the load generator and the mock, runs on the other six (`taskset`). Every gateway gets the same four vCPUs, and LiteLLM one worker per vCPU. A larger instance only gives the load generator more room.
 - One `wye-bench run --repeat 3` with Wye, its allocation-counting build, and all four competitors, so every gateway sees the same payloads on the same host in the same hour. Gateway output is discarded.
 
 What the commit pins, since the instance clones it and runs its `bench/reference/remote.sh`:
@@ -186,11 +186,11 @@ What the commit pins, since the instance clones it and runs its `bench/reference
 | LiteLLM | 1.105.0, CPython 3.12 | `bench/reference/litellm-requirements.txt`: every dependency pinned by hash |
 | AWS CLI | 2.37.12 | for the upload only; SHA-256 of the first download |
 
-Not pinned: the Ubuntu image and the build packages from its mirrors (recorded per run), and the host EC2 places the instance on. `--runs N` repeats the run on N fresh instances, one after another, to measure that host-to-host variance.
+The Ubuntu image and the build packages from its mirrors (recorded per run), and the host EC2 places the instance on, are not pinned. `--runs N` repeats the run on N fresh instances, one after another, to measure that host-to-host variance.
 
-Each run leaves `bench/reference/results/<date>-<commit>/run-<n>/`, committed with the numbers it backs: `results.json` and `table.txt` (Wye against each competitor), `system.json` (instance type, AMI, zone, kernel, CPU model, memory, `rustc`, Python, the CPU split, competitor versions), `lscpu.txt`, `run.json` (region, zone, AMI parameter, status, duration), each gateway's generated configuration, `remote.log`, and the Run Command output. `median.json` beside the runs merges them.
+Each run leaves `bench/reference/results/<date>-<commit>/run-<n>/`, committed with the numbers it backs, holding `results.json` and `table.txt` (Wye against each competitor), `system.json` (instance type, AMI, zone, kernel, CPU model, memory, `rustc`, Python, the CPU split, competitor versions), `lscpu.txt`, `run.json` (region, zone, AMI parameter, status, duration), each gateway's generated configuration, `remote.log`, and the Run Command output. `median.json` beside the runs merges them.
 
-Against Bifrost's published method (t3 instances, one headline number, payloads that differ by instance size): a fixed-performance instance, every scenario with its percentiles and failure counts, the same payloads for every gateway on one host, and host variance measured rather than assumed.
+Unlike Bifrost's published method (t3 instances, one headline number, payloads that differ by instance size), it has a fixed-performance instance, every scenario with its percentiles and failure counts, the same payloads for every gateway on one host, and host variance measured rather than assumed.
 
 To reproduce the [results](#results), in an account used for nothing else (the budget alarm covers the whole account):
 
@@ -207,21 +207,21 @@ bench/reference/cleanup.sh        # deletes any leftover run stack
 bench/reference/cleanup.sh --all  # also the bucket, role, and budget
 ```
 
-Teardown: `run.sh` deletes its stack on every exit, after a failure or Ctrl-C too, and waits until it is gone. If `run.sh` itself dies, the instance powers off 3 hours after boot and, by its shutdown behavior, terminates; the stack left behind costs nothing, and `cleanup.sh` removes it. The instance has no inbound rule: Run Command reaches it through the SSM agent, and its role may only write under `runs/` in the results bucket, whose objects expire after 30 days.
+`run.sh` deletes its stack on every exit, after a failure or Ctrl-C too, and waits until it is gone. If `run.sh` itself dies, the instance powers off 3 hours after boot and, by its shutdown behavior, terminates; the stack left behind costs nothing, and `cleanup.sh` removes it. The instance has no inbound rule. Run Command reaches it through the SSM agent, and its role may only write under `runs/` in the results bucket, whose objects expire after 30 days.
 
-Cost, from the AWS price list (2026-11-05, `us-east-1`, on demand): `c7i.4xlarge` $0.714 per hour, its 40 GB gp3 volume about $0.004 per hour, its public IPv4 address $0.005 per hour. Each of the three runs took 28-31 minutes, about $0.37; all three about $1.10. The lifetime limit caps a forgotten run at about $2.20.
+From the AWS price list (2026-11-05, `us-east-1`, on demand), `c7i.4xlarge` costs $0.714 per hour, its 40 GB gp3 volume about $0.004 per hour, its public IPv4 address $0.005 per hour. Each of the three runs took 28-31 minutes, about $0.37; all three about $1.10. The lifetime limit caps a forgotten run at about $2.20.
 
 ## Limits
 
 What these numbers do not show:
 
-- The upstream is a mock on the same host: no network between gateway and provider, and no real model's timing.
-- One host, not two: the gateway and the load generator share the machine, separated by core pinning (two physical cores for the gateway, six for `wye-bench`) rather than a separate load machine. The gateway's 4 vCPUs are hyperthreads of 2 cores.
+- The upstream is a mock on the same host, with no network between gateway and provider and no real model's timing.
+- One host, not two. The gateway and the load generator share the machine, separated by core pinning (two physical cores for the gateway, six for `wye-bench`) rather than a separate load machine. The gateway's 4 vCPUs are hyperthreads of 2 cores.
 - Competitor configurations are each one's documented best case for this traffic, set by me; their generated files are in the raw results, so a better one can be proposed and rerun.
 - LiteLLM is its Python proxy, not its Rust gateway, which is a beta.
 - One commit (`7a83fae`) on one date, with each competitor's version as pinned that day.
 - CPU time comes in 10 ms steps ([how it is read](development.md#benchmark)), so small per-MB figures such as 0.60 ms move a step at a time between hosts.
-- No soak, capacity-per-core, or real-session figures yet: those have not run in the reference environment.
+- No soak, capacity-per-core, or real-session figures yet. Those have not run in the reference environment.
 
 ## Benchmark suite: kept, cut, missing
 
@@ -231,11 +231,11 @@ The suite measures the gateway's own overhead under agent-shaped load, and each 
 - Competitors run only in comparison runs and the reference environment, never in the commit gate.
 - Missing parts (agent trace replay, a floor baseline, a separate load machine) and the next competitors are planned in [roadmap.md](roadmap.md#m5-benchmarks-and-optimization).
 
-Why these competitors: KrakenD was the first reference (a mature general gateway), LiteLLM is the most-used open-source LLM gateway, Bifrost markets low overhead against LiteLLM (Wye's own claim), and agentgateway is the closest in kind.
+I chose these competitors because KrakenD was the first reference (a mature general gateway), LiteLLM is the most-used open-source LLM gateway, Bifrost markets low overhead against LiteLLM (Wye's own claim), and agentgateway is the closest in kind.
 
 ## Gate tolerances
 
-The commit gate runs on whatever machine commits, against the parent in alternating rounds ([development.md](development.md#commit-gate)). Until 2026-10-29 it compared each commit with a stored result instead. It then failed five times in a row on `sse_ttfb_added_p50_us` for code identical to a commit that had passed that morning: the binary that recorded the stored result measured about twice that value after the machine had been up 11 days, and something in between after a reboot. In the first run against the parent, an A/A comparison in effect, the gated metrics differed by a few percent at the median, and allocations by a few percent on uploads.
+The commit gate runs on whatever machine commits, against the parent in alternating rounds ([development.md](development.md#commit-gate)). Until 2026-10-29 it compared each commit with a stored result instead. It then failed five times in a row on `sse_ttfb_added_p50_us` for code identical to a commit that had passed that morning. The binary that recorded the stored result measured about twice that value after the machine had been up 11 days, and something in between after a reboot. In the first run against the parent, an A/A comparison in effect, the gated metrics differed by a few percent at the median, and allocations by a few percent on uploads.
 
 A metric passes when it stays under the parent's value times one plus its relative tolerance, plus an absolute floor. Eight A/A comparisons, on a quiet and on a busy machine, showed six floors too tight; each was raised to cover the worst excess seen plus about a quarter:
 
@@ -248,4 +248,4 @@ A metric passes when it stays under the parent's value times one plus its relati
 | `tls_cold_unary_added_p50_us` | 150% | 7 ms |
 | `tls_stalled_event_added_p99_us` | 50% | 3 ms |
 
-Per-event overhead stays guarded by CPU per event and allocations per event. Under everyday load the new floors still failed now and then: on identical code a run and its rerun failed on different metrics (`alloc_upload_bytes_per_request`, then `tls_upload_added_p50_us`), and in both gate runs that failed twice on identical code the two comparisons shared no metric. Hence the gate's rule that only a metric failing both counts.
+Per-event overhead stays guarded by CPU per event and allocations per event. Under everyday load the new floors still failed now and then. On identical code a run and its rerun failed on different metrics (`alloc_upload_bytes_per_request`, then `tls_upload_added_p50_us`), and in both gate runs that failed twice on identical code the two comparisons shared no metric. Hence the gate's rule that only a metric failing both counts.

@@ -37,7 +37,7 @@ By request class
 
 ## What it does
 
-- **Shows usage and cost.** One JSON line per request: tokens, cost, model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. With `[telemetry]`, logs, metrics, and one trace per session go to your OpenTelemetry backend. Every prompt-cache miss is recorded with its reason. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
+- **Shows usage and cost.** One JSON line per request records its tokens, cost, and model, and for Claude Code and Codex the session, subagent, request class, and tool calls. `wye report` reads the usage log, no backend needed. With `[telemetry]`, logs, metrics, and one trace per session go to your OpenTelemetry backend. Every prompt-cache miss is recorded with its reason. ([reading the report](docs/guide.md#reading-wye-report), [telemetry](docs/operations.md#usage-records-and-telemetry), [prices](docs/policy.md#price-table))
 - **Gives each caller its own gateway token.** It stands in for the provider key and is signed by Wye or your identity provider (GitHub Actions, or SSO through Claude Code's `apiKeyHelper`). A token names its models and output-token ceiling; anything else is refused before the provider gets the whole request, and Claude Code's model picker can list only those models. ([teams](docs/guide.md#using-it-for-a-team), [apps](docs/guide.md#using-it-from-apps), [tokens](docs/policy.md#gateway-tokens))
 - **Spreads load across keys and providers.** Several Anthropic keys, Claude Platform on AWS, Bedrock, or several OpenAI keys behind one address, split by weight, with failover between them. ([several upstreams](docs/guide.md#several-upstreams))
 - **Changes models in one place.** Aliases map a name to a model, per caller (a person, a repository, or a service). Upgrade checks tell you which Messages requests a newer model would reject, before you switch. Wye never rewrites a request to make it fit. ([aliases and upgrades](docs/guide.md#model-aliases-and-upgrades))
@@ -58,7 +58,7 @@ Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four 
 
 Under load the gap widens. With 2,000 token-paced streams, Wye adds 0.28 ms per event at p99; agentgateway adds 1.0 ms, Bifrost 132 ms, LiteLLM 490 ms, and KrakenD, which buffers, 404 ms ([results](docs/benchmarks.md#results)). Under the stress scenarios LiteLLM failed 104-132 requests and streams on every host; Wye failed none, in any scenario ([failures](docs/benchmarks.md#failures)).
 
-Where others lead: KrakenD on bulk transfer (3.7 against 2.4 GB/s), because it buffers responses instead of streaming them; agentgateway on cold connections and on memory beside clients that stopped reading, with a delay per event close to Wye's; LiteLLM on memory per idle stream over plain HTTP. Each vendor's own claim beside these numbers, the method, and the configs: [benchmarks](docs/benchmarks.md#what-they-claim-what-i-measured).
+Where others lead, it is in three places. KrakenD moves bulk transfers faster (3.7 against 2.4 GB/s) because it buffers responses instead of streaming them. agentgateway does better on cold connections and on memory beside clients that stopped reading, with a delay per event close to Wye's. LiteLLM uses less memory per idle stream over plain HTTP. [The benchmarks](docs/benchmarks.md#what-they-claim-what-i-measured) set each vendor's own claim beside these numbers, with the method and the configs.
 
 | What Wye adds | Plain HTTP/1.1 | TLS + HTTP/2 |
 |---|---|---|
@@ -74,7 +74,7 @@ Every commit that changes code is benchmarked against its parent, in alternating
 
 ## How it compares
 
-Two choices explain most rows: native APIs pass through, and nothing is kept between requests.
+Most rows follow from two choices, passing native APIs through and keeping nothing between requests.
 
 | Teams usually want | Wye |
 |---|---|
@@ -91,7 +91,7 @@ Two choices explain most rows: native APIs pass through, and nothing is kept bet
 
 A team that runs only Claude Code with SSO may prefer Anthropic's own self-hosted gateway for Claude Code, which follows every Claude Code release.
 
-Why native APIs: provider APIs keep changing. Within one year on Anthropic's API, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates everything into one format is always catching up ([what Wye changes](docs/architecture.md#forwarding-contract)).
+Wye passes native APIs through because provider APIs keep changing. Within one year on Anthropic's API, `thinking.budget_tokens`, sampling parameters, assistant prefill, forced `tool_choice`, and `output_format` all broke on newer models. A gateway that translates everything into one format is always catching up ([what Wye changes](docs/architecture.md#forwarding-contract)).
 
 ## Configuration
 
@@ -123,7 +123,7 @@ cache_write_5m = "5.00"
 cache_write_1h = "8.00"
 ```
 
-Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way, and `standby = true` keeps an upstream for failover only ([details](docs/guide.md#several-upstreams)). Each upstream serves its `provider`'s API: Claude's for `anthropic` (the default), `bedrock`, and `claude-platform-aws`; OpenAI's for `openai`. Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
+Each session stays on one upstream. A rejected request moves to the other; two keys of one provider work the same way, and `standby = true` keeps an upstream for failover only ([details](docs/guide.md#several-upstreams)). Upstreams of `provider` `anthropic` (the default), `bedrock`, and `claude-platform-aws` serve Claude's API; `openai` serves OpenAI's. Secrets come from environment variables or files, never the config. An unknown field stops startup. [examples/wye.toml](examples/wye.toml) has every field with its default and limits, and a test keeps it valid.
 
 `wye explain` shows what this config decides for one request, offline, through the gateway's own functions:
 
@@ -145,23 +145,23 @@ decision: forward
 
 ## Status
 
-Built and covered by tests: everything under [What it does](#what-it-does). I've run Claude Code through Wye on a claude.ai subscription since 2026-10-30.
+Everything under [What it does](#what-it-does) is built and covered by tests. I've run Claude Code through Wye on a claude.ai subscription since 2026-10-30.
 
-Tested only against mocks so far: Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS. `wye service` hasn't run under systemd on a real Linux machine.
+Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS are tested only against mocks so far. `wye service` hasn't run under systemd on a real Linux machine.
 
-Next: a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests. Then provider-held budgets per team. Not built: a published container image, Vertex AI, AWS SigV4. Details in [docs/roadmap.md](docs/roadmap.md#status).
+Next comes a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests, then provider-held budgets per team. A published container image, Vertex AI, and AWS SigV4 are not built. Details in [docs/roadmap.md](docs/roadmap.md#status).
 
 ## What Wye will not do
 
-- Keep global rate limits, spending budgets, or quotas: they need shared state, and providers already enforce them per key or workspace.
-- Break circuits, cool down upstreams, or balance by measured latency: each remembers across requests. Failover handles a rejection within the request.
+- Keep global rate limits, spending budgets, or quotas. They need shared state, and providers already enforce them per key or workspace.
+- Break circuits, cool down upstreams, or balance by measured latency. Each remembers across requests. Failover handles a rejection within the request.
 - Translate between provider APIs, rewrite prompts, swap in another model when one fails, or cache responses.
 - Filter content (guardrails, redaction) or store prompts.
-- Terminate TLS: a load balancer, an ingress, or Caddy in front does it, and renews the certificate.
+- Terminate TLS. A load balancer, an ingress, or Caddy in front does it, and renews the certificate.
 - Run agents or tools.
-- Protect a public endpoint from abuse: per-user authentication and quotas stay in your backend.
+- Protect a public endpoint from abuse. Per-user authentication and quotas stay in your backend.
 - Grow a dashboard or an admin API. Config changes go through Git and a restart or rolling deploy.
 
 ## Documentation
 
-[docs/README.md](docs/README.md) maps each question to the document that answers it, and [docs/glossary.md](docs/glossary.md) defines the terms. Development: [docs/development.md](docs/development.md); tests run against local mock upstreams and never call a paid API. License: [MIT](LICENSE).
+[docs/README.md](docs/README.md) maps each question to the document that answers it, and [docs/glossary.md](docs/glossary.md) defines the terms. To change Wye, read [docs/development.md](docs/development.md); tests run against local mock upstreams and never call a paid API. License: [MIT](LICENSE).

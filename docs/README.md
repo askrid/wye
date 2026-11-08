@@ -1,6 +1,6 @@
 # Wye docs
 
-New here: the [README](../README.md#what-it-does) says what Wye does, how fast it is, and [how it compares](../README.md#how-it-compares); the [glossary](glossary.md) defines its terms; the [guide](guide.md) shows how to use each part. Each document owns one concern, and the others link to it instead of restating it ([conventions](development.md#documentation)).
+If you are new, the [README](../README.md#what-it-does) says what Wye does, how fast it is, and [how it compares](../README.md#how-it-compares); the [glossary](glossary.md) defines its terms; the [guide](guide.md) shows how to use each part. Each document owns one concern, and the others link to it instead of restating it ([conventions](development.md#documentation)).
 
 ## Use it
 
@@ -17,7 +17,7 @@ New here: the [README](../README.md#what-it-does) says what Wye does, how fast i
 - [benchmarks.md](benchmarks.md): Wye's overhead against four other gateways, their own claims beside it, the method, the reference environment, the gate's evidence.
 - [policy.md](policy.md): what Wye authorizes and enforces, what it cannot enforce without shared state, security requirements.
 - [SECURITY.md](../SECURITY.md): reporting a vulnerability, what a running gateway holds and reaches, how a release is built and how to verify one.
-- [architecture.md](architecture.md): how a request flows: components, runtime, forwarding, upstream selection and failover, providers, streaming, configuration, invariants, open design decisions.
+- [architecture.md](architecture.md): how a request flows, components, runtime, forwarding, upstream selection and failover, providers, streaming, configuration, invariants, open design decisions.
 
 ## Change it
 
