@@ -69,7 +69,8 @@ function hero(period, reduce) {
   canvas.setAttribute("aria-hidden", "true");
   period.append(canvas);
   const paths = [...period.querySelectorAll(".strands path"), period.querySelector(".thread")];
-  // Each string as 40 segments; a vertex is x, y, how much a pluck moves it
+  // Each string as 40 segments, and an out string's straight tail as one
+  // more; a vertex is x, y, how much a pluck moves it
   // (the curve's middle control points' weight, 3t(1-t)), and its string.
   const vertices = [];
   const lines = paths.map((el, i) => {
@@ -85,7 +86,7 @@ function hero(period, reduce) {
     }
     if (tail) at.push([tail, y3, 0]);
     for (let k = 1; k < at.length; k++) vertices.push(...at[k - 1], i, ...at[k], i);
-    return { at, amp: 0, since: 0, dy: 0 };
+    return { at, amp: 0, since: 0 };
   });
   // The drawing's order: 100 strings in, then 99 out (in's order, less the
   // one that fails over), then the thread, that one's way out.
@@ -137,13 +138,12 @@ function hero(period, reduce) {
   // A pulse is a soft point of light: x, y, brightness, size.
   const pulses = program(`
     attribute vec4 a;
-    uniform float u_density;
     varying vec2 v_pos;
     varying float v_alpha;
     void main() {
       v_pos = a.xy;
       v_alpha = a.z;
-      gl_PointSize = a.w * u_density;
+      gl_PointSize = a.w;
       gl_Position = vec4(a.x / 750.0 - 1.0, 1.0 - a.y / 300.0, 0.0, 1.0);
     }`, `
     precision mediump float;
@@ -170,7 +170,7 @@ function hero(period, reduce) {
     const hex = getComputedStyle(period).getPropertyValue(name).trim().slice(1);
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   };
-  let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0;
+  let ink, accent, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0;
   // The pointer: its latest place, read once a frame, the place read the frame
   // before, and the canvas's box, measured again only after a scroll or a
   // resize.
@@ -179,22 +179,19 @@ function hero(period, reduce) {
   // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
   const fit = () => {
     box = canvas.getBoundingClientRect();
-    canvas.width = Math.round(box.width * density);
-    canvas.height = Math.round(box.height * density);
+    canvas.width = Math.round(box.width);
+    canvas.height = Math.round(box.height);
     gl.viewport(0, 0, canvas.width, canvas.height);
     ink = rgb("--ink");
     accent = rgb("--accent");
   };
-  // Requests: a string in, then its string out. In, they gather speed into
-  // the dot; out, they ease off. At most 48 at once, 6 new a frame.
+  // Requests: a string in, then its string out, i the string it is on. In,
+  // they gather speed into the dot; out, they ease off. At most 48 at once
+  // (and 6 new a frame, as sense launches no more).
   const flight = [];
   const IN = 1500, OUT = 1900;
-  let launched = 0;
   const launch = (i, out, t) => {
-    if (flight.length < 48 && launched < 6) {
-      flight.push({ i, out, t });
-      launched++;
-    }
+    if (flight.length < 48) flight.push({ i, out, t });
   };
   // Where the pointer crosses a string at rest, by the string's own points.
   const yAt = (line, x) => {
@@ -248,7 +245,7 @@ function hero(period, reduce) {
         if (c % every) continue;
         const at = line.at, t = (x - at[0][0]) / (at[at.length - 1][0] - at[0][0]);
         if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)));
-        else launch(i === thread ? 59 : i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)));
+        else launch(i, true, 1 - Math.sqrt(1 - Math.min(t, 1)));
       }
     }
     previousX = x;
@@ -258,13 +255,13 @@ function hero(period, reduce) {
   // Writes a request's streak into the buffer at point n: a head and nine
   // fading points close behind it. Returns the next free point.
   const streak = (p, n) => {
-    const line = p.out ? lines[route(p.i)] : lines[p.i], at = line.at, end = at.length - 1;
+    const at = lines[p.i].at, end = at.length - 1;
     const ease = p.out ? 1 - (1 - p.t) * (1 - p.t) : p.t * p.t;
     for (let k = 0; k < 10; k++) {
       const f = Math.min(Math.max(ease - k * 0.006, 0), 1) * end, j = Math.min(Math.floor(f), end - 1), r = f - j;
       const a = at[j], b = at[j + 1], o = n * 4;
       pulseData[o] = a[0] + (b[0] - a[0]) * r;
-      pulseData[o + 1] = a[1] + (b[1] - a[1]) * r + (a[2] + (b[2] - a[2]) * r) * line.dy;
+      pulseData[o + 1] = a[1] + (b[1] - a[1]) * r + (a[2] + (b[2] - a[2]) * r) * dys[p.i];
       pulseData[o + 2] = (1 - k / 10) ** 2 * 0.8;
       pulseData[o + 3] = 10 - k * 0.7;
       n++;
@@ -274,14 +271,13 @@ function hero(period, reduce) {
   const draw = (now) => {
     const dt = Math.min(now - (last || now), 50);
     last = now;
-    launched = 0;
     if (pending) sense(now);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
     // second; its copy glows in over 60 ms and out over 700, to nothing.
     let ringing = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], age = now - line.since;
-      dys[i] = glows[i] = line.dy = 0;
+      dys[i] = glows[i] = 0;
       if (!line.amp) continue;
       ringing = true;
       if (age < 0) continue;
@@ -290,7 +286,7 @@ function hero(period, reduce) {
         line.amp = 0;
         continue;
       }
-      dys[i] = line.dy = line.amp * Math.exp(-age / 520) * Math.sin((2 * Math.PI * 3 * age) / 1000);
+      dys[i] = line.amp * Math.exp(-age / 520) * Math.sin((2 * Math.PI * 3 * age) / 1000);
       glows[i] = glow;
     }
     // The dot carries the traffic: each request through it brightens a soft
@@ -303,6 +299,7 @@ function hero(period, reduce) {
       if (p.out) flight.splice(k, 1);
       else {
         p.out = true;
+        p.i = route(p.i);
         p.t = 0;
         halo = Math.min(1, halo + 0.18);
       }
@@ -312,10 +309,9 @@ function hero(period, reduce) {
     pulseData[2] = halo * 0.35;
     pulseData[3] = 70;
     let n = 1;
-    for (const p of flight) if (!(p.out && p.i === 59)) n = streak(p, n);
+    for (const p of flight) if (p.i !== thread) n = streak(p, n);
     const accentAt = n;
-    for (const p of flight) if (p.out && p.i === 59) n = streak(p, n);
-    gl.clearColor(0, 0, 0, 0);
+    for (const p of flight) if (p.i === thread) n = streak(p, n);
     gl.clear(gl.COLOR_BUFFER_BIT);
     // The ringing strings.
     gl.useProgram(strings);
@@ -338,7 +334,6 @@ function hero(period, reduce) {
     // to finish reading last frame's.
     gl.bufferData(gl.ARRAY_BUFFER, pulseData.subarray(0, n * 4), gl.STREAM_DRAW);
     gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
-    gl.uniform1f(u.density, density);
     gl.uniform3fv(u.pulseColour, ink);
     gl.drawArrays(gl.POINTS, 0, accentAt);
     gl.uniform3fv(u.pulseColour, accent);
@@ -379,7 +374,7 @@ function hero(period, reduce) {
       removeEventListener("pointermove", pluck);
       removeEventListener("scroll", forget);
       document.documentElement.removeEventListener("pointerleave", forget);
-      havePrevious = pending = false;
+      forget();
       flight.length = 0;
       for (const line of lines) line.amp = 0;
       if (!lost) gl.clear(gl.COLOR_BUFFER_BIT);
@@ -406,7 +401,7 @@ function hero(period, reduce) {
     const where = (p, name) => gl.getUniformLocation(p, name);
     u = {
       dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
-      lineColour: where(strings, "u_colour"), density: where(pulses, "u_density"), pulseColour: where(pulses, "u_colour"),
+      lineColour: where(strings, "u_colour"), pulseColour: where(pulses, "u_colour"),
     };
     update();
   };

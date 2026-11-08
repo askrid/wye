@@ -174,9 +174,9 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
 .mark .version { color: var(--graphite); font-size: var(--caption); font-weight: 400; }
 .mark .tile { fill: var(--ground); stroke: var(--edge); }
 .mark .fork { fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
-.bar nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-family: var(--mono); }
-.bar nav a { color: var(--graphite); text-decoration: none; }
-.bar nav a:hover { color: var(--ink); text-decoration: underline; }
+:is(.bar, .foot) nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-family: var(--mono); }
+:is(.bar, .foot) nav a { color: var(--graphite); text-decoration: none; }
+:is(.bar, .foot) nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* First screen, in source order: what Wye is, then how to start it. The
    drawing is the headline's period (below). Its own stacking context: the
@@ -186,24 +186,22 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   isolation: isolate;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "copy" "install";
-  align-items: start;
-  gap: 2.5rem clamp(2.5rem, 5vw, 4.5rem);
+  gap: 2.5rem;
   padding-block: clamp(2rem, 4vw, 3.5rem) clamp(2.5rem, 5vw, 4rem);
 }
-.hero-copy { grid-area: copy; display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
-.hero-install { grid-area: install; display: grid; gap: 0.875rem; min-width: 0; }
+.hero-copy { display: grid; gap: 1.625rem; min-width: 0; container-type: inline-size; }
+.hero-install { display: grid; gap: 0.875rem; min-width: 0; }
 /* Grids whose single column must never grow past the page to fit a long
    word or line: their content wraps or scrolls inside it instead. */
 .hero-copy, .hero-install, .part, .prose { grid-template-columns: minmax(0, 1fr); }
 h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 /* README's line under the headline. */
-.lede p { max-width: 54ch; margin: 0; line-height: 1.6; }
+.lede p { max-width: 54ch; line-height: 1.6; }
 /* README's Quick start blocks, install then set up then use, one task to a
    block so each copies on its own; stacked tight, they read as one. */
 .steps { display: grid; gap: 2px; width: fit-content; max-width: 100%; min-width: 0; }
 /* As wide as the widest, each copy button beside its commands, not above. */
-.steps .code-wrap, .steps pre.code { width: auto; margin: 0; }
+.steps .code-wrap, .steps pre.code { width: auto; }
 @media (scripting: enabled) {
   .steps pre.code[data-lang="bash"] { padding-top: 1.1875rem; padding-right: 6.5rem; }
 }
@@ -233,8 +231,8 @@ html, body { overflow-x: clip; }
   height: 7.143em;
 }
 /* The fade is the strokes' own paint, a gradient from the dot to nothing
-   before the drawing's edges, not a mask: a redrawn line repaints only
-   lines, so the motion can run every frame. */
+   before the drawing's edges; the canvas's shaders draw the same fade
+   (assets/site.js). */
 .period .strands path { fill: none; stroke: url(#period-fade); stroke-width: 0.9; opacity: 0.2; }
 .period .thread { fill: none; stroke: url(#period-fade-thread); stroke-width: 1.6; }
 .period stop { stop-color: var(--ink); }
@@ -260,7 +258,6 @@ html, body { overflow-x: clip; }
 .rail { position: sticky; top: 0; align-self: start; padding-block: clamp(2rem, 5vw, 3.5rem); }
 .contents {
   list-style: none;
-  margin: 0;
   padding: 0;
   font-family: var(--display);
   /* With the line height below, a row is 24 px, WCAG 2.2's minimum target. */
@@ -270,7 +267,7 @@ html, body { overflow-x: clip; }
 /* Two groups, each a list of its own, so a screen reader announces the
    stops as one list of six; a row's height apart, twice the space
    inside a group. */
-.contents ol, .contents ul { list-style: none; margin: 0; padding: 0; }
+.contents ol, .contents ul { list-style: none; padding: 0; }
 .contents > li + li { margin-top: 1.5rem; }
 .contents a { display: block; color: var(--graphite); text-decoration: none; }
 .contents a:hover .name { color: var(--ink); text-decoration: underline; }
@@ -283,7 +280,7 @@ html, body { overflow-x: clip; }
    scroll-driven animations keep a plain table of contents. It follows the
    reader's scrolling and moves nothing by itself. */
 @supports (animation-timeline: view()) {
-  .stops > section { view-timeline-axis: block; view-timeline-inset: 20% 79%; }
+  .stops > section { view-timeline-inset: 20% 79%; }
   #client { view-timeline-name: --client; }
   #access { view-timeline-name: --access; }
   #model { view-timeline-name: --model; }
@@ -446,7 +443,7 @@ pre.code code { font: inherit; }
 /* Config and JSON keys recede, so the values lead. */
 .code .k { color: var(--graphite); }
 /* The one line of a block its section is about (the palette, above). */
-.accent, .code .accent { color: var(--accent); }
+.accent { color: var(--accent); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
 .code .w { white-space: nowrap; }
@@ -526,9 +523,6 @@ pre.code code { font: inherit; }
   line-height: 1.6;
 }
 .foot a { color: var(--text); }
-.foot nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; }
-.foot nav a { color: var(--graphite); text-decoration: none; }
-.foot nav a:hover { color: var(--ink); text-decoration: underline; }
 
 /* Charts drawn in block characters (site/src/chart.rs): names and values
    are text, the bars hidden from screen readers; Wye's line in ink and
@@ -564,6 +558,4 @@ pre.code code { font: inherit; }
 /* On a phone the axis keeps its ends; the caption says the scale is log. */
 @media (max-width: 40rem) {
   .bars .axis span:not(:first-child, :last-child) { display: none; }
-}
-@media (max-width: 40rem) {
 }
