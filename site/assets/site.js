@@ -51,11 +51,21 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 // draws twice. Frames run only while something the reader started still
 // moves, on the low-power GPU, and never under prefers-reduced-motion,
 // out of view, or in a hidden tab; without WebGL the drawing stays still.
+// Nothing is built until motion may play, and then in an idle moment after
+// load: a first visit's shaders take the GPU over 100 ms to compile.
 const period = document.querySelector(".period");
-const canvas = document.createElement("canvas");
-const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
-if (gl) {
+if (period) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  const begin = () => {
+    if (reduce.matches) reduce.addEventListener("change", begin, { once: true });
+    else (window.requestIdleCallback || setTimeout)(() => hero(period, reduce));
+  };
+  begin();
+}
+function hero(period, reduce) {
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
+  if (!gl) return;
   canvas.setAttribute("aria-hidden", "true");
   period.append(canvas);
   const paths = [...period.querySelectorAll(".strands path"), period.querySelector(".thread")];
@@ -152,11 +162,8 @@ if (gl) {
   const pulseData = new Float32Array((48 * 10 + 1) * 4);
   gl.enableVertexAttribArray(0);
   gl.enable(gl.BLEND);
-  const where = (p, name) => gl.getUniformLocation(p, name);
-  const u = {
-    dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
-    lineColour: where(strings, "u_colour"), density: where(pulses, "u_density"), pulseColour: where(pulses, "u_colour"),
-  };
+  // The shaders' inputs, found once both programs have linked.
+  let u = null;
   const dys = new Float32Array(200);
   const glows = new Float32Array(200);
   const rgb = (name) => {
@@ -356,6 +363,7 @@ if (gl) {
     box = null;
   };
   const update = () => {
+    if (!u) return;
     const on = visible && !lost && !document.hidden && !reduce.matches;
     if (on === running) return;
     running = on;
@@ -390,5 +398,17 @@ if (gl) {
   }).observe(canvas);
   document.addEventListener("visibilitychange", update);
   reduce.addEventListener("change", update);
-  update();
+  // The programs link on the GPU's own time where the browser allows it;
+  // asking for an input before then would make the page wait for them.
+  const parallel = gl.getExtension("KHR_parallel_shader_compile");
+  const linked = () => {
+    if (parallel && ![strings, pulses].every((p) => gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR))) return setTimeout(linked, 50);
+    const where = (p, name) => gl.getUniformLocation(p, name);
+    u = {
+      dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
+      lineColour: where(strings, "u_colour"), density: where(pulses, "u_density"), pulseColour: where(pulses, "u_colour"),
+    };
+    update();
+  };
+  linked();
 }
