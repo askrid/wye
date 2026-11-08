@@ -56,15 +56,23 @@ pub(super) struct RawDiscoveredModel {
 #[serde(deny_unknown_fields)]
 pub(super) struct RawTelemetry {
     pub(super) otlp_endpoint: String,
-    pub(super) otlp_headers_env: Option<String>,
+    pub(super) otlp_headers: Option<RawSecret>,
     pub(super) service_name: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawCacheDiagnostics {
-    pub(super) hash_key_env: String,
+    pub(super) hash_key: RawSecret,
     pub(super) sample_percent: Option<u8>,
+}
+
+/// A secret's source: `{ env = "NAME" }` or `{ file = "path" }`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RawSecret {
+    pub(super) env: Option<String>,
+    pub(super) file: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Default)]
@@ -72,13 +80,9 @@ pub(super) struct RawCacheDiagnostics {
 pub(super) struct RawServer {
     pub(super) listen: Option<String>,
     pub(super) max_request_body_bytes: Option<u64>,
-    pub(super) max_total_held_bytes: Option<u64>,
-    pub(super) max_total_kept_bytes: Option<u64>,
     pub(super) max_concurrent_requests: Option<usize>,
-    pub(super) max_connections: Option<usize>,
-    pub(super) drain_delay_secs: Option<u64>,
-    pub(super) shutdown_grace_secs: Option<u64>,
-    pub(super) client_write_timeout_secs: Option<u64>,
+    pub(super) drain_delay: Option<String>,
+    pub(super) shutdown_grace: Option<String>,
 }
 
 pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
@@ -89,78 +93,42 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
     if !listen.ip().is_loopback() && !authenticated {
         return Err(ConfigError::NonLoopbackListen(listen));
     }
-    let max_request_body_bytes = nonzero(
-        raw.max_request_body_bytes
-            .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
-        "server.max_request_body_bytes",
-    )?;
-    let max_total_held_bytes = nonzero(
-        raw.max_total_held_bytes
-            .unwrap_or(DEFAULT_MAX_TOTAL_HELD_BYTES),
-        "server.max_total_held_bytes",
-    )?;
-    // A body that names its model last is held whole; with a smaller budget
-    // it would be refused as an overload, and retried, forever.
-    if max_total_held_bytes < max_request_body_bytes {
-        return Err(ConfigError::Invalid(
-            "server.max_total_held_bytes must be at least server.max_request_body_bytes",
-        ));
-    }
     let max_concurrent_requests = match raw.max_concurrent_requests {
         Some(0) => return Err(ConfigError::Zero("server.max_concurrent_requests")),
         value => value.unwrap_or(DEFAULT_MAX_CONCURRENT_REQUESTS),
     };
-    let max_connections = match raw.max_connections {
-        // Twice the requests: room for the idle connections clients keep.
-        None => max_concurrent_requests
-            .saturating_mul(2)
-            .min(MAX_CONNECTIONS),
-        Some(n) if n > MAX_CONNECTIONS => {
-            return Err(ConfigError::Invalid(
-                "server.max_connections must be at most 1048576",
-            ));
-        }
-        // A request in flight holds a connection, so fewer connections
-        // would lower max_concurrent_requests in silence.
-        Some(n) if n < max_concurrent_requests => {
-            return Err(ConfigError::Invalid(
-                "server.max_connections must be at least server.max_concurrent_requests",
-            ));
-        }
-        Some(n) => n,
-    };
     Ok(Server {
         listen,
-        max_request_body_bytes,
-        max_total_held_bytes,
-        max_total_kept_bytes: nonzero(
-            raw.max_total_kept_bytes
-                .unwrap_or(DEFAULT_MAX_TOTAL_KEPT_BYTES),
-            "server.max_total_kept_bytes",
+        max_request_body_bytes: nonzero(
+            raw.max_request_body_bytes
+                .unwrap_or(DEFAULT_MAX_REQUEST_BODY_BYTES),
+            "server.max_request_body_bytes",
         )?,
         max_concurrent_requests,
-        max_connections,
-        drain_delay: timer(
-            raw.drain_delay_secs.unwrap_or(DEFAULT_DRAIN_DELAY_SECS),
-            "server.drain_delay_secs",
-        )?,
+        drain_delay: timer(raw.drain_delay, DEFAULT_DRAIN_DELAY, "server.drain_delay")?,
         // Zero is valid: cancel active streams immediately on shutdown.
         shutdown_grace: timer(
-            raw.shutdown_grace_secs
-                .unwrap_or(DEFAULT_SHUTDOWN_GRACE_SECS),
-            "server.shutdown_grace_secs",
-        )?,
-        client_write_timeout: running_timer(
-            raw.client_write_timeout_secs
-                .unwrap_or(DEFAULT_CLIENT_WRITE_TIMEOUT_SECS),
-            "server.client_write_timeout_secs",
+            raw.shutdown_grace,
+            DEFAULT_SHUTDOWN_GRACE,
+            "server.shutdown_grace",
         )?,
     })
 }
 
+/// A secret named by exactly one source: a valid environment variable name,
+/// or a file path. `field` names it in errors.
+pub(super) fn validate_secret(raw: RawSecret, field: &'static str) -> Result<Secret, ConfigError> {
+    match (raw.env, raw.file) {
+        (Some(name), None) => env_name(name, field).map(Secret::Env),
+        (None, Some(path)) if path.as_os_str().is_empty() => Err(ConfigError::Empty(field)),
+        (None, Some(path)) => Ok(Secret::File(path)),
+        _ => Err(ConfigError::Secret(field)),
+    }
+}
+
 /// An https URL, or an http one to a loopback host, without credentials or
 /// a query: its scheme, host, and path without a trailing slash. Secrets
-/// come from the environment, never from a URL in config, and what a
+/// come from a [`Secret`], never from a URL in config, and what a
 /// request carries (a key, OTLP headers, prompts) never crosses a network
 /// in the clear. `field` names it in errors.
 pub(super) fn parse_url(
@@ -215,9 +183,9 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
         otlp_logs_uri: signal_uri("logs")?,
         otlp_metrics_uri: signal_uri("metrics")?,
         otlp_traces_uri: signal_uri("traces")?,
-        otlp_headers_env: raw
-            .otlp_headers_env
-            .map(|name| env_name(name, "telemetry.otlp_headers_env"))
+        otlp_headers: raw
+            .otlp_headers
+            .map(|raw| validate_secret(raw, "telemetry.otlp_headers"))
             .transpose()?,
         service_name: match raw.service_name {
             Some(name) if name.is_empty() => {
@@ -269,7 +237,7 @@ pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigE
     Ok(Discovery { models })
 }
 
-pub(super) fn env_name(name: String, field: &'static str) -> Result<String, ConfigError> {
+fn env_name(name: String, field: &'static str) -> Result<String, ConfigError> {
     let mut bytes = name.bytes();
     let valid = bytes
         .next()
@@ -301,20 +269,52 @@ pub(super) fn sample_percent(value: Option<u8>, field: &'static str) -> Result<u
 
 /// The longest timer, a day: longer ones are mistakes, and a timer adds its
 /// duration to an `Instant`, which must not overflow.
-const MAX_TIMER_SECS: u64 = 24 * 3600;
+const MAX_TIMER: Duration = Duration::from_secs(24 * 3600);
 
-/// A timer of `value` seconds, zero allowed.
-fn timer(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
-    if value > MAX_TIMER_SECS {
-        return Err(ConfigError::TooLong {
-            field,
-            max: MAX_TIMER_SECS,
-        });
+/// A duration as written, else `default`; at most `max`.
+fn duration(
+    raw: Option<String>,
+    default: Duration,
+    max: Duration,
+    field: &'static str,
+) -> Result<Duration, ConfigError> {
+    let value = match raw {
+        None => default,
+        Some(text) => crate::duration::parse(&text).ok_or(ConfigError::Duration(field))?,
+    };
+    if value > max {
+        return Err(ConfigError::TooLong { field, max });
     }
-    Ok(Duration::from_secs(value))
+    Ok(value)
 }
 
-/// A timer that must run: more than zero seconds.
-fn running_timer(value: u64, field: &'static str) -> Result<Duration, ConfigError> {
-    nonzero(value, field).and_then(|value| timer(value, field))
+/// A timer as written, else `default`, zero allowed.
+fn timer(
+    raw: Option<String>,
+    default: Duration,
+    field: &'static str,
+) -> Result<Duration, ConfigError> {
+    duration(raw, default, MAX_TIMER, field)
+}
+
+/// A duration that must run: more than zero, at most `max`.
+fn running(
+    raw: Option<String>,
+    default: Duration,
+    max: Duration,
+    field: &'static str,
+) -> Result<Duration, ConfigError> {
+    match duration(raw, default, max, field)? {
+        Duration::ZERO => Err(ConfigError::Zero(field)),
+        value => Ok(value),
+    }
+}
+
+/// A timer that must run: more than zero, at most a day.
+fn running_timer(
+    raw: Option<String>,
+    default: Duration,
+    field: &'static str,
+) -> Result<Duration, ConfigError> {
+    running(raw, default, MAX_TIMER, field)
 }

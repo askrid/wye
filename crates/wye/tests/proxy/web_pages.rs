@@ -68,7 +68,7 @@ async fn model_discovery_without_auth_refuses_a_web_page() {
     let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
          [discovery]\nmodels = [{{ id = \"claude-sonnet-4-6\" }}]\n"
     );
     let h = Harness::launch_config(&config, keyed_resources(), hits).await;
@@ -93,7 +93,7 @@ async fn a_gateway_with_auth_checks_the_token_not_the_host() {
     let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n{}",
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}",
         auth_section(&key, "")
     );
     let h = Harness::launch_config(&config, keyed_resources(), hits).await;
@@ -113,7 +113,7 @@ async fn explain_and_the_server_answer_alike_for_web_pages() {
     let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n"
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
     );
     let parsed = Config::from_toml_str(&config).unwrap();
     let h = Harness::launch_config(&config, keyed_resources(), hits).await;

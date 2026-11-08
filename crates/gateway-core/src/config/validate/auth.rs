@@ -1,4 +1,4 @@
-//! `[auth]`: Wye's own issuer and the identity providers.
+//! `[auth]`: Wye's own signing keys and the identity providers.
 
 use std::path::PathBuf;
 
@@ -9,22 +9,15 @@ use super::*;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawAuth {
-    pub(crate) issuer: Option<String>,
     pub(crate) audience: Option<String>,
-    pub(crate) max_gateway_token_ttl_secs: Option<u64>,
+    pub(crate) max_gateway_token_ttl: Option<String>,
+    /// Ed25519 public keys, unpadded base64url.
     #[serde(default)]
-    pub(crate) signing_keys: Vec<RawPublicKey>,
+    pub(crate) signing_keys: Vec<String>,
     #[serde(default)]
     pub(crate) identity_providers: Vec<RawIdentityProvider>,
     pub(crate) models: Option<Vec<String>>,
     pub(crate) max_output_tokens: Option<u64>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RawPublicKey {
-    pub(crate) id: String,
-    pub(crate) ed25519_public_key: String,
 }
 
 #[derive(Deserialize)]
@@ -49,36 +42,30 @@ pub(crate) struct RawGrant {
 
 pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     let err = |msg: String| ConfigError::Auth(msg);
-    let own = match (raw.issuer, raw.audience, raw.signing_keys.is_empty()) {
-        (None, None, true) => None,
-        (Some(issuer), Some(audience), false) => {
-            Some(validate_own(issuer, audience, raw.signing_keys)?)
+    let own = match (raw.audience, raw.signing_keys.is_empty()) {
+        (None, true) => None,
+        (Some(audience), false) => Some(validate_own(audience, raw.signing_keys)?),
+        (Some(_), true) => {
+            return Err(err("audience needs at least one key in signing_keys".into()));
         }
-        (Some(_), Some(_), true) => {
+        (None, false) => {
             return Err(err(
-                "issuer and audience need at least one [[auth.signing_keys]] entry".into(),
-            ));
-        }
-        _ => {
-            return Err(err(
-                "issuer, audience, and [[auth.signing_keys]] go together; omit all three to \
-                 trust only [[auth.identity_providers]]"
+                "signing_keys needs an audience; omit both to trust only \
+                 [[auth.identity_providers]]"
                     .into(),
             ));
         }
     };
     if own.is_none() && raw.identity_providers.is_empty() {
         return Err(err(
-            "set issuer, audience, and [[auth.signing_keys]], or at least one \
-             [[auth.identity_providers]]"
-                .into(),
+            "set audience and signing_keys, or at least one [[auth.identity_providers]]".into(),
         ));
     }
     let mut identity_providers: Vec<IdentityProvider> =
         Vec::with_capacity(raw.identity_providers.len());
     for (i, raw_idp) in raw.identity_providers.into_iter().enumerate() {
         let idp = validate_identity_provider(raw_idp, i)?;
-        let taken = own.as_ref().is_some_and(|o| o.issuer == idp.issuer)
+        let taken = (own.is_some() && idp.issuer == OWN_ISSUER)
             || identity_providers
                 .iter()
                 .any(|other| other.issuer == idp.issuer);
@@ -104,59 +91,37 @@ pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
             .max_output_tokens
             .map(|n| nonzero(n, "auth.max_output_tokens"))
             .transpose()?,
-        max_gateway_token_ttl: token_ttl(
-            raw.max_gateway_token_ttl_secs
-                .unwrap_or(DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS),
+        max_gateway_token_ttl: running(
+            raw.max_gateway_token_ttl,
+            DEFAULT_MAX_GATEWAY_TOKEN_TTL,
+            MAX_GATEWAY_TOKEN_TTL,
+            "auth.max_gateway_token_ttl",
         )?,
     })
 }
 
-/// `max_gateway_token_ttl_secs`: more than zero, at most
-/// [`MAX_GATEWAY_TOKEN_TTL_SECS`].
-fn token_ttl(secs: u64) -> Result<Duration, ConfigError> {
-    const FIELD: &str = "auth.max_gateway_token_ttl_secs";
-    if secs > MAX_GATEWAY_TOKEN_TTL_SECS {
-        return Err(ConfigError::TooLong {
-            field: FIELD,
-            max: MAX_GATEWAY_TOKEN_TTL_SECS,
-        });
-    }
-    nonzero(secs, FIELD).map(Duration::from_secs)
-}
-
-fn validate_own(
-    issuer: String,
-    audience: String,
-    raw_keys: Vec<RawPublicKey>,
-) -> Result<OwnIssuer, ConfigError> {
+fn validate_own(audience: String, raw_keys: Vec<String>) -> Result<OwnIssuer, ConfigError> {
     let err = |msg: String| ConfigError::Auth(msg);
-    if issuer.is_empty() || audience.is_empty() {
-        return Err(err("issuer and audience must not be empty".into()));
+    if audience.is_empty() {
+        return Err(err("audience must not be empty".into()));
     }
-    let mut keys = Vec::with_capacity(raw_keys.len());
-    for key in raw_keys {
-        if key.id.is_empty() {
-            return Err(err("key id must not be empty".into()));
-        }
-        if keys.iter().any(|k: &PublicKey| k.id == key.id) {
-            return Err(err(format!("duplicate key id {:?}", key.id)));
-        }
-        let Some(public) = crate::token::decode_public_key(&key.ed25519_public_key) else {
+    let mut keys: Vec<PublicKey> = Vec::with_capacity(raw_keys.len());
+    for encoded in raw_keys {
+        let Some(key) = PublicKey::decode(&encoded) else {
             return Err(err(format!(
-                "key {:?}: ed25519_public_key must be 32 bytes in unpadded base64url",
-                key.id
+                "signing_keys: {encoded:?} is not an Ed25519 public key, 32 bytes in \
+                 unpadded base64url"
             )));
         };
-        keys.push(PublicKey {
-            id: key.id,
-            ed25519_public_key: public,
-        });
+        if keys
+            .iter()
+            .any(|k| k.ed25519_public_key == key.ed25519_public_key)
+        {
+            return Err(err(format!("signing_keys: {encoded:?} is listed twice")));
+        }
+        keys.push(key);
     }
-    Ok(OwnIssuer {
-        issuer,
-        audience,
-        keys,
-    })
+    Ok(OwnIssuer { audience, keys })
 }
 
 fn validate_identity_provider(

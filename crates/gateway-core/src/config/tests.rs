@@ -34,9 +34,10 @@ fn server(lines: &str) -> Result<Config, ConfigError> {
 
 #[test]
 fn minimal_config_gets_defaults() {
-    let config =
-        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"")
-            .unwrap();
+    let config = parse(
+        "base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }",
+    )
+    .unwrap();
     assert_eq!(
         config.server.max_request_body_bytes,
         DEFAULT_MAX_REQUEST_BODY_BYTES
@@ -47,7 +48,7 @@ fn minimal_config_gets_defaults() {
     assert_eq!(upstream.path_prefix, "");
     assert_eq!(
         upstream.provider_key,
-        ProviderKey::Env("ANTHROPIC_API_KEY".into())
+        ProviderKey::Secret(Secret::Env("ANTHROPIC_API_KEY".into()))
     );
     assert_eq!(upstream.response_header_timeout, Duration::from_secs(600));
 }
@@ -93,67 +94,87 @@ fn auth_allows_network_listen_and_validates_keys() {
     let with_auth = |listen: &str, upstream: &str, auth: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"{listen}\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             {upstream}\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{auth}"
+             {upstream}\n[auth]\naudience = \"wye-prod\"\n{auth}"
         ))
     };
-    let keys = format!("[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
-    let config = with_auth("0.0.0.0:8080", "provider_key_env = \"K\"", &keys).unwrap();
+    let keys = format!("signing_keys = [\"{PUBLIC_KEY}\"]");
+    let config = with_auth("0.0.0.0:8080", "provider_key = { env = \"K\" }", &keys).unwrap();
     let auth = config.auth.unwrap();
-    assert_eq!(auth.own.unwrap().keys.len(), 1);
+    let own = auth.own.unwrap();
+    assert_eq!(own.keys.len(), 1);
+    // Named by its RFC 7638 thumbprint (RFC 8037, appendix A.3).
+    assert_eq!(
+        own.keys[0].thumbprint,
+        "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+    );
+    assert_eq!(own.keys[0].encoded(), PUBLIC_KEY);
     assert_eq!(
         auth.max_gateway_token_ttl,
         Duration::from_secs(7 * 24 * 3600)
     );
 
-    assert!(matches!(
-        with_auth("0.0.0.0:8080", "forward_caller_credential = true", &keys),
-        Err(ConfigError::Auth(_))
-    ));
-    assert!(matches!(
-        with_auth(
-            "127.0.0.1:8080",
-            "provider_key_env = \"K\"",
-            "signing_keys = []"
+    let error = |upstream: &str, auth: &str| {
+        with_auth("127.0.0.1:8080", upstream, auth)
+            .unwrap_err()
+            .to_string()
+    };
+    let key = "provider_key = { env = \"K\" }";
+    assert!(
+        error("forward_caller_credential = true", &keys)
+            .starts_with("auth: cannot be combined with forward_caller_credential")
+    );
+    assert_eq!(
+        error(key, "signing_keys = []"),
+        "auth: audience needs at least one key in signing_keys"
+    );
+    assert_eq!(
+        error(key, "signing_keys = [\"not-a-key\"]"),
+        "auth: signing_keys: \"not-a-key\" is not an Ed25519 public key, 32 bytes in \
+         unpadded base64url"
+    );
+    assert_eq!(
+        error(
+            key,
+            &format!("signing_keys = [\"{PUBLIC_KEY}\", \"{PUBLIC_KEY}\"]")
         ),
-        Err(ConfigError::Auth(_))
-    ));
-    let bad = "[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"not-a-key\"";
-    assert!(matches!(
-        with_auth("127.0.0.1:8080", "provider_key_env = \"K\"", bad),
-        Err(ConfigError::Auth(_))
-    ));
-    let twice = format!("{keys}\n{keys}");
-    assert!(matches!(
-        with_auth("127.0.0.1:8080", "provider_key_env = \"K\"", &twice),
-        Err(ConfigError::Auth(_))
-    ));
+        format!("auth: signing_keys: \"{PUBLIC_KEY}\" is listed twice")
+    );
+    // Wye's own tokens always name the issuer "wye", and keys need no id.
+    assert!(error(key, &format!("{keys}\nissuer = \"wye\"")).contains("unknown field"));
+    let table =
+        format!("[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
+    assert!(error(key, &table).starts_with("invalid configuration"));
 }
 
 /// Gateway tokens cannot be revoked one by one, so how long one may live
 /// has a hard cap.
 #[test]
 fn gateway_token_lifetimes_are_capped_at_30_days() {
-    let with_ttl = |secs: u64| {
+    let with_ttl = |ttl: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
-             base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
-             [auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\nmax_gateway_token_ttl_secs = {secs}\n\
-             [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
+             base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
+             [auth]\naudience = \"wye-prod\"\nmax_gateway_token_ttl = \"{ttl}\"\n\
+             signing_keys = [\"{PUBLIC_KEY}\"]"
         ))
     };
-    let ttl = |secs| with_ttl(secs).unwrap().auth.unwrap().max_gateway_token_ttl;
-    assert_eq!(ttl(30 * 24 * 3600), Duration::from_secs(2_592_000));
-    assert_eq!(ttl(3600), Duration::from_secs(3600));
+    let ttl = |text| with_ttl(text).unwrap().auth.unwrap().max_gateway_token_ttl;
+    assert_eq!(ttl("30d"), Duration::from_secs(2_592_000));
+    assert_eq!(ttl("1h"), Duration::from_secs(3600));
     assert_eq!(
-        with_ttl(30 * 24 * 3600 + 1).unwrap_err(),
+        with_ttl("2592001s").unwrap_err(),
         ConfigError::TooLong {
-            field: "auth.max_gateway_token_ttl_secs",
-            max: 2_592_000
+            field: "auth.max_gateway_token_ttl",
+            max: MAX_GATEWAY_TOKEN_TTL
         }
     );
     assert_eq!(
-        with_ttl(0).unwrap_err(),
-        ConfigError::Zero("auth.max_gateway_token_ttl_secs")
+        with_ttl("31d").unwrap_err().to_string(),
+        "auth.max_gateway_token_ttl must be at most 30d"
+    );
+    assert_eq!(
+        with_ttl("0s").unwrap_err(),
+        ConfigError::Zero("auth.max_gateway_token_ttl")
     );
 }
 
@@ -162,8 +183,8 @@ fn auth_models_are_validated_patterns() {
     let with_models = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             provider_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{models}\n\
-             [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\""
+             provider_key = {{ env = \"K\" }}\n[auth]\naudience = \"wye-prod\"\n{models}\n\
+             signing_keys = [\"{PUBLIC_KEY}\"]"
         ))
     };
     assert!(with_models("").unwrap().auth.unwrap().models.is_none());
@@ -197,7 +218,7 @@ fn auth_models_are_validated_patterns() {
 #[test]
 fn rejects_unknown_fields() {
     let err = parse(
-        "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\napi_key = \"sk-secret\"",
+        "base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\napi_key = \"sk-secret\"",
     )
     .unwrap_err();
     assert!(matches!(err, ConfigError::Parse(_)));
@@ -205,29 +226,39 @@ fn rejects_unknown_fields() {
 
 #[test]
 fn credential_must_be_exactly_one() {
-    assert_eq!(
-        parse("base_url = \"https://api.anthropic.com\"")
-            .unwrap_err()
-            .to_string(),
-        "routes.claude.upstreams \"anthropic\": set provider_key_env, provider_key_file, or \
-         forward_caller_credential = true"
-    );
-    assert_eq!(
-        parse(
-            "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\nforward_caller_credential = true"
-        )
+    let error = |lines: &str| {
+        parse(&format!(
+            "base_url = \"https://api.anthropic.com\"\n{lines}"
+        ))
         .unwrap_err()
-        .to_string(),
-        "routes.claude.upstreams \"anthropic\": set only one of provider_key_env, provider_key_file, and \
-         forward_caller_credential"
+        .to_string()
+    };
+    assert_eq!(
+        error(""),
+        "routes.claude.upstreams \"anthropic\": set provider_key = { env = \"NAME\" } or \
+         { file = \"path\" }, or forward_caller_credential = true"
     );
     assert_eq!(
-        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"1BAD\"").unwrap_err(),
+        error("provider_key = { env = \"K\" }\nforward_caller_credential = true"),
+        "routes.claude.upstreams \"anthropic\": set provider_key or \
+         forward_caller_credential, not both"
+    );
+    assert_eq!(
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"1BAD\" }")
+            .unwrap_err(),
         in_upstream(ConfigError::InvalidEnvName {
-            field: "provider_key_env",
+            field: "provider_key",
             name: "1BAD".into()
         })
     );
+    // The old shapes are gone: one shape for every secret.
+    for old in [
+        "provider_key_env = \"K\"",
+        "provider_key_file = \"k\"",
+        "provider_key = \"K\"",
+    ] {
+        assert!(error(old).contains("invalid configuration"), "{old}");
+    }
 }
 
 #[test]
@@ -271,83 +302,93 @@ fn lifecycle_defaults_and_zero_limits_rejected() {
     let config = parse(FORWARDING).unwrap();
     assert_eq!(config.server.max_concurrent_requests, 10_000);
     assert_eq!(config.server.drain_delay, Duration::ZERO);
-    assert_eq!(
-        config.server.max_total_held_bytes,
-        DEFAULT_MAX_TOTAL_HELD_BYTES
-    );
-    assert_eq!(
-        config.server.max_total_kept_bytes,
-        DEFAULT_MAX_TOTAL_KEPT_BYTES
-    );
-    assert_eq!(config.server.client_write_timeout, Duration::from_secs(60));
+    assert_eq!(config.server.shutdown_grace, Duration::from_secs(30));
     assert_eq!(
         server("max_concurrent_requests = 0").unwrap_err(),
         ConfigError::Zero("server.max_concurrent_requests")
     );
+    let timers = server("drain_delay = \"10s\"\nshutdown_grace = \"2m\"").unwrap();
+    assert_eq!(timers.server.drain_delay, Duration::from_secs(10));
+    assert_eq!(timers.server.shutdown_grace, Duration::from_secs(120));
     assert_eq!(
-        server("client_write_timeout_secs = 0").unwrap_err(),
-        ConfigError::Zero("server.client_write_timeout_secs")
+        server("drain_delay = \"10\"").unwrap_err().to_string(),
+        "server.drain_delay must be a duration such as 30s, 10m, 8h, 7d"
     );
-    assert_eq!(
-        server("max_total_kept_bytes = 0").unwrap_err(),
-        ConfigError::Zero("server.max_total_kept_bytes")
+    assert!(
+        server("drain_delay = 10")
+            .unwrap_err()
+            .to_string()
+            .starts_with("invalid configuration")
     );
+}
+
+/// Internal bounds are fixed or follow from the configured ones, never
+/// configured themselves.
+#[test]
+fn internal_bounds_are_derived_not_configured() {
+    let config = parse(FORWARDING).unwrap();
+    assert_eq!(config.server.max_total_held_bytes(), 64 * 1024 * 1024);
+    assert_eq!(config.server.max_connections(), 20_000);
+    let small = server("max_request_body_bytes = 1024\nmax_concurrent_requests = 100").unwrap();
+    // One body may be held whole, and a request in flight holds a connection.
+    assert_eq!(small.server.max_total_held_bytes(), 2048);
+    assert_eq!(small.server.max_connections(), 200);
     assert_eq!(
-        server("max_total_kept_bytes = 1024")
+        server("max_concurrent_requests = 1000000")
             .unwrap()
             .server
-            .max_total_kept_bytes,
-        1024
+            .max_connections(),
+        MAX_CONNECTIONS
     );
+    for gone in [
+        "max_total_held_bytes = 1048576",
+        "max_total_kept_bytes = 1024",
+        "max_connections = 100",
+        "client_write_timeout = \"1m\"",
+        "client_write_timeout_secs = 60",
+        "drain_delay_secs = 0",
+    ] {
+        assert!(
+            server(gone)
+                .unwrap_err()
+                .to_string()
+                .contains("unknown field"),
+            "{gone}"
+        );
+    }
 }
 
 #[test]
-fn connections_default_to_twice_the_requests_and_fit_them() {
-    assert_eq!(parse(FORWARDING).unwrap().server.max_connections, 20_000);
-    let connections = |lines: &str| server(lines).map(|c| c.server.max_connections);
-    assert_eq!(connections("max_concurrent_requests = 100"), Ok(200));
-    assert_eq!(
-        connections("max_concurrent_requests = 100\nmax_connections = 100"),
-        Ok(100)
-    );
-    assert_eq!(
-        connections("max_concurrent_requests = 1000000"),
-        Ok(MAX_CONNECTIONS)
-    );
-    assert_eq!(
-        connections("max_concurrent_requests = 100\nmax_connections = 99"),
-        Err(ConfigError::Invalid(
-            "server.max_connections must be at least server.max_concurrent_requests"
-        ))
-    );
-    assert_eq!(
-        connections("max_connections = 1048577"),
-        Err(ConfigError::Invalid(
-            "server.max_connections must be at most 1048576"
-        ))
-    );
-}
-
-#[test]
-fn cache_diagnostics_require_a_key_variable() {
+fn cache_diagnostics_require_a_key() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
-                base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
+                base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
     assert!(
         Config::from_toml_str(base)
             .unwrap()
             .cache_diagnostics
             .is_none()
     );
-    let config = Config::from_toml_str(&format!(
-        "{base}[cache_diagnostics]\nhash_key_env = \"WYE_CACHE_HASH_KEY\""
-    ))
-    .unwrap();
-    let diagnostics = config.cache_diagnostics.unwrap();
-    assert_eq!(diagnostics.hash_key_env, "WYE_CACHE_HASH_KEY");
+    let with = |lines: &str| Config::from_toml_str(&format!("{base}[cache_diagnostics]\n{lines}"));
+    let diagnostics = with("hash_key = { env = \"WYE_CACHE_HASH_KEY\" }")
+        .unwrap()
+        .cache_diagnostics
+        .unwrap();
+    assert_eq!(
+        diagnostics.hash_key,
+        Secret::Env("WYE_CACHE_HASH_KEY".into())
+    );
     assert_eq!(diagnostics.sample_percent, 100);
+    assert_eq!(
+        with("hash_key = { file = \"cache-hash.key\" }")
+            .unwrap()
+            .cache_diagnostics
+            .unwrap()
+            .hash_key,
+        Secret::File("cache-hash.key".into())
+    );
     let with_percent = |p: &str| {
-        Config::from_toml_str(&format!(
-            "{base}[cache_diagnostics]\nhash_key_env = \"K\"\nsample_percent = {p}"
+        with(&format!(
+            "hash_key = {{ env = \"K\" }}\nsample_percent = {p}"
         ))
     };
     assert_eq!(
@@ -364,57 +405,81 @@ fn cache_diagnostics_require_a_key_variable() {
             ConfigError::Percent("cache_diagnostics.sample_percent")
         );
     }
+    assert!(matches!(with(""), Err(ConfigError::Parse(_))));
+    assert_eq!(
+        with("hash_key = { env = \"a-b\" }").unwrap_err(),
+        ConfigError::InvalidEnvName {
+            field: "cache_diagnostics.hash_key",
+            name: "a-b".into()
+        }
+    );
+    for none_or_both in ["hash_key = {}", "hash_key = { env = \"K\", file = \"k\" }"] {
+        assert_eq!(
+            with(none_or_both).unwrap_err().to_string(),
+            "cache_diagnostics.hash_key must name one source: { env = \"NAME\" } or \
+             { file = \"path\" }",
+            "{none_or_both}"
+        );
+    }
     assert!(matches!(
-        Config::from_toml_str(&format!("{base}[cache_diagnostics]\n")),
+        with("hash_key = { env = \"K\", vault = \"x\" }"),
         Err(ConfigError::Parse(_))
     ));
     assert_eq!(
-        Config::from_toml_str(&format!(
-            "{base}[cache_diagnostics]\nhash_key_env = \"a-b\""
-        ))
-        .unwrap_err(),
-        ConfigError::InvalidEnvName {
-            field: "cache_diagnostics.hash_key_env",
-            name: "a-b".into()
-        }
+        with("hash_key = { file = \"\" }").unwrap_err(),
+        ConfigError::Empty("cache_diagnostics.hash_key")
     );
 }
 
 #[test]
 fn rejects_zero_timeouts_and_timers_past_a_day() {
+    let upstream = |lines: &str| parse(&format!("{FORWARDING}{lines}"));
+    let config = upstream(
+        "connect_timeout = \"3s\"\nresponse_header_timeout = \"10m\"\nstream_idle_timeout = \"1h\"",
+    )
+    .unwrap();
+    let timers = &claude(&config).upstreams()[0];
+    assert_eq!(timers.connect_timeout, Duration::from_secs(3));
+    assert_eq!(timers.response_header_timeout, Duration::from_secs(600));
+    assert_eq!(timers.stream_idle_timeout, Duration::from_secs(3600));
     assert_eq!(
-        parse(&format!("{FORWARDING}stream_idle_timeout_secs = 0")).unwrap_err(),
-        in_upstream(ConfigError::Zero("stream_idle_timeout_secs"))
+        upstream("stream_idle_timeout = \"0s\"").unwrap_err(),
+        in_upstream(ConfigError::Zero("stream_idle_timeout"))
     );
-    // The largest TOML integer would overflow `Instant + timeout`.
-    let huge = "9223372036854775807";
     assert_eq!(
-        parse(&format!("{FORWARDING}stream_idle_timeout_secs = {huge}")).unwrap_err(),
+        upstream("stream_idle_timeout = \"86401s\"").unwrap_err(),
         in_upstream(ConfigError::TooLong {
-            field: "stream_idle_timeout_secs",
-            max: 86_400
+            field: "stream_idle_timeout",
+            max: Duration::from_secs(86_400)
         })
     );
+    // The largest number would overflow `Instant + timeout`.
     assert!(matches!(
-        server(&format!("client_write_timeout_secs = {huge}")),
+        server(&format!("shutdown_grace = \"{}s\"", u64::MAX)),
         Err(ConfigError::TooLong { .. })
     ));
-    assert!(server("shutdown_grace_secs = 86400").is_ok());
-}
-
-#[test]
-fn the_hold_budget_fits_one_whole_body() {
-    assert!(matches!(
-        server("max_total_held_bytes = 1048576"),
-        Err(ConfigError::Invalid(_))
-    ));
-    assert!(server("max_total_held_bytes = 1048576\nmax_request_body_bytes = 1048576").is_ok());
+    assert_eq!(
+        server("shutdown_grace = \"2d\"").unwrap_err().to_string(),
+        "server.shutdown_grace must be at most 1d"
+    );
+    assert!(server("shutdown_grace = \"1d\"").is_ok());
+    assert!(server("shutdown_grace = \"0s\"").is_ok());
+    assert_eq!(
+        upstream("connect_timeout = \"ten\"").unwrap_err(),
+        in_upstream(ConfigError::Duration("connect_timeout"))
+    );
+    assert!(
+        upstream("connect_timeout_secs = 10")
+            .unwrap_err()
+            .to_string()
+            .contains("unknown field")
+    );
 }
 
 #[test]
 fn telemetry_endpoint_gets_the_logs_path() {
     let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\n\
-                base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
+                base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
     let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
     let telemetry = with("otlp_endpoint = \"http://localhost:4318\"")
         .unwrap()
@@ -427,9 +492,9 @@ fn telemetry_endpoint_gets_the_logs_path() {
     );
     assert_eq!(telemetry.otlp_traces_uri, "http://localhost:4318/v1/traces");
     assert_eq!(telemetry.service_name, "wye");
-    assert_eq!(telemetry.otlp_headers_env, None);
+    assert_eq!(telemetry.otlp_headers, None);
     let telemetry = with(
-        "otlp_endpoint = \"https://otlp.example.com/otel/\"\notlp_headers_env = \"OTLP_HEADERS\"\nservice_name = \"gw\"",
+        "otlp_endpoint = \"https://otlp.example.com/otel/\"\notlp_headers = { env = \"OTLP_HEADERS\" }\nservice_name = \"gw\"",
     )
     .unwrap()
     .telemetry
@@ -438,12 +503,25 @@ fn telemetry_endpoint_gets_the_logs_path() {
         telemetry.otlp_logs_uri,
         "https://otlp.example.com/otel/v1/logs"
     );
-    assert_eq!(telemetry.otlp_headers_env.as_deref(), Some("OTLP_HEADERS"));
+    assert_eq!(
+        telemetry.otlp_headers,
+        Some(Secret::Env("OTLP_HEADERS".into()))
+    );
+    assert_eq!(
+        with(
+            "otlp_endpoint = \"http://localhost:4318\"\notlp_headers = { file = \"otlp.headers\" }"
+        )
+        .unwrap()
+        .telemetry
+        .unwrap()
+        .otlp_headers,
+        Some(Secret::File("otlp.headers".into()))
+    );
     for bad in [
         "otlp_endpoint = \"ftp://c\"",
         "otlp_endpoint = \"http://c/?x=1\"",
         "otlp_endpoint = \"/relative\"",
-        // Secrets come from otlp_headers_env, never from config.
+        // Secrets come from otlp_headers, never from the URL.
         "otlp_endpoint = \"https://user:secret@collector\"",
         // Records and OTLP headers would cross the network in the clear.
         "otlp_endpoint = \"http://collector:4318\"",
@@ -469,29 +547,33 @@ fn telemetry_endpoint_gets_the_logs_path() {
 }
 
 #[test]
-fn provider_key_file_is_a_third_exclusive_credential_mode() {
-    let config =
-        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"secrets/key\"")
-            .unwrap();
+fn a_provider_key_comes_from_the_environment_or_a_file() {
+    let config = parse(
+        "base_url = \"https://api.anthropic.com\"\nprovider_key = { file = \"secrets/key\" }",
+    )
+    .unwrap();
     assert_eq!(
         claude(&config).upstreams()[0].provider_key,
-        ProviderKey::File(PathBuf::from("secrets/key"))
+        ProviderKey::Secret(Secret::File(PathBuf::from("secrets/key")))
     );
-    for both in [
-        "provider_key_file = \"k\"\nprovider_key_env = \"K\"",
-        "provider_key_file = \"k\"\nforward_caller_credential = true",
-    ] {
-        let err = parse(&format!("base_url = \"https://api.anthropic.com\"\n{both}"))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.starts_with("routes.claude.upstreams \"anthropic\": set only one of"),
-            "{err}"
-        );
-    }
     assert_eq!(
-        parse("base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"\"").unwrap_err(),
-        in_upstream(ConfigError::Empty("provider_key_file"))
+        claude(&config).upstreams()[0].provider_key.to_string(),
+        "secrets/key"
+    );
+    let error = |key: &str| {
+        parse(&format!("base_url = \"https://api.anthropic.com\"\n{key}"))
+            .unwrap_err()
+            .to_string()
+    };
+    assert_eq!(
+        error("provider_key = { file = \"k\", env = \"K\" }"),
+        "routes.claude.upstreams \"anthropic\": provider_key must name one source: \
+         { env = \"NAME\" } or { file = \"path\" }"
+    );
+    assert_eq!(
+        parse("base_url = \"https://api.anthropic.com\"\nprovider_key = { file = \"\" }")
+            .unwrap_err(),
+        in_upstream(ConfigError::Empty("provider_key"))
     );
 }
 
@@ -519,7 +601,7 @@ fn discovery_lists_unique_model_names() {
     let with = |models: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
              [discovery]\nmodels = [{models}]"
         ))
     };
@@ -552,7 +634,7 @@ fn identity_provider_issuers_are_validated() {
     let parse_auth = |auth: &str| {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"0.0.0.0:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             provider_key_env = \"K\"\n[auth]\n{auth}"
+             provider_key = {{ env = \"K\" }}\n[auth]\n{auth}"
         ))
     };
     let idp = "[[auth.identity_providers]]\nissuer = \"https://token.actions.githubusercontent.com\"\n\
@@ -576,19 +658,19 @@ fn identity_provider_issuers_are_validated() {
         "claude-haiku-*"
     );
 
-    let own = format!(
-        "issuer = \"wye\"\naudience = \"wye-prod\"\n[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"\n"
-    );
+    let own = format!("audience = \"wye-prod\"\nsigning_keys = [\"{PUBLIC_KEY}\"]\n");
     let auth = parse_auth(&format!("{own}{idp}")).unwrap().auth.unwrap();
     assert!(auth.own.is_some() && auth.identity_providers.len() == 1);
 
     for bad in [
-        String::new(),                   // neither own keys nor identity providers
-        "issuer = \"wye\"\n".to_owned(), // own issuer without keys or audience
-        idp.replace("RS256", "HS256"),   // HMAC is never accepted
+        String::new(),                          // neither own keys nor identity providers
+        "audience = \"wye-prod\"\n".to_owned(), // own audience without keys
+        format!("signing_keys = [\"{PUBLIC_KEY}\"]\n"), // own keys without an audience
+        idp.replace("RS256", "HS256"),          // HMAC is never accepted
         idp.replace("RS256", "none"),
         idp.replace("github.jwks", ""),
         format!("{idp}{idp}"), // duplicate issuer
+        // Wye's own tokens name the issuer "wye".
         format!(
             "{own}{}",
             idp.replace("https://token.actions.githubusercontent.com", "wye")

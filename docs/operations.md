@@ -48,13 +48,13 @@ Read by `wye`:
 
 `--token-file` takes a path while `WYE_TOKEN` holds the token itself: a secret never goes in a flag's value, which other users of the machine can read in `ps`.
 
-Named by the config, read once at startup; the names are yours to choose, and these are the usual ones:
+Named by the config's [secrets](glossary.md#the-product) written `{ env = "NAME" }`, read once at startup; the names are yours to choose, and these are the usual ones:
 
 | Field | Usual variable | Holds |
 |---|---|---|
-| `provider_key_env` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A provider key |
-| `cache_diagnostics.hash_key_env` | `WYE_CACHE_HASH_KEY` | The key for prompt-section hashes |
-| `telemetry.otlp_headers_env` | `OTLP_HEADERS` | Headers for OTLP export |
+| `provider_key` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A provider key |
+| `cache_diagnostics.hash_key` | `WYE_CACHE_HASH_KEY` | The key for prompt-section hashes |
+| `telemetry.otlp_headers` | `OTLP_HEADERS` | Headers for OTLP export |
 
 Set for the agent by `wye claude` and `wye codex`:
 
@@ -91,17 +91,17 @@ jq -c 'select(.unix_ms < 1794096000000)' usage.jsonl | wye report -   # before N
 
 **`wye init`** writes the config `-c` names, else the one later commands would read: [choosing a setup](guide.md#choosing-a-setup). It leaves out what defaults give: `[server]` with its loopback `listen` (`--shared` writes `0.0.0.0:8080`), the providers' base URLs, and the upstreams' ids. What it wrote and the next steps go to stderr, and the steps pass `-c` only when later commands would not find the config by themselves. Next to the config it writes `policy-tests/`: a Messages request that forwards (with `--shared`, from a caller with a gateway token), a Responses request with `--openai`, and with `--shared` a request without a gateway token, refused with `401`. They match the config it wrote, so `wye policy-test` passes until a config change alters one of those decisions; an existing case is kept as it is. With `--shared`, the signing key goes to `~/.wye/signing.key`, and the next steps say to keep it off the hosts that serve: it issues gateway tokens, and `wye serve` never reads it.
 
-**`wye token keygen`** writes a new signing key to `--out <path>`, created mode 600 and never over an existing file, and prints on stdout the `[[auth.signing_keys]]` entry for its public half. Without `--out` it writes `~/.wye/signing.key`, the key `wye token issue` signs with, unless one is there.
+**`wye token keygen`** writes a new signing key to `--out <path>`, created mode 600 and never over an existing file, and prints on stdout the `signing_keys` line for its public half, to put under `[auth]` (when rotating, append the key to the list until the old key's tokens expire). Without `--out` it writes `~/.wye/signing.key`, the key `wye token issue` signs with, unless one is there.
 
-**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. The key id comes from the `[[auth.signing_keys]]` entry whose public half matches the key, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl_secs` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
+**`wye token issue <subject>`** signs a gateway token offline ([policy.md](policy.md#gateway-tokens)) and never runs inside the gateway. Its `kid` is the key's [thumbprint](glossary.md#access), and the key must be in the config's `signing_keys`, so a rotated key needs no flag. A `--ttl` above `max_gateway_token_ttl` is refused, as the gateway would refuse the token. A service that mints tokens does the same with a config of its own.
 
 **`wye doctor`** checks what `serve` will need and says what to change, one line per check. Secrets go through the same functions `serve` resolves them with, so a check fails exactly when startup would. Every check runs, so one pass lists every problem.
 
 - Each upstream's provider key is present, not blank, and valid in an HTTP header (never printed), and how it will be sent.
-- A `provider_key_file`, and the signing key `wye token issue` uses by default (`~/.wye/signing.key`) when this machine has one, is closed to group and others; otherwise the check fails with the `chmod 600` to run. `serve` warns of an open `provider_key_file` in the message log, and starts. A Kubernetes secret volume is mounted `0644` unless its `defaultMode` says otherwise.
+- Each secret file (`{ file = "..." }`), and the signing key `wye token issue` uses by default (`~/.wye/signing.key`) when this machine has one, is closed to group and others; otherwise the check fails with the `chmod 600` to run. `serve` warns of an open secret file in the message log, and starts. A Kubernetes secret volume is mounted `0644` unless its `defaultMode` says otherwise.
 - A Bedrock upstream's base URL ends in `/anthropic`, where its Messages endpoint is.
 - Each upstream answers at its base URL: one unauthenticated `HEAD`, trusting its `ca_file`, proves DNS, TCP, TLS, and HTTP, and nothing is billed.
-- The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP header variable and endpoint.
+- The identity providers' key sets, the cache-diagnostics hash key's length, and the OTLP headers and endpoint.
 
 Not checked yet: model availability per upstream.
 
@@ -120,7 +120,7 @@ A refusal prints the status and error the gateway would send. The body is read a
 
 **`wye policy-diff <old> <new>`** prints what a config change widens, narrows, or only changes, and exits 3 when anything widens, so CI can ask for a second review. Key sets are read relative to each config, so compare against a checkout of the base: `git worktree add ../base main && wye policy-diff ../base/wye.toml wye.toml`.
 
-- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_gateway_token_ttl_secs`, a newly trusted [issuer](glossary.md#access) (a signing key, Wye tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
+- Widening: authentication removed, a listener moved beyond loopback or onto every interface, a model newly allowed by `[auth] models` or an identity provider's grant, a raised or removed `max_output_tokens`, a longer `max_gateway_token_ttl`, a newly trusted [issuer](glossary.md#access) (a signing key, by its [thumbprint](glossary.md#access), Wye tokens, an identity provider, a key in its key set, or a changed audience, algorithm, or subject claim), a route for an API that had none, and an upstream that starts sending a provider key where callers brought their own.
 - Model patterns compare by coverage, so `claude-*` → `claude-opus-*` narrows; output-token ceilings and trusted issuers compare by value.
 - Listed for review only: upstreams added, removed, or moved within a route, and a changed provider-key source. Where requests go is not who may send them.
 - Not compared: aliases (permissions apply to the served model) and tokens (a token can only narrow what config allows).
@@ -168,8 +168,7 @@ It writes a LaunchAgent (`~/Library/LaunchAgents/dev.wye.gateway.plist`) on macO
 
 Before installing, the config is checked as the service will start it: it parses, every file it names is readable, and no secret comes from an environment variable, since a service does not inherit your shell's environment.
 
-- Provider keys go in files next to the config (`provider_key_file = "anthropic.key"`, readable only by you), which is how `wye init` writes them.
-- The cache-diagnostics hash key and OTLP headers come only from the environment for now, so a config that uses them runs `wye serve` under a service definition of your own. Start from what `--dry-run` prints for a config without them.
+- Secrets go in files next to the config, readable only by you: `provider_key = { file = "anthropic.key" }`, which is how `wye init` writes it, and the same `{ file = "..." }` for `hash_key` and `otlp_headers`.
 - If another gateway already answers on the config's port, such as `wye serve` in a terminal, the install stops.
 - Under systemd, it refuses paths containing spaces, quotes, `$`, or a backslash.
 
@@ -183,7 +182,7 @@ wye service uninstall   # shows what it stops and removes, and asks; your files 
 
 Replacing a running service waits for its gateway to finish its requests, up to the stop timeout: the config's drain delay and shutdown grace plus 5 s (35 s by default). New connections are refused until then. Open streams end after that grace; Claude Code retries them.
 
-The definition sets the service's open-file limit to 65536, soft and hard (launchd's `SoftResourceLimits` and `HardResourceLimits`, systemd's `LimitNOFILE`); launchd would start it with 256 and systemd with 1024. [`server.max_connections`](policy.md#local-resource-bounds) needs about twice its value, a client and an upstream connection each: 40,000 at the default 20,000. A definition of your own sets it the same way.
+The definition sets the service's open-file limit to 65536, soft and hard (launchd's `SoftResourceLimits` and `HardResourceLimits`, systemd's `LimitNOFILE`); launchd would start it with 256 and systemd with 1024. Open client connections are at most twice [`server.max_concurrent_requests`](policy.md#local-resource-bounds) (20,000 by default), and need about twice as many open files, a client and an upstream connection each: 40,000 by default. A definition of your own sets it the same way.
 
 `wye serve` run by hand or in a container keeps the limit it inherits: the shell's (`ulimit -n`, often 256 on macOS and 1024 on Linux; raise it with `ulimit -n 65536`) or the container runtime's (Docker's default is far higher; Kubernetes inherits the node runtime's).
 
@@ -235,7 +234,7 @@ steps:
       CLAUDE_CODE_API_KEY_HELPER_TTL_MS: "240000"   # refresh within the token's lifetime
 ```
 
-GitHub does not document the token lifetime (its example token is valid for five minutes), so keep the helper's cache lifetime below it; Wye refuses an expired token with `401`, and `max_gateway_token_ttl_secs` bounds what it accepts.
+GitHub does not document the token lifetime (its example token is valid for five minutes), so keep the helper's cache lifetime below it; Wye refuses an expired token with `401`, and `max_gateway_token_ttl` bounds what it accepts.
 
 Developers use the same setting with a helper that prints a token from an issuer Wye trusts: the team's IdP (an `[[auth.identity_providers]]` entry), or an internal service that authenticates the developer by SSO and mints a short-lived gateway token with `wye token issue` (the signing key stays in that service). Offboarding then happens at the IdP: the next renewal fails, and the last token expires on its own ([revocation](policy.md#revocation)).
 
@@ -243,7 +242,7 @@ Developers use the same setting with a helper that prints a token from an issuer
 
 Every deployment of several replicas has the same shape, since Wye keeps no state and has no peer discovery: a load balancer in front of identical processes reading the same config, with its health check on [`/readyz`](#health-and-shutdown). An Auto Scaling group, ECS, Docker Swarm, Nomad, or VMs behind HAProxy all fit; none has run Wye yet.
 
-For container platforms, `provider_key_file` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-upstreams).
+For container platforms, `provider_key = { file = "/run/secrets/..." }` reads the provider key from a mounted secret file at startup, and [`wye probe`](#commands) is the health check for images without `curl`. Several upstreams behind one route: [guide](guide.md#several-upstreams).
 
 ### Sizing (estimate)
 
@@ -257,8 +256,8 @@ Wye does not lower a stream's tokens per second. It adds a roughly constant dela
 
 On SIGTERM, shutdown has two phases:
 
-1. Draining (`server.drain_delay_secs`, default 0): `/readyz` returns 503 while `/healthz` stays 200, and new connections and requests are still served, so a load balancer removes the replica before connections are refused. Set it to cover the load balancer's probe interval and endpoint propagation (in Kubernetes, typically 5-15 s) instead of a `preStop` sleep.
-2. Grace (`server.shutdown_grace_secs`, default 30): the listener closes, active requests may finish, and whatever remains is cancelled; cancelling a stream closes its upstream request.
+1. Draining (`server.drain_delay`, default `"0s"`): `/readyz` returns 503 while `/healthz` stays 200, and new connections and requests are still served, so a load balancer removes the replica before connections are refused. Set it to cover the load balancer's probe interval and endpoint propagation (in Kubernetes, typically 5-15 s) instead of a `preStop` sleep.
+2. Grace (`server.shutdown_grace`, default `"30s"`): the listener closes, active requests may finish, and whatever remains is cancelled; cancelling a stream closes its upstream request.
 
 Give the platform a stop timeout (Kubernetes: `terminationGracePeriodSeconds`) above the sum of both.
 
@@ -299,7 +298,7 @@ An example, from a Claude Code session that failed over:
 
 Bounds: records pass a 4,096-record queue to one writer task; OTLP batches go at 512 records or after 1 s through a queue of 8 batches, with a 10 s timeout per export. Anything dropped is counted and written to the usage log at shutdown (`usage_log_dropped` and `otlp_dropped` events, each with its `records` count). A blocked usage log keeps OTLP running: up to 4,096 records, as many as the queue holds, are kept for the log's next write, and the rest are counted as dropped.
 
-`telemetry.otlp_headers_env` names an environment variable of extra export headers (`key=value,key2=value2`), treated as secrets; the export client trusts the upstreams' roots, every `ca_file` included.
+`telemetry.otlp_headers` names the [secret](glossary.md#the-product), an environment variable or a file, holding extra export headers (`key=value,key2=value2`); the export client trusts the upstreams' roots, every `ca_file` included.
 
 Client-supplied values are labels, never authorization: closed vocabularies map to fixed strings, and ids outside 1-128 bytes of letters, digits, `-`, `_`, `.`, `:` are dropped. No `provider`: the `upstream` id names the upstream, and config maps it to its provider.
 
@@ -314,7 +313,7 @@ Client-supplied values are labels, never authorization: closed vocabularies map 
   - `refused`: Wye's [refusal](glossary.md#decisions), its overload included; no upstream response.
   - `upstream_error`: no usable upstream response ([upstream error](glossary.md#requests-and-where-they-go)).
   - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
-- `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout_secs`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
+- `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
 - `duration_ms`, `response_headers_ms`: milliseconds, in all and to the response headers.
 - `upstream`: the upstream's `id` (by default its provider's name, such as `anthropic`); absent for requests refused before upstream selection.
 - `failovers`, such as `[{"upstream": "a", "reason": "429"}]`: attempts rejected before the one that answered, in order, each with its [failover reason](glossary.md#requests-and-where-they-go) ([failover](architecture.md#failover)); absent when none.
@@ -390,13 +389,13 @@ Each reported tool call becomes a sibling span `execute_tool <name>` (`gen_ai.op
 - **Bad config or missing secret**: startup fails with a message that says what to fix; secret values are never printed.
 - **Invalid or expired gateway token**: `401`, before any upstream contact.
 - **No eligible route**: `404 no route serves ...`.
-- **Slow downstream**: bounded flow control ([upstream connections](architecture.md#upstream-connections)): streams sharing its upstream connection are unaffected, and a client that accepts no bytes for `client_write_timeout_secs` (60) is disconnected and its upstream request cancelled.
+- **Slow downstream**: bounded flow control ([upstream connections](architecture.md#upstream-connections)): streams sharing its upstream connection are unaffected, and a client that accepts no bytes for 60 s is disconnected and its upstream request cancelled.
 - **Client body breaks** (bad framing, cut off mid-upload): `400`, recorded as `refused`; the upstream request is aborted and not failed over.
 - **Client stops sending while its body is held**: `408` after 60 s without bytes, or 5 minutes without reaching its `model`; its held bytes and permit are released.
 - **Request body breaks the policy or the size limit mid-upload**: the upstream request is aborted before the provider sees the body whole; the client gets the refusal's own `400`, `403`, or `413`, from HTTP/1.1 and HTTP/2 upstreams alike.
-- **Upstream error or rejection before output**: `502` or `504`, recorded as `upstream_error` with its kind; with `failover` on the route, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
+- **Upstream error or rejection before output**: `502` or `504`, recorded as `upstream_error` with its kind; on a route of two or more upstreams, the session's next upstream when the rejection proves the request was not processed ([failover](architecture.md#failover)).
 - **Partial stream failure**: the stream ends; output is never replayed.
-  - A successful Messages event stream that stalls past `stream_idle_timeout_secs` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error.
+  - A successful Messages event stream that stalls past `stream_idle_timeout` or breaks at an event boundary ends with an Anthropic `error` event (`overloaded_error`) and a clean close, so clients see a retryable API error.
   - A Responses stream in the same case just ends, which Codex and the OpenAI SDKs retry.
   - Mid-event failures still drop the stream, since appending would corrupt the event.
 - **Client disconnect**: cancel upstream where possible, free resources, record uncertain cost.

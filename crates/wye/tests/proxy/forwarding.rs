@@ -263,7 +263,7 @@ async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected
 }
 
 #[tokio::test]
-async fn provider_key_file_is_read_relative_to_the_config_and_trimmed() {
+async fn a_provider_key_from_a_file_is_read_relative_to_the_config_and_trimmed() {
     let dir = TempDir::new("key");
     std::fs::create_dir_all(dir.join("secrets")).unwrap();
     std::fs::write(dir.join("secrets/provider-key"), "sk-from-file\n").unwrap();
@@ -271,14 +271,14 @@ async fn provider_key_file_is_read_relative_to_the_config_and_trimmed() {
     let (upstream, hits) = spawn_counted(handler).await;
     let config = Config::from_toml_str(&format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n[[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\n\
-         provider_key_file = \"secrets/provider-key\""
+         provider_key = {{ file = \"secrets/provider-key\" }}"
     ))
     .unwrap();
     let resources = Resources::resolve(&config, &dir).unwrap();
     let h = Harness::launch(
         &format!("http://{upstream}"),
         "",
-        "provider_key_file = \"unused\"",
+        "provider_key = { file = \"unused\" }",
         resources,
         hits,
     )

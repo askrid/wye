@@ -10,7 +10,8 @@ use std::path::Path;
 
 use gateway_core::{
     api::RouteId,
-    config::{Auth, Config, IdentityProvider, ProviderKey},
+    config::{Auth, Config, IdentityProvider, OwnIssuer, ProviderKey},
+    duration::show,
     policy::ModelPattern,
     route::Route,
 };
@@ -149,16 +150,12 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             .push(format!("[auth] max_output_tokens: no ceiling -> {b}")),
         _ => {}
     }
-    let (a, b) = (
-        old.max_gateway_token_ttl.as_secs(),
-        new.max_gateway_token_ttl.as_secs(),
-    );
+    let (a, b) = (old.max_gateway_token_ttl, new.max_gateway_token_ttl);
+    let ttl = || format!("[auth] max_gateway_token_ttl: {} -> {}", show(a), show(b));
     if b > a {
-        diff.widens
-            .push(format!("[auth] max_gateway_token_ttl_secs: {a} -> {b}"));
+        diff.widens.push(ttl());
     } else if b < a {
-        diff.narrows
-            .push(format!("[auth] max_gateway_token_ttl_secs: {a} -> {b}"));
+        diff.narrows.push(ttl());
     }
     match (&old.own, &new.own) {
         (None, Some(_)) => diff.widens.push("[auth] Wye tokens accepted".into()),
@@ -166,33 +163,30 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             .narrows
             .push("[auth] Wye tokens no longer accepted".into()),
         (Some(old), Some(new)) => {
-            if (&old.issuer, &old.audience) != (&new.issuer, &new.audience) {
+            if old.audience != new.audience {
                 diff.widens.push(format!(
-                    "[auth] issuer and audience: {} {} -> {} {}",
-                    old.issuer, old.audience, new.issuer, new.audience
+                    "[auth] audience: {} -> {}",
+                    old.audience, new.audience
                 ));
             }
+            // Keys compare by thumbprint, which names a key in tokens and
+            // in `wye explain`.
+            let trusts = |issuer: &OwnIssuer, thumbprint: &str| {
+                issuer.keys.iter().any(|k| k.thumbprint == thumbprint)
+            };
             for key in &new.keys {
-                if !old
-                    .keys
-                    .iter()
-                    .any(|k| k.ed25519_public_key == key.ed25519_public_key)
-                {
+                if !trusts(old, &key.thumbprint) {
                     diff.widens.push(format!(
-                        "[[auth.signing_keys]] {}: a new signing key is trusted",
-                        key.id
+                        "[auth] signing_keys {}: a new signing key is trusted",
+                        key.thumbprint
                     ));
                 }
             }
             for key in &old.keys {
-                if !new
-                    .keys
-                    .iter()
-                    .any(|k| k.ed25519_public_key == key.ed25519_public_key)
-                {
+                if !trusts(new, &key.thumbprint) {
                     diff.narrows.push(format!(
-                        "[[auth.signing_keys]] {}: no longer trusted",
-                        key.id
+                        "[auth] signing_keys {}: no longer trusted",
+                        key.thumbprint
                     ));
                 }
             }

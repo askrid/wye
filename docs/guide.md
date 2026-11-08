@@ -127,25 +127,22 @@ Streamed chat completions report usage only with `stream_options={"include_usage
 When one provider key's rate limits are not enough, or spend is split across accounts, list each provider key as its own `[[routes.claude.upstreams]]` entry. An upstream is named by its provider (`anthropic`, `bedrock`) unless it has an `id`, which two of one provider each need:
 
 ```toml
-[routes.claude]
-failover = ["429", "529", "connect"]
-
 [[routes.claude.upstreams]]
 id = "key-a"
 weight = 2                     # twice the sessions of key-b
-provider_key_env = "ANTHROPIC_KEY_A"
+provider_key = { env = "ANTHROPIC_KEY_A" }
 
 [[routes.claude.upstreams]]
 id = "key-b"
-provider_key_env = "ANTHROPIC_KEY_B"
+provider_key = { env = "ANTHROPIC_KEY_B" }
 ```
 
 - Each session stays on one upstream, chosen from its session id (SDK callers without one: from the gateway token's subject), so its prompt cache keeps hitting ([cache affinity](architecture.md#cache-affinity)). Without either, as for a local app with no gateway token, every request goes to the same upstream.
 - Weights share sessions, not tokens. Adding an upstream moves only the sessions it now wins; removing one moves only its own, and their next turn writes the cache again at the new upstream.
-- With `failover`, a [rejected](glossary.md#requests-and-where-they-go) request goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). Without it, a `429` goes back to the client, whose retry reaches the same upstream.
+- A [rejected](glossary.md#requests-and-where-they-go) request goes to the session's next upstream in the same turn, never after output has started ([failover](architecture.md#failover)). With one upstream, a `429` goes back to the client, whose retry reaches the same upstream.
 - `select = "ordered"` makes the first upstream primary and the others standby.
 - Claude Platform on AWS and Bedrock mix in with `provider` ([examples/wye.toml](../examples/wye.toml)), and `[routes.openai]` takes several OpenAI upstreams the same way.
-- A route of several upstreams holds their provider keys, so it does not combine with passthrough, which needs a route with one upstream. Under `wye service`, give each provider key with `provider_key_file` instead of `provider_key_env` ([why](operations.md#running-as-a-service)).
+- A route of several upstreams holds their provider keys, so it does not combine with passthrough, which needs a route with one upstream. Under `wye service`, read each provider key from a file, `provider_key = { file = "anthropic-a.key" }` ([why](operations.md#running-as-a-service)).
 - `wye explain --session <id>` shows which upstream a session uses; records, OTLP, and `wye report` split usage and cost by `upstream`.
 
 ## Seeing costs
@@ -182,10 +179,10 @@ Add `[telemetry]` with an OTLP/HTTP endpoint, a collector or a backend that take
 ```toml
 [telemetry]
 otlp_endpoint = "http://localhost:4318"
-otlp_headers_env = "OTLP_HEADERS"     # "key=value,...": a hosted backend's API key
+otlp_headers = { file = "otlp.headers" }   # "key=value,...": a hosted backend's API key
 ```
 
-Each request becomes a log record and a span, each Claude Code session one trace, and metrics count them ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to the usage log. Under `wye service`, OTLP headers need a service definition of your own ([running as a service](operations.md#running-as-a-service)).
+Each request becomes a log record and a span, each Claude Code session one trace, and metrics count them ([what is exported](operations.md#usage-records-and-telemetry)). Records still go to the usage log. Under `wye service`, OTLP headers come from a file, as here, not the environment ([running as a service](operations.md#running-as-a-service)).
 
 ## Changing or upgrading
 
@@ -206,7 +203,7 @@ Startup failures and the gateway's messages go to stderr, the message log (`~/.w
 - `404 no route serves ...`: no route for that API. Add the section it names, such as `[routes.openai]`.
 - `408 request body stalled`: while Wye read `model`, the client sent nothing for 60 s, or had not reached it after 5 minutes. Check the client's network.
 - `415 the request body must...`: a compressed or non-UTF-8 body during [the hold](glossary.md#requests-and-where-they-go). Send plain UTF-8 JSON.
-- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests` or `max_total_held_bytes`. Otherwise it comes from the provider. Clients retry on their own; if it persists, raise the limit.
+- `529 overloaded_error` (`503` on the OpenAI APIs): from Wye, it says `gateway is...`: past `max_concurrent_requests`, or past the bytes it may hold while reading `model` (twice `max_request_body_bytes`). Otherwise it comes from the provider. Clients retry on their own; if it persists, raise the limit.
 - One `429` at each session start: Claude Code's probe on a claude.ai login; Anthropic answers it with or without Wye. Nothing to do.
 
 [Failure behavior](operations.md#failure-behavior) lists the rest.

@@ -95,26 +95,22 @@ Why native APIs: provider APIs keep changing. Within one year on Anthropic's API
 
 ## Configuration
 
-A route with two upstreams, failover, and a price table:
+A route with two upstreams, which fail over to each other, and a price table:
 
 ```toml
 [server]
 listen = "127.0.0.1:8080"
 
-[routes.claude]
-failover = ["429", "529", "connect"]
-
 [[routes.claude.upstreams]]
 id = "anthropic"
 weight = 2         # twice the sessions of the other
-base_url = "https://api.anthropic.com"
-provider_key_env = "ANTHROPIC_API_KEY"
+provider_key = { env = "ANTHROPIC_API_KEY" }
 
 [[routes.claude.upstreams]]
 id = "bedrock-us"
 provider = "bedrock"
 base_url = "https://bedrock-mantle.us-east-1.api.aws/anthropic"
-provider_key_env = "BEDROCK_API_KEY"
+provider_key = { env = "BEDROCK_API_KEY" }
 
 [pricing]
 version = "anthropic-2026-11-01"
@@ -135,7 +131,7 @@ Each session stays on one upstream. A rejected request moves to the other; two k
 $ wye explain -c wye.toml --session session-a request.json
 config: wye.toml
 endpoint: POST /v1/messages
-gateway token: not required (no [auth])
+gateway token: not required (no [auth]); a local client: a loopback Host, no Origin
 body: 88 bytes (limit 32 MiB)
 model: claude-opus-5-5; allowed by config: any; by token: any
 selection: upstream bedrock-us of 2 (cache_affine by session id)

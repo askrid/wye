@@ -193,8 +193,8 @@ mod tests {
         let dir = wye_testkit::TempDir::new("policy");
         let config = Config::from_toml_str(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             provider_key_env = \"K\"\n[auth]\nissuer = \"wye\"\naudience = \"wye\"\nmodels = [\"claude-*\"]\n\
-             [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"",
+             provider_key = { env = \"K\" }\n[auth]\naudience = \"wye\"\nmodels = [\"claude-*\"]\n\
+             signing_keys = [\"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"]",
         )
         .unwrap();
         let case = |name: &str, body: &str, expect: &str| {
@@ -250,8 +250,8 @@ mod tests {
         let dir = wye_testkit::TempDir::new("policy-route");
         let config = Config::from_toml_str(
             "[server]\nlisten = \"127.0.0.1:8080\"\n[routes.claude]\n\
-             [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"A\"\n\
-             [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"B\"\n",
+             [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"A\" }\n\
+             [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"B\" }\n",
         )
         .unwrap();
         let route = config.routes.claude.as_ref().unwrap();

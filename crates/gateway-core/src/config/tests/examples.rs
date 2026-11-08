@@ -26,7 +26,7 @@ fn every_section_enabled(reference: &str) -> String {
             });
             let list_item = body.trim_start().starts_with("{ id") || *body == "]";
             let alternative = body.starts_with("forward_caller_credential")
-                || body.starts_with("provider_key_file");
+                || body.starts_with("provider_key = { file");
             (header || field || list_item) && !alternative
         });
         out.push_str(option.unwrap_or(line));
@@ -51,7 +51,7 @@ fn the_examples_parse_as_they_stand() {
 #[test]
 fn the_reference_sets_only_defaults() {
     const REQUIRED: &str =
-        "[[routes.claude.upstreams]]\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n";
+        "[[routes.claude.upstreams]]\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n";
     let reference = Config::from_toml_str(REFERENCE).unwrap();
     let required = Config::from_toml_str(REQUIRED).unwrap();
     assert_eq!(

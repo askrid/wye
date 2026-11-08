@@ -25,8 +25,8 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
          [routes.claude]\n\
-         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\nprovider_key_env = \"UNUSED\"\n\
-         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\nprovider_key_env = \"UNUSED\"\n"
+         [[routes.claude.upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
+         [[routes.claude.upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
     );
     let route = Config::from_toml_str(&config)
         .unwrap()

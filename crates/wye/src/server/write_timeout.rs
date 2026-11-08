@@ -63,7 +63,7 @@ impl<T> WriteTimeout<T> {
         ready!(sleep.as_mut().poll(cx));
         Poll::Ready(Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "client accepted no response bytes within client_write_timeout_secs",
+            "client accepted no response bytes within the client write timeout",
         )))
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! Raw TOML is parsed into private `Raw*` types and validated once into public
 //! types whose invariants later code relies on. Secrets and files are referenced
-//! by environment variable name or path and never read here.
+//! by environment variable name or path ([`Secret`]) and never read here.
 
 use std::{fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -12,10 +12,12 @@ use http::{
 };
 
 mod auth;
+mod secret;
 mod upstream;
 mod validate;
 
-pub use auth::{Algorithm, Auth, Grant, IdentityProvider, OwnIssuer, PublicKey};
+pub use auth::{Algorithm, Auth, Grant, IdentityProvider, OWN_ISSUER, OwnIssuer, PublicKey};
+pub use secret::Secret;
 pub use upstream::{Provider, ProviderKey, Upstream, UpstreamHttpVersion};
 
 use crate::{
@@ -26,8 +28,9 @@ use crate::{
     route::Route,
 };
 use validate::{
-    RawConfig, env_name, sample_percent, validate_aliases, validate_auth, validate_discovery,
-    validate_pricing, validate_routes, validate_server, validate_telemetry, validate_upgrade_check,
+    RawConfig, sample_percent, validate_aliases, validate_auth, validate_discovery,
+    validate_pricing, validate_routes, validate_secret, validate_server, validate_telemetry,
+    validate_upgrade_check,
 };
 
 /// The default `server.listen`, as a literal for `concat!`: also the
@@ -40,32 +43,33 @@ macro_rules! default_listen {
 }
 /// The default `server.listen`: this machine only, port 8080.
 pub const DEFAULT_LISTEN: &str = default_listen!();
-const DEFAULT_MAX_TOTAL_HELD_BYTES: u64 = 64 * 1024 * 1024;
 /// Anthropic's request size limit.
 const DEFAULT_MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
-const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
-const DEFAULT_CLIENT_WRITE_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 /// Generous for one process: an idle Claude Code stream costs Wye tens of KB.
 const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 10_000;
-const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Non-streaming generations send no headers until they complete.
-const DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS: u64 = 600;
+const DEFAULT_RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(600);
 /// Must exceed the provider's SSE `ping` interval during long thinking pauses.
-const DEFAULT_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Local use needs no drain; behind a load balancer, set it above the
 /// health-check interval.
-const DEFAULT_DRAIN_DELAY_SECS: u64 = 0;
-const DEFAULT_MAX_GATEWAY_TOKEN_TTL_SECS: u64 = 7 * 24 * 3600;
-/// The longest `max_gateway_token_ttl_secs`, 30 days: tokens cannot be
-/// revoked one by one, so a stolen one is good until it expires.
-pub const MAX_GATEWAY_TOKEN_TTL_SECS: u64 = 30 * 24 * 3600;
-/// The most `server.max_connections`, about a million: Linux's default
+const DEFAULT_DRAIN_DELAY: Duration = Duration::ZERO;
+const DEFAULT_MAX_GATEWAY_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+/// The longest `max_gateway_token_ttl`, 30 days: tokens cannot be revoked
+/// one by one, so a stolen one is good until it expires.
+pub const MAX_GATEWAY_TOKEN_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+/// The most open client connections, about a million: Linux's default
 /// ceiling on one process's open files (`fs.nr_open`).
 pub const MAX_CONNECTIONS: usize = 1 << 20;
-/// Default `failover_max_body_bytes`: a Claude Code turn is 1-8 MB.
-pub(crate) const DEFAULT_FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
-/// Default `server.max_total_kept_bytes`, across all requests of a process.
-pub(crate) const DEFAULT_MAX_TOTAL_KEPT_BYTES: u64 = 256 * 1024 * 1024;
+/// Request bytes kept so failover can resend them, across all requests of a
+/// process; beyond it, a request goes without failover, never refused.
+pub const MAX_TOTAL_KEPT_BYTES: u64 = 256 * 1024 * 1024;
+/// A client that accepts no response bytes this long is disconnected, which
+/// cancels its upstream request: a client that stops reading would
+/// otherwise hold its stream and buffers indefinitely.
+pub const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Default `sample_percent` of cache diagnostics and upgrade checks: every
 /// session.
 pub const DEFAULT_SAMPLE_PERCENT: u8 = 100;
@@ -186,9 +190,9 @@ pub struct Telemetry {
     pub otlp_metrics_uri: Uri,
     /// Traces endpoint: the base URL with `/v1/traces` appended.
     pub otlp_traces_uri: Uri,
-    /// Environment variable with extra request headers, in the OpenTelemetry
-    /// format `key1=value1,key2=value2` (for example a backend API key).
-    pub otlp_headers_env: Option<String>,
+    /// Extra request headers, in the OpenTelemetry format
+    /// `key1=value1,key2=value2` (for example a backend API key).
+    pub otlp_headers: Option<Secret>,
     /// `service.name` resource attribute.
     pub service_name: String,
 }
@@ -196,10 +200,10 @@ pub struct Telemetry {
 /// Cache-miss diagnostics (see [`crate::prompt`]).
 #[derive(Debug, Clone)]
 pub struct CacheDiagnostics {
-    /// Environment variable holding the secret that keys the exported hashes
-    /// (at least [`crate::prompt::HashKey::MIN_LEN`] bytes). Required: an
-    /// unkeyed hash could be matched against guessed prompts.
-    pub hash_key_env: String,
+    /// The secret that keys the exported hashes (at least
+    /// [`crate::prompt::HashKey::MIN_LEN`] bytes). Required: an unkeyed hash
+    /// could be matched against guessed prompts.
+    pub hash_key: Secret,
     /// Percentage of Claude Code sessions diagnosed, 1-100 (see
     /// [`crate::prompt::session_sampled`]).
     pub sample_percent: u8,
@@ -210,30 +214,36 @@ pub struct Server {
     /// A loopback address unless `[auth]` is set.
     pub listen: SocketAddr,
     pub max_request_body_bytes: u64,
-    /// Request bytes held across all requests while reading `model`; beyond
-    /// it, requests are answered with an overload error.
-    pub max_total_held_bytes: u64,
-    /// Request bytes kept for failover across all requests; beyond it,
-    /// requests are forwarded without failover, never refused.
-    pub max_total_kept_bytes: u64,
     /// Requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
     pub max_concurrent_requests: usize,
-    /// Open client connections, idle ones included; at the limit, Wye
-    /// accepts no more until one closes, and new ones wait in the kernel's
-    /// listen queue. At least `max_concurrent_requests`, since a request in
-    /// flight holds its connection.
-    pub max_connections: usize,
     /// After a shutdown signal, `/readyz` fails but connections are still
     /// accepted for this long, so load balancers stop routing here before
     /// new connections are refused. Zero for local use.
     pub drain_delay: Duration,
     /// After the drain delay, active requests get this long to finish.
     pub shutdown_grace: Duration,
-    /// A client connection whose response writes make no progress for this
-    /// long is closed, which cancels its upstream request: a client that
-    /// stops reading would otherwise hold its stream and buffers indefinitely.
-    pub client_write_timeout: Duration,
+}
+
+impl Server {
+    /// Request bytes held across all requests while reading `model`; beyond
+    /// it, requests are answered with an overload error. Twice
+    /// `max_request_body_bytes`: a body that names its model last is held
+    /// whole, and with a smaller budget it would be refused, and retried,
+    /// forever.
+    pub fn max_total_held_bytes(&self) -> u64 {
+        self.max_request_body_bytes.saturating_mul(2)
+    }
+
+    /// Open client connections, idle ones included; at the limit, Wye
+    /// accepts no more until one closes, and new ones wait in the kernel's
+    /// listen queue. Twice `max_concurrent_requests`, for the idle
+    /// connections clients keep, at most [`MAX_CONNECTIONS`].
+    pub fn max_connections(&self) -> usize {
+        self.max_concurrent_requests
+            .saturating_mul(2)
+            .min(MAX_CONNECTIONS)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,12 +261,16 @@ pub enum ConfigError {
         field: &'static str,
         name: String,
     },
+    /// A secret naming no source, or both.
+    Secret(&'static str),
     Empty(&'static str),
     Zero(&'static str),
-    /// A timer longer than `max` seconds.
+    /// Not a duration as [`crate::duration::parse`] reads one.
+    Duration(&'static str),
+    /// A duration longer than `max`.
     TooLong {
         field: &'static str,
-        max: u64,
+        max: Duration,
     },
     Percent(&'static str),
     Invalid(&'static str),
@@ -294,9 +308,20 @@ impl fmt::Display for ConfigError {
                     "{field}: {name:?} is not a valid environment variable name"
                 )
             }
+            Self::Secret(field) => write!(
+                f,
+                "{field} must name one source: {{ env = \"NAME\" }} or {{ file = \"path\" }}"
+            ),
             Self::Empty(field) => write!(f, "{field} must not be empty"),
             Self::Zero(field) => write!(f, "{field} must be greater than zero"),
-            Self::TooLong { field, max } => write!(f, "{field} must be at most {max} seconds"),
+            Self::Duration(field) => write!(
+                f,
+                concat!("{} must be a duration such as ", crate::duration_syntax!()),
+                field
+            ),
+            Self::TooLong { field, max } => {
+                write!(f, "{field} must be at most {}", crate::duration::show(*max))
+            }
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
             Self::Route { route, error } => write!(f, "routes.{route}.{error}"),
@@ -351,7 +376,7 @@ impl Config {
                         raw.sample_percent,
                         "cache_diagnostics.sample_percent",
                     )?,
-                    hash_key_env: env_name(raw.hash_key_env, "cache_diagnostics.hash_key_env")?,
+                    hash_key: validate_secret(raw.hash_key, "cache_diagnostics.hash_key")?,
                 })
             })
             .transpose()?;

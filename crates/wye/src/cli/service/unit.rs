@@ -10,8 +10,8 @@ const LABEL: &str = "dev.wye.gateway";
 pub(super) const UNIT: &str = "wye.service";
 /// The service's open-file limit, soft and hard. Each client connection
 /// takes a file descriptor, and so does its upstream connection while a
-/// request is in flight: about twice `server.max_connections` (20,000 by
-/// default). Without it, launchd starts the service with 256 and systemd
+/// request is in flight: about twice the open connections, which are at
+/// most twice `server.max_concurrent_requests` (20,000 by default). Without it, launchd starts the service with 256 and systemd
 /// with 1024. launchd sets it even above `kern.maxfilesperproc` (122,880 on
 /// a 2026 Mac), which still caps what the process opens; systemd's default
 /// hard limit is 524,288.

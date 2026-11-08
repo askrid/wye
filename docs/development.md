@@ -101,7 +101,7 @@ The variants, all on the plain path:
 
 - **`auth_`, `models_`, `diag_`, `otlp_`**: per-request scenarios; `models_` and `diag_` also uploads.
 - **`bedrock_`**: Wye with a Claude route to one Bedrock upstream: every request held until its `model` is read ([the hold](glossary.md#requests-and-where-they-go)) and its id rewritten with the `anthropic.` prefix; per-request scenarios and allocations.
-- **`failover_`**: Wye with a Claude route of two upstreams (both the mock) and `failover`: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload.
+- **`failover_`**: Wye with a Claude route of two upstreams (both the mock), which fails over: every request body kept for resending until the response; per-request scenarios, uploads, and allocations per request and per agent-shaped upload.
 - **`refused_`**: `failover_` with `select = "ordered"`, whose first upstream rejects every fourth request with `429` before reading it: per-request scenarios and uploads; failed requests gated (uploads allow 3: one rejected after its body was delivered whole is answered as it is).
 - **`openai_`**: Wye on `[routes.openai]`; the mock answers `/v1/responses` with OpenAI Responses JSON and streams (created, text deltas, completed with usage): per-request scenarios and CPU per event, so the Responses scanners are gated.
 
@@ -190,7 +190,7 @@ The rules the design principles do not already state.
 - Bodies are `bytes::Bytes` frames on streaming bodies: relayed without copying, a streaming response never collected.
 - What can be resolved at startup is: upstream URIs, header values, price tables. No `format!` or `String` building per request where a precomputed value works.
 - Request bodies are read by hand-written scanners over `memchr`, for the few fields policy needs; small JSON objects (gateway-token claims, a usage object) are parsed with borrowing serde types (`RawValue`, `IgnoredAny`). A forwarded body is never re-serialized: a rewrite splices the new value in place.
-- Every buffer and queue has a fixed bound: a `DEFAULT_*` in `config.rs` where operators tune it, otherwise a constant listed under [Fixed limits](architecture.md#fixed-limits).
+- Every buffer and queue has a fixed bound: a `DEFAULT_*` in `config.rs` where operators tune it, one derived from those (`Server::max_total_held_bytes`), otherwise a constant listed under [Fixed limits](architecture.md#fixed-limits).
 
 #### Concurrency
 
@@ -227,7 +227,7 @@ Every command follows these, so one learned is all learned. A new flag or comman
   - `--out <path>`: the one file a command creates that holds a secret (a signing key, a gateway token), created readable only by you and never over an existing file. A redirect cannot promise either.
   - `--token-file <path>`: the gateway token a client presents, read from a file. Default `$WYE_TOKEN`.
   - `--url <url>`: the gateway a client uses. Default `$WYE_URL`, else `http://127.0.0.1:8080`.
-  - Durations are written `30m`, `8h`, `7d` (`--ttl`, `--since`); a date is UTC `YYYY-MM-DD`.
+  - A duration is a whole number and one unit, `30s`, `10m`, `8h`, `7d`, on the command line (`--ttl`, `--since`) and in the config (`drain_delay = "10s"`), parsed by one function, `gateway_core::duration::parse`; a date is UTC `YYYY-MM-DD`.
 - **Wye owns a file only when a redirect cannot do the job:** to create it safely (`--out`), or to act on it over time (`serve --usage-log`, which rotates it). Otherwise, redirect stdout.
 - **Secrets never in a flag's value.** A command line is visible to other users in `ps`. A token or key comes from a file or the environment, never `--token <value>`.
 - **An environment variable is a fact about the environment** (where the config and your files are, which gateway, which token), and its flag always beats it. Everything else is a flag only. `wye --help` lists every variable a user sets; the rest (`WYE_CLAUDE_BIN`, `WYE_CODEX_BIN`) are documented in [operations.md](operations.md#commands).

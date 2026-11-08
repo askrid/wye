@@ -127,15 +127,12 @@ pub enum UpstreamHttpVersion {
     Http1,
 }
 
-/// The provider key Wye presents to an upstream: from an environment
-/// variable, a file, or, with caller-credential passthrough, the caller.
+/// The provider key Wye presents to an upstream: a configured secret, or,
+/// with caller-credential passthrough, the caller's own.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderKey {
-    /// Provider API key read from this environment variable at startup.
-    Env(String),
-    /// Provider API key read from this file at startup (a mounted secret);
-    /// relative to the config file.
-    File(PathBuf),
+    /// Read at startup from the environment or a file.
+    Secret(Secret),
     /// Forward the caller's own credential (loopback only).
     ForwardCaller,
 }
@@ -144,8 +141,7 @@ pub enum ProviderKey {
 impl fmt::Display for ProviderKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Env(name) => write!(f, "${name}"),
-            Self::File(path) => write!(f, "{}", path.display()),
+            Self::Secret(secret) => secret.fmt(f),
             Self::ForwardCaller => f.write_str("the caller's own"),
         }
     }

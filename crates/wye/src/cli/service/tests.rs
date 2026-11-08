@@ -55,7 +55,7 @@ fn a_definition_reads_back_as_written() {
     );
     assert!(unit.contains("StandardOutput=append:/home/a%%b/.wye/wye.log\n"));
     assert!(unit.contains("StandardError=append:/home/a%%b/.wye/wye.log\n"));
-    // Room for a client and an upstream connection per max_connections.
+    // Room for a client and an upstream connection per open connection.
     assert!(unit.contains("\nLimitNOFILE=65536\n"), "{unit}");
     for limits in ["SoftResourceLimits", "HardResourceLimits"] {
         assert!(
@@ -188,17 +188,51 @@ fn the_uninstall_plan_says_what_stops_goes_and_stays() {
 fn secrets_from_the_environment_are_named() {
     let config = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"ANTHROPIC_API_KEY\"\n\
-         [cache_diagnostics]\nhash_key_env = \"WYE_HASH_KEY\"\n",
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"ANTHROPIC_API_KEY\" }\n\
+         [cache_diagnostics]\nhash_key = { env = \"WYE_HASH_KEY\" }\n",
     )
     .unwrap();
     assert_eq!(env_secrets(&config), ["ANTHROPIC_API_KEY", "WYE_HASH_KEY"]);
     let file = Config::from_toml_str(
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_file = \"anthropic.key\"\n",
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { file = \"anthropic.key\" }\n",
     )
     .unwrap();
     assert!(env_secrets(&file).is_empty());
+}
+
+/// A service starts outside the shell: env-held secrets are refused, and
+/// every secret may come from a file instead.
+#[test]
+fn a_service_reads_its_secrets_from_files() {
+    let dir = wye_testkit::TempDir::new("service-secrets");
+    let upstream = "[[routes.claude.upstreams]]\nprovider_key = { file = \"anthropic.key\" }\n";
+    let files = format!(
+        "{upstream}[cache_diagnostics]\nhash_key = {{ file = \"hash.key\" }}\n\
+         [telemetry]\notlp_endpoint = \"http://127.0.0.1:4318\"\n\
+         otlp_headers = {{ file = \"otlp.headers\" }}\n"
+    );
+    std::fs::write(dir.join("anthropic.key"), "sk-test\n").unwrap();
+    std::fs::write(dir.join("hash.key"), format!("{}\n", "k".repeat(32))).unwrap();
+    std::fs::write(dir.join("otlp.headers"), "api-key=secret\n").unwrap();
+    let show = |path: &Path| path.display().to_string();
+    let config = dir.join("files.toml");
+    std::fs::write(&config, &files).unwrap();
+    let checked = check(&config, &show).unwrap();
+    assert!(env_secrets(&checked).is_empty());
+
+    let config = dir.join("env.toml");
+    std::fs::write(
+        &config,
+        format!("{upstream}[cache_diagnostics]\nhash_key = {{ env = \"WYE_HASH_KEY\" }}\n"),
+    )
+    .unwrap();
+    let refused = check(&config, &show).unwrap_err();
+    assert!(refused.contains("would not see $WYE_HASH_KEY"), "{refused}");
+    assert!(
+        refused.contains("provider_key = { file = \"anthropic.key\" }"),
+        "{refused}"
+    );
 }
 
 #[test]
@@ -255,8 +289,8 @@ fn loading_the_service_waits_out_the_old_gateway_shutting_down() {
 fn a_restart_brings_the_stop_timeout_up_to_the_config() {
     let installed = service("/Users/a");
     let config = Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\ndrain_delay_secs = 10\nshutdown_grace_secs = 60\n\
-         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n",
+        "[server]\nlisten = \"127.0.0.1:8080\"\ndrain_delay = \"10s\"\nshutdown_grace = \"1m\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n",
     )
     .unwrap();
     let refreshed = refreshed(&installed, &config);

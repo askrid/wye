@@ -14,6 +14,7 @@ pub mod agent;
 pub mod alias;
 pub mod api;
 pub mod config;
+pub mod duration;
 mod json;
 pub mod policy;
 pub mod pricing;

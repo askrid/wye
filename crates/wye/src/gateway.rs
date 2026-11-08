@@ -14,7 +14,10 @@ use gateway_core::{
     admission::{self, Refusal},
     alias::Aliases,
     api::{self, Api},
-    config::{Config, DEFAULT_SAMPLE_PERCENT, Provider, Routes, UpgradeCheck},
+    config::{
+        CLIENT_WRITE_TIMEOUT, Config, DEFAULT_SAMPLE_PERCENT, MAX_TOTAL_KEPT_BYTES, Provider,
+        Routes, UpgradeCheck,
+    },
     policy::ModelPattern,
     pricing::Pricing,
     prompt::HashKey,
@@ -145,10 +148,9 @@ impl Gateway {
                 .collect(),
             held_bytes: Gauge::default(),
             failover_kept: Gauge::default(),
-            max_total_held_bytes: usize::try_from(config.server.max_total_held_bytes)
+            max_total_held_bytes: usize::try_from(config.server.max_total_held_bytes())
                 .unwrap_or(usize::MAX),
-            max_total_kept_bytes: usize::try_from(config.server.max_total_kept_bytes)
-                .unwrap_or(usize::MAX),
+            max_total_kept_bytes: usize::try_from(MAX_TOTAL_KEPT_BYTES).unwrap_or(usize::MAX),
             otlp: config
                 .telemetry
                 .as_ref()
@@ -167,11 +169,21 @@ impl Gateway {
             in_flight: Gauge::default(),
             max_concurrent_requests: config.server.max_concurrent_requests,
             draining: AtomicBool::new(false),
-            max_connections: config.server.max_connections,
+            max_connections: config.server.max_connections(),
             drain_delay: config.server.drain_delay,
             shutdown_grace: config.server.shutdown_grace,
-            client_write_timeout: config.server.client_write_timeout,
+            client_write_timeout: CLIENT_WRITE_TIMEOUT,
         })
+    }
+
+    /// The gateway with another client write timeout than
+    /// [`CLIENT_WRITE_TIMEOUT`], so a test need not wait a minute for one.
+    #[doc(hidden)]
+    pub fn with_client_write_timeout(self, client_write_timeout: Duration) -> Self {
+        Self {
+            client_write_timeout,
+            ..self
+        }
     }
 
     /// The caller's identity when gateway tokens are configured, `None`

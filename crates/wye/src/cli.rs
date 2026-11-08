@@ -97,15 +97,6 @@ impl From<&str> for Error {
     }
 }
 
-/// How every option that takes a duration writes it: `--ttl` and `--since`,
-/// in their help and their errors.
-macro_rules! duration {
-    () => {
-        "30m, 8h, 7d"
-    };
-}
-pub(crate) use duration;
-
 /// `println!` through [`emit`].
 macro_rules! say {
     ($($arg:tt)*) => {

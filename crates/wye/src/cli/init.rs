@@ -76,18 +76,18 @@ impl InitOptions {
                 "# Each caller's own credential goes through, whether Claude Code's\n\
                  # login or an API key: this machine only, no [auth].\n\
                  forward_caller_credential = true",
-                "provider_key_file = \"openai.key\"",
+                "provider_key = { file = \"openai.key\" }",
             ),
             Setup::ProviderKey => (
                 "",
                 "# Read at startup from this file, next to this config:\n\
-                 provider_key_file = \"anthropic.key\"",
-                "provider_key_file = \"openai.key\"",
+                 provider_key = { file = \"anthropic.key\" }",
+                "provider_key = { file = \"openai.key\" }",
             ),
             Setup::Shared => (
                 "[server]\nlisten = \"0.0.0.0:8080\"\n\n",
-                "provider_key_env = \"ANTHROPIC_API_KEY\"",
-                "provider_key_env = \"OPENAI_API_KEY\"",
+                "provider_key = { env = \"ANTHROPIC_API_KEY\" }",
+                "provider_key = { env = \"OPENAI_API_KEY\" }",
             ),
         };
         let mut text = format!(
@@ -105,8 +105,7 @@ impl InitOptions {
             text.push_str(&format!(
                 "\n# Gateway tokens: `wye token issue <name>` signs one with the key whose\n\
                  # public half is below. Give each gateway its own audience.\n\
-                 [auth]\nissuer = \"wye\"\naudience = \"wye\"\n\n\
-                 [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{public_key}\"\n"
+                 [auth]\naudience = \"wye\"\nsigning_keys = [\"{public_key}\"]\n"
             ));
         }
         Config::from_toml_str(&text).map_err(|e| e.to_string())?;
@@ -457,6 +456,14 @@ mod tests {
                     "{text}"
                 );
                 assert_eq!(text.contains("listen"), setup == Setup::Shared, "{text}");
+                // Wye's own tokens: an audience and the key, nothing else.
+                assert_eq!(
+                    text.contains(&format!(
+                        "\n[auth]\naudience = \"wye\"\nsigning_keys = [\"{key}\"]\n"
+                    )),
+                    setup == Setup::Shared,
+                    "{text}"
+                );
             }
         }
 

@@ -76,7 +76,7 @@ async fn stalled_event_stream_ends_with_an_error_event() {
             streaming(rx)
         })
     });
-    let h = Harness::keyed(handler, "stream_idle_timeout_secs = 1").await;
+    let h = Harness::keyed(handler, "stream_idle_timeout = \"1s\"").await;
     let res = h.send(messages(), "{}").await;
     let body = tokio::time::timeout(WAIT, res.into_body().collect())
         .await
@@ -120,7 +120,7 @@ async fn idle_upstream_stream_is_terminated() {
             Response::new(Either::Right(ChannelBody(rx)))
         })
     });
-    let h = Harness::keyed(handler, "stream_idle_timeout_secs = 1").await;
+    let h = Harness::keyed(handler, "stream_idle_timeout = \"1s\"").await;
     let res = h.send(messages(), "{}").await;
     let mut body = res.into_body();
     next_frame(&mut body).await;
@@ -139,7 +139,7 @@ async fn slow_upstream_headers_time_out() {
             full(StatusCode::OK, "{}")
         })
     });
-    let h = Harness::keyed(handler, "response_header_timeout_secs = 1").await;
+    let h = Harness::keyed(handler, "response_header_timeout = \"1s\"").await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
     assert_eq!(res.headers()["content-type"], "application/json");
@@ -207,7 +207,17 @@ async fn client_that_stops_reading_is_disconnected() {
         });
         Response::new(Either::Right(ChannelBody(rx)))
     });
-    let h = Harness::with_server_config(handler, "client_write_timeout_secs = 1").await;
+    let (upstream, hits) = spawn_counted(handler).await;
+    let config = format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\n\
+         provider_key = {{ env = \"UNUSED\" }}\n"
+    );
+    // The timeout is fixed at a minute; a second here.
+    let h = Harness::launch_adjusted(&config, keyed_resources(), hits, |gateway| {
+        gateway.with_client_write_timeout(Duration::from_secs(1))
+    })
+    .await;
 
     // Receive headers, then read nothing: the socket fills, writes block,
     // and after the timeout Wye closes the connection and the upstream stream.

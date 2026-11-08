@@ -23,7 +23,6 @@ use serde::Deserialize;
 use super::{
     Error,
     args::Parsed,
-    duration,
     files::{self, USAGE_LOG_FILE},
     paint::Paint,
     token::duration_secs,
@@ -209,7 +208,7 @@ impl Window {
                         format!(
                             concat!(
                                 "--since {}: write it as a time ago (",
-                                duration!(),
+                                gateway_core::duration_syntax!(),
                                 ") or a UTC date (2026-11-01)"
                             ),
                             when

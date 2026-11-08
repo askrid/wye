@@ -8,6 +8,8 @@ use std::path::Path;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use gateway_core::{
     config::{Auth, Config, OwnIssuer},
+    duration::{self, show},
+    duration_syntax,
     policy::ModelPattern,
     token::{self, NewToken},
 };
@@ -19,7 +21,7 @@ use ring::{
 use super::{
     Error,
     args::Parsed,
-    duration, emit,
+    emit,
     files::{self, SIGNING_KEY_FILE},
 };
 
@@ -53,13 +55,13 @@ pub fn read_key(path: &Path) -> Result<Ed25519KeyPair, String> {
     Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| format!("{shown}: not an Ed25519 key"))
 }
 
-/// The key's public half as `[[auth.signing_keys]]` takes it.
+/// The key's public half as `[auth] signing_keys` lists it.
 pub fn public_key(key: &Ed25519KeyPair) -> String {
     token::encode_public_key(key.public_key().as_ref())
 }
 
 /// `wye token keygen`: a new key. Returns what to tell the user, and the
-/// result: the `[[auth.signing_keys]]` entry to add to the config.
+/// result: the `signing_keys` line to put under `[auth]`.
 pub fn run_keygen(
     parsed: &Parsed<'_>,
     env: &impl Fn(&str) -> Option<String>,
@@ -82,13 +84,11 @@ pub fn run_keygen(
     Ok((
         format!(
             "wrote {} (keep it secret, outside the gateway); add its public half to \
-             wye.toml, under [auth]:\n",
+             wye.toml, under [auth] (when rotating, after the keys already in \
+             signing_keys, until their tokens expire):\n",
             files::tilde(&out, env),
         ),
-        format!(
-            "[[auth.signing_keys]]\nid = \"<a new id>\"\ned25519_public_key = \"{}\"\n",
-            public_key(&key),
-        ),
+        format!("signing_keys = [\"{}\"]\n", public_key(&key)),
     ))
 }
 
@@ -98,7 +98,10 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
         .value("ttl")
         .map(|ttl| {
             duration_secs(ttl).ok_or_else(|| {
-                Error::Usage(format!(concat!("--ttl {}: write it as ", duration!()), ttl))
+                Error::Usage(format!(
+                    concat!("--ttl {}: write it as ", duration_syntax!()),
+                    ttl
+                ))
             })
         })
         .transpose()?;
@@ -123,7 +126,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> 
             if key.symlink_metadata().is_err() {
                 return Err(format!(
                     "no signing key at {}: pass --signing-key <path>, or make one with \
-                     `wye token keygen` and add its public half to [[auth.signing_keys]]",
+                     `wye token keygen` and add its public half to [auth] signing_keys",
                     files::tilde(&key, env)
                 )
                 .into());
@@ -178,9 +181,10 @@ pub struct Issue<'a> {
     pub max_output_tokens: Option<u64>,
 }
 
-/// A token for `issue.subject`, signed with `key`. The issuer, audience, key
-/// id, and longest lifetime are the config's, so the gateway that reads this
-/// config accepts it. Errors from here are about the config.
+/// A token for `issue.subject`, signed with `key`. The audience and longest
+/// lifetime are the config's, and the key must be among its signing keys,
+/// so the gateway that reads this config accepts it. Errors from here are
+/// about the config.
 pub fn issue(
     issue: &Issue<'_>,
     key: &Ed25519KeyPair,
@@ -189,31 +193,28 @@ pub fn issue(
 ) -> Result<String, String> {
     let (auth, own) = issuer(config)?;
     let public = key.public_key().as_ref();
-    let kid = own
+    if !own
         .keys
         .iter()
-        .find(|k| k.ed25519_public_key.as_slice() == public)
-        .map(|k| k.id.as_str())
-        .ok_or_else(|| {
-            format!(
-                "the signing key is not among its [[auth.signing_keys]]; add its public half: {}",
-                public_key(key)
-            )
-        })?;
-    let longest = auth.max_gateway_token_ttl.as_secs();
-    let ttl = issue.ttl_secs.unwrap_or(longest);
-    if ttl > longest {
+        .any(|k| k.ed25519_public_key.as_slice() == public)
+    {
         return Err(format!(
-            "--ttl {} is longer than it accepts ({}, max_gateway_token_ttl_secs)",
-            show_duration(ttl),
-            show_duration(longest)
+            "the signing key is not among its [auth] signing_keys; add its public half: {}",
+            public_key(key)
+        ));
+    }
+    let longest = auth.max_gateway_token_ttl;
+    let ttl = issue.ttl_secs.unwrap_or(longest.as_secs());
+    if ttl > longest.as_secs() {
+        return Err(format!(
+            "--ttl {} is longer than it accepts ({}, max_gateway_token_ttl)",
+            show(std::time::Duration::from_secs(ttl)),
+            show(longest)
         ));
     }
     Ok(token::issue(
         key,
-        kid,
         &NewToken {
-            iss: &own.issuer,
             sub: issue.subject,
             aud: &own.audience,
             iat: now,
@@ -238,31 +239,11 @@ fn issuer(config: &Config) -> Result<(&Auth, &OwnIssuer), &'static str> {
     Ok((auth, own))
 }
 
-/// A duration as people write it: `45s`, `30m`, `8h`, `7d`, or seconds.
+/// A duration that runs, as [`duration::parse`] reads it, in seconds.
 pub(super) fn duration_secs(text: &str) -> Option<u64> {
-    let (digits, unit) = match text.char_indices().last()? {
-        (i, c) if c.is_ascii_alphabetic() => (text.get(..i)?, c),
-        _ => (text, 's'),
-    };
-    let n: u64 = digits.parse().ok()?;
-    let scale = match unit {
-        's' => 1,
-        'm' => 60,
-        'h' => 3600,
-        'd' => 86_400,
-        _ => return None,
-    };
-    n.checked_mul(scale).filter(|&secs| secs > 0)
-}
-
-/// Seconds as `duration_secs` reads them back: `7d`, `8h`, `90s`.
-fn show_duration(secs: u64) -> String {
-    match secs {
-        s if s % 86_400 == 0 => format!("{}d", s / 86_400),
-        s if s % 3600 == 0 => format!("{}h", s / 3600),
-        s if s % 60 == 0 => format!("{}m", s / 60),
-        s => format!("{s}s"),
-    }
+    duration::parse(text)
+        .map(|d| d.as_secs())
+        .filter(|&secs| secs > 0)
 }
 
 #[cfg(test)]
@@ -274,17 +255,15 @@ mod tests {
     fn config(extra: &str, public: &str) -> Config {
         Config::from_toml_str(&format!(
             "[server]\nlisten = \"0.0.0.0:8080\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n\
-             [auth]\nissuer = \"wye\"\naudience = \"team\"\n{extra}\n\
-             [[auth.signing_keys]]\nid = \"old\"\ned25519_public_key = \"{}\"\n\
-             [[auth.signing_keys]]\nid = \"now\"\ned25519_public_key = \"{public}\"\n",
+             [[routes.claude.upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
+             [auth]\naudience = \"team\"\n{extra}\nsigning_keys = [\"{}\", \"{public}\"]\n",
             "A".repeat(43),
         ))
         .unwrap()
     }
 
     #[test]
-    fn issue_takes_claims_and_the_key_id_from_the_config() {
+    fn issue_takes_claims_from_the_config_and_names_the_key_by_its_thumbprint() {
         let dir = wye_testkit::TempDir::new("token");
         // keygen's default path sits in a home that may not exist yet.
         let path = dir.join("new-home/issuer.key");
@@ -297,14 +276,18 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o077, 0, "{mode:o}");
         }
-        let config = config("max_gateway_token_ttl_secs = 3600", &public_key(&key));
+        let config = config("max_gateway_token_ttl = \"1h\"", &public_key(&key));
         let alice = Issue {
             subject: "alice",
             ..Issue::default()
         };
         let token = issue(&alice, &key, &config, 1000).unwrap();
         let header = B64.decode(token.split('.').next().unwrap()).unwrap();
-        assert!(String::from_utf8_lossy(&header).contains("\"kid\":\"now\""));
+        let kid = token::thumbprint(key.public_key().as_ref().try_into().unwrap());
+        assert!(
+            String::from_utf8_lossy(&header).contains(&format!("\"kid\":\"{kid}\"")),
+            "{kid}"
+        );
         let claims = B64.decode(token.split('.').nth(1).unwrap()).unwrap();
         let claims = String::from_utf8_lossy(&claims);
         assert!(claims.contains("\"aud\":\"team\""), "{claims}");
@@ -319,7 +302,7 @@ mod tests {
         };
         assert_eq!(
             issue(&long, &key, &config, 0).unwrap_err(),
-            "--ttl 2h is longer than it accepts (1h, max_gateway_token_ttl_secs)"
+            "--ttl 2h is longer than it accepts (1h, max_gateway_token_ttl)"
         );
         assert!(models("claude-*,a*b").unwrap_err().contains("a*b"));
         assert_eq!(models("claude-*,m").unwrap(), ["claude-*", "m"]);
@@ -340,18 +323,11 @@ mod tests {
     }
 
     #[test]
-    fn durations_read_as_written() {
-        for (text, secs) in [
-            ("45s", 45),
-            ("30m", 1800),
-            ("8h", 28_800),
-            ("7d", 604_800),
-            ("90", 90),
-        ] {
+    fn durations_read_as_written_and_run() {
+        for (text, secs) in [("45s", 45), ("30m", 1800), ("8h", 28_800), ("7d", 604_800)] {
             assert_eq!(duration_secs(text), Some(secs), "{text}");
-            assert_eq!(duration_secs(&show_duration(secs)), Some(secs));
         }
-        for bad in ["", "d", "7w", "-1d", "0", "1.5h"] {
+        for bad in ["", "d", "7w", "-1d", "0s", "90", "1.5h"] {
             assert_eq!(duration_secs(bad), None, "{bad}");
         }
     }

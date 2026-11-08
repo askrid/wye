@@ -123,12 +123,10 @@ mod tests {
             models: None,
             max_output_tokens: None,
             own: Some(OwnIssuer {
-                issuer: "wye".into(),
                 audience: "wye-prod".into(),
-                keys: vec![PublicKey {
-                    id: "k1".into(),
-                    ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
-                }],
+                keys: vec![PublicKey::new(
+                    key.public_key().as_ref().try_into().unwrap(),
+                )],
             }),
             identity_providers: Vec::new(),
             max_gateway_token_ttl: Duration::from_secs(86_400),
@@ -139,9 +137,7 @@ mod tests {
     fn token(key: &Ed25519KeyPair, sub: &str, exp: u64) -> String {
         token::issue(
             key,
-            "k1",
             &NewToken {
-                iss: "wye",
                 sub,
                 aud: "wye-prod",
                 iat: NOW,
@@ -176,10 +172,11 @@ mod tests {
             &connection,
         )
         .unwrap();
+        // Another key's token names another key.
         let forged = token(&keypair(), "mallory", NOW + 600);
         assert_eq!(
             authenticate_at(&verifier(&key), &forged, NOW, &connection),
-            Err(TokenError::BadSignature)
+            Err(TokenError::UnknownKey)
         );
         // A token differing from the cached one in its last byte is not a hit.
         let mut near = token(&key, "alice", NOW + 600);

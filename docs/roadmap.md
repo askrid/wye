@@ -26,7 +26,7 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 
 ### M1: team-ready Claude Code
 
-Built: Wye tokens and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, `provider_key_file`, a local OCI image with a smoke test, and release archives from a `v*` tag.
+Built: Wye tokens and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, secrets from files (`{ file = "..." }`), a local OCI image with a smoke test, and release archives from a `v*` tag.
 
 Open:
 
@@ -119,7 +119,7 @@ Open (the auth questions are in [open design decisions](architecture.md#open-des
 - An opt-in smoke test per provider against the real service, for SDK compatibility; it does not replace the deterministic protocol tests.
 - SigV4 for Bedrock and Claude Platform on AWS.
 - Google Vertex AI: model in the URL, the `anthropic_version` splice (property-tested: every other byte unchanged), access tokens.
-- Re-reading a `provider_key_file` when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
+- Re-reading a provider key file (`provider_key = { file = "..." }`) when it changes, so short-lived provider keys (Claude Platform on AWS issues 12-hour ones) need no restart. The config itself still changes only by restart.
 - Excluding an upstream for a model or feature it does not serve.
 
 Exit: a team serves Claude Code from at least two providers, keeps prompt-cache hit rates within a few points of a single provider, rides out one provider's overload without failed turns, and sees cost per provider.
@@ -155,13 +155,13 @@ Exit: each extension preserves or explicitly revises statelessness and compatibi
 Found by review rounds ([development.md](development.md#review-rounds)) and not fixed yet, with the reason. The next round starts here.
 
 - No minimum read rate: a client that accepts one window update a minute keeps its stream, its permit, and the memory of a [stalled stream](benchmarks.md#current-harness-and-baseline), since the write timeout resets on any progress. Open: bounded by `max_concurrent_requests`; a rate floor needs a per-stream throughput measure, and slow mobile links are legitimate.
-- Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout_secs` (600 s), or `stream_idle_timeout_secs` (120 s) once a stream has started. Open: some front ends answer frequent pings with `GOAWAY`; needs a check against each provider.
+- Upstream HTTP/2 connections send no keepalive pings: a network path that dies silently holds its requests until `response_header_timeout` (`"10m"`), or `stream_idle_timeout` (`"2m"`) once a stream has started. Open: some front ends answer frequent pings with `GOAWAY`; needs a check against each provider.
 - Chat Completions' `n` asks for several choices, each up to the output-token ceiling, so one request may generate `n` times the ceiling ([policy.md](policy.md#per-request-ceilings)). Open: reading `n` is one more field under the hold; refuse or multiply is a policy choice.
 - Model permissions read only the top-level `model`; a model named inside the body (a Responses `image_generation` tool's) is not checked ([policy.md](policy.md#model-permissions)). Open: each such field is provider-specific; a list of them is a design change.
 - OTLP metric series are first come, first served (256 per metric): one client can fill the tool-name or subject series for the life of the process. Open: the excess is counted in `wye.records.dropped`; per-attribute caps need a design.
 - Tests: a few negative checks (`try_recv` on an empty channel, in aliases, OpenAI, and failover tests) could race the upstream, and some tests wait with fixed sleeps, among them a rejection mid-upload in the failover tests (200 ms for the rejection to arrive first). Open: test cleanup; none has flaked locally or in CI.
 - A chunked body whose chunk-size lines are padded (HTTP/1.1 allows leading zeros) can pin 8-32 KiB of the connection's read buffer per held or kept chunk, which counts 1 KiB, so under such a client the hold and failover budgets bound their charges, not memory. Open: a strict bound copies each held or kept chunk, one more allocation per request (gated), or caps chunk-size framing, which hyper does not expose; it takes an authenticated client uploading gigabytes.
-- A client that stalls mid-upload after the hold is reported as an upstream timeout (504) after `response_header_timeout_secs` (600 s), and keeps its permit and, on a failover route, its share of the kept-body budget. Decided (2026-11-02): no idle timer on uploads, which would add a timer to every request and a new way for slow uploads to fail.
+- A client that stalls mid-upload after the hold is reported as an upstream timeout (504) after `response_header_timeout` (`"10m"`), and keeps its permit and, on a failover route, its share of the kept-body budget. Decided (2026-11-02): no idle timer on uploads, which would add a timer to every request and a new way for slow uploads to fail.
 - Test and benchmark code repeats setup (recording upstreams, SSE responses, leaked `'static` bodies, CPU before-and-after pairs), and `wye-bench` leaves its gateways running when interrupted. Open: cleanup with no behavior change; next round.
 - CI's benchmark rebuilds the reference commit from scratch on every run: its cache holds the build, but `scripts/bench.sh` removes a reference tree without a worktree. Open: CI time only; the fix is a build directory outside the worktree.
 - No `cargo-fuzz` targets for the parsers of untrusted input; property tests cover the scanners. Open: needs a nightly toolchain: a decision for the maintainer.

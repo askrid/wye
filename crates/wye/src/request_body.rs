@@ -5,7 +5,7 @@
 //! [`hold_until_model`] reads the request body only until its top-level
 //! `model` value has been read. Claude Code sends `model` first, so usually
 //! only the first chunk waits. The held bytes count against a process-wide
-//! budget (`server.max_total_held_bytes`). When the model is allowed,
+//! budget (twice `server.max_request_body_bytes`). When the model is allowed,
 //! [`RequestBody`] replays the held chunks and streams the rest, and keeps
 //! checking it: a second top-level `model` key, an output-token maximum above
 //! the ceiling that arrives after the hold, or (on the OpenAI APIs, where the

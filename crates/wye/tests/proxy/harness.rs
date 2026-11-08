@@ -107,7 +107,7 @@ impl Harness {
     ) -> Self {
         let (upstream, hits) = spawn_counted(handler).await;
         let base_url = format!("http://{upstream}");
-        let extra = format!("provider_key_env = \"UNUSED\"\n{upstream_extra}");
+        let extra = format!("provider_key = {{ env = \"UNUSED\" }}\n{upstream_extra}");
         Self::launch(&base_url, server_extra, &extra, resources, hits).await
     }
 
@@ -133,7 +133,8 @@ impl Harness {
             prompt_key: Some(HashKey::new(key).unwrap()),
             ..keyed_resources()
         };
-        let extra = format!("[cache_diagnostics]\nhash_key_env = \"UNUSED\"\n{diagnostics_extra}");
+        let extra =
+            format!("[cache_diagnostics]\nhash_key = {{ env = \"UNUSED\" }}\n{diagnostics_extra}");
         Self::keyed_with(handler, "", &extra, resources).await
     }
 
@@ -162,7 +163,7 @@ impl Harness {
             },
         }]);
         let base_url = format!("https://{upstream}");
-        let extra = format!("provider_key_env = \"UNUSED\"\n{upstream_extra}");
+        let extra = format!("provider_key = {{ env = \"UNUSED\" }}\n{upstream_extra}");
         Self::launch(&base_url, "", &extra, resources, hits).await
     }
 
@@ -179,7 +180,7 @@ impl Harness {
         let config = format!(
             "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
              [routes.{route}]\n[[routes.{route}.upstreams]]\n{upstream_lines}\n\
-             base_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n"
+             base_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
         );
         let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
         Self::launch_config(&config, resources, hits).await
@@ -205,13 +206,24 @@ impl Harness {
         resources: Resources,
         upstream_hits: Arc<AtomicUsize>,
     ) -> Self {
+        Self::launch_adjusted(config, resources, upstream_hits, |gateway| gateway).await
+    }
+
+    /// [`Self::launch_config`], with the gateway changed by `adjust` before
+    /// it serves: for a fixed bound a test cannot wait out.
+    pub(crate) async fn launch_adjusted(
+        config: &str,
+        resources: Resources,
+        upstream_hits: Arc<AtomicUsize>,
+        adjust: impl FnOnce(Gateway) -> Gateway,
+    ) -> Self {
         let config = Config::from_toml_str(config).unwrap();
         // Key files in test configs are absolute paths.
         let resources = Resources {
             verifier: wye::verifier(&config, Path::new("/")).unwrap(),
             ..resources
         };
-        let gateway = Arc::new(Gateway::new(&config, resources).unwrap());
+        let gateway = Arc::new(adjust(Gateway::new(&config, resources).unwrap()));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (usage_out, usage_in) = tokio::io::duplex(64 * 1024);
@@ -513,11 +525,10 @@ pub(crate) fn now() -> u64 {
         .as_secs()
 }
 
-/// Claims the tests' gateway tokens share: issuer `wye`, audience
-/// `wye-prod`, valid for ten minutes, no model list or ceiling.
+/// Claims the tests' gateway tokens share: audience `wye-prod`, valid for
+/// ten minutes, no model list or ceiling.
 pub(crate) fn claims(sub: &str) -> NewToken<'_> {
     NewToken {
-        iss: "wye",
         sub,
         aud: "wye-prod",
         iat: now(),
@@ -527,9 +538,9 @@ pub(crate) fn claims(sub: &str) -> NewToken<'_> {
     }
 }
 
-/// A gateway token signed with `key` as key `k1`.
+/// A gateway token signed with `key`.
 pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewToken<'_>) -> String {
-    token::issue(key, "k1", claims)
+    token::issue(key, claims)
 }
 
 /// A gateway token for `sub` with its own model list and output ceiling, if any.
@@ -549,11 +560,10 @@ pub(crate) fn token(
     )
 }
 
-/// An `[auth]` section trusting `key` as key `k1`, with `extra` lines.
+/// An `[auth]` section trusting `key`, with `extra` lines.
 pub(crate) fn auth_section(key: &Ed25519KeyPair, extra: &str) -> String {
     format!(
-        "\n[auth]\nissuer = \"wye\"\naudience = \"wye-prod\"\n{extra}\n\
-         [[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{}\"",
+        "\n[auth]\naudience = \"wye-prod\"\nsigning_keys = [\"{}\"]\n{extra}",
         token::encode_public_key(key.public_key().as_ref())
     )
 }

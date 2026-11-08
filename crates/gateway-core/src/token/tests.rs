@@ -15,12 +15,8 @@ fn verifier(key: &Ed25519KeyPair) -> Verifier {
             models: None,
             max_output_tokens: None,
             own: Some(OwnIssuer {
-                issuer: "wye".into(),
                 audience: "wye-prod".into(),
-                keys: vec![PublicKey {
-                    id: "k1".into(),
-                    ed25519_public_key: key.public_key().as_ref().try_into().unwrap(),
-                }],
+                keys: vec![PublicKey::new(public(key))],
             }),
             identity_providers: Vec::new(),
             max_gateway_token_ttl: Duration::from_secs(86_400),
@@ -30,9 +26,23 @@ fn verifier(key: &Ed25519KeyPair) -> Verifier {
     .unwrap()
 }
 
+fn public(key: &Ed25519KeyPair) -> [u8; 32] {
+    key.public_key().as_ref().try_into().unwrap()
+}
+
+/// The key id Wye's tokens signed with `key` carry.
+fn kid(key: &Ed25519KeyPair) -> String {
+    thumbprint(&public(key))
+}
+
+/// A token of `header` and `claims` (JSON), signed with `key` as issued.
+fn signed(key: &Ed25519KeyPair, header: &str, claims: &str) -> String {
+    let signed = format!("{}.{}", B64.encode(header), B64.encode(claims));
+    format!("{signed}.{}", B64.encode(key.sign(signed.as_bytes())))
+}
+
 fn claims<'a>() -> NewToken<'a> {
     NewToken {
-        iss: "wye",
         sub: "alice",
         aud: "wye-prod",
         iat: NOW,
@@ -45,10 +55,21 @@ fn claims<'a>() -> NewToken<'a> {
 #[test]
 fn issued_token_verifies() {
     let key = keypair();
-    let token = issue(&key, "k1", &claims());
+    let token = issue(&key, &claims());
+    let header = B64.decode(token.split('.').next().unwrap()).unwrap();
+    assert_eq!(
+        String::from_utf8(header).unwrap(),
+        format!(r#"{{"alg":"EdDSA","kid":"{}","typ":"JWT"}}"#, kid(&key))
+    );
+    let claims_json = B64.decode(token.split('.').nth(1).unwrap()).unwrap();
+    assert!(
+        String::from_utf8(claims_json)
+            .unwrap()
+            .starts_with(r#"{"iss":"wye","#)
+    );
     let identity = verifier(&key).verify(&token, NOW + 10).unwrap();
     assert_eq!(&*identity.subject, "alice");
-    assert_eq!(&*identity.key_id, "k1");
+    assert_eq!(*identity.key_id, kid(&key));
     assert_eq!(identity.expires_at, NOW + 3_600);
     assert_eq!(identity.models, None);
 }
@@ -60,7 +81,7 @@ fn models_claim_becomes_patterns_and_bad_lists_fail_closed() {
     let with_models = |models: &[&str]| {
         let mut c = claims();
         c.models = Some(models);
-        v.verify(&issue(&key, "k1", &c), NOW + 10)
+        v.verify(&issue(&key, &c), NOW + 10)
     };
     let identity = with_models(&["claude-haiku-*", "claude-sonnet-4-5"]).unwrap();
     let models = identity.models.unwrap();
@@ -72,7 +93,7 @@ fn models_claim_becomes_patterns_and_bad_lists_fail_closed() {
     let with_limit = |limit: u64| {
         let mut c = claims();
         c.max_output_tokens = Some(limit);
-        v.verify(&issue(&key, "k1", &c), NOW + 10)
+        v.verify(&issue(&key, &c), NOW + 10)
     };
     assert_eq!(with_limit(4000).unwrap().max_output_tokens, Some(4000));
     assert_eq!(with_limit(0), Err(TokenError::Malformed));
@@ -85,16 +106,21 @@ fn rejects_by_time_issuer_audience_and_lifetime() {
     let with = |f: fn(&mut NewToken<'_>)| {
         let mut c = claims();
         f(&mut c);
-        issue(&key, "k1", &c)
+        issue(&key, &c)
     };
     assert_eq!(
-        v.verify(&issue(&key, "k1", &claims()), NOW + 3_600),
+        v.verify(&issue(&key, &claims()), NOW + 3_600),
         Err(TokenError::Expired)
     );
-    assert_eq!(
-        v.verify(&with(|c| c.iss = "other"), NOW),
-        Err(TokenError::WrongIssuer)
+    let other_issuer = signed(
+        &key,
+        &format!(r#"{{"alg":"EdDSA","kid":"{}"}}"#, kid(&key)),
+        &format!(
+            r#"{{"iss":"other","sub":"a","aud":"wye-prod","iat":{NOW},"exp":{}}}"#,
+            NOW + 60
+        ),
     );
+    assert_eq!(v.verify(&other_issuer, NOW), Err(TokenError::WrongIssuer));
     assert_eq!(
         v.verify(&with(|c| c.aud = "wye-dev"), NOW),
         Err(TokenError::WrongAudience)
@@ -115,20 +141,25 @@ fn rejects_by_time_issuer_audience_and_lifetime() {
 fn rejects_other_keys_and_tampering() {
     let key = keypair();
     let v = verifier(&key);
+    // Another key under this key's id.
+    let header = format!(r#"{{"alg":"EdDSA","kid":"{}"}}"#, kid(&key));
+    let body = format!(
+        r#"{{"iss":"wye","sub":"a","aud":"wye-prod","iat":{NOW},"exp":{}}}"#,
+        NOW + 60
+    );
     assert_eq!(
-        v.verify(&issue(&keypair(), "k1", &claims()), NOW),
+        v.verify(&signed(&keypair(), &header, &body), NOW),
         Err(TokenError::BadSignature)
     );
     assert_eq!(
-        v.verify(&issue(&key, "k2", &claims()), NOW),
+        v.verify(&issue(&keypair(), &claims()), NOW),
         Err(TokenError::UnknownKey)
     );
     // Swap in claims with another subject, keeping the original signature.
-    let token = issue(&key, "k1", &claims());
+    let token = issue(&key, &claims());
     let mut parts: Vec<&str> = token.split('.').collect();
     let mallory = issue(
         &key,
-        "k1",
         &NewToken {
             sub: "mallory",
             ..claims()
@@ -146,14 +177,15 @@ fn rejects_other_keys_and_tampering() {
 fn rejects_unsupported_algorithms_and_headers() {
     let key = keypair();
     let v = verifier(&key);
-    let token = issue(&key, "k1", &claims());
+    let token = issue(&key, &claims());
     let rest = token.split_once('.').unwrap().1;
+    let kid = kid(&key);
     for header in [
-        r#"{"alg":"none","kid":"k1"}"#,
-        r#"{"alg":"HS256","kid":"k1"}"#,
-        r#"{"alg":"EdDSA","kid":"k1","crit":["exp"]}"#,
+        format!(r#"{{"alg":"none","kid":"{kid}"}}"#),
+        format!(r#"{{"alg":"HS256","kid":"{kid}"}}"#),
+        format!(r#"{{"alg":"EdDSA","kid":"{kid}","crit":["exp"]}}"#),
     ] {
-        let forged = format!("{}.{rest}", B64.encode(header));
+        let forged = format!("{}.{rest}", B64.encode(&header));
         let err = v.verify(&forged, NOW).unwrap_err();
         assert!(
             matches!(
@@ -180,13 +212,14 @@ fn rejects_malformed_and_oversized_tokens() {
 #[test]
 fn audience_may_be_a_list() {
     let key = keypair();
-    let header = B64.encode(r#"{"alg":"EdDSA","kid":"k1"}"#);
-    let claims = B64.encode(format!(
-        r#"{{"iss":"wye","sub":"ci","aud":["x","wye-prod"],"iat":{NOW},"exp":{}}}"#,
-        NOW + 60
-    ));
-    let signed = format!("{header}.{claims}");
-    let token = format!("{signed}.{}", B64.encode(key.sign(signed.as_bytes())));
+    let token = signed(
+        &key,
+        &format!(r#"{{"alg":"EdDSA","kid":"{}"}}"#, kid(&key)),
+        &format!(
+            r#"{{"iss":"wye","sub":"ci","aud":["x","wye-prod"],"iat":{NOW},"exp":{}}}"#,
+            NOW + 60
+        ),
+    );
     assert_eq!(&*verifier(&key).verify(&token, NOW).unwrap().subject, "ci");
 }
 
@@ -199,6 +232,16 @@ fn public_key_round_trips() {
         key.public_key().as_ref()
     );
     assert!(decode_public_key("short").is_none());
+}
+
+#[test]
+fn a_key_id_is_the_rfc_7638_thumbprint() {
+    // RFC 8037, appendix A.3.
+    let x = decode_public_key("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo").unwrap();
+    assert_eq!(
+        thumbprint(&x),
+        "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+    );
 }
 
 mod identity_provider;

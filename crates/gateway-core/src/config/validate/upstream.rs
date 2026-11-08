@@ -4,7 +4,7 @@
 use serde::Deserialize;
 
 use super::*;
-use crate::route::{Failover, FailoverReason, MAX_UPSTREAMS, MAX_WEIGHT, Select};
+use crate::route::{MAX_UPSTREAMS, MAX_WEIGHT, Select};
 
 /// `[routes]`: one route per native API.
 #[derive(Deserialize)]
@@ -18,8 +18,6 @@ pub(crate) struct RawRoutes {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawRoute {
     pub(crate) select: Option<String>,
-    pub(crate) failover: Option<Vec<String>>,
-    pub(crate) failover_max_body_bytes: Option<u64>,
     pub(crate) upstreams: Vec<RawUpstream>,
 }
 
@@ -32,14 +30,13 @@ pub(crate) struct RawUpstream {
     pub(crate) weight: Option<u32>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) base_url: Option<String>,
-    pub(crate) provider_key_env: Option<String>,
-    pub(crate) provider_key_file: Option<PathBuf>,
+    pub(crate) provider_key: Option<RawSecret>,
     #[serde(default)]
     pub(crate) forward_caller_credential: bool,
     pub(crate) ca_file: Option<PathBuf>,
-    pub(crate) connect_timeout_secs: Option<u64>,
-    pub(crate) response_header_timeout_secs: Option<u64>,
-    pub(crate) stream_idle_timeout_secs: Option<u64>,
+    pub(crate) connect_timeout: Option<String>,
+    pub(crate) response_header_timeout: Option<String>,
+    pub(crate) stream_idle_timeout: Option<String>,
     pub(crate) http_version: Option<String>,
 }
 
@@ -78,7 +75,7 @@ pub(crate) fn validate_routes(routes: Option<RawRoutes>) -> Result<Routes, Confi
     Ok(Routes { claude, openai })
 }
 
-/// One `[routes.<route>]`: its upstreams, selection, and failover.
+/// One `[routes.<route>]`: its upstreams and selection.
 fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
     let in_route = in_route(id);
     let select = match raw.select.as_deref() {
@@ -90,51 +87,8 @@ fn validate_route(raw: RawRoute, id: RouteId) -> Result<Route, ConfigError> {
             )));
         }
     };
-    let failover = match raw.failover {
-        None => {
-            if raw.failover_max_body_bytes.is_some() {
-                return Err(in_route(ConfigError::Invalid(
-                    "failover_max_body_bytes needs failover",
-                )));
-            }
-            None
-        }
-        Some(on) => {
-            let mut failover = Failover {
-                on: 0,
-                max_body_bytes: nonzero(
-                    raw.failover_max_body_bytes
-                        .unwrap_or(DEFAULT_FAILOVER_MAX_BODY_BYTES),
-                    "failover_max_body_bytes",
-                )
-                .map_err(in_route)?,
-            };
-            for reason in &on {
-                // Only rejections that prove the request was not processed:
-                // an ambiguous 5xx may already be billed.
-                let Some(reason) = FailoverReason::parse(reason) else {
-                    return Err(in_route(ConfigError::Invalid(
-                        "failover takes \"429\", \"529\", and \"connect\" only: other \
-                         failures may already have been processed and billed",
-                    )));
-                };
-                failover.enable(reason);
-            }
-            if on.is_empty() {
-                return Err(in_route(ConfigError::Invalid(
-                    "failover must name at least one reason",
-                )));
-            }
-            if raw.upstreams.len() < 2 {
-                return Err(in_route(ConfigError::Invalid(
-                    "failover needs at least two upstreams",
-                )));
-            }
-            Some(failover)
-        }
-    };
     let upstreams = validate_route_upstreams(raw.upstreams, id)?;
-    Ok(Route::new(upstreams, select, failover))
+    Ok(Route::new(upstreams, select))
 }
 
 /// Puts an error about one of route `id`'s own fields under its name.
@@ -295,33 +249,21 @@ fn validate_upstream(
     provider: Provider,
     can_forward: bool,
 ) -> Result<Upstream, ConfigError> {
-    let provider_key = match (
-        raw.provider_key_env,
-        raw.provider_key_file,
-        raw.forward_caller_credential,
-    ) {
-        (Some(name), None, false) => ProviderKey::Env(env_name(name, "provider_key_env")?),
-        (None, Some(path), false) => {
-            if path.as_os_str().is_empty() {
-                return Err(ConfigError::Empty("provider_key_file"));
-            }
-            ProviderKey::File(path)
-        }
-        (None, None, true) => ProviderKey::ForwardCaller,
-        (None, None, false) => {
+    let provider_key = match (raw.provider_key, raw.forward_caller_credential) {
+        (Some(secret), false) => ProviderKey::Secret(validate_secret(secret, "provider_key")?),
+        (None, true) => ProviderKey::ForwardCaller,
+        (None, false) => {
             return Err(ConfigError::Invalid(if can_forward {
-                "set provider_key_env, provider_key_file, or forward_caller_credential = true"
+                "set provider_key = { env = \"NAME\" } or { file = \"path\" }, or \
+                 forward_caller_credential = true"
             } else {
-                "set provider_key_env or provider_key_file"
+                "set provider_key = { env = \"NAME\" } or { file = \"path\" }"
             }));
         }
-        _ => {
-            return Err(ConfigError::Invalid(if can_forward {
-                "set only one of provider_key_env, provider_key_file, and \
-                 forward_caller_credential"
-            } else {
-                "set only one of provider_key_env and provider_key_file"
-            }));
+        (Some(_), true) => {
+            return Err(ConfigError::Invalid(
+                "set provider_key or forward_caller_credential, not both",
+            ));
         }
     };
     let base_url = match (raw.base_url, provider.default_base_url()) {
@@ -357,14 +299,14 @@ fn validate_upstream(
             path => path,
         },
         connect_timeout: running_timer(
-            raw.connect_timeout_secs
-                .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
-            "connect_timeout_secs",
+            raw.connect_timeout,
+            DEFAULT_CONNECT_TIMEOUT,
+            "connect_timeout",
         )?,
         response_header_timeout: running_timer(
-            raw.response_header_timeout_secs
-                .unwrap_or(DEFAULT_RESPONSE_HEADER_TIMEOUT_SECS),
-            "response_header_timeout_secs",
+            raw.response_header_timeout,
+            DEFAULT_RESPONSE_HEADER_TIMEOUT,
+            "response_header_timeout",
         )?,
         http_version: match raw.http_version.as_deref() {
             None | Some("auto") => UpstreamHttpVersion::Auto,
@@ -376,9 +318,9 @@ fn validate_upstream(
             }
         },
         stream_idle_timeout: running_timer(
-            raw.stream_idle_timeout_secs
-                .unwrap_or(DEFAULT_STREAM_IDLE_TIMEOUT_SECS),
-            "stream_idle_timeout_secs",
+            raw.stream_idle_timeout,
+            DEFAULT_STREAM_IDLE_TIMEOUT,
+            "stream_idle_timeout",
         )?,
     })
 }

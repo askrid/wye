@@ -84,7 +84,7 @@ impl Setup {
         std::fs::write(
             repo.join("wye.toml"),
             "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"WYE_TEST_UNSET\"\n",
+             [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
         )
         .unwrap();
         Self { home, repo }
@@ -433,7 +433,7 @@ fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
     let keyed = write(
         "keyed.toml",
         "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"WYE_TEST_UNSET\"\n",
+         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n",
     );
     let request = write("request.json", r#"{"messages":[]}"#);
     let status = |args: &[&str]| {
@@ -468,7 +468,7 @@ fn checks_exit_1_on_problems_and_3_on_what_to_act_on() {
     let idp = write(
         "idp.toml",
         "[server]\nlisten = \"0.0.0.0:8080\"\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key_env = \"WYE_TEST_UNSET\"\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://127.0.0.1:1\"\nprovider_key = { env = \"WYE_TEST_UNSET\" }\n\
          [auth]\n[[auth.identity_providers]]\nissuer = \"https://idp.example\"\naudience = \"wye\"\n\
          algorithm = \"RS256\"\njwks_file = \"idp.jwks\"\n",
     );
@@ -525,11 +525,11 @@ fn the_defaults_work_on_a_fresh_home() {
         "{}",
         err(&keygen)
     );
-    // The result is the entry to add to the config, and only that.
+    // The result is the line to add to the config, and only that.
+    let line = out(&keygen);
     assert!(
-        out(&keygen).starts_with("[[auth.signing_keys]]\nid = \"<a new id>\"\n"),
-        "{}",
-        out(&keygen)
+        line.starts_with("signing_keys = [\"") && line.ends_with("\"]\n") && line.len() == 63,
+        "{line}"
     );
     // A second would replace the key `token issue` signs with.
     let again = err(&run(&["token", "keygen"]));
@@ -675,7 +675,7 @@ fn the_defaults_work_on_a_fresh_home() {
     assert_eq!(
         no_key,
         "wye: no signing key at ~/.wye/signing.key: pass --signing-key <path>, or make one \
-         with `wye token keygen` and add its public half to [[auth.signing_keys]]\n"
+         with `wye token keygen` and add its public half to [auth] signing_keys\n"
     );
     let printed = printed.into_inner();
     assert!(!printed.contains("/blob/main/"), "{printed}");

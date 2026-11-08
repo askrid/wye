@@ -19,7 +19,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    Error, REPO_AT_RELEASE,
+    Error,
     files::{self, MESSAGE_LOG_FILE, USAGE_LOG_FILE},
     paint::Paint,
     probe_blocking as probe, say,
@@ -58,11 +58,10 @@ fn check(path: &Path, show: &dyn Fn(&Path) -> String) -> Result<Config, String> 
             .join(", ");
         return Err(named(format!(
             "a service starts outside your shell, so it would not see {list}. Read \
-             provider keys from files instead (provider_key_file = \"anthropic.key\", next to \
-             the config, readable only by you), as `wye init` writes them; for the cache \
-             diagnostics key and OTLP headers, run `wye serve` under a service definition \
-             of your own ({REPO_AT_RELEASE}/docs/operations.md#running-as-a-service). \
-             Another config: -c <path>"
+             each secret from a file instead, next to the config and readable only by \
+             you, as `wye init` writes them: provider_key = {{ file = \"anthropic.key\" }}, \
+             and the same {{ file = \"...\" }} for hash_key and otlp_headers. Another \
+             config: -c <path>"
         )));
     }
     crate::startup::Resources::resolve(&config, files::config_dir(path))

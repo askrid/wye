@@ -39,9 +39,7 @@ impl BenchCredentials {
             .as_secs();
         let token = token::issue(
             &key,
-            "bench",
             &NewToken {
-                iss: "wye-bench",
                 sub: "bench",
                 aud: "wye-bench",
                 iat: now,
@@ -74,8 +72,8 @@ pub(crate) struct WyeOptions<'a> {
     /// The Claude route's one upstream on Bedrock instead of Anthropic:
     /// model ids get the provider's prefix, with the key from [`BENCH_PROVIDER_KEY_ENV`].
     pub(crate) bedrock: bool,
-    /// `[routes.claude]` with two accounts (both the mock) and failover:
-    /// every request body is kept for resending.
+    /// `[routes.claude]` with two accounts (both the mock), which fail
+    /// over: every request body is kept for resending.
     pub(crate) failover: bool,
     /// With `failover`: the first account is this upstream instead, tried
     /// first (`select = "ordered"`).
@@ -94,7 +92,7 @@ pub(crate) fn wye_config(
         || options.bedrock
         || options.failover
     {
-        format!("provider_key_env = \"{BENCH_PROVIDER_KEY_ENV}\"")
+        format!("provider_key = {{ env = \"{BENCH_PROVIDER_KEY_ENV}\" }}")
     } else {
         "forward_caller_credential = true".to_owned()
     };
@@ -109,7 +107,7 @@ pub(crate) fn wye_config(
             None => ("", upstream_base_url),
         };
         format!(
-            "[routes.claude]\n{select}failover = [\"429\", \"529\", \"connect\"]\n\
+            "[routes.claude]\n{select}\
              [[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"{first}\"\n{credential}\n\
              [[routes.claude.upstreams]]\nid = \"b\""
         )
@@ -117,7 +115,7 @@ pub(crate) fn wye_config(
         "[[routes.claude.upstreams]]".to_owned()
     };
     let mut config = format!(
-        "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace_secs = 0\n\n\
+        "[server]\nlisten = \"127.0.0.1:{port}\"\nshutdown_grace = \"0s\"\n\n\
          {upstream}\nbase_url = \"{upstream_base_url}\"\n{credential}\n"
     );
     if let Some(path) = ca_file {
@@ -131,8 +129,7 @@ pub(crate) fn wye_config(
     }
     if let Some(key) = options.auth_public_key {
         config.push_str(&format!(
-            "\n[auth]\nissuer = \"wye-bench\"\naudience = \"wye-bench\"\n{}\n\
-             [[auth.signing_keys]]\nid = \"bench\"\ned25519_public_key = \"{key}\"\n",
+            "\n[auth]\naudience = \"wye-bench\"\nsigning_keys = [\"{key}\"]\n{}\n",
             options
                 .auth_models
                 .map_or(String::new(), |list| format!("models = {list}"))
@@ -140,7 +137,7 @@ pub(crate) fn wye_config(
     }
     if options.cache_diagnostics {
         config.push_str(&format!(
-            "\n[cache_diagnostics]\nhash_key_env = \"{BENCH_HASH_KEY_ENV}\"\n"
+            "\n[cache_diagnostics]\nhash_key = {{ env = \"{BENCH_HASH_KEY_ENV}\" }}\n"
         ));
     }
     if let Some(endpoint) = options.otlp_endpoint {

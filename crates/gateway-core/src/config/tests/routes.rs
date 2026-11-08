@@ -8,7 +8,7 @@ fn parse_route(route: &str) -> Result<Config, ConfigError> {
     ))
 }
 
-const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\nprovider_key_env = \"K\"\n";
+const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
 
 #[test]
 fn route_upstreams_parse_with_ids_and_weights() {
@@ -16,7 +16,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
         "select = \"cache_affine\"\n\
          [[routes.claude.upstreams]]\nid = \"team-a\"\nweight = 3\n{ACCOUNT}\
          [[routes.claude.upstreams]]\nid = \"team-b\"\nprovider = \"anthropic\"\n\
-         base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"b.key\"\n"
+         base_url = \"https://api.anthropic.com\"\nprovider_key = {{ file = \"b.key\" }}\n"
     ))
     .unwrap();
     let upstreams = claude(&config).upstreams();
@@ -25,7 +25,10 @@ fn route_upstreams_parse_with_ids_and_weights() {
     assert_eq!(upstreams[0].weight, 3);
     assert_eq!(&*upstreams[1].id, "team-b");
     assert_eq!(upstreams[1].weight, 1);
-    assert_eq!(upstreams[1].provider_key, ProviderKey::File("b.key".into()));
+    assert_eq!(
+        upstreams[1].provider_key,
+        ProviderKey::Secret(Secret::File("b.key".into()))
+    );
     // Without an id, an upstream is named by its provider; it may still
     // have one.
     let alone = parse(ACCOUNT).unwrap();
@@ -38,7 +41,7 @@ fn route_upstreams_parse_with_ids_and_weights() {
 fn an_upstream_is_named_by_its_provider_unless_another_shares_it() {
     let bedrock = "provider = \"bedrock\"\n\
                    base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\n\
-                   provider_key_env = \"B\"\n";
+                   provider_key = { env = \"B\" }\n";
     let mixed = parse_route(&format!(
         "[[routes.claude.upstreams]]\n{ACCOUNT}[[routes.claude.upstreams]]\n{bedrock}"
     ))
@@ -80,7 +83,7 @@ fn an_upstream_is_named_by_its_provider_unless_another_shares_it() {
 fn anthropic_and_openai_need_no_base_url_and_regional_providers_do() {
     let config = Config::from_toml_str(
         "[[routes.claude.upstreams]]\nforward_caller_credential = true\n\
-         [[routes.openai.upstreams]]\nprovider_key_file = \"openai.key\"\n",
+         [[routes.openai.upstreams]]\nprovider_key = { file = \"openai.key\" }\n",
     )
     .unwrap();
     let base: Vec<String> = config.routes.upstreams().map(|u| u.base_url()).collect();
@@ -99,7 +102,7 @@ fn anthropic_and_openai_need_no_base_url_and_regional_providers_do() {
     ] {
         let err = parse_route(&format!(
             "[[routes.claude.upstreams]]\nprovider = \"{provider}\"\n{extra}\
-             provider_key_env = \"K\"\n"
+             provider_key = {{ env = \"K\" }}\n"
         ))
         .unwrap_err()
         .to_string();
@@ -131,7 +134,7 @@ fn route_upstreams_are_validated() {
         (
             entry("id = \"a\"")
                 + "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"a\"\n\
-                   base_url = \"https://api.openai.com\"\nprovider_key_env = \"O\"\n",
+                   base_url = \"https://api.openai.com\"\nprovider_key = { env = \"O\" }\n",
             "routes.openai.upstreams \"a\": id is used by routes.claude too",
         ),
         (entry("id = \"a\"\nweight = 0"), "between 1 and 1000"),
@@ -153,31 +156,36 @@ fn route_upstreams_are_validated() {
             "routes.claude.upstreams \"anthropic\": weight must be between 1 and 1000",
         ),
         (
-            entry("id = \"a\"").replace("provider_key_env = \"K\"", "provider_key_env = \"1K\""),
-            "routes.claude.upstreams \"a\": provider_key_env: \"1K\" is not a valid",
+            entry("id = \"a\"").replace(
+                "provider_key = { env = \"K\" }",
+                "provider_key = { env = \"1K\" }",
+            ),
+            "routes.claude.upstreams \"a\": provider_key: \"1K\" is not a valid",
         ),
         (
             entry("id = \"a\"").replace("https://api.anthropic.com", "http://x.example"),
             "routes.claude.upstreams \"a\": base_url \"http://x.example\": plain http",
         ),
         (
-            entry("id = \"a\"\nprovider_key_file = \"k\"") + &entry("id = \"b\""),
-            "routes.claude.upstreams \"a\": set only one of provider_key_env and provider_key_file",
+            // One key per upstream: a second is a duplicate.
+            entry("id = \"a\"\nprovider_key = { file = \"k\" }") + &entry("id = \"b\""),
+            "duplicate key",
         ),
         (
             "[[routes.claude.upstreams]]\nid = \"a\"\nbase_url = \"https://x.example\"\n"
                 .to_owned()
                 + &entry("id = \"b\""),
-            "routes.claude.upstreams \"a\": set provider_key_env or provider_key_file",
+            "routes.claude.upstreams \"a\": set provider_key = { env = \"NAME\" } or \
+             { file = \"path\" }",
         ),
         (
             "[[routes.claude.upstreams]]\nbase_url = \"https://x.example\"\n".into(),
-            "routes.claude.upstreams \"anthropic\": set provider_key_env, provider_key_file, or \
-             forward_caller_credential = true",
+            "routes.claude.upstreams \"anthropic\": set provider_key = { env = \"NAME\" } or \
+             { file = \"path\" }, or forward_caller_credential = true",
         ),
         (
-            entry("id = \"a\"\nconnect_timeout_secs = 0"),
-            "routes.claude.upstreams \"a\": connect_timeout_secs must be greater than zero",
+            entry("id = \"a\"\nconnect_timeout = \"0s\""),
+            "routes.claude.upstreams \"a\": connect_timeout must be greater than zero",
         ),
     ];
     for (route, expected) in rejected {
@@ -227,7 +235,7 @@ fn only_a_claude_route_with_one_upstream_forwards_the_caller_credential() {
 #[test]
 fn openai_route_alone_or_beside_claude() {
     let openai = "[routes.openai]\n[[routes.openai.upstreams]]\nid = \"oa\"\n\
-                  base_url = \"https://api.openai.com\"\nprovider_key_env = \"OPENAI_API_KEY\"\n";
+                  base_url = \"https://api.openai.com\"\nprovider_key = { env = \"OPENAI_API_KEY\" }\n";
     let alone =
         Config::from_toml_str(&format!("[server]\nlisten = \"127.0.0.1:8080\"\n{openai}")).unwrap();
     assert!(alone.routes.claude.is_none());
@@ -266,7 +274,10 @@ fn base_url_ending_in_v1_is_refused() {
         "https://api.openai.com/v1",
         "https://gw.example.com/anthropic/v1/",
     ] {
-        let err = parse(&format!("base_url = \"{url}\"\nprovider_key_env = \"K\"")).unwrap_err();
+        let err = parse(&format!(
+            "base_url = \"{url}\"\nprovider_key = {{ env = \"K\" }}"
+        ))
+        .unwrap_err();
         assert!(
             err.to_string().starts_with(&format!(
                 "routes.claude.upstreams \"anthropic\": base_url \"{url}\": drop the trailing /v1"
@@ -275,7 +286,8 @@ fn base_url_ending_in_v1_is_refused() {
         );
     }
     assert!(
-        parse("base_url = \"https://gw.example.com/v1beta\"\nprovider_key_env = \"K\"").is_ok()
+        parse("base_url = \"https://gw.example.com/v1beta\"\nprovider_key = { env = \"K\" }")
+            .is_ok()
     );
 }
 
@@ -284,7 +296,7 @@ fn claude_platform_on_aws_needs_a_workspace() {
     let entry = |extra: &str| {
         format!(
             "[[routes.claude.upstreams]]\nid = \"aws\"\n{extra}\n\
-             base_url = \"https://aws-external-anthropic.us-west-2.api.aws\"\nprovider_key_env = \"K\"\n"
+             base_url = \"https://aws-external-anthropic.us-west-2.api.aws\"\nprovider_key = {{ env = \"K\" }}\n"
         )
     };
     let ok = parse_route(&entry(
@@ -323,7 +335,7 @@ fn claude_platform_on_aws_needs_a_workspace() {
 fn bedrock_takes_an_api_key_and_prefixes_model_ids() {
     let route = parse_route(
         "[[routes.claude.upstreams]]\nid = \"bedrock\"\nprovider = \"bedrock\"\n\
-         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key_env = \"K\"\n",
+         base_url = \"https://bedrock-mantle.us-east-1.api.aws/anthropic\"\nprovider_key = { env = \"K\" }\n",
     )
     .unwrap();
     let upstream = &claude(&route).upstreams()[0];

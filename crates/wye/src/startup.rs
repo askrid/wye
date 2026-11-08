@@ -8,7 +8,7 @@ use std::{
 
 use gateway_core::{
     api::RouteId,
-    config::{Config, IdentityProvider, ProviderKey, Upstream},
+    config::{Config, IdentityProvider, ProviderKey, Secret, Upstream},
     prompt::HashKey,
     token::{IssuerKeys, KeySetError, Verifier},
 };
@@ -23,19 +23,26 @@ pub enum StartupError {
     /// A secret's environment variable is set but blank.
     EmptyEnv(String),
     InvalidApiKey,
-    HashKeyTooShort(String),
+    /// The cache diagnostics key, from this source, is too short.
+    HashKeyTooShort(Secret),
     /// A file the configuration names, by the setting that names it.
     File {
         what: String,
         path: PathBuf,
         reason: String,
     },
-    InvalidOtlpHeaders(String),
+    /// The OTLP headers, from this source, are not `key=value,...`.
+    InvalidOtlpHeaders(Secret),
     KeySet(KeySetError),
     Tls(String),
     BodyLimitTooLarge,
     /// The resources were not resolved from this configuration.
     UpstreamCount,
+    /// A problem with a secret of a config section, under its name.
+    InSection {
+        section: &'static str,
+        error: Box<StartupError>,
+    },
 }
 
 impl fmt::Display for StartupError {
@@ -50,14 +57,15 @@ impl fmt::Display for StartupError {
                 "upstream API key contains characters not allowed in an HTTP header \
                  (a trailing newline, for example)",
             ),
-            Self::HashKeyTooShort(name) => write!(
+            Self::HashKeyTooShort(source) => write!(
                 f,
-                "environment variable {name} must hold at least {} bytes (for example `openssl rand -hex 32`)",
+                "hash_key {source} must hold at least {} bytes (for example \
+                 `openssl rand -hex 32`)",
                 HashKey::MIN_LEN
             ),
-            Self::InvalidOtlpHeaders(name) => write!(
+            Self::InvalidOtlpHeaders(source) => write!(
                 f,
-                "environment variable {name} must hold key=value pairs separated by commas"
+                "otlp_headers {source} must hold key=value pairs separated by commas"
             ),
             Self::File { what, path, reason } => {
                 write!(f, "{what} {}: {reason}", path.display())
@@ -70,6 +78,7 @@ impl fmt::Display for StartupError {
             Self::UpstreamCount => {
                 f.write_str("one set of upstream resources is needed per configured upstream")
             }
+            Self::InSection { section, error } => write!(f, "{section}: {error}"),
         }
     }
 }
@@ -105,7 +114,7 @@ pub struct Resources {
     pub verifier: Option<Verifier>,
     /// Keys the prompt hashes in the usage log; present when cache diagnostics are on.
     pub prompt_key: Option<HashKey>,
-    /// Extra headers for OTLP export requests, from `telemetry.otlp_headers_env`.
+    /// Extra headers for OTLP export requests, from `telemetry.otlp_headers`.
     pub otlp_headers: HeaderMap,
 }
 
@@ -144,14 +153,23 @@ impl Resources {
         let prompt_key = config
             .cache_diagnostics
             .as_ref()
-            .map(|diagnostics| prompt_key(&diagnostics.hash_key_env))
-            .transpose()?;
+            .map(|diagnostics| prompt_key(&diagnostics.hash_key, config_dir))
+            .transpose()
+            .map_err(|error| StartupError::InSection {
+                section: "cache_diagnostics",
+                error: Box::new(error),
+            })?;
         let otlp_headers = match config
             .telemetry
             .as_ref()
-            .and_then(|t| t.otlp_headers_env.as_ref())
+            .and_then(|t| t.otlp_headers.as_ref())
         {
-            Some(name) => otlp_headers(name)?,
+            Some(source) => {
+                otlp_headers(source, config_dir).map_err(|error| StartupError::InSection {
+                    section: "telemetry",
+                    error: Box::new(error),
+                })?
+            }
             None => HeaderMap::new(),
         };
         Ok(Self {
@@ -203,30 +221,45 @@ pub(crate) fn key_set(
     IssuerKeys::parse(&jwks, issuer.algorithm).map_err(|e| error(e.to_string()))
 }
 
-/// The environment variables [`Resources::resolve`] reads secrets from,
-/// sorted: a service does not inherit the shell's environment, so `wye
-/// service` checks and passes on each.
-pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
-    let mut names: Vec<String> = config
+/// Every secret the configuration names, with the setting that names it:
+/// each upstream's provider key, the cache diagnostics key, and the OTLP
+/// headers.
+pub(crate) fn secrets(config: &Config) -> Vec<(&'static str, &Secret)> {
+    let mut secrets: Vec<(&'static str, &Secret)> = config
         .routes
         .upstreams()
         .filter_map(|u| match &u.provider_key {
-            ProviderKey::Env(name) => Some(name.clone()),
-            _ => None,
+            ProviderKey::Secret(secret) => Some(("provider_key", secret)),
+            ProviderKey::ForwardCaller => None,
         })
         .collect();
-    names.extend(
+    secrets.extend(
         config
             .cache_diagnostics
             .as_ref()
-            .map(|d| d.hash_key_env.clone()),
+            .map(|d| ("cache_diagnostics.hash_key", &d.hash_key)),
     );
-    names.extend(
+    secrets.extend(
         config
             .telemetry
             .as_ref()
-            .and_then(|t| t.otlp_headers_env.clone()),
+            .and_then(|t| t.otlp_headers.as_ref())
+            .map(|headers| ("telemetry.otlp_headers", headers)),
     );
+    secrets
+}
+
+/// The environment variables [`Resources::resolve`] reads secrets from,
+/// sorted: a service does not inherit the shell's environment, so `wye
+/// service` refuses a config that names any.
+pub(crate) fn env_secrets(config: &Config) -> Vec<String> {
+    let mut names: Vec<String> = secrets(config)
+        .into_iter()
+        .filter_map(|(_, secret)| match secret {
+            Secret::Env(name) => Some(name.clone()),
+            Secret::File(_) => None,
+        })
+        .collect();
     names.sort();
     names.dedup();
     names
@@ -242,49 +275,60 @@ pub(crate) fn upstream_auth(
     upstream: &Upstream,
     config_dir: &Path,
 ) -> Result<UpstreamAuth, StartupError> {
-    let key = match &upstream.provider_key {
-        ProviderKey::Env(name) => Some(env_secret(name)?),
-        ProviderKey::File(path) => Some(read_secret(&config_dir.join(path))?),
-        ProviderKey::ForwardCaller => None,
-    };
-    match key {
-        Some(key) if upstream.provider.bearer_key() => UpstreamAuth::bearer(&key),
-        Some(key) => UpstreamAuth::api_key(&key),
-        None => Ok(UpstreamAuth::ForwardCaller),
+    match &upstream.provider_key {
+        ProviderKey::Secret(secret) => {
+            let key = read_secret(secret, config_dir, "provider_key")?;
+            if upstream.provider.bearer_key() {
+                UpstreamAuth::bearer(&key)
+            } else {
+                UpstreamAuth::api_key(&key)
+            }
+        }
+        ProviderKey::ForwardCaller => Ok(UpstreamAuth::ForwardCaller),
     }
 }
 
-/// The key prompt hashes are made with, from the variable `name`.
-pub(crate) fn prompt_key(name: &str) -> Result<HashKey, StartupError> {
-    HashKey::new(env(name)?.as_bytes())
-        .ok_or_else(|| StartupError::HashKeyTooShort(name.to_owned()))
+/// The key prompt hashes are made with.
+pub(crate) fn prompt_key(source: &Secret, config_dir: &Path) -> Result<HashKey, StartupError> {
+    let key = read_secret(source, config_dir, "hash_key")?;
+    HashKey::new(key.as_bytes()).ok_or_else(|| StartupError::HashKeyTooShort(source.clone()))
 }
 
-/// Extra OTLP export headers from the variable `name`.
-pub(crate) fn otlp_headers(name: &str) -> Result<HeaderMap, StartupError> {
-    parse_headers(&env(name)?).ok_or_else(|| StartupError::InvalidOtlpHeaders(name.to_owned()))
+/// Extra OTLP export headers.
+pub(crate) fn otlp_headers(source: &Secret, config_dir: &Path) -> Result<HeaderMap, StartupError> {
+    let spec = read_secret(source, config_dir, "otlp_headers")?;
+    parse_headers(&spec).ok_or_else(|| StartupError::InvalidOtlpHeaders(source.clone()))
 }
 
-/// The variable `name` as a secret: set and not blank. A blank key would
-/// start the server and fail every request upstream.
-fn env_secret(name: &str) -> Result<String, StartupError> {
-    let value = env(name)?;
-    if value.trim().is_empty() {
-        return Err(StartupError::EmptyEnv(name.to_owned()));
+/// A secret's value: an environment variable, set and not blank, or a
+/// file's contents (relative to `config_dir`) without surrounding
+/// whitespace, since mounted secrets often end in a newline. A blank key
+/// would start the server and fail every request upstream. `what` names
+/// the setting in a file error.
+fn read_secret(
+    secret: &Secret,
+    config_dir: &Path,
+    what: &'static str,
+) -> Result<String, StartupError> {
+    match secret {
+        Secret::Env(name) => {
+            let value = env(name)?;
+            if value.trim().is_empty() {
+                return Err(StartupError::EmptyEnv(name.clone()));
+            }
+            Ok(value)
+        }
+        Secret::File(path) => {
+            let path = config_dir.join(path);
+            let error = file_error(what, &path);
+            let contents = std::fs::read_to_string(&path).map_err(|e| error(e.to_string()))?;
+            let secret = contents.trim();
+            if secret.is_empty() {
+                return Err(error("file is empty".into()));
+            }
+            Ok(secret.to_owned())
+        }
     }
-    Ok(value)
-}
-
-/// A secret file's contents without surrounding whitespace (mounted secrets
-/// often end in a newline).
-fn read_secret(path: &Path) -> Result<String, StartupError> {
-    let error = file_error("provider_key_file", path);
-    let contents = std::fs::read_to_string(path).map_err(|e| error(e.to_string()))?;
-    let secret = contents.trim();
-    if secret.is_empty() {
-        return Err(error("file is empty".into()));
-    }
-    Ok(secret.to_owned())
 }
 
 /// Why the secret file `path` is open to more than its owner, with the
@@ -307,18 +351,17 @@ pub(crate) fn open_to_others(path: &Path) -> Option<String> {
     }
 }
 
-/// Each upstream's `provider_key_file` (relative to `config_dir`) that group
-/// or others may open, and the command that closes it: `serve` warns of
-/// each, and `wye doctor` fails on it.
+/// Each secret file (relative to `config_dir`) that group or others may
+/// open, and the command that closes it: `serve` warns of each, and `wye
+/// doctor` fails on it.
 pub fn key_file_warnings(config: &Config, config_dir: &Path) -> Vec<String> {
-    config
-        .routes
-        .upstreams()
-        .filter_map(|upstream| match &upstream.provider_key {
-            ProviderKey::File(path) => open_to_others(&config_dir.join(path)),
-            _ => None,
+    secrets(config)
+        .into_iter()
+        .filter_map(|(what, secret)| match secret {
+            Secret::File(path) => open_to_others(&config_dir.join(path)).map(|why| (what, why)),
+            Secret::Env(_) => None,
         })
-        .map(|why| format!("provider_key_file {why}"))
+        .map(|(what, why)| format!("{what} {why}"))
         .collect()
 }
 
@@ -427,7 +470,7 @@ mod tests {
         let error = |upstream: &str| {
             let config = Config::from_toml_str(&format!(
                 "[server]\nlisten = \"127.0.0.1:8080\"\n{upstream}\
-                 base_url = \"https://api.anthropic.com\"\nprovider_key_file = \"missing.key\"\n"
+                 base_url = \"https://api.anthropic.com\"\nprovider_key = {{ file = \"missing.key\" }}\n"
             ))
             .unwrap();
             Resources::resolve(&config, Path::new("/nonexistent-wye-dir"))
@@ -437,7 +480,7 @@ mod tests {
         let unnamed = error("[[routes.claude.upstreams]]\n");
         assert!(
             unnamed.starts_with(
-                "routes.claude.upstreams \"anthropic\": provider_key_file \
+                "routes.claude.upstreams \"anthropic\": provider_key \
                  /nonexistent-wye-dir/missing.key: "
             ),
             "{unnamed}"
@@ -445,10 +488,45 @@ mod tests {
         let entry = error("[routes.claude]\n[[routes.claude.upstreams]]\nid = \"a\"\n");
         assert!(
             entry.starts_with(
-                "routes.claude.upstreams \"a\": provider_key_file \
+                "routes.claude.upstreams \"a\": provider_key \
                  /nonexistent-wye-dir/missing.key: "
             ),
             "{entry}"
+        );
+    }
+
+    /// Every secret takes either source; a file is read relative to the
+    /// config and trimmed, as a provider key's is.
+    #[test]
+    fn the_hash_key_and_otlp_headers_come_from_files_too() {
+        let dir = wye_testkit::TempDir::new("secret-files");
+        let config = Config::from_toml_str(
+            "[[routes.claude.upstreams]]\nforward_caller_credential = true\n\
+             [cache_diagnostics]\nhash_key = { file = \"hash.key\" }\n\
+             [telemetry]\notlp_endpoint = \"http://127.0.0.1:4318\"\n\
+             otlp_headers = { file = \"otlp.headers\" }\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("hash.key"), format!("{}\n", "k".repeat(32))).unwrap();
+        std::fs::write(dir.join("otlp.headers"), "api-key=secret\n").unwrap();
+        let resources = Resources::resolve(&config, &dir).unwrap();
+        assert!(resources.prompt_key.is_some());
+        assert_eq!(resources.otlp_headers["api-key"], "secret");
+
+        std::fs::write(dir.join("hash.key"), "short\n").unwrap();
+        assert_eq!(
+            Resources::resolve(&config, &dir).unwrap_err().to_string(),
+            "cache_diagnostics: hash_key hash.key must hold at least 32 bytes (for example \
+             `openssl rand -hex 32`)"
+        );
+        std::fs::remove_file(dir.join("hash.key")).unwrap();
+        let missing = Resources::resolve(&config, &dir).unwrap_err().to_string();
+        assert!(
+            missing.starts_with(&format!(
+                "cache_diagnostics: hash_key {}: ",
+                dir.join("hash.key").display()
+            )),
+            "{missing}"
         );
     }
 

@@ -3,7 +3,6 @@
 
 use std::time::Duration;
 
-use ring::signature::KeyPair;
 use wye_testkit::jwt::{IdpKey, jwks};
 
 use super::super::*;
@@ -231,20 +230,15 @@ fn own_and_provider_keys_coexist_by_kid() {
     let idp = IdpKey::ed25519();
     let mut both = auth(vec![issuer(Algorithm::EdDsa, Vec::new())]);
     both.own = Some(OwnIssuer {
-        issuer: "wye".into(),
         audience: "wye-prod".into(),
-        keys: vec![PublicKey {
-            id: "k1".into(),
-            ed25519_public_key: own.public_key().as_ref().try_into().unwrap(),
-        }],
+        keys: vec![PublicKey::new(super::public(&own))],
     });
+    let own_kid = super::kid(&own);
     let set = || IssuerKeys::parse(jwks(&[(&idp, "idp-1")]).as_bytes(), Algorithm::EdDsa).unwrap();
     let v = Verifier::new(&both, vec![set()]).unwrap();
     let own_token = issue(
         &own,
-        "k1",
         &NewToken {
-            iss: "wye",
             sub: "alice",
             aud: "wye-prod",
             iat: NOW,
@@ -270,13 +264,16 @@ fn own_and_provider_keys_coexist_by_kid() {
     );
     assert_eq!(v.verify(&posing, NOW), Err(TokenError::WrongIssuer));
     // Wye's own header stays strict.
-    let extra = idp.sign(r#"{"alg":"EdDSA","kid":"k1","x5t":"a"}"#, &claims(""));
+    let extra = idp.sign(
+        &format!(r#"{{"alg":"EdDSA","kid":"{own_kid}","x5t":"a"}}"#),
+        &claims(""),
+    );
     assert_eq!(v.verify(&extra, NOW), Err(TokenError::Malformed));
 
-    let clash = IssuerKeys::parse(jwks(&[(&idp, "k1")]).as_bytes(), Algorithm::EdDsa).unwrap();
+    let clash = IssuerKeys::parse(jwks(&[(&idp, &own_kid)]).as_bytes(), Algorithm::EdDsa).unwrap();
     assert_eq!(
         Verifier::new(&both, vec![clash]).err(),
-        Some(KeySetError::DuplicateKid("k1".into()))
+        Some(KeySetError::DuplicateKid(own_kid))
     );
 }
 

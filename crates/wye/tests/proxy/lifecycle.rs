@@ -44,12 +44,12 @@ async fn requests_beyond_the_concurrency_limit_get_an_overload_error() {
     assert_eq!(status, 200);
 }
 
-/// Past `max_connections`, Wye stops accepting: a new connection waits in
-/// the listen queue, costing Wye nothing, until an open one closes.
+/// Past its open connections, twice `max_concurrent_requests`, Wye stops
+/// accepting: a new connection waits in the listen queue, costing Wye
+/// nothing, until an open one closes.
 #[tokio::test]
 async fn connections_past_the_limit_wait_until_one_closes() {
-    let h =
-        Harness::with_server_config(ok(), "max_concurrent_requests = 2\nmax_connections = 2").await;
+    let h = Harness::with_server_config(ok(), "max_concurrent_requests = 1").await;
     let first = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     let _second = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     let req = Request::post(format!("http://{}/v1/messages", h.gateway))
@@ -78,13 +78,13 @@ async fn requests_beyond_the_hold_budget_get_an_overload_error() {
     let (handler, _bodies) = recording(|seen| seen.body);
     let (upstream, hits) = spawn_counted(handler).await;
     let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         max_total_held_bytes = 1024\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n\
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 512\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n"
     );
     let h = Harness::launch_config(&config, keyed_resources(), hits).await;
-    // A first request holds 900 bytes, its model still to come.
+    // A first request holds 400 bytes, its model still to come: a chunk
+    // counts at least 1 KiB, the whole budget of twice the 512-byte limit.
     let (tx, rx) = mpsc::channel::<Bytes>(2);
     let client: Client<HttpConnector, ChannelBody> =
         Client::builder(TokioExecutor::new()).build_http();
@@ -92,7 +92,7 @@ async fn requests_beyond_the_hold_budget_get_an_overload_error() {
         .body(ChannelBody(rx))
         .unwrap();
     let _first = tokio::spawn(async move { client.request(held).await });
-    let padding = format!(r#"{{"messages":[],"pad":"{}","#, "x".repeat(880));
+    let padding = format!(r#"{{"messages":[],"pad":"{}","#, "x".repeat(380));
     tx.send(Bytes::from(padding)).await.unwrap();
     // Until the gateway has read those bytes the budget has room. Without a
     // model, this body reaches no upstream either way: 400 with room, 529 without.
@@ -122,7 +122,7 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
     let open = Arc::default();
     let mut h = Harness::with_server_config(
         held_open(&open),
-        "drain_delay_secs = 1\nshutdown_grace_secs = 1",
+        "drain_delay = \"1s\"\nshutdown_grace = \"1s\"",
     )
     .await;
     let stream = h.send(messages(), "{}").await;
@@ -204,7 +204,7 @@ async fn a_stream_that_ends_within_the_grace_is_delivered_whole() {
             streaming(rx)
         })
     });
-    let mut h = Harness::with_server_config(handler, "shutdown_grace_secs = 2").await;
+    let mut h = Harness::with_server_config(handler, "shutdown_grace = \"2s\"").await;
     let stream = h.send(messages(), "{}").await;
     assert_eq!(stream.status(), StatusCode::OK);
     h.begin_shutdown();

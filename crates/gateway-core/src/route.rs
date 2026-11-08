@@ -6,8 +6,8 @@
 //! on one upstream: weighted rendezvous hashing keyed by the session id (or
 //! the gateway token's subject) sends a key to the upstream with the highest
 //! score, and a key moves only when its upstream leaves the route. With
-//! failover, the rest of the ranking is the order of the next attempts, the
-//! same on every replica too.
+//! several upstreams, the rest of the ranking is the order of failover's
+//! next attempts, the same on every replica too.
 
 use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 
@@ -28,7 +28,11 @@ pub enum Select {
     Ordered,
 }
 
-/// A rejection that proves a request was not processed, so it may go to the
+/// Largest request body a route with several upstreams keeps for
+/// resending: larger ones go without failover. A Claude Code turn is 1-8 MB.
+pub const FAILOVER_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
+
+/// A rejection that proves a request was not processed, so it goes to the
 /// next upstream: an ambiguous `5xx` may already be billed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailoverReason {
@@ -44,7 +48,7 @@ pub enum FailoverReason {
 impl FailoverReason {
     pub const ALL: [Self; 3] = [Self::RateLimited, Self::Overloaded, Self::Connect];
 
-    /// Its name in config, usage records, and metrics.
+    /// Its name in usage records and metrics.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::RateLimited => "429",
@@ -65,43 +69,6 @@ impl FailoverReason {
     /// The reason a response with `status` gives, if any.
     pub fn of_status(status: u16) -> Option<Self> {
         Self::ALL.into_iter().find(|r| r.status() == Some(status))
-    }
-
-    pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|r| r.as_str() == name)
-    }
-
-    fn bit(self) -> u8 {
-        1 << self as u8
-    }
-}
-
-/// Sending a request to another upstream when one rejected it before it
-/// was processed ([`FailoverReason`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Failover {
-    /// The reasons config enabled, one bit per [`FailoverReason`].
-    pub(crate) on: u8,
-    /// Larger request bodies are forwarded without failover: resending needs
-    /// the bytes already sent.
-    pub max_body_bytes: u64,
-}
-
-impl Failover {
-    /// Whether `reason` moves a request on.
-    pub fn fails_over_on(&self, reason: FailoverReason) -> bool {
-        self.on & reason.bit() != 0
-    }
-
-    /// The reasons that move a request on, in [`FailoverReason::ALL`] order.
-    pub fn reasons(&self) -> impl Iterator<Item = FailoverReason> + '_ {
-        FailoverReason::ALL
-            .into_iter()
-            .filter(|&r| self.fails_over_on(r))
-    }
-
-    pub(crate) fn enable(&mut self, reason: FailoverReason) {
-        self.on |= reason.bit();
     }
 }
 
@@ -143,23 +110,17 @@ pub struct Route {
     /// Per upstream, the hash seed derived from its id.
     seeds: Box<[u64]>,
     select: Select,
-    failover: Option<Failover>,
 }
 
 impl Route {
     /// `upstreams` is validated: non-empty, at most [`MAX_UPSTREAMS`], ids
-    /// unique; failover only with several upstreams.
-    pub(crate) fn new(
-        upstreams: Vec<Upstream>,
-        select: Select,
-        failover: Option<Failover>,
-    ) -> Self {
+    /// unique.
+    pub(crate) fn new(upstreams: Vec<Upstream>, select: Select) -> Self {
         let seeds = upstreams.iter().map(|u| xxh3_64(u.id.as_bytes())).collect();
         Self {
             upstreams: upstreams.into(),
             seeds,
             select,
-            failover,
         }
     }
 
@@ -180,9 +141,11 @@ impl Route {
         self.select
     }
 
-    /// Failover between this route's upstreams, when configured.
-    pub fn failover(&self) -> Option<&Failover> {
-        self.failover.as_ref()
+    /// Whether a rejected request moves to the next upstream: with two or
+    /// more, on every [`FailoverReason`], for bodies up to
+    /// [`FAILOVER_MAX_BODY_BYTES`].
+    pub fn fails_over(&self) -> bool {
+        self.upstreams.len() > 1
     }
 
     /// Every upstream in the order a request with affinity `key` tries

@@ -15,7 +15,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use gateway_core::config::{Config, Provider, ProviderKey, Upstream};
+use gateway_core::config::{Config, Provider, ProviderKey, Secret, Upstream};
 use http::{Request, Uri};
 use http_body_util::Empty;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -53,11 +53,14 @@ pub async fn doctor(
         });
     }
     if let Some(diagnostics) = &config.cache_diagnostics {
-        let name = &diagnostics.hash_key_env;
-        checks.push(match prompt_key(name) {
-            Ok(_) => Ok(format!("cache_diagnostics: ${name} set")),
-            Err(e) => Err(format!("cache_diagnostics: {e}")),
-        });
+        let source = &diagnostics.hash_key;
+        checks.push(
+            prompt_key(source, config_dir)
+                .map_err(|e| e.to_string())
+                .and_then(|_| found(source, config_dir).map_err(|why| format!("hash_key {why}")))
+                .map(|found| format!("cache_diagnostics: hash key {found}"))
+                .map_err(|e| format!("cache_diagnostics: {e}")),
+        );
     }
     // It signs gateway tokens: anyone who can read it can mint one.
     checks.extend(
@@ -66,11 +69,16 @@ pub async fn doctor(
             .map(|why| Err(format!("signing key {why}"))),
     );
     if let Some(telemetry) = &config.telemetry {
-        if let Some(name) = &telemetry.otlp_headers_env {
-            checks.push(match otlp_headers(name) {
-                Ok(_) => Ok(format!("telemetry: ${name} set")),
-                Err(e) => Err(format!("telemetry: {e}")),
-            });
+        if let Some(source) = &telemetry.otlp_headers {
+            checks.push(
+                otlp_headers(source, config_dir)
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| {
+                        found(source, config_dir).map_err(|why| format!("otlp_headers {why}"))
+                    })
+                    .map(|found| format!("telemetry: OTLP headers {found}"))
+                    .map_err(|e| format!("telemetry: {e}")),
+            );
         }
         checks.push(head("telemetry", &telemetry.otlp_logs_uri, &[]).await);
     }
@@ -110,18 +118,26 @@ fn endpoint_path(name: &str, upstream: &Upstream) -> Option<Check> {
 fn provider_key(name: &str, upstream: &Upstream, config_dir: &Path) -> Check {
     let header = upstream.provider.key_header();
     upstream_auth(upstream, config_dir).map_err(|e| format!("{name}: {e}"))?;
-    Ok(match &upstream.provider_key {
-        ProviderKey::Env(var) => format!("{name}: ${var} set (sent as {header})"),
-        ProviderKey::File(path) => {
-            if let Some(why) = open_to_others(&config_dir.join(path)) {
-                return Err(format!("{name}: provider_key_file {why}"));
-            }
-            format!("{name}: {} read (sent as {header})", path.display())
-        }
-        ProviderKey::ForwardCaller => {
-            format!("{name}: forwards the caller's own credential (loopback only)")
-        }
-    })
+    match &upstream.provider_key {
+        ProviderKey::Secret(secret) => found(secret, config_dir)
+            .map(|found| format!("{name}: provider key {found} (sent as {header})"))
+            .map_err(|e| format!("{name}: provider_key {e}")),
+        ProviderKey::ForwardCaller => Ok(format!(
+            "{name}: forwards the caller's own credential (loopback only)"
+        )),
+    }
+}
+
+/// Where a secret that resolved was found, without its value; an error
+/// when its file is open to other users.
+fn found(secret: &Secret, config_dir: &Path) -> Result<String, String> {
+    match secret {
+        Secret::Env(name) => Ok(format!("${name} set")),
+        Secret::File(path) => match open_to_others(&config_dir.join(path)) {
+            Some(why) => Err(why),
+            None => Ok(format!("{} read", path.display())),
+        },
+    }
 }
 
 /// The upstream answers HTTP at its base URL, trusting its extra roots.

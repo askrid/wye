@@ -26,7 +26,7 @@ forward_caller_credential = true
 # Keyed prompt hashes in each usage record, to explain prompt-cache misses.
 # export WYE_CACHE_HASH_KEY="$(openssl rand -hex 32)"
 # [cache_diagnostics]
-# hash_key_env = "WYE_CACHE_HASH_KEY"
+# hash_key = { env = "WYE_CACHE_HASH_KEY" }
 
 # Usage, metrics, and per-session traces to a local collector or Jaeger
 # (docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:1.62.0).

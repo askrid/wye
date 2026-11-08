@@ -11,7 +11,7 @@ async fn explain_and_the_server_answer_alike() {
     let (upstream, hits) = spawn_counted(ok()).await;
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n{}\n\
+         [[routes.claude.upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}\n\
          [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
         auth_section(
             &key,
@@ -103,7 +103,7 @@ async fn explain_and_the_server_answer_alike_on_responses() {
     let config = format!(
         "[server]\nlisten = \"127.0.0.1:0\"\n\
          [routes.openai]\n[[routes.openai.upstreams]]\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\nprovider_key_env = \"UNUSED\"\n{}\n",
+         base_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}\n",
         auth_section(&key, "models = [\"gpt-5*\"]\nmax_output_tokens = 1000")
     );
     let parsed = Config::from_toml_str(&config).unwrap();

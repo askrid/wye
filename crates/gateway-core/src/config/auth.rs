@@ -1,4 +1,4 @@
-//! `[auth]`: Wye's own token keys and the identity providers it trusts.
+//! `[auth]`: Wye's own signing keys and the identity providers it trusts.
 
 use super::*;
 
@@ -22,21 +22,46 @@ pub struct Auth {
     pub max_output_tokens: Option<u64>,
 }
 
-/// Wye's own tokens: Ed25519, `alg` pinned to `EdDSA`.
+/// The `iss` claim of Wye's own tokens.
+pub const OWN_ISSUER: &str = "wye";
+
+/// Wye's own tokens: Ed25519, `alg` pinned to `EdDSA`, `iss` always
+/// [`OWN_ISSUER`].
 #[derive(Debug, Clone)]
 pub struct OwnIssuer {
-    /// Required `iss` claim.
-    pub issuer: String,
     /// Required `aud` claim (one of them, if a list).
     pub audience: String,
-    /// Verification keys, selected by the token's `kid`; several allow rotation.
+    /// Verification keys, selected by the token's `kid`, each key's
+    /// thumbprint; several allow rotation.
     pub keys: Vec<PublicKey>,
 }
 
+/// One of Wye's own signing keys, by its public half.
 #[derive(Debug, Clone)]
 pub struct PublicKey {
-    pub id: String,
     pub ed25519_public_key: [u8; 32],
+    /// The key's RFC 7638 JWK thumbprint: the `kid` of the tokens it signs.
+    pub thumbprint: String,
+}
+
+impl PublicKey {
+    /// A key as config writes it: 32 bytes in unpadded base64url.
+    pub fn decode(encoded: &str) -> Option<Self> {
+        let ed25519_public_key = crate::token::decode_public_key(encoded)?;
+        Some(Self::new(ed25519_public_key))
+    }
+
+    pub fn new(ed25519_public_key: [u8; 32]) -> Self {
+        Self {
+            thumbprint: crate::token::thumbprint(&ed25519_public_key),
+            ed25519_public_key,
+        }
+    }
+
+    /// The key as config writes it.
+    pub fn encoded(&self) -> String {
+        crate::token::encode_public_key(&self.ed25519_public_key)
+    }
 }
 
 /// An identity provider (`[[auth.identity_providers]]`) whose JWTs Wye verifies

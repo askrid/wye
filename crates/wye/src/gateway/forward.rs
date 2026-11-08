@@ -9,7 +9,7 @@ use bytes::Bytes;
 use gateway_core::{
     api::Api,
     prompt,
-    route::{self, FailoverReason, affinity_key},
+    route::{FAILOVER_MAX_BODY_BYTES, FailoverReason, affinity_key},
 };
 use http::{
     HeaderValue, Request, Response,
@@ -125,11 +125,8 @@ impl Gateway {
             .unwrap_or_default(),
         );
         // Failover keeps the body for resending, unless it is declared too large.
-        let failover = route
-            .route
-            .failover()
-            .filter(|f| declared_len.is_none_or(|len| len <= f.max_body_bytes))
-            .copied();
+        let failover = route.route.fails_over()
+            && declared_len.is_none_or(|len| len <= FAILOVER_MAX_BODY_BYTES);
         // The declared length before any provider prefix is added to `model`.
         let base_len = content_length(&parts.headers);
         // The provider prefix the body's model carries now; the first
@@ -141,17 +138,15 @@ impl Gateway {
         {
             prefix_sent = prefix;
         }
-        let (mut body, mut handback) = match &failover {
-            Some(f) => {
-                let (body, handback) =
-                    FailoverBody::kept(body, &self.failover_kept, self.bounds(f));
-                (body, Some(handback))
-            }
-            None => (FailoverBody::once(body), None),
+        let (mut body, mut handback) = if failover {
+            let (body, handback) = FailoverBody::kept(body, &self.failover_kept, self.bounds());
+            (body, Some(handback))
+        } else {
+            (FailoverBody::once(body), None)
         };
         // `forward` rewrites the URI and credential headers per upstream, so
         // another attempt starts from a copy of the request as received.
-        let received = failover.as_ref().map(|_| copy_parts(&parts));
+        let received = failover.then(|| copy_parts(&parts));
         let mut parts = Some(parts);
         let mut order = ranking.iter().peekable();
         loop {
@@ -181,12 +176,9 @@ impl Gateway {
                 )
                 .await;
             let next = order.peek().and_then(|&i| route.upstreams.get(i));
-            if let (Some(reason), Some(f), Some(handback), Some(next)) = (
-                rejection(&result, failover.as_ref()),
-                &failover,
-                handback.as_mut(),
-                next,
-            ) {
+            if let (Some(reason), Some(handback), Some(next)) =
+                (rejection(&result), handback.as_mut(), next)
+            {
                 let cut = matches!(result, Err(ForwardError::Upstream));
                 if let Some(resend) = handed_back(handback, cut).await.and_then(|resend| {
                     with_model_id(resend, model_span.as_ref(), next, &mut prefix_sent)
@@ -196,7 +188,7 @@ impl Gateway {
                         upstream: upstream.id.clone(),
                         reason,
                     });
-                    (body, *handback) = FailoverBody::resume(resend, self.bounds(f));
+                    (body, *handback) = FailoverBody::resume(resend, self.bounds());
                     continue;
                 }
             }
@@ -204,11 +196,11 @@ impl Gateway {
         }
     }
 
-    /// The bounds a body kept for `failover` stays within: the route's
-    /// per-request bound and the process-wide one.
-    fn bounds(&self, failover: &route::Failover) -> Bounds {
+    /// The bounds a body kept for failover stays within: the per-request
+    /// bound and the process-wide one.
+    fn bounds(&self) -> Bounds {
         Bounds {
-            max_body: usize::try_from(failover.max_body_bytes).unwrap_or(usize::MAX),
+            max_body: usize::try_from(FAILOVER_MAX_BODY_BYTES).unwrap_or(usize::MAX),
             max_kept: self.max_total_kept_bytes,
         }
     }
@@ -236,20 +228,18 @@ impl Gateway {
     }
 }
 
-/// The failover reason `result` gives, if the route acts on it. A lost connection
-/// qualifies only if the attempt did not deliver the whole body (checked by
+/// The failover reason `result` gives, if any. A lost connection qualifies
+/// only if the attempt did not deliver the whole body (checked by
 /// [`handed_back`]): a provider can reject early and close while the upload
 /// runs, and an incomplete request cannot have been processed.
 fn rejection(
     result: &Result<Response<UpstreamBody<Incoming>>, ForwardError>,
-    failover: Option<&route::Failover>,
 ) -> Option<FailoverReason> {
-    let reason = match result {
-        Ok(res) => FailoverReason::of_status(res.status().as_u16())?,
-        Err(ForwardError::Connect | ForwardError::Upstream) => FailoverReason::Connect,
-        Err(_) => return None,
-    };
-    failover?.fails_over_on(reason).then_some(reason)
+    match result {
+        Ok(res) => FailoverReason::of_status(res.status().as_u16()),
+        Err(ForwardError::Connect | ForwardError::Upstream) => Some(FailoverReason::Connect),
+        Err(_) => None,
+    }
 }
 
 /// The body a rejected attempt hands back: the bytes it sent plus the unread

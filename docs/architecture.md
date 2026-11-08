@@ -121,7 +121,7 @@ Gateway-generated errors on `/v1/responses` use OpenAI's shape: `{"error": {"mes
 
 Preserve request JSON, unknown fields, tool definitions, and provider-native options. The body streams upstream and is never re-serialized.
 
-`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#model-permissions), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within `server.max_total_held_bytes`.
+`server.max_request_body_bytes` (default 32 MiB, Anthropic's limit) counts the bytes the client sent: a declared length past it gets `413` at once, and a body without one gets `413` when it passes the limit mid-upload. With [model permissions or output-token ceilings](policy.md#model-permissions), aliases, or a provider with its own model ids, only the start of the body is held, until its top-level `model` has been read, within the held-bytes bound, twice `max_request_body_bytes` ([local resource bounds](policy.md#local-resource-bounds)).
 
 Never buffer the generated response. Relay SSE bytes without parsing or rebuilding events; HTTP chunks are not SSE event boundaries. Preserve non-streaming JSON and upstream error bodies.
 
@@ -161,7 +161,7 @@ Four on the upstream and client sides, two on a held body, and no total request 
 - Connect: short, over the TCP connect and the TLS handshake together. A peer that stalls the handshake fails as a refused connection, so failover applies.
 - Response headers: several minutes, because a non-streaming generation sends no headers until it completes (Claude Code falls back to non-streaming requests after a stream failure).
 - Streaming inactivity: longer than the provider's `ping` interval.
-- Client write: a connection whose response writes make no progress for `client_write_timeout_secs` is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs.
+- Client write: a connection whose response writes make no progress for 60 s (`CLIENT_WRITE_TIMEOUT`) is closed, cancelling its upstream request, because a client that stops reading leaves its response unpolled and the inactivity timer never runs.
 - Held body: while Wye reads `model`, 60 s without a byte or 5 minutes in all gets `408` (`HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT`).
 
 Shutdown: [operations.md](operations.md#health-and-shutdown).
@@ -207,9 +207,9 @@ A route with one upstream resolves every stored response. With several OpenAI up
 
 Wye does not retry an ambiguous failure or fail over after output: it may already have incurred charges, and switching providers after output starts cannot preserve the response. It does not retry the same provider either: clients retry on their own, guided by the `x-should-retry` and `retry-after` headers Wye forwards, and gateway retries would multiply attempts and risk duplicate billing.
 
-The one exception is failover to a route's next upstream after a [rejection](glossary.md#requests-and-where-they-go) that proves the request was not processed, and only before any response byte reached the client, so it cannot duplicate billing. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover, and config refuses any other reason. Do not claim exactly-once execution.
+The one exception is failover, which every route of two or more upstreams has and a route of one cannot: to the route's next upstream after a [rejection](glossary.md#requests-and-where-they-go) that proves the request was not processed, and only before any response byte reached the client, so it cannot duplicate billing. A `429`, a `529`, a refused connection, or a connection lost before the request body was delivered whole moves the request to the next upstream in its ranking: the next-highest rendezvous score, or config order with `select = "ordered"`, so every replica fails a session over to the same second upstream. An incomplete request cannot have been processed, which covers a provider that rejects early and closes during the upload. A `5xx` after the provider may have accepted the request gets no failover, and nothing configures another reason. Do not claim exactly-once execution.
 
-Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `failover_max_body_bytes` per request (default 8 MiB) and `server.max_total_kept_bytes` across the process (default 256 MiB, separate from `server.max_total_held_bytes`, so kept bodies never starve the hold that reads `model`).
+Resending needs the body, which hyper consumes. `wye/src/failover.rs` keeps each chunk it sends (shared `Bytes`, not copies), up to `FAILOVER_MAX_BODY_BYTES` per request (8 MiB) and `MAX_TOTAL_KEPT_BYTES` across the process (256 MiB, separate from the held-bytes bound, so kept bodies never starve the hold that reads `model`).
 
 A dropped attempt hands back its sent chunks plus the unread rest of the client's body through a oneshot channel, so a rejection that arrives mid-upload moves on too: the next upstream gets the sent bytes, then the rest as the client sends it. A body over either bound, or an attempt still holding its body 100 ms after the rejection (hyper still writing), is answered as it is, never refused and never partly resent.
 
@@ -227,7 +227,7 @@ Passing provider-native options through does not mean Wye interprets or enforces
 
 hyper-util's client pool keeps a single HTTP/2 connection per host and never opens another, so requests beyond the provider's concurrent-stream limit would queue inside it. `upstream/pool.rs` keeps 64 lanes, each a client with its own connection, connected lazily. Each request takes a slot on the least loaded lane, held by the response body until the stream ends: sequential traffic reuses one connection, `k` concurrent requests use up to `k`, and beyond 64 the load stays even. Spreading is deliberate: `h2` guards all streams of one connection with one mutex, and packing streams onto a connection made that lock the dominant overhead of the TLS path.
 
-Streams on a lane share its HTTP/2 connection window. With hyper's default (5 MiB, 2 MiB per stream), three clients that stopped reading filled it and stalled every other stream on the lane. So the connection window is the protocol maximum, and buffering is bounded per stream instead (a 256 KiB window; [memory per stalled stream](benchmarks.md#current-harness-and-baseline)): a stalled client holds only its own stream, and only until `client_write_timeout_secs`.
+Streams on a lane share its HTTP/2 connection window. With hyper's default (5 MiB, 2 MiB per stream), three clients that stopped reading filled it and stalled every other stream on the lane. So the connection window is the protocol maximum, and buffering is bounded per stream instead (a 256 KiB window; [memory per stalled stream](benchmarks.md#current-harness-and-baseline)): a stalled client holds only its own stream, and only until the client write timeout (60 s).
 
 On the client side, each connection's kernel send buffer is fixed at 128 KiB (`server.rs`; Linux doubles the value, so 256 KiB there) instead of autotuning to as much as 4 MiB. The worst case, every in-flight request stalled at once, is `max_concurrent_requests` × (a stalled stream's memory plus this buffer).
 
@@ -311,7 +311,7 @@ Opt-in (`[cache_diagnostics]`, `gateway-core/src/prompt.rs`): keyed hashes of a 
 
 ## Configuration
 
-One TOML file, loaded at startup, is the source of truth for routes and their providers, token verification, limits, aliases, and prices. Secrets are referenced by environment variable or file, never stored in Git, images, or IaC state.
+One TOML file, loaded at startup, is the source of truth for routes and their providers, token verification, limits, aliases, and prices. Every secret has one shape, `{ env = "NAME" }` or `{ file = "path" }` (`config::Secret`), and is never stored in Git, images, or IaC state. Durations are written as on the command line, `"30s"`, `"10m"`, `"8h"`, `"7d"` (`gateway_core::duration`).
 
 The runtime resolves them; the core validates configuration without resolving secrets. Refuse unknown fields, invalid URLs or limits, broken references, duplicate IDs, unsupported provider/API pairs, missing provider keys, and a policy that needs prices without them at startup. Never print secrets or log request bodies by default.
 
@@ -332,7 +332,10 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `MAX_CONNECTION_BUFFER` | `wye/src/server.rs` | A client connection's read buffer, request headers included |
 | `CLIENT_SEND_BUFFER` | `wye/src/server.rs` | A client connection's kernel send buffer |
 | `HANDBACK_WAIT` | `wye/src/gateway/forward.rs` | A rejected attempt's hand-back of its body for failover |
-| `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against `max_total_held_bytes` and `max_total_kept_bytes` (1 KiB), so tiny chunks cannot pin more than those say |
+| `MAX_TOTAL_KEPT_BYTES`, `FAILOVER_MAX_BODY_BYTES` | `gateway-core/src/config.rs`, `gateway-core/src/route.rs` | Bytes kept for failover across the process (256 MiB) and per request (8 MiB) ([local resource bounds](policy.md#local-resource-bounds)) |
+| `MAX_CONNECTIONS` | `gateway-core/src/config.rs` | The most open client connections, whatever `max_concurrent_requests` asks (1,048,576) |
+| `CLIENT_WRITE_TIMEOUT` | `gateway-core/src/config.rs` | A client's longest stall in accepting response bytes (60 s) |
+| `MIN_CHUNK_CHARGE` | `wye/src/request_body.rs` | The least a held or kept chunk counts against the held and kept bounds (1 KiB), so tiny chunks cannot pin more than those say |
 | `HOLD_IDLE_TIMEOUT`, `HOLD_TIMEOUT` | `wye/src/request_body.rs` | A held body's longest silence and total time to `model` ([timeouts](#timeouts)) |
 | `QUEUE_CAPACITY` | `wye/src/usage_log.rs` | Usage records waiting for the writer; more are dropped and counted |
 | `WRITE_BATCH` | `wye/src/usage_log/writer.rs` | Records formatted into one write, which bounds the write buffer (below) |

@@ -6,7 +6,6 @@
 //! the same everywhere (docs/development.md, "Command-line conventions").
 
 use super::{Command, Id, Opt};
-use crate::cli::duration;
 
 /// `-c, --config <path>`: the config a command reads, or `init` creates.
 const CONFIG: Opt = Opt {
@@ -151,7 +150,7 @@ pub const COMMANDS: &[Command] = &[
             "when",
             concat!(
                 "Records from then on: a time ago (",
-                duration!(),
+                gateway_core::duration_syntax!(),
                 ") or a UTC date (2026-11-01)"
             ),
         )],
@@ -195,8 +194,8 @@ pub const COMMANDS: &[Command] = &[
             "Write the key to this new file, readable only by you (default: \
              $WYE_HOME/signing.key)",
         )],
-        notes: "Prints the public half for [[auth.signing_keys]]. `wye init --shared` makes \
-                the first key; this one is for rotation.",
+        notes: "Prints the line to put under [auth]: signing_keys with its public half. \
+                `wye init --shared` makes the first key; this one is for rotation.",
         ..BASE
     },
     Command {
@@ -217,7 +216,7 @@ pub const COMMANDS: &[Command] = &[
                 "duration",
                 concat!(
                     "Lifetime: ",
-                    duration!(),
+                    gateway_core::duration_syntax!(),
                     " (default: the config's longest)"
                 ),
             ),

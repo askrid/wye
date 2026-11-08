@@ -93,7 +93,7 @@ impl Outcome {
 pub(crate) enum UpstreamError {
     /// No connection or TLS handshake.
     Connect,
-    /// No response headers within `response_header_timeout_secs`.
+    /// No response headers within `response_header_timeout`.
     Timeout,
     /// The request failed after connecting, before response headers.
     Reset,

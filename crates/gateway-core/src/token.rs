@@ -1,5 +1,6 @@
-//! Gateway tokens: compact JWTs, from Wye's own issuer (Ed25519) or from
-//! configured identity providers (RS256, ES256, or EdDSA).
+//! Gateway tokens: compact JWTs, from Wye's own issuer (Ed25519, `iss`
+//! `wye`, `kid` the key's JWK thumbprint) or from configured identity
+//! providers (RS256, ES256, or EdDSA).
 //!
 //! A token's `kid` selects its key, and the key belongs to one issuer, whose
 //! one algorithm the header must name: the algorithm is fixed by
@@ -20,7 +21,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use serde::{Deserialize, Serialize, de::IgnoredAny};
 
 use crate::{
-    config::{Algorithm, Auth, Grant},
+    config::{Algorithm, Auth, Grant, OWN_ISSUER},
     policy::ModelPattern,
 };
 
@@ -28,7 +29,7 @@ mod identity_provider;
 mod issue;
 mod keys;
 
-pub use issue::{NewToken, encode_public_key, issue};
+pub use issue::{NewToken, encode_public_key, issue, thumbprint};
 use keys::VerifyKey;
 pub use keys::{IssuerKeys, KeySetError};
 
@@ -207,9 +208,13 @@ impl Verifier {
             sources: Vec::new(),
         };
         if let Some(own) = &auth.own {
-            let index = verifier.add_source(&own.issuer, &own.audience, SourceKind::Own);
+            let index = verifier.add_source(OWN_ISSUER, &own.audience, SourceKind::Own);
             for key in &own.keys {
-                verifier.add_key(&key.id, VerifyKey::ed25519(key.ed25519_public_key), index)?;
+                verifier.add_key(
+                    &key.thumbprint,
+                    VerifyKey::ed25519(key.ed25519_public_key),
+                    index,
+                )?;
             }
         }
         for (issuer, set) in auth.identity_providers.iter().zip(issuer_keys) {
@@ -362,7 +367,7 @@ fn decode(part: &str) -> Result<Vec<u8>, TokenError> {
     B64.decode(part).map_err(|_| TokenError::Malformed)
 }
 
-/// Decodes `ed25519_public_key` from the config.
+/// Decodes a key of `[auth] signing_keys`.
 pub(crate) fn decode_public_key(encoded: &str) -> Option<[u8; 32]> {
     B64.decode(encoded).ok()?.try_into().ok()
 }

@@ -18,7 +18,7 @@ use gateway_core::{
     policy,
     pricing::{Pico, PriceEntry, Usd},
     prompt,
-    route::{self, FailoverReason, Route, Select},
+    route::{self, FAILOVER_MAX_BODY_BYTES, FailoverReason, Route, Select},
     token::{Identity, Verifier},
     upgrade::{self, UpgradeScanner},
 };
@@ -390,18 +390,21 @@ impl Explanation {
                 upstreams.len()
             ));
         }
-        if let Some(failover) = route.failover() {
+        if route.fails_over() {
             let next: Vec<&str> = ranking
                 .iter()
                 .skip(1)
                 .filter_map(|i| upstreams.get(i).map(|u| &*u.id))
                 .collect();
-            let reasons: Vec<&str> = failover.reasons().map(FailoverReason::as_str).collect();
+            let reasons: Vec<&str> = FailoverReason::ALL
+                .into_iter()
+                .map(FailoverReason::as_str)
+                .collect();
             self.step(format!(
                 "failover: on {} to {} in that order, for bodies up to {}",
                 reasons.join(", "),
                 next.join(", "),
-                size(failover.max_body_bytes)
+                size(FAILOVER_MAX_BODY_BYTES)
             ));
         }
         upstream
