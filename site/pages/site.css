@@ -49,8 +49,9 @@
 /* Dark only: the page is one terminal, whatever the system's theme.
    Three colours: black, white (and greys between them), and one orange
    accent for emphasis: at most one thing per figure, the one its section's
-   lead claims (the hero's one thread, upstream's failover, Wye's bars, a
-   request's cost); a figure that is its own point gets none. */
+   lead claims, a value or a key, never a block: the hero's one thread, a
+   token's limits, the fields a newer model rejects, the failover, Wye's
+   bars, the cost, the decision. A figure that is its own point gets none. */
 :root {
   color-scheme: dark;
   --paper: #070707;
@@ -330,7 +331,6 @@ html, body { overflow-x: clip; }
 }
 .lines code { font: inherit; color: var(--ink); white-space: pre; }
 .lines .n { color: var(--graphite); }
-.lines .hit { color: var(--accent); }
 @media (max-width: 40rem) {
   .lines { grid-template-columns: minmax(0, 1fr); overflow-x: auto; padding-inline: 1rem; }
   .lines .n:empty { display: none; }
@@ -445,7 +445,7 @@ pre.code code { font: inherit; }
 /* Config and JSON keys recede, so the values lead. */
 .code .k { color: var(--graphite); }
 /* The one line of a block its section is about (the palette, above). */
-.code .accent, .code .accent .k { color: var(--accent); }
+.accent, .code .accent { color: var(--accent); }
 /* A shell word with a hyphen (site/src/markdown.rs): wrapped lines break
    between words, never after the hyphen. */
 .code .w { white-space: nowrap; }
