@@ -4,7 +4,7 @@
 
 **LLM gateway without bloat.**
 
-Small, fast, and stateless: one binary, one TOML file, under a millisecond per request ([p50 on c7i.4xlarge](#performance)), and the features a gateway needs, no more.
+Small, fast, and stateless: one binary, one TOML file, under a millisecond per request ([p99 on c7i.4xlarge](#performance)), and the features a gateway needs, no more.
 
 ## Quick start
 
