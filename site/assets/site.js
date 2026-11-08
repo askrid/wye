@@ -149,7 +149,7 @@ if (gl) {
   gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
   const pulseBuffer = gl.createBuffer();
-  const pulseData = new Float32Array((24 * 10 + 1) * 4);
+  const pulseData = new Float32Array((48 * 10 + 1) * 4);
   gl.enableVertexAttribArray(0);
   gl.enable(gl.BLEND);
   const where = (p, name) => gl.getUniformLocation(p, name);
@@ -179,12 +179,12 @@ if (gl) {
     accent = rgb("--accent");
   };
   // Requests: a string in, then its string out. In, they gather speed into
-  // the dot; out, they ease off. At most 24 at once, 2 new a frame.
+  // the dot; out, they ease off. At most 48 at once, 6 new a frame.
   const flight = [];
   const IN = 1500, OUT = 1900;
   let launched = 0;
   const launch = (i, out, t) => {
-    if (flight.length < 24 && launched < 2) {
+    if (flight.length < 48 && launched < 6) {
       flight.push({ i, out, t });
       launched++;
     }
@@ -209,12 +209,11 @@ if (gl) {
     line.amp = amp;
     line.since = now;
   };
-  // Once a frame, the strings the pointer crossed since the last frame are
-  // plucked, within a budget, as a real strum is: at most 8 a frame, spread
-  // evenly over those crossed, their swing shared out so a fast sweep is one
-  // even ripple, not every string at full swing. Only a slow touch, three
-  // strings or fewer, wakes the neighbours. Each plucked string sends a
-  // request on from where it was plucked.
+  // Once a frame, every string the pointer crossed since the last frame is
+  // plucked, its swing set by the pointer's speed. Only a slow touch, three
+  // strings or fewer, wakes the neighbours; in a sweep they are crossed
+  // anyway. Each plucked string sends a request on from where it was
+  // plucked, up to six a frame, spread over the strings crossed.
   const crossed = [];
   const sense = (now) => {
     pending = false;
@@ -227,10 +226,10 @@ if (gl) {
         const before = yAt(lines[i], previousX), after = yAt(lines[i], x);
         if (before !== null && after !== null && Math.sign(previousY - before) !== Math.sign(y - after)) crossed.push(i);
       }
-      const count = Math.min(crossed.length, 8);
-      const amp = (Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1) * Math.sqrt(count / Math.max(crossed.length, 1)));
-      for (let c = 0; c < count; c++) {
-        const i = crossed[Math.floor(((c + 0.5) * crossed.length) / count)], line = lines[i];
+      const amp = Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1);
+      const every = Math.ceil(crossed.length / 6);
+      for (let c = 0; c < crossed.length; c++) {
+        const i = crossed[c], line = lines[i];
         line.amp = amp;
         line.since = now;
         if (crossed.length <= 3) {
@@ -239,6 +238,7 @@ if (gl) {
           ring(i - 2, amp * 0.12, now + 80);
           ring(i + 2, amp * 0.12, now + 80);
         }
+        if (c % every) continue;
         const at = line.at, t = (x - at[0][0]) / (at[at.length - 1][0] - at[0][0]);
         if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)));
         else launch(i === thread ? 59 : i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)));
@@ -270,7 +270,7 @@ if (gl) {
     launched = 0;
     if (pending) sense(now);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
-    // second; its copy glows in over 60 ms and out over 450, to nothing.
+    // second; its copy glows in over 60 ms and out over 700, to nothing.
     let ringing = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i], age = now - line.since;
@@ -278,7 +278,7 @@ if (gl) {
       if (!line.amp) continue;
       ringing = true;
       if (age < 0) continue;
-      const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 450);
+      const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 700);
       if (age > 300 && glow < 0.002) {
         line.amp = 0;
         continue;
