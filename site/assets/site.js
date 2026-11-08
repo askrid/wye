@@ -5,8 +5,8 @@
 const uncommented = (text) =>
   text
     .split("\n")
-    .map((line) => line.replace(/\s+#\s.*$/, ""))
     .filter((line) => !/^\s*#/.test(line))
+    .map((line) => line.replace(/\s+#\s.*$/, ""))
     .join("\n");
 for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.code[data-lang="toml"]')) {
   const wrap = document.createElement("div");
@@ -62,6 +62,7 @@ if (strings) {
         u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3,
       ]);
     }
+    if (tail) at.push([tail, y3]);
     return { el, d, x0, y0, x1, y1, x2, y2, x3, y3, tail, at, amp: 0, since: 0,
       phase: i * 2.399, period: 9000 + (i % 7) * 900, thread: el.classList.contains("thread") };
   });
@@ -76,27 +77,33 @@ if (strings) {
     }
     return null;
   };
-  let running = false, visible = true, frame = 0, last = 0, previous = null;
+  let running = false, visible = false, frame = 0, last = 0, previous = null;
   const draw = (now) => {
     frame = requestAnimationFrame(draw);
     if (now - last < 32) return; // about 30 frames a second is enough
     last = now;
     for (const line of lines) {
+      // The orange thread only moves when plucked.
+      if (line.thread && !line.amp) continue;
       const sway = line.thread ? 0 : 1.4 * Math.sin((2 * Math.PI * now) / line.period + line.phase);
       let ring = 0;
       if (line.amp) {
         const age = now - line.since;
         ring = line.amp * Math.exp(-age / 750) * Math.sin((2 * Math.PI * 2.6 * age) / 1000);
-        if (age > 3500) line.amp = 0;
+        if (age > 3500) {
+          line.amp = 0;
+          line.el.style.opacity = "";
+        }
       }
       const dy = sway + ring;
       line.el.setAttribute("d", `M${line.x0} ${line.y0}C${line.x1} ${(line.y1 + dy).toFixed(1)} ${line.x2} ${(line.y2 + dy).toFixed(1)} ${line.x3} ${line.y3}${line.tail ? "H" + line.tail : ""}`);
-      if (!line.thread) line.el.style.opacity = line.amp ? (0.2 + Math.min(0.45, Math.abs(ring) / 10)).toFixed(2) : "";
+      if (line.amp && !line.thread) line.el.style.opacity = (0.2 + Math.min(0.45, Math.abs(ring) / 10)).toFixed(2);
     }
   };
   const pluck = (event) => {
-    if (event.pointerType !== "mouse") return;
-    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(strings.getScreenCTM().inverse());
+    const screen = strings.getScreenCTM();
+    if (event.pointerType !== "mouse" || !screen) return;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(screen.inverse());
     if (previous) {
       const speed = Math.min(8, Math.max(2, Math.abs(point.y - previous.y) * 0.6));
       for (const line of lines) {
@@ -110,6 +117,11 @@ if (strings) {
     }
     previous = point;
   };
+  // A pointer that left the window, or a page that scrolled under it, starts
+  // afresh, so its next move does not pluck every line in between.
+  const forget = () => {
+    previous = null;
+  };
   const update = () => {
     const on = visible && !document.hidden && !reduce.matches;
     if (on === running) return;
@@ -117,9 +129,13 @@ if (strings) {
     if (on) {
       frame = requestAnimationFrame(draw);
       addEventListener("pointermove", pluck, { passive: true });
+      addEventListener("scroll", forget, { passive: true });
+      document.documentElement.addEventListener("pointerleave", forget);
     } else {
       cancelAnimationFrame(frame);
       removeEventListener("pointermove", pluck);
+      removeEventListener("scroll", forget);
+      document.documentElement.removeEventListener("pointerleave", forget);
       previous = null;
       for (const line of lines) {
         line.amp = 0;
