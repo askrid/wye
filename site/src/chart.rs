@@ -6,6 +6,9 @@ use crate::markdown;
 /// The longest bar of a ratio chart, in cells; a longer value is cut there
 /// and marked, its number still printed in full.
 const RATIO_CELLS: usize = 20;
+/// The narrowest column of printed values ("1,738×"), so charts stacked in
+/// one section start their bars at the same place.
+const LABEL_CELLS: usize = 6;
 /// Eighths of a cell, for the end of a bar.
 const PARTIAL: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
@@ -149,7 +152,8 @@ fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
         .iter()
         .map(|bar| bar.label.chars().count())
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(LABEL_CELLS);
     let lines: Vec<String> = bars
         .iter()
         .map(|bar| {
@@ -217,9 +221,9 @@ mod tests {
         let text = "| TLS | Wye | Bifrost | KrakenD | LiteLLM |\n|---|---|---|---|---|\n\
                     | Delay p99 | 282 µs (230-367) | 132 ms (94-145) | 1.0 ms (0.7-1.1) | not run |\n";
         let chart = relative(text, "Delay p99").unwrap();
-        assert!(chart.contains("Wye        1×"), "{chart}");
-        assert!(chart.contains("KrakenD  3.5×"), "{chart}");
-        assert!(chart.contains("Bifrost  468×"), "{chart}");
+        assert!(chart.contains("Wye          1×"), "{chart}");
+        assert!(chart.contains("KrakenD    3.5×"), "{chart}");
+        assert!(chart.contains("Bifrost    468×"), "{chart}");
         assert!(!chart.contains("LiteLLM"));
         assert!(relative(text, "Nothing").is_err());
         assert_eq!(multiple(1738.3), "1,738×");
@@ -230,10 +234,10 @@ mod tests {
         assert_eq!(
             ratios(RATIOS, "Added latency (p50)").unwrap(),
             "<pre class=\"bars\" tabindex=\"0\">\
-             <span class=\"us\">Wye             1×  <span class=\"fill\" aria-hidden=\"true\">█</span></span>\n\
-             KrakenD       1.4×  <span class=\"fill\" aria-hidden=\"true\">█▍</span>\n\
-             agentgateway    7×  <span class=\"fill\" aria-hidden=\"true\">███████</span>\n\
-             LiteLLM       170×  <span class=\"fill\" aria-hidden=\"true\">████████████████████»</span>\
+             <span class=\"us\">Wye               1×  <span class=\"fill\" aria-hidden=\"true\">█</span></span>\n\
+             KrakenD         1.4×  <span class=\"fill\" aria-hidden=\"true\">█▍</span>\n\
+             agentgateway      7×  <span class=\"fill\" aria-hidden=\"true\">███████</span>\n\
+             LiteLLM         170×  <span class=\"fill\" aria-hidden=\"true\">████████████████████»</span>\
              </pre>"
         );
     }
