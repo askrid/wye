@@ -64,7 +64,7 @@ if (strings) {
     }
     if (tail) at.push([tail, y3]);
     return { el, d, x0, y0, x1, y1, x2, y2, x3, y3, tail, at, amp: 0, since: 0,
-      phase: i * 2.399, period: 9000 + (i % 7) * 900, thread: el.classList.contains("thread") };
+      phase: i * 2.399, period: 4000 + (i % 7) * 400, thread: el.classList.contains("thread") };
   });
   const yAt = (line, x) => {
     const at = line.at;
@@ -77,46 +77,31 @@ if (strings) {
     }
     return null;
   };
-  let running = false, visible = false, frame = 0, timer = 0, last = 0, previous = null;
-  // The sway moves at most about a pixel a second, so four redraws a second
-  // show no steps, and each repaints the whole drawing: at rest the page
-  // wakes four times a second, on a timer, not every frame. A plucked line
-  // is redrawn every frame until it settles. A line is only rewritten when
-  // its shape changed. Returns whether a line still rings.
+  let running = false, visible = false, frame = 0, previous = null;
+  // Every frame: the fade is the strokes' own paint, so a redraw is cheap.
+  // A line sways over four to six seconds; a plucked one rings at 7 Hz and
+  // settles within a second and a half. A line is only rewritten when its
+  // shape changed.
   const draw = (now) => {
-    let ringing = false;
-    const swaying = now - last >= 250;
-    if (swaying) last = now;
+    frame = requestAnimationFrame(draw);
     for (const line of lines) {
-      if (!line.amp && (line.thread || !swaying)) continue;
-      const sway = line.thread ? 0 : 1.4 * Math.sin((2 * Math.PI * now) / line.period + line.phase);
+      if (line.thread && !line.amp) continue;
+      const sway = line.thread ? 0 : 1.6 * Math.sin((2 * Math.PI * now) / line.period + line.phase);
       let ring = 0;
       if (line.amp) {
         const age = now - line.since;
-        ring = line.amp * Math.exp(-age / 750) * Math.sin((2 * Math.PI * 2.6 * age) / 1000);
-        line.el.style.opacity = line.thread ? "" : (0.2 + Math.min(0.45, Math.abs(ring) / 10)).toFixed(2);
-        if (age > 3500) {
+        ring = line.amp * Math.exp(-age / 350) * Math.sin((2 * Math.PI * 7 * age) / 1000);
+        line.el.style.opacity = line.thread ? "" : (0.2 + Math.min(0.5, Math.abs(ring) / 8)).toFixed(2);
+        if (age > 1600) {
           line.amp = 0;
           line.el.style.opacity = "";
-        } else ringing = true;
+        }
       }
       const dy = (sway + ring).toFixed(1);
       if (dy === line.dy) continue;
       line.dy = dy;
       line.el.setAttribute("d", `M${line.x0} ${line.y0}C${line.x1} ${(line.y1 + +dy).toFixed(1)} ${line.x2} ${(line.y2 + +dy).toFixed(1)} ${line.x3} ${line.y3}${line.tail ? "H" + line.tail : ""}`);
     }
-    return ringing;
-  };
-  const step = (now) => {
-    frame = 0;
-    if (!running) return;
-    if (draw(now)) frame = requestAnimationFrame(step);
-    else timer = setTimeout(() => (frame = requestAnimationFrame(step)), 250);
-  };
-  const wake = () => {
-    if (!running || frame) return;
-    clearTimeout(timer);
-    frame = requestAnimationFrame(step);
   };
   const pluck = (event) => {
     const screen = strings.getScreenCTM();
@@ -130,7 +115,6 @@ if (strings) {
         if (Math.sign(previous.y - before) !== Math.sign(point.y - after)) {
           line.amp = speed * Math.sign(point.y - previous.y || 1);
           line.since = performance.now();
-          wake();
         }
       }
     }
@@ -146,14 +130,12 @@ if (strings) {
     if (on === running) return;
     running = on;
     if (on) {
-      frame = requestAnimationFrame(step);
+      frame = requestAnimationFrame(draw);
       addEventListener("pointermove", pluck, { passive: true });
       addEventListener("scroll", forget, { passive: true });
       document.documentElement.addEventListener("pointerleave", forget);
     } else {
       cancelAnimationFrame(frame);
-      clearTimeout(timer);
-      frame = 0;
       removeEventListener("pointermove", pluck);
       removeEventListener("scroll", forget);
       document.documentElement.removeEventListener("pointerleave", forget);
