@@ -147,7 +147,7 @@ if (gl) {
   gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
   const pulseBuffer = gl.createBuffer();
-  const pulseData = new Float32Array((96 * 10 + 1) * 4);
+  const pulseData = new Float32Array((48 * 10 + 1) * 4);
   gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, pulseData.byteLength, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(0);
@@ -163,78 +163,139 @@ if (gl) {
     const hex = getComputedStyle(period).getPropertyValue(name).trim().slice(1);
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   };
-  let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0, previous = null;
+  let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0;
+  // The pointer: its latest place, read once a frame, the place read the frame
+  // before, and the canvas's box, measured again only after a scroll or a
+  // resize.
+  let box = null, pointerX = 0, pointerY = 0, pending = false, previousX = 0, previousY = 0, havePrevious = false;
   // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
   // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
   const fit = () => {
-    const box = canvas.getBoundingClientRect();
+    box = canvas.getBoundingClientRect();
     canvas.width = Math.round(box.width * density);
     canvas.height = Math.round(box.height * density);
     gl.viewport(0, 0, canvas.width, canvas.height);
     ink = rgb("--ink");
     accent = rgb("--accent");
   };
-  // Where a string is at fraction t of its length, displaced as it rings.
-  const along = (line, t) => {
-    const at = line.at, f = Math.min(Math.max(t, 0), 1) * (at.length - 1), k = Math.min(Math.floor(f), at.length - 2), r = f - k;
-    const [ax, ay, aw] = at[k], [bx, by, bw] = at[k + 1];
-    return [ax + (bx - ax) * r, ay + (by - ay) * r + (aw + (bw - aw) * r) * line.dy];
-  };
-  // Pulses: a string in, then its string out. In, they gather speed into the
-  // dot; out, they ease off.
+  // Requests: a string in, then its string out. In, they gather speed into
+  // the dot; out, they ease off. At most 48 at once, 6 new a frame.
   const flight = [];
-  const launch = (i, out, t, bright) => {
-    if (flight.length < 96) flight.push({ i, out, t, bright });
-  };
   const IN = 1500, OUT = 1900;
+  let launched = 0;
+  const launch = (i, out, t) => {
+    if (flight.length < 48 && launched < 6) {
+      flight.push({ i, out, t });
+      launched++;
+    }
+  };
+  // Where the pointer crosses a string at rest, by the string's own points.
+  const yAt = (line, x) => {
+    const at = line.at;
+    if (x < at[0][0] || x > at[at.length - 1][0]) return null;
+    for (let k = 1; k < at.length; k++) {
+      if (x <= at[k][0]) {
+        const a = at[k - 1], b = at[k];
+        return a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0] || 1);
+      }
+    }
+    return null;
+  };
+  // A plucked string's neighbours pick up a faint ring, 40 ms later per
+  // string away, unless they already ring louder.
+  const ring = (j, amp, now) => {
+    const line = lines[j];
+    if (!line || j === thread || Math.abs(line.amp) > Math.abs(amp)) return;
+    line.amp = amp;
+    line.since = now;
+  };
+  // Once a frame: every string the pointer crossed since the last frame is
+  // plucked, and sends a request on from where it was plucked.
+  const sense = (now) => {
+    pending = false;
+    if (!box) box = canvas.getBoundingClientRect();
+    if (!box.width) return;
+    const x = ((pointerX - box.left) / box.width) * 1500, y = ((pointerY - box.top) / box.height) * 600;
+    if (havePrevious) {
+      const amp = Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i], before = yAt(line, previousX), after = yAt(line, x);
+        if (before === null || after === null || Math.sign(previousY - before) === Math.sign(y - after)) continue;
+        line.amp = amp;
+        line.since = now;
+        ring(i - 1, amp * 0.35, now + 40);
+        ring(i + 1, amp * 0.35, now + 40);
+        ring(i - 2, amp * 0.12, now + 80);
+        ring(i + 2, amp * 0.12, now + 80);
+        const at = line.at, t = (x - at[0][0]) / (at[at.length - 1][0] - at[0][0]);
+        if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)));
+        else launch(i === thread ? 59 : i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)));
+      }
+    }
+    previousX = x;
+    previousY = y;
+    havePrevious = true;
+  };
+  // Writes a request's streak into the buffer at point n: a head and nine
+  // fading points close behind it. Returns the next free point.
+  const streak = (p, n) => {
+    const line = p.out ? lines[route(p.i)] : lines[p.i], at = line.at, end = at.length - 1;
+    const ease = p.out ? 1 - (1 - p.t) * (1 - p.t) : p.t * p.t;
+    for (let k = 0; k < 10; k++) {
+      const f = Math.min(Math.max(ease - k * 0.006, 0), 1) * end, j = Math.min(Math.floor(f), end - 1), r = f - j;
+      const a = at[j], b = at[j + 1], o = n * 4;
+      pulseData[o] = a[0] + (b[0] - a[0]) * r;
+      pulseData[o + 1] = a[1] + (b[1] - a[1]) * r + (a[2] + (b[2] - a[2]) * r) * line.dy;
+      pulseData[o + 2] = (1 - k / 10) ** 2 * 0.8;
+      pulseData[o + 3] = 10 - k * 0.7;
+      n++;
+    }
+    return n;
+  };
   const draw = (now) => {
     const dt = Math.min(now - (last || now), 50);
     last = now;
+    launched = 0;
+    if (pending) sense(now);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
     // second; its copy glows in over 60 ms and out over 700, to nothing.
-    lines.forEach((line, i) => {
-      const age = now - line.since;
+    let ringing = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], age = now - line.since;
       dys[i] = glows[i] = line.dy = 0;
-      if (!line.amp || age < 0) return;
+      if (!line.amp) continue;
+      ringing = true;
+      if (age < 0) continue;
       const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 700);
       if (age > 300 && glow < 0.002) {
         line.amp = 0;
-        return;
+        continue;
       }
       dys[i] = line.dy = line.amp * Math.exp(-age / 520) * Math.sin((2 * Math.PI * 3 * age) / 1000);
       glows[i] = glow;
-    });
-    // Pulses: a head and nine fading points close behind it, a streak.
-    let n = 0, accentAt = 0;
-    const write = (thread) => {
-      for (const p of flight) {
-        const line = p.out ? lines[route(p.i)] : lines[p.i];
-        if ((line === lines[thread]) !== thread) continue;
-        const ease = p.out ? 1 - (1 - p.t) * (1 - p.t) : p.t * p.t;
-        for (let k = 0; k < 10; k++) {
-          const [x, y] = along(line, ease - k * 0.006);
-          pulseData.set([x, y, p.bright * (1 - k / 10) ** 2 * 0.8, 10 - k * 0.7], n * 4);
-          n++;
-        }
-      }
-    };
-    for (const p of flight) p.t += dt / (p.out ? OUT : IN);
+    }
     // The dot carries the traffic: each request through it brightens a soft
     // halo, which dies away over 400 ms.
     halo *= Math.exp(-dt / 400);
     for (let k = flight.length - 1; k >= 0; k--) {
       const p = flight[k];
-      if (p.t >= 1 && !p.out) {
+      p.t += dt / (p.out ? OUT : IN);
+      if (p.t < 1) continue;
+      if (p.out) flight.splice(k, 1);
+      else {
         p.out = true;
         p.t = 0;
-        halo = Math.min(1, halo + 0.18 * p.bright);
-      } else if (p.t >= 1) flight.splice(k, 1);
+        halo = Math.min(1, halo + 0.18);
+      }
     }
-    pulseData.set([900, 300, halo * 0.35, 70], 0);
-    n = 1;
-    write(false);
-    accentAt = n;
-    write(true);
+    pulseData[0] = 900;
+    pulseData[1] = 300;
+    pulseData[2] = halo * 0.35;
+    pulseData[3] = 70;
+    let n = 1;
+    for (const p of flight) if (!(p.out && p.i === 59)) n = streak(p, n);
+    const accentAt = n;
+    for (const p of flight) if (p.out && p.i === 59) n = streak(p, n);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     // The ringing strings.
@@ -250,7 +311,7 @@ if (gl) {
     gl.uniform1f(u.solid, 1);
     gl.uniform3fv(u.lineColour, accent);
     gl.drawArrays(gl.LINES, strandVertices, vertices.length / 4 - strandVertices);
-    // The pulses, added light on light.
+    // The requests, added light on light.
     gl.useProgram(pulses);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
@@ -262,66 +323,23 @@ if (gl) {
     gl.uniform3fv(u.pulseColour, accent);
     gl.drawArrays(gl.POINTS, accentAt, n - accentAt);
     // Go on while anything still moves; otherwise the frame just drawn is
-    // empty, and the loop stops until the next pluck.
-    if (flight.length || halo > 0.003 || lines.some((line) => line.amp)) frame = requestAnimationFrame(draw);
+    // empty, and the loop stops until the pointer moves again.
+    if (flight.length || halo > 0.003 || ringing) frame = requestAnimationFrame(draw);
     else frame = last = 0;
   };
-  const wake = () => {
-    if (!frame) frame = requestAnimationFrame(draw);
-  };
-  // Where the pointer crosses a string at rest, by the string's own points.
-  const yAt = (line, x) => {
-    const at = line.at;
-    if (x < at[0][0] || x > at[at.length - 1][0]) return null;
-    for (let k = 1; k < at.length; k++) {
-      if (x <= at[k][0]) {
-        const [ax, ay] = at[k - 1], [bx, by] = at[k];
-        return ay + ((by - ay) * (x - ax)) / (bx - ax || 1);
-      }
-    }
-    return null;
-  };
+  // The pointer only notes where it is and asks for a frame.
   const pluck = (event) => {
     if (event.pointerType !== "mouse") return;
-    const box = canvas.getBoundingClientRect();
-    if (!box.width) return;
-    const point = { x: ((event.clientX - box.left) / box.width) * 1500, y: ((event.clientY - box.top) / box.height) * 600 };
-    if (previous) {
-      const amp = Math.min(5, Math.max(1.5, Math.abs(point.y - previous.y) * 0.4)) * Math.sign(point.y - previous.y || 1);
-      const now = performance.now();
-      // A plucked string's neighbours pick up a faint ring, 40 ms later per
-      // string away, unless they already ring louder.
-      const ring = (j, share, delay) => {
-        const line = lines[j];
-        if (!line || j === thread || Math.abs(line.amp) > Math.abs(amp * share)) return;
-        line.amp = amp * share;
-        line.since = now + delay;
-      };
-      lines.forEach((line, i) => {
-        const before = yAt(line, previous.x), after = yAt(line, point.x);
-        if (before === null || after === null) return;
-        if (Math.sign(previous.y - before) !== Math.sign(point.y - after)) {
-          line.amp = amp;
-          line.since = now;
-          for (const d of [1, 2]) {
-            ring(i - d, d === 1 ? 0.35 : 0.12, 40 * d);
-            ring(i + d, d === 1 ? 0.35 : 0.12, 40 * d);
-          }
-          // And sends a request on from where it was plucked.
-          const t = (point.x - line.at[0][0]) / (line.at[line.at.length - 1][0] - line.at[0][0]);
-          if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)), 1);
-          else if (i === thread) launch(59, true, 1 - Math.sqrt(1 - Math.min(t, 1)), 1);
-          else launch(i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)), 1);
-          wake();
-        }
-      });
-    }
-    previous = point;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    pending = true;
+    if (!frame) frame = requestAnimationFrame(draw);
   };
   // A pointer that left the window, or a page that scrolled under it, starts
   // afresh, so its next move does not pluck every string in between.
   const forget = () => {
-    previous = null;
+    havePrevious = pending = false;
+    box = null;
   };
   const update = () => {
     const on = visible && !lost && !document.hidden && !reduce.matches;
@@ -339,7 +357,7 @@ if (gl) {
       removeEventListener("pointermove", pluck);
       removeEventListener("scroll", forget);
       document.documentElement.removeEventListener("pointerleave", forget);
-      previous = null;
+      havePrevious = pending = false;
       flight.length = 0;
       for (const line of lines) line.amp = 0;
       if (!lost) gl.clear(gl.COLOR_BUFFER_BIT);
