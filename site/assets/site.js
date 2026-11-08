@@ -43,15 +43,14 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
   wrap.append(button, status);
 }
 
-// The headline's lines as strings, and requests along them. Pulses of
-// light enter on the incoming strings, speed into the dot, and leave on the
-// string that line routes to (one on the orange thread, the failover); a
-// string the pointer crosses is plucked, rings, and sends a pulse of its own.
-// It all lives on the GPU: the strings' shapes are uploaded once, and a frame
-// sends each string's displacement and each pulse's place, then draws twice.
-// It runs only while the hero is in view and the tab shown, on the
-// low-power GPU, and never under prefers-reduced-motion; without WebGL the
-// drawing just sways (CSS).
+// The headline's lines as strings. Nothing moves by itself: a string the
+// pointer crosses is plucked, rings, nudges its neighbours, and sends a
+// request on along its route, and the dot glows as the request passes.
+// It all lives on the GPU: the strings' shapes are uploaded once, and a
+// frame sends each string's displacement and each request's place, then
+// draws twice. Frames run only while something the reader started still
+// moves, on the low-power GPU, and never under prefers-reduced-motion,
+// out of view, or in a hidden tab; without WebGL the drawing stays still.
 const period = document.querySelector(".period");
 const canvas = document.createElement("canvas");
 const gl = period && canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
@@ -164,7 +163,7 @@ if (gl) {
     const hex = getComputedStyle(period).getPropertyValue(name).trim().slice(1);
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   };
-  let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0, spawn = 0, previous = null;
+  let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0, previous = null;
   // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
   // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
   const fit = () => {
@@ -189,16 +188,8 @@ if (gl) {
   };
   const IN = 1500, OUT = 1900;
   const draw = (now) => {
-    frame = requestAnimationFrame(draw);
     const dt = Math.min(now - (last || now), 50);
     last = now;
-    // A new request every 120 ms or so; one on the failover every 4 s.
-    spawn -= dt;
-    if (spawn <= 0) {
-      spawn = 60 + Math.random() * 80;
-      launch(Math.floor(Math.random() * 100), false, 0, 0.55 + Math.random() * 0.3);
-    }
-    if (now % 4000 < dt) launch(59, false, 0, 0.9);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
     // second; its copy glows in over 60 ms and out over 700, to nothing.
     lines.forEach((line, i) => {
@@ -270,6 +261,13 @@ if (gl) {
     gl.drawArrays(gl.POINTS, 0, accentAt);
     gl.uniform3fv(u.pulseColour, accent);
     gl.drawArrays(gl.POINTS, accentAt, n - accentAt);
+    // Go on while anything still moves; otherwise the frame just drawn is
+    // empty, and the loop stops until the next pluck.
+    if (flight.length || halo > 0.003 || lines.some((line) => line.amp)) frame = requestAnimationFrame(draw);
+    else frame = last = 0;
+  };
+  const wake = () => {
+    if (!frame) frame = requestAnimationFrame(draw);
   };
   // Where the pointer crosses a string at rest, by the string's own points.
   const yAt = (line, x) => {
@@ -314,6 +312,7 @@ if (gl) {
           if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)), 1);
           else if (i === thread) launch(59, true, 1 - Math.sqrt(1 - Math.min(t, 1)), 1);
           else launch(i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)), 1);
+          wake();
         }
       });
     }
@@ -330,13 +329,13 @@ if (gl) {
     running = on;
     if (on) {
       fit();
-      last = 0;
-      frame = requestAnimationFrame(draw);
       addEventListener("pointermove", pluck, { passive: true });
       addEventListener("scroll", forget, { passive: true });
       document.documentElement.addEventListener("pointerleave", forget);
     } else {
       cancelAnimationFrame(frame);
+      frame = last = 0;
+      halo = 0;
       removeEventListener("pointermove", pluck);
       removeEventListener("scroll", forget);
       document.documentElement.removeEventListener("pointerleave", forget);
