@@ -205,7 +205,9 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .facts a { color: var(--text); }
 @media (max-width: 40rem) {
   :root { --h1: min(3.25rem, 100cqi / 8.6); }
-  .hero pre.code { white-space: pre-wrap; overflow-wrap: break-word; }
+  /* "anywhere", so the long URL can break and the blocks fit the screen. */
+  .hero pre.code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .steps pre.code[data-lang="bash"] { padding-right: 5.25rem; }
   .hero .code .c { display: none; }
 }
 
@@ -299,7 +301,9 @@ html { overflow-x: clip; }
    A gateway token as wye token issue writes it, its claims (bright) between
    header and signature, then decoded; an alias as a fork; the config's two
    upstreams sharing sessions by weight, one session failing over. */
-.token, .routes { margin: 0; display: grid; gap: 1rem; }
+.token, .routes { margin: 0; display: grid; gap: 1rem; min-width: 0; }
+/* Lines that must keep their shape scroll in their own box on a phone. */
+.claims, .fork { overflow-x: auto; }
 .jwt, .claims, .fork { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
 .jwt .claims-part, .claims, .fork { color: var(--ink); }
