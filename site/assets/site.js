@@ -46,15 +46,10 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 // The headline's lines as strings: each sways a little, slowly, and one the
 // pointer crosses is plucked, rings, and settles; both ends stay put, like a
 // string's. Ambient only: it never moves the page, runs only while the hero
-// is in view, and stays still under prefers-reduced-motion; the m key turns
-// it on or off either way, remembered on this browser.
+// is in view, and stays still under prefers-reduced-motion.
 const strings = document.querySelector(".period svg");
 if (strings) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-  let chosen = null;
-  try {
-    chosen = localStorage.getItem("wye-motion");
-  } catch {}
   const lines = [...strings.querySelectorAll(".lines path, .thread")].map((el, i) => {
     const d = el.getAttribute("d");
     const [x0, y0, x1, y1, x2, y2, x3, y3, tail] = d.match(/-?[\d.]+/g).map(Number);
@@ -116,7 +111,7 @@ if (strings) {
     previous = point;
   };
   const update = () => {
-    const on = visible && !document.hidden && (chosen ? chosen === "on" : !reduce.matches);
+    const on = visible && !document.hidden && !reduce.matches;
     if (on === running) return;
     running = on;
     if (on) {
@@ -139,13 +134,5 @@ if (strings) {
   }).observe(strings);
   document.addEventListener("visibilitychange", update);
   reduce.addEventListener("change", update);
-  addEventListener("keydown", (event) => {
-    if (event.code !== "KeyM" || event.metaKey || event.ctrlKey || event.altKey || event.target.closest("input, textarea, [contenteditable]")) return;
-    chosen = running ? "off" : "on";
-    try {
-      localStorage.setItem("wye-motion", chosen);
-    } catch {}
-    update();
-  });
   update();
 }
