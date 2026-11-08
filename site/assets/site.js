@@ -75,7 +75,7 @@ if (gl) {
     }
     if (tail) at.push([tail, y3, 0]);
     for (let k = 1; k < at.length; k++) vertices.push(...at[k - 1], i, ...at[k], i);
-    return { at, amp: 0, since: 0, dy: 0, plucked: -1e9, sent: -1e9 };
+    return { at, amp: 0, since: 0, dy: 0 };
   });
   // The drawing's order: 100 strings in, then 99 out (in's order, less the
   // one that fails over), then the thread, that one's way out.
@@ -164,22 +164,13 @@ if (gl) {
     return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
   };
   let ink, accent, density = 1, halo = 0, running = false, visible = false, lost = false, frame = 0, last = 0;
-  // Motion is bounded, whatever the pointer does. Quality steps down when
-  // frames run slow (over 22 ms on average) and back up after four seconds
-  // of smooth ones (under 18, so a 60 Hz screen recovers): each step is the points in a request's
-  // streak, the dot's halo, the most strings ringing at once, and the
-  // canvas's pixels per CSS pixel. A fast machine stays on the top step.
-  const LEVELS = [[3, false, 16, 0.5], [6, true, 32, 0.75], [10, true, 48, 1]];
-  let quality = 2, pace = 16.7, changed = 0;
   // The pointer: its latest place, read once a frame, the place read the frame
   // before, and the canvas's box, measured again only after a scroll or a
   // resize.
   let box = null, pointerX = 0, pointerY = 0, pending = false, previousX = 0, previousY = 0, havePrevious = false;
-  // One canvas pixel per CSS pixel on the top step: a ringing string draws a
-  // pixel wide, as the drawing's 0.9-unit strokes do, and the pulses are soft
-  // anyway. Lower steps draw fewer pixels, scaled up.
+  // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
+  // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
   const fit = () => {
-    density = LEVELS[quality][3];
     box = canvas.getBoundingClientRect();
     canvas.width = Math.round(box.width * density);
     canvas.height = Math.round(box.height * density);
@@ -214,26 +205,9 @@ if (gl) {
   // string away, unless they already ring louder.
   const ring = (j, amp, now) => {
     const line = lines[j];
-    if (!line || j === thread || Math.abs(line.amp) > Math.abs(amp) || (!line.amp && !voice())) return;
+    if (!line || j === thread || Math.abs(line.amp) > Math.abs(amp)) return;
     line.amp = amp;
     line.since = now;
-  };
-  // A voice for one more ringing string, as a synthesizer finds one: free
-  // while fewer than the step's limit ring, else taken from the quietest.
-  let voices = 0;
-  const voice = () => {
-    if (voices < LEVELS[quality][2]) return ++voices;
-    let quietest = null, least = Infinity;
-    const now = performance.now();
-    for (const line of lines) {
-      const left = Math.abs(line.amp) * Math.exp(-(now - line.since) / 450);
-      if (line.amp && left < least) {
-        least = left;
-        quietest = line;
-      }
-    }
-    if (quietest) quietest.amp = 0;
-    return true;
   };
   // Once a frame, the strings the pointer crossed since the last frame are
   // plucked, within a budget, as a real strum is: at most 8 a frame, spread
@@ -253,26 +227,18 @@ if (gl) {
         const before = yAt(lines[i], previousX), after = yAt(lines[i], x);
         if (before !== null && after !== null && Math.sign(previousY - before) !== Math.sign(y - after)) crossed.push(i);
       }
-      voices = 0;
-      for (const line of lines) if (line.amp) voices++;
       const count = Math.min(crossed.length, 8);
       const amp = (Math.min(5, Math.max(1.5, Math.abs(y - previousY) * 0.4)) * Math.sign(y - previousY || 1) * Math.sqrt(count / Math.max(crossed.length, 1)));
       for (let c = 0; c < count; c++) {
         const i = crossed[Math.floor(((c + 0.5) * crossed.length) / count)], line = lines[i];
-        // A string crossed again within 150 ms rings on; it is not struck
-        // anew, so a fast back-and-forth does not restart every string.
-        if (now - line.plucked < 150 || (!line.amp && !voice())) continue;
         line.amp = amp;
-        line.since = line.plucked = now;
+        line.since = now;
         if (crossed.length <= 3) {
           ring(i - 1, amp * 0.35, now + 40);
           ring(i + 1, amp * 0.35, now + 40);
           ring(i - 2, amp * 0.12, now + 80);
           ring(i + 2, amp * 0.12, now + 80);
         }
-        // One request a string per 400 ms, so a tremolo is not a flood.
-        if (now - line.sent < 400) continue;
-        line.sent = now;
         const at = line.at, t = (x - at[0][0]) / (at[at.length - 1][0] - at[0][0]);
         if (i < 100) launch(i, false, Math.sqrt(Math.max(t, 0)));
         else launch(i === thread ? 59 : i - 100 + (i - 100 >= 59 ? 1 : 0), true, 1 - Math.sqrt(1 - Math.min(t, 1)));
@@ -282,35 +248,25 @@ if (gl) {
     previousY = y;
     havePrevious = true;
   };
-  // Writes a request's streak into the buffer at point n: a head and fading
-  // points close behind it (ten on the top step). Returns the next free point.
+  // Writes a request's streak into the buffer at point n: a head and nine
+  // fading points close behind it. Returns the next free point.
   const streak = (p, n) => {
-    const line = p.out ? lines[route(p.i)] : lines[p.i], at = line.at, end = at.length - 1, points = LEVELS[quality][0];
+    const line = p.out ? lines[route(p.i)] : lines[p.i], at = line.at, end = at.length - 1;
     const ease = p.out ? 1 - (1 - p.t) * (1 - p.t) : p.t * p.t;
-    for (let k = 0; k < points; k++) {
+    for (let k = 0; k < 10; k++) {
       const f = Math.min(Math.max(ease - k * 0.006, 0), 1) * end, j = Math.min(Math.floor(f), end - 1), r = f - j;
       const a = at[j], b = at[j + 1], o = n * 4;
       pulseData[o] = a[0] + (b[0] - a[0]) * r;
       pulseData[o + 1] = a[1] + (b[1] - a[1]) * r + (a[2] + (b[2] - a[2]) * r) * line.dy;
-      pulseData[o + 2] = (1 - k / points) ** 2 * 0.8;
-      pulseData[o + 3] = 10 - (k * 7) / points;
+      pulseData[o + 2] = (1 - k / 10) ** 2 * 0.8;
+      pulseData[o + 3] = 10 - k * 0.7;
       n++;
     }
     return n;
   };
   const draw = (now) => {
-    const raw = last ? now - last : 16.7, dt = Math.min(raw, 50);
+    const dt = Math.min(now - (last || now), 50);
     last = now;
-    pace = pace * 0.9 + raw * 0.1;
-    if (pace > 22 && quality > 0 && now - changed > 800) {
-      quality--;
-      changed = now;
-      fit();
-    } else if (pace < 18 && quality < 2 && now - changed > 4000) {
-      quality++;
-      changed = now;
-      fit();
-    }
     launched = 0;
     if (pending) sense(now);
     // Strings: a plucked one rings at 3 Hz, its swing dying over half a
@@ -346,7 +302,7 @@ if (gl) {
     }
     pulseData[0] = 900;
     pulseData[1] = 300;
-    pulseData[2] = LEVELS[quality][1] ? halo * 0.35 : 0;
+    pulseData[2] = halo * 0.35;
     pulseData[3] = 70;
     let n = 1;
     for (const p of flight) if (!(p.out && p.i === 59)) n = streak(p, n);
