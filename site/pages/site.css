@@ -526,18 +526,32 @@ pre.code code { font: inherit; }
 .chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
 .chart figcaption { color: var(--graphite); font-size: var(--caption); }
 .bars {
-  margin: 0;
-  overflow-x: auto;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
   color: var(--text);
   font-family: var(--mono);
   font-size: var(--output);
   font-variant-numeric: tabular-nums;
   line-height: 1.75;
 }
-.bars .fill { color: var(--graphite); }
+.bars th { width: 14ch; padding: 0 1rem 0 0; font-weight: 400; text-align: left; white-space: nowrap; }
+/* Names and values in fixed columns (the longest name, agentgateway, and
+   the widest value, 1,738×), so stacked charts start their bars at one place. */
+.bars .v { width: 8ch; padding: 0 1rem 0 0; text-align: right; white-space: nowrap; }
+/* The bar takes what the name and value leave, so the chart fits any width. */
+.bars .t { padding: 0; }
+.bars tbody .t span { display: block; width: calc(var(--w) * 100%); min-width: 2px; height: 0.8em; background: var(--graphite); }
 .bars .us { color: var(--ink); }
-.bars .us .fill { color: var(--accent); }
-.bars .axis { color: var(--graphite); }
+.bars .us .t span { background: var(--accent); }
+/* Past the scale's end: cut, and marked. */
+.bars .cut { position: relative; }
+.bars .cut::after { content: "»"; position: absolute; left: 100%; top: -0.45em; padding-left: 0.25ch; color: var(--graphite); }
+.bars .axis .t { position: relative; height: 1.75em; }
+.bars .axis span { position: absolute; left: calc(var(--at) * 100%); transform: translateX(-50%); color: var(--graphite); font-size: var(--caption); white-space: nowrap; }
+.bars .axis span:first-child { transform: none; }
+.bars .axis span:last-child { transform: translateX(-100%); }
+/* On a phone the axis keeps its ends; the caption says the scale is log. */
 @media (max-width: 40rem) {
-  .bars { font-size: var(--caption); }
+  .bars .axis span:not(:first-child, :last-child) { display: none; }
 }

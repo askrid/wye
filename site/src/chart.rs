@@ -4,16 +4,12 @@
 
 use crate::markdown;
 
-/// Cells per tenfold: 1× is one cell, 10× seventeen, 1,000× forty-nine.
-const DECADE_CELLS: f64 = 16.0;
+/// Steps per tenfold: Wye's 1× is one step, so it shows as a short bar,
+/// and each tenfold adds sixteen.
+const DECADE_STEPS: f64 = 16.0;
 /// The scale ends at 10,000×; a longer value is cut there and marked "»",
 /// its number still printed in full.
 const DECADES: f64 = 4.0;
-/// The narrowest column of printed values ("1,738×"), so charts stacked in
-/// one section start their bars at the same place.
-const LABEL_CELLS: usize = 6;
-/// Eighths of a cell, for the end of a bar.
-const PARTIAL: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
 struct Bar {
     name: String,
@@ -145,9 +141,10 @@ fn multiple(times: f64) -> String {
     format!("{grouped}×")
 }
 
-/// One line per bar, shortest first: the name, the value as printed, and the
-/// bar on the log scale, then the scale's axis. Bars and axis are hidden
-/// from screen readers, which read the names and values.
+/// A row per bar, shortest first: the name, the value as printed, and the
+/// bar as a share of the space left, on the log scale, so the chart fits
+/// any width; then the axis, one label per tenfold. Screen readers read the
+/// names and values; bars and axis are hidden from them.
 fn draw(mut bars: Vec<Bar>) -> Result<String, String> {
     // The scale starts at Wye's 1×: a gateway ahead of Wye would draw as a
     // sliver like Wye's, so it is an error, not a bar.
@@ -161,67 +158,36 @@ fn draw(mut bars: Vec<Bar>) -> Result<String, String> {
         ));
     }
     bars.sort_by(|a, b| a.value.total_cmp(&b.value));
-    let name_width = bars
-        .iter()
-        .map(|bar| bar.name.chars().count())
-        .max()
-        .unwrap_or(0);
-    let label_width = bars
-        .iter()
-        .map(|bar| bar.label.chars().count())
-        .max()
-        .unwrap_or(0)
-        .max(LABEL_CELLS);
-    let max_cells = 1.0 + DECADE_CELLS * DECADES;
-    let lines: Vec<String> = bars
-        .iter()
-        .map(|bar| {
-            let cells = 1.0 + DECADE_CELLS * bar.value.log10();
-            let cut = cells > max_cells;
-            let cells = cells.clamp(0.0, max_cells);
-            let mut full = cells.floor() as usize;
-            let mut eighths = ((cells - cells.floor()) * 8.0).round() as usize;
-            if eighths == 8 {
-                full += 1;
-                eighths = 0;
-            }
-            if full == 0 && eighths == 0 {
-                eighths = 1;
-            }
-            let mut line = format!(
-                "{}{}  {}{}  <span class=\"fill\" aria-hidden=\"true\">{}{}{}</span>",
-                markdown::escape(&bar.name),
-                " ".repeat(name_width - bar.name.chars().count()),
-                " ".repeat(label_width - bar.label.chars().count()),
-                markdown::escape(&bar.label),
-                "█".repeat(full),
-                PARTIAL.get(eighths).unwrap_or(&""),
-                if cut { "»" } else { "" },
-            );
-            if bar.us {
-                line = format!("<span class=\"us\">{line}</span>");
-            }
-            line
-        })
-        .collect();
-    // The axis: each tenfold up to the first at or above the longest bar.
-    let top = bars
-        .last()
-        .map_or(0.0, |bar| bar.value.log10().min(DECADES));
-    let mut axis = " ".repeat(name_width + 2 + label_width + 2);
-    let start = axis.chars().count();
-    for decade in 0..=(top - 1e-9).ceil() as u32 {
-        let at = start + (DECADE_CELLS as usize) * decade as usize;
-        let pad = at.saturating_sub(axis.chars().count());
-        axis.push_str(&" ".repeat(pad.max(if decade == 0 { 0 } else { 1 })));
-        axis.push_str(&multiple(10f64.powi(decade as i32)));
+    // As many tenfolds as the longest bar reaches, at least one.
+    let top = bars.last().map_or(0.0, |bar| bar.value.log10());
+    let decades = (top - 1e-9).ceil().clamp(1.0, DECADES);
+    let span = 1.0 + DECADE_STEPS * decades;
+    let share = |steps: f64| format!("{:.4}", (steps / span).clamp(0.0, 1.0));
+    let mut out = String::from("<table class=\"bars\"><tbody>");
+    for bar in &bars {
+        let steps = 1.0 + DECADE_STEPS * bar.value.log10();
+        out.push_str(&format!(
+            "<tr{}><th scope=\"row\">{}</th><td class=\"v\">{}</td>\
+             <td class=\"t\" aria-hidden=\"true\"><span{} style=\"--w:{}\"></span></td></tr>",
+            if bar.us { " class=\"us\"" } else { "" },
+            markdown::escape(&bar.name),
+            markdown::escape(&bar.label),
+            if steps > span { " class=\"cut\"" } else { "" },
+            share(steps),
+        ));
     }
-    // Focusable, so a keyboard can scroll a chart wider than the page.
-    Ok(format!(
-        "<pre class=\"bars\" tabindex=\"0\">{}\n<span class=\"axis\" aria-hidden=\"true\">{}</span></pre>",
-        lines.join("\n"),
-        axis.trim_end()
-    ))
+    out.push_str(
+        "</tbody><tfoot aria-hidden=\"true\"><tr class=\"axis\"><td></td><td></td><td class=\"t\">",
+    );
+    for decade in 0..=decades as i32 {
+        out.push_str(&format!(
+            "<span style=\"--at:{}\">{}</span>",
+            share(1.0 + DECADE_STEPS * f64::from(decade)),
+            multiple(10f64.powi(decade))
+        ));
+    }
+    out.push_str("</td></tr></tfoot></table>");
+    Ok(out)
 }
 
 /// A gateway's name from its table cell: a link's text, or the cell up to
@@ -248,14 +214,21 @@ mod tests {
         | [LiteLLM](https://y) 1.105 (Python) | 170× | 320× (at idle) |\n\
         | [KrakenD](https://z) 3.0 CE (Go) | 1.4× | cannot stream |\n";
 
+    const ROW: &str = "<th scope=\"row\">";
+
     #[test]
     fn draws_a_row_relative_to_wye() {
         let text = "| TLS | Wye | Bifrost | KrakenD | LiteLLM |\n|---|---|---|---|---|\n\
                     | Delay p99 | 282 µs (230-367) | 132 ms (94-145) | 1.0 ms (0.7-1.1) | not run |\n";
         let chart = relative(text, "Delay p99").unwrap();
-        assert!(chart.contains("Wye          1×"), "{chart}");
-        assert!(chart.contains("KrakenD    3.5×"), "{chart}");
-        assert!(chart.contains("Bifrost    468×"), "{chart}");
+        for row in [
+            "Wye</th><td class=\"v\">1×",
+            "KrakenD</th><td class=\"v\">3.5×",
+            "Bifrost</th><td class=\"v\">468×",
+        ] {
+            assert!(chart.contains(&format!("{ROW}{row}")), "{chart}");
+        }
+        assert!(chart.contains("<tr class=\"us\">"), "{chart}");
         assert!(!chart.contains("LiteLLM"));
         assert!(relative(text, "Nothing").is_err());
     }
@@ -282,28 +255,40 @@ mod tests {
         let text = "| TLS | Wye | Ten | Huge |\n|---|---|---|---|\n\
                     | Delay | 1 ms | 10 ms | 20 s |\n";
         let chart = relative(text, "Delay").unwrap();
-        assert!(chart.contains("»"), "{chart}");
-        let axis = chart.lines().last().unwrap();
         assert!(
-            axis.contains("10,000×") && !axis.contains("100,000×"),
+            chart.contains("class=\"cut\" style=\"--w:1.0000\""),
+            "{chart}"
+        );
+        assert!(
+            chart.contains(">10,000×<") && !chart.contains(">100,000×<"),
             "{chart}"
         );
         let tens = "| TLS | Wye | Ten |\n|---|---|---|\n| Delay | 1 ms | 10 ms |\n";
-        let axis = relative(tens, "Delay").unwrap();
-        assert!(axis.contains("10×") && !axis.contains("100×"), "{axis}");
+        let chart = relative(tens, "Delay").unwrap();
+        assert!(
+            chart.contains("--w:1.0000") && chart.contains(">10×<") && !chart.contains(">100×<"),
+            "{chart}"
+        );
     }
 
     #[test]
     fn draws_multiples_with_wye_as_one() {
-        assert_eq!(
-            ratios(RATIOS, "Added latency (p50)").unwrap(),
-            "<pre class=\"bars\" tabindex=\"0\">\
-             <span class=\"us\">Wye               1×  <span class=\"fill\" aria-hidden=\"true\">█</span></span>\n\
-             KrakenD         1.4×  <span class=\"fill\" aria-hidden=\"true\">███▍</span>\n\
-             agentgateway      7×  <span class=\"fill\" aria-hidden=\"true\">██████████████▌</span>\n\
-             LiteLLM         170×  <span class=\"fill\" aria-hidden=\"true\">████████████████████████████████████▋</span>\n\
-             <span class=\"axis\" aria-hidden=\"true\">                      1×              10×             100×            1,000×</span>\
-             </pre>"
+        let chart = ratios(RATIOS, "Added latency (p50)").unwrap();
+        // Three tenfolds (170×), 49 steps: 1× is one step, 170× 36.7.
+        for (name, label, width) in [
+            ("Wye", "1×", "0.0204"),
+            ("KrakenD", "1.4×", "0.0681"),
+            ("agentgateway", "7×", "0.2964"),
+            ("LiteLLM", "170×", "0.7487"),
+        ] {
+            let row = format!(
+                "{ROW}{name}</th><td class=\"v\">{label}</td><td class=\"t\" aria-hidden=\"true\"><span style=\"--w:{width}\">"
+            );
+            assert!(chart.contains(&row), "{row}\n{chart}");
+        }
+        assert!(
+            chart.contains("<span style=\"--at:1.0000\">1,000×</span>"),
+            "{chart}"
         );
     }
 
