@@ -100,7 +100,7 @@ if (gl) {
       float glow = dot(u_glow[i], m);
       vec2 p = vec2(a.x, a.y + a.z * dy);
       v_pos = p;
-      v_alpha = glow == 0.0 ? 0.0 : u_solid > 0.5 ? 1.0 : 0.2 + glow;
+      v_alpha = u_solid > 0.5 ? min(1.0, glow * 1.8) : glow;
       gl_Position = vec4(p.x / 750.0 - 1.0, 1.0 - p.y / 300.0, 0.0, 1.0);
     }`));
   gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `
@@ -141,23 +141,25 @@ if (gl) {
     accent = rgb("--accent");
   };
   // A plucked line rings like a string: 3 Hz, its swing dying away over half
-  // a second, gone by 2.2 s. It brightens with that envelope, not with the
-  // swing, so it glows and fades instead of flickering at each crossing.
-  // When none rings, the canvas is cleared and the loop stops.
+  // a second. Its copy over the drawing glows in over 60 ms and fades out
+  // over 700, a little after the swing, all the way to nothing, so it never
+  // drops away in a step; the line stops once its glow cannot be seen. When
+  // none rings, the canvas is cleared and the loop stops.
   const draw = (now) => {
     let ringing = false;
     lines.forEach((line, i) => {
       const age = now - line.since;
-      if (line.amp && age > 2200) line.amp = 0;
-      if (!line.amp || age < 0) {
-        dys[i] = glows[i] = 0;
-        if (line.amp) ringing = true;
+      dys[i] = glows[i] = 0;
+      if (!line.amp) return;
+      ringing = true;
+      if (age < 0) return;
+      const glow = 0.55 * (1 - Math.exp(-Math.abs(line.amp) / 3)) * (1 - Math.exp(-age / 60)) * Math.exp(-age / 700);
+      if (age > 300 && glow < 0.002) {
+        line.amp = 0;
         return;
       }
-      ringing = true;
-      const envelope = line.amp * Math.exp(-age / 520);
-      dys[i] = envelope * Math.sin((2 * Math.PI * 3 * age) / 1000);
-      glows[i] = Math.max(1e-6, Math.min(0.45, Math.abs(envelope) / 10));
+      dys[i] = line.amp * Math.exp(-age / 520) * Math.sin((2 * Math.PI * 3 * age) / 1000);
+      glows[i] = glow;
     });
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
