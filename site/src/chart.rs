@@ -1,11 +1,14 @@
 //! Bar charts drawn in block characters, from tables in the repository's
-//! Markdown: other gateways beside Wye, to scale up to a cut-off marked "»".
+//! Markdown: other gateways beside Wye, on a log scale (each tenfold the same
+//! width, an axis under the bars), so 1× and 1,738× both fit a column.
 
 use crate::markdown;
 
-/// The longest bar of a ratio chart, in cells; a longer value is cut there
-/// and marked, its number still printed in full.
-const RATIO_CELLS: usize = 20;
+/// Cells per tenfold: 1× is one cell, 10× seventeen, 1,000× forty-nine.
+const DECADE_CELLS: f64 = 16.0;
+/// The scale ends at 10,000×; a longer value is cut there and marked "»",
+/// its number still printed in full.
+const DECADES: f64 = 4.0;
 /// The narrowest column of printed values ("1,738×"), so charts stacked in
 /// one section start their bars at the same place.
 const LABEL_CELLS: usize = 6;
@@ -54,7 +57,7 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
     if bars.len() < 2 {
         return Err(format!("the {column:?} column holds no multiples"));
     }
-    Ok(draw(bars, 1.0, RATIO_CELLS))
+    Ok(draw(bars))
 }
 
 /// A chart of one row of a table whose columns are gateways, Wye among them:
@@ -101,7 +104,7 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
     if bars.len() < 2 {
         return Err(format!("{row_start:?}: no figure beside Wye's"));
     }
-    Ok(draw(bars, 1.0, RATIO_CELLS))
+    Ok(draw(bars))
 }
 
 /// A cell's first figure in base units: "1.0 ms (0.7-1.1)" is 0.001.
@@ -139,9 +142,9 @@ fn multiple(times: f64) -> String {
 }
 
 /// One line per bar, shortest first: the name, the value as printed, and the
-/// bar, `per_cell` to a cell. Bars are hidden from screen readers, which
-/// read the names and values.
-fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
+/// bar on the log scale, then the scale's axis. Bars and axis are hidden
+/// from screen readers, which read the names and values.
+fn draw(mut bars: Vec<Bar>) -> String {
     bars.sort_by(|a, b| a.value.total_cmp(&b.value));
     let name_width = bars
         .iter()
@@ -154,12 +157,13 @@ fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
         .max()
         .unwrap_or(0)
         .max(LABEL_CELLS);
+    let max_cells = 1.0 + DECADE_CELLS * DECADES;
     let lines: Vec<String> = bars
         .iter()
         .map(|bar| {
-            let cells = bar.value / per_cell;
-            let cut = cells > max_cells as f64;
-            let cells = cells.min(max_cells as f64);
+            let cells = 1.0 + DECADE_CELLS * bar.value.log10();
+            let cut = cells > max_cells;
+            let cells = cells.clamp(0.0, max_cells);
             let mut full = cells.floor() as usize;
             let mut eighths = ((cells - cells.floor()) * 8.0).round() as usize;
             if eighths == 8 {
@@ -185,10 +189,23 @@ fn draw(mut bars: Vec<Bar>, per_cell: f64, max_cells: usize) -> String {
             line
         })
         .collect();
+    // The axis: each tenfold up to the longest bar, under where its bar ends.
+    let top = bars
+        .last()
+        .map_or(0.0, |bar| bar.value.log10().min(DECADES));
+    let mut axis = " ".repeat(name_width + 2 + label_width + 2);
+    let start = axis.chars().count();
+    for decade in 0..=top.ceil() as u32 {
+        let at = start + (DECADE_CELLS as usize) * decade as usize;
+        let pad = at.saturating_sub(axis.chars().count());
+        axis.push_str(&" ".repeat(pad.max(if decade == 0 { 0 } else { 1 })));
+        axis.push_str(&multiple(10f64.powi(decade as i32)));
+    }
     // Focusable, so a keyboard can scroll a chart wider than the page.
     format!(
-        "<pre class=\"bars\" tabindex=\"0\">{}</pre>",
-        lines.join("\n")
+        "<pre class=\"bars\" tabindex=\"0\">{}\n<span class=\"axis\" aria-hidden=\"true\">{}</span></pre>",
+        lines.join("\n"),
+        axis.trim_end()
     )
 }
 
@@ -235,9 +252,10 @@ mod tests {
             ratios(RATIOS, "Added latency (p50)").unwrap(),
             "<pre class=\"bars\" tabindex=\"0\">\
              <span class=\"us\">Wye               1×  <span class=\"fill\" aria-hidden=\"true\">█</span></span>\n\
-             KrakenD         1.4×  <span class=\"fill\" aria-hidden=\"true\">█▍</span>\n\
-             agentgateway      7×  <span class=\"fill\" aria-hidden=\"true\">███████</span>\n\
-             LiteLLM         170×  <span class=\"fill\" aria-hidden=\"true\">████████████████████»</span>\
+             KrakenD         1.4×  <span class=\"fill\" aria-hidden=\"true\">███▍</span>\n\
+             agentgateway      7×  <span class=\"fill\" aria-hidden=\"true\">██████████████▌</span>\n\
+             LiteLLM         170×  <span class=\"fill\" aria-hidden=\"true\">████████████████████████████████████▋</span>\n\
+             <span class=\"axis\" aria-hidden=\"true\">                      1×              10×             100×            1,000×</span>\
              </pre>"
         );
     }

@@ -552,6 +552,7 @@ pre.code code { font: inherit; }
 .bars .fill { color: var(--graphite); }
 .bars .us { color: var(--ink); }
 .bars .us .fill { color: var(--accent); }
+.bars .axis { color: var(--graphite); }
 @media (max-width: 40rem) {
   .bars { font-size: 0.8125rem; }
 }
