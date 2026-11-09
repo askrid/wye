@@ -558,10 +558,10 @@ pre.code code { font: inherit; }
 .bars .cut { position: relative; }
 .bars .cut::after { content: "»"; position: absolute; left: 100%; top: -0.45em; padding-left: 0.25ch; color: var(--graphite); }
 .bars .axis .t { position: relative; height: 1.75em; }
-.bars .axis span { position: absolute; left: calc(var(--at) * 100%); transform: translateX(-50%); color: var(--graphite); font-size: var(--caption); white-space: nowrap; }
-.bars .axis span:first-child { transform: none; }
-.bars .axis span:last-child { transform: translateX(-100%); }
+.bars .axis .t span { position: absolute; left: calc(var(--at) * 100%); transform: translateX(-50%); color: var(--graphite); font-size: var(--caption); white-space: nowrap; }
+.bars .axis .t span:first-child { transform: none; }
+.bars .axis .t span:last-child { transform: translateX(-100%); }
 /* On a phone the axis keeps its ends; the caption says the scale is log. */
 @media (max-width: 40rem) {
-  .bars .axis span:not(:first-child, :last-child) { display: none; }
+  .bars .axis .t span:not(:first-child, :last-child) { display: none; }
 }

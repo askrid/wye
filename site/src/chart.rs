@@ -146,7 +146,8 @@ fn multiple(times: f64) -> String {
 /// A row per bar, shortest first: the name, the value as printed, and the
 /// bar as a share of the space left, on the log scale, so the chart fits
 /// any width; then the axis, one label per tenfold. Screen readers read the
-/// names and values; bars and axis are hidden from them.
+/// names and values; bars and axis are hidden from them. The axis row has a
+/// header of its own, unseen, as every cell with text in a table needs one.
 fn draw(mut bars: Vec<Bar>) -> Result<String, String> {
     // The scale starts at Wye's 1×: a gateway ahead of Wye would draw as a
     // sliver like Wye's, so it is an error, not a bar.
@@ -179,7 +180,7 @@ fn draw(mut bars: Vec<Bar>) -> Result<String, String> {
         ));
     }
     out.push_str(
-        "</tbody><tfoot aria-hidden=\"true\"><tr class=\"axis\"><td></td><td></td><td class=\"t\">",
+        "</tbody><tfoot aria-hidden=\"true\"><tr class=\"axis\"><th scope=\"row\"><span class=\"visually-hidden\">Scale</span></th><td></td><td class=\"t\">",
     );
     for decade in 0..=decades as i32 {
         out.push_str(&format!(
