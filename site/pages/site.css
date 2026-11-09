@@ -246,8 +246,10 @@ html, body { overflow-x: clip; }
 .period stop.end { stop-opacity: 0; }
 .period circle { fill: var(--ink); }
 /* Nothing here moves by itself. A string the reader plucks rings on the
-   canvas over the drawing (assets/strings.js), drawn only while it moves. */
-.period canvas { pointer-events: none; }
+   canvas over the drawing (assets/strings.js), drawn only while it moves.
+   The drawing reaches past the headline, over the header's links; neither
+   layer takes the pointer, so what lies under it stays clickable. */
+.period :is(svg, canvas) { pointer-events: none; }
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
