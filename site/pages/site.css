@@ -238,7 +238,7 @@ html, body { overflow-x: clip; }
 }
 /* The fade is the strokes' own paint, a gradient from the dot to nothing
    before the drawing's edges; the canvas's shaders draw the same fade
-   (assets/site.js). */
+   (assets/strings.js). */
 .period .strands path { fill: none; stroke: url(#period-fade); stroke-width: 0.9; opacity: 0.2; }
 .period .thread { fill: none; stroke: url(#period-fade-thread); stroke-width: 1.6; }
 .period stop { stop-color: var(--ink); }
@@ -246,7 +246,7 @@ html, body { overflow-x: clip; }
 .period stop.end { stop-opacity: 0; }
 .period circle { fill: var(--ink); }
 /* Nothing here moves by itself. A string the reader plucks rings on the
-   canvas over the drawing (assets/site.js), drawn only while it moves. */
+   canvas over the drawing (assets/strings.js), drawn only while it moves. */
 .period canvas { pointer-events: none; }
 
 /* A request's path: the stops, the sections in the order a request meets
