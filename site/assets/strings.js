@@ -3,7 +3,7 @@
 // starts; about 40 after) and every frame stay off the page's main thread.
 // site.js sends the drawing's paths and colours with the canvas, then the
 // canvas's size, the pointer's place in the drawing's units, when to forget
-// it, and whether motion may run.
+// it, and when to stop.
 const start = ({ canvas, paths, ink, accent }) => {
   const gl = canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
   if (!gl) return () => {};
@@ -100,11 +100,19 @@ const start = ({ canvas, paths, ink, accent }) => {
   const pulseData = new Float32Array((48 * 10 + 1) * 4);
   gl.enableVertexAttribArray(0);
   gl.enable(gl.BLEND);
-  // The shaders' inputs, found once both programs have linked.
-  let u = null;
+  // The shaders' inputs; asking for them waits for the programs to link,
+  // which in a worker keeps no one waiting.
+  const where = (p, name) => gl.getUniformLocation(p, name);
+  const u = {
+    dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
+    lineColour: where(strings, "u_colour"), pulseColour: where(pulses, "u_colour"),
+  };
   const dys = new Float32Array(200);
   const glows = new Float32Array(200);
-  let halo = 0, running = false, lost = false, frame = 0, last = 0;
+  // blank: the canvas holds nothing, so a frame with nothing to show is
+  // skipped; size: the canvas's next size, set at the next frame drawn, so
+  // a window being resized costs nothing while the strings are still.
+  let halo = 0, frame = 0, last = 0, blank = true, size = null;
   // The pointer: its latest place in the drawing's units, read once a frame,
   // and the place read the frame before.
   let pointerX = 0, pointerY = 0, pending = false, previousX = 0, previousY = 0, havePrevious = false;
@@ -233,6 +241,17 @@ const start = ({ canvas, paths, ink, accent }) => {
     for (const p of flight) if (p.i !== thread) n = streak(p, n);
     const accentAt = n;
     for (const p of flight) if (p.i === thread) n = streak(p, n);
+    const still = !ringing && !flight.length && halo <= 0.003;
+    if (still && blank) {
+      frame = last = 0;
+      return;
+    }
+    blank = still;
+    if (size) {
+      [canvas.width, canvas.height] = size;
+      gl.viewport(0, 0, size[0], size[1]);
+      size = null;
+    }
     gl.clear(gl.COLOR_BUFFER_BIT);
     // The ringing strings.
     gl.useProgram(strings);
@@ -261,53 +280,32 @@ const start = ({ canvas, paths, ink, accent }) => {
     gl.drawArrays(gl.POINTS, accentAt, n - accentAt);
     // Go on while anything still moves; otherwise the frame just drawn is
     // empty, and the loop stops until the pointer moves again.
-    if (flight.length || halo > 0.003 || ringing) frame = requestAnimationFrame(draw);
+    if (!still) frame = requestAnimationFrame(draw);
     else frame = last = 0;
   };
-  const stop = () => {
+  // Motion stopped (out of view, a hidden tab, reduced motion): all still.
+  // A lost context needs no care: its calls do nothing, and the frames stop
+  // once the strings settle.
+  const silence = () => {
     cancelAnimationFrame(frame);
     frame = last = 0;
     halo = 0;
     havePrevious = pending = false;
     flight.length = 0;
     for (const line of lines) line.amp = 0;
-    if (!lost) gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    blank = true;
   };
-  // A lost GPU context (a reset, a sleep) stops the motion; the drawing stays.
-  canvas.addEventListener("webglcontextlost", (event) => {
-    event.preventDefault();
-    lost = true;
-    running = false;
-    stop();
-  });
-  // The programs link on the GPU's own time where the browser allows it;
-  // asking for an input before then would wait for them.
-  const parallel = gl.getExtension("KHR_parallel_shader_compile");
-  const linked = () => {
-    if (parallel && ![strings, pulses].every((p) => gl.getProgramParameter(p, parallel.COMPLETION_STATUS_KHR))) return setTimeout(linked, 50);
-    const where = (p, name) => gl.getUniformLocation(p, name);
-    u = {
-      dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
-      lineColour: where(strings, "u_colour"), pulseColour: where(pulses, "u_colour"),
-    };
-  };
-  linked();
   // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
   // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
-  return ({ size, at, forget, run }) => {
-    if (size) {
-      [canvas.width, canvas.height] = size;
-      gl.viewport(0, 0, size[0], size[1]);
-    }
-    if (forget) havePrevious = pending = false;
-    if (run !== undefined) {
-      running = run && !lost;
-      if (!running) stop();
-    }
-    if (at && running) {
-      [pointerX, pointerY] = at;
+  return (data) => {
+    if (data.size) size = data.size;
+    if (data.forget) havePrevious = pending = false;
+    if (data.stop) silence();
+    if (data.at) {
+      [pointerX, pointerY] = data.at;
       pending = true;
-      if (u && !frame) frame = requestAnimationFrame(draw);
+      if (!frame) frame = requestAnimationFrame(draw);
     }
   };
 };

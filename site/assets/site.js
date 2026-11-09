@@ -72,10 +72,8 @@ function hero(period, reduce) {
   if (!canvas.transferControlToOffscreen) return;
   canvas.setAttribute("aria-hidden", "true");
   period.append(canvas);
-  const rgb = (name) => {
-    const hex = getComputedStyle(period).getPropertyValue(name).trim().slice(1);
-    return [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-  };
+  const style = getComputedStyle(period);
+  const rgb = (name) => [1, 3, 5].map((i) => parseInt(style.getPropertyValue(name).trim().slice(i, i + 2), 16) / 255);
   const offscreen = canvas.transferControlToOffscreen();
   const worker = new Worker("assets/strings.js");
   worker.postMessage({
@@ -84,44 +82,31 @@ function hero(period, reduce) {
     ink: rgb("--ink"),
     accent: rgb("--accent"),
   }, [offscreen]);
-  // The canvas's box, measured again only after a scroll or a resize.
-  let box = null, running = false, visible = false;
-  const fit = () => {
-    box = canvas.getBoundingClientRect();
-    worker.postMessage({ size: [Math.round(box.width), Math.round(box.height)] });
-  };
-  // The pointer's place, in the drawing's units, to the worker, which reads
-  // the latest once a frame.
+  // The pointer's place in the drawing's units. The canvas's box is read at
+  // each move, about one a frame (browsers align moves to frames), so no
+  // shift of the page leaves it stale.
   const pluck = (event) => {
     if (event.pointerType !== "mouse") return;
-    if (!box) box = canvas.getBoundingClientRect();
-    if (!box.width) return;
+    const box = canvas.getBoundingClientRect();
     worker.postMessage({ at: [((event.clientX - box.left) / box.width) * 1500, ((event.clientY - box.top) / box.height) * 600] });
   };
   // A pointer that left the window, or a page that scrolled under it, starts
   // afresh, so its next move does not pluck every string in between.
-  const forget = () => {
-    box = null;
-    worker.postMessage({ forget: true });
-  };
+  const forget = () => worker.postMessage({ forget: true });
+  let running = false, visible = false;
+  // The pointer is heard only while the strings may move; when they may
+  // not, the worker stills them.
   const update = () => {
     const on = visible && !document.hidden && !reduce.matches;
     if (on === running) return;
     running = on;
-    worker.postMessage({ run: on });
-    if (on) {
-      fit();
-      addEventListener("pointermove", pluck, { passive: true });
-      addEventListener("scroll", forget, { passive: true });
-      document.documentElement.addEventListener("pointerleave", forget);
-    } else {
-      removeEventListener("pointermove", pluck);
-      removeEventListener("scroll", forget);
-      document.documentElement.removeEventListener("pointerleave", forget);
-      forget();
-    }
+    const listen = on ? "addEventListener" : "removeEventListener";
+    window[listen]("pointermove", pluck, { passive: true });
+    window[listen]("scroll", forget, { passive: true });
+    document.documentElement[listen]("pointerleave", forget);
+    if (!on) worker.postMessage({ stop: true });
   };
-  new ResizeObserver(() => running && fit()).observe(canvas);
+  new ResizeObserver(([entry]) => worker.postMessage({ size: [Math.round(entry.contentRect.width), Math.round(entry.contentRect.height)] })).observe(canvas);
   new IntersectionObserver(([entry]) => {
     visible = entry.isIntersecting;
     update();
