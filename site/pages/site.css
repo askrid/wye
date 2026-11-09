@@ -80,7 +80,11 @@
   /* The headline is README's tagline, wrapped and balanced: "LLM
      gateway" over "without bloat.". The longer line is 14 advances of
      0.58 em (0.6 less the tracking), 8.12 em: / 11.3 sets it across about
-     72% of the column, / 8.6 on a phone (below) about 94%. */
+     72% of the column. On a phone (below) it is set as large but on three
+     lines, "LLM gateway", "without", "bloat.", so the dot sits short of
+     the edge and its threads fan out on the screen: no line over 7 em
+     takes "without bloat." apart, and "LLM gateway", 6.38 em, spans about
+     74%. */
   --h1: min(5.25rem, 100cqi / 11.3);
   /* The one column every section's blocks share, prose, panels, figures,
      and tables, so their edges line up down the page: about 75 characters
@@ -211,6 +215,7 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .facts a { color: var(--text); }
 @media (max-width: 40rem) {
   :root { --h1: min(3.25rem, 100cqi / 8.6); }
+  h1 { max-width: 7em; }
   /* "anywhere", so the long URL can break and the blocks fit the screen. */
   .hero pre.code { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
