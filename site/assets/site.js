@@ -51,15 +51,21 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
 // draws twice. Frames run only while something the reader started still
 // moves, on the low-power GPU, and never under prefers-reduced-motion,
 // out of view, or in a hidden tab; without WebGL the drawing stays still.
-// Nothing is built until motion may play, and then in an idle moment after
-// load: a first visit's shaders take the GPU over 100 ms to compile.
+// Nothing is built until motion may play and a mouse or trackpad could
+// pluck (a touch screen never does), and then in an idle moment after load:
+// a first visit's shaders take the GPU over 100 ms to compile.
 const period = document.querySelector(".period");
 if (period) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  const mouse = matchMedia("(any-hover: hover) and (any-pointer: fine)");
+  let started = false;
   const begin = () => {
-    if (reduce.matches) reduce.addEventListener("change", begin, { once: true });
-    else (window.requestIdleCallback || setTimeout)(() => hero(period, reduce));
+    if (started || reduce.matches || !mouse.matches) return;
+    started = true;
+    (window.requestIdleCallback || setTimeout)(() => hero(period, reduce));
   };
+  reduce.addEventListener("change", begin);
+  mouse.addEventListener("change", begin);
   begin();
 }
 function hero(period, reduce) {
