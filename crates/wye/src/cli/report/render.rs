@@ -166,11 +166,14 @@ pub(super) fn render(s: &Summary, paint: Paint) -> String {
 
     columns.title(&mut out, "Top sessions by tokens");
     columns.header(&mut out, "session");
-    let mut sessions: Vec<_> = s.sessions.iter().collect();
-    sessions.sort_by_key(|&(n, g)| (Reverse(g.group.tokens.total()), n));
     // A session without tokens (a refused probe, a count) has no place in a
     // ranking by tokens.
-    sessions.retain(|(_, session)| session.group.tokens.total() > 0);
+    let mut sessions: Vec<_> = s
+        .sessions
+        .iter()
+        .filter(|(_, session)| session.group.tokens.total() > 0)
+        .collect();
+    sessions.sort_by_key(|&(n, g)| (Reverse(g.group.tokens.total()), n));
     for (id, session) in sessions.iter().take(TOP) {
         columns.row(&mut out, short(id), &session.group);
         // The subject and compactions on a line of their own: a subject

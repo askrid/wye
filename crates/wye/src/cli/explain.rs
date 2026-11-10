@@ -10,7 +10,6 @@ use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use http::{HeaderMap, HeaderName, HeaderValue, header::HOST};
 
-use super::{Env, Error, Exit, args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
@@ -23,7 +22,9 @@ use gateway_core::{
 };
 
 use super::{
-    model_list,
+    Env, Error, Exit,
+    args::Parsed,
+    files, model_list,
     paint::{FORWARD, REFUSE},
     size,
 };
@@ -136,7 +137,7 @@ fn missing_request(flag: Option<&str>, config: &Path, env: &impl Env) -> String 
 }
 
 /// The decision and the steps that led to it.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Explanation {
     pub steps: Vec<String>,
     /// `Some((status, error type, message))` when the request is refused.
@@ -516,12 +517,7 @@ pub fn explain(
     now: u64,
     targets: &[&str],
 ) -> Explanation {
-    let mut out = Explanation {
-        steps: Vec::new(),
-        refused: None,
-        model: None,
-        upstream: None,
-    };
+    let mut out = Explanation::default();
     // The server's checks, in its order. Each stage records its steps; a
     // refusal ends the walk with its answer already recorded.
     let _ = (|| -> Stage {
@@ -583,9 +579,6 @@ fn held_len(api: Api, output_ceiling: Option<u64>, body: &[u8]) -> usize {
         .unwrap_or(body.len())
 }
 
-#[cfg(test)]
-mod tests;
-
 /// An entry's prices per million tokens, exact and with at least two
 /// decimals, as `[pricing]` writes them.
 fn prices(entry: &PriceEntry) -> String {
@@ -622,3 +615,6 @@ fn prices(entry: &PriceEntry) -> String {
     }
     text
 }
+
+#[cfg(test)]
+mod tests;

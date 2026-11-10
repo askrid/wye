@@ -31,11 +31,7 @@ use crate::startup::env_secrets;
 mod run;
 mod unit;
 
-#[cfg(test)]
-use run::retry;
 use run::{run_all, uid, wait_for, write_atomically};
-#[cfg(test)]
-use unit::UNIT;
 use unit::{
     Commands, LABEL_WIDTH, plan, restart_commands, shell, start_commands, stop_commands, systemctl,
     uninstall_plan,

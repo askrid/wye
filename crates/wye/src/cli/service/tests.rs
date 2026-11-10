@@ -1,4 +1,4 @@
-use super::*;
+use super::{run::retry, unit::UNIT, *};
 
 fn service(dir: &str) -> Service {
     Service {

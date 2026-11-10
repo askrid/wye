@@ -30,6 +30,10 @@ use super::{
 };
 use crate::log_files;
 
+mod render;
+
+use render::render;
+
 /// Rows shown in the session and prompt rankings.
 const TOP: usize = 10;
 
@@ -232,6 +236,13 @@ impl Window {
     }
 }
 
+/// Session and subagent starts among the unexplained cache misses.
+#[derive(Default)]
+struct Starts {
+    sessions: u64,
+    subagents: u64,
+}
+
 #[derive(Default)]
 struct Summary {
     window: Window,
@@ -351,15 +362,7 @@ impl Summary {
         }
         starts
     }
-}
 
-#[derive(Default)]
-struct Starts {
-    sessions: u64,
-    subagents: u64,
-}
-
-impl Summary {
     /// Adds a usage log's records in the window. Lines that are not request
     /// records (shutdown notices, other output) are skipped and counted.
     /// Records of every format version are read: those without `v` too.
@@ -425,10 +428,6 @@ fn home_logs(env: &impl Env) -> Result<Vec<PathBuf>, String> {
     }
     Ok(paths)
 }
-
-mod render;
-
-use render::render;
 
 #[cfg(test)]
 mod tests;
