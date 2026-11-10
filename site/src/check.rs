@@ -1,12 +1,14 @@
-//! Checks on the built site: everything a page loads comes from the site
-//! itself (no request to another origin, so nothing tracks a reader), every
-//! local link and anchor resolves, and no directive is left unexpanded.
+//! Checks on the built site: everything a page or a script loads comes from
+//! the site itself (no request to another origin, so nothing tracks a
+//! reader), every local link and anchor resolves, and no directive is left
+//! unexpanded.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-/// Files by their path under `out/`, with the text of pages and stylesheets.
+/// Files by their path under `out/`, with the text of pages, stylesheets,
+/// and scripts.
 type Files = BTreeMap<String, Option<String>>;
 
 /// Every problem in the built site under `out`, all reported at once.
@@ -38,7 +40,10 @@ fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
         if path.is_dir() {
             collect(&path, &relative, files)?;
         } else {
-            let text = if relative.ends_with(".html") || relative.ends_with(".css") {
+            let text = if [".html", ".css", ".js"]
+                .iter()
+                .any(|kind| relative.ends_with(kind))
+            {
                 Some(fs::read_to_string(&path).map_err(|e| crate::io_error(&path, e))?)
             } else {
                 None
@@ -56,6 +61,19 @@ fn problems(files: &Files) -> Vec<String> {
         if path.ends_with(".css") {
             for target in css_urls(text) {
                 check_resource(files, path, target, &mut found);
+            }
+            continue;
+        }
+        if path.ends_with(".js") {
+            // A script's URLs resolve against the page that runs it, and
+            // every page is at the site's root.
+            for target in script_urls(text) {
+                match target {
+                    Some(target) => {
+                        check_resource_from(files, path, "index.html", target, &mut found)
+                    }
+                    None => found.push(format!("{path}: loads a URL the check cannot read")),
+                }
             }
             continue;
         }
@@ -77,6 +95,17 @@ fn problems(files: &Files) -> Vec<String> {
 
 /// A file the browser fetches on its own: it must be part of the site.
 fn check_resource(files: &Files, from: &str, target: &str, found: &mut Vec<String>) {
+    check_resource_from(files, from, from, target, found);
+}
+
+/// As `check_resource`, `target` resolved against the page `base`.
+fn check_resource_from(
+    files: &Files,
+    from: &str,
+    base: &str,
+    target: &str,
+    found: &mut Vec<String>,
+) {
     if target.starts_with("data:") {
         return;
     }
@@ -85,7 +114,7 @@ fn check_resource(files: &Files, from: &str, target: &str, found: &mut Vec<Strin
         return;
     }
     let path = target.split(['#', '?']).next().unwrap_or(target);
-    if resolve(from, path).is_none_or(|path| !files.contains_key(&path)) {
+    if resolve(base, path).is_none_or(|path| !files.contains_key(&path)) {
         found.push(format!("{from}: {target} is not in the site"));
     }
 }
@@ -205,6 +234,47 @@ fn styles(html: &str) -> impl Iterator<Item = &str> {
         .filter_map(|rest| rest.split_once("</style>").map(|(css, _)| css))
 }
 
+/// The first argument of each call a script makes that loads a URL: the
+/// literal, or None where it is not one (a variable, a template with `${`),
+/// which the check cannot follow.
+fn script_urls(script: &str) -> Vec<Option<&str>> {
+    const LOADS: [&str; 8] = [
+        "new Worker(",
+        "new SharedWorker(",
+        "importScripts(",
+        "fetch(",
+        "import(",
+        "new EventSource(",
+        "new WebSocket(",
+        "sendBeacon(",
+    ];
+    let mut found = Vec::new();
+    for call in LOADS {
+        for (at, _) in script.match_indices(call) {
+            let named = script
+                .get(..at)
+                .and_then(|before| before.chars().last())
+                .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '$');
+            if named && !call.starts_with("new ") {
+                continue; // prefetch(, myimport(: another function
+            }
+            let argument = script
+                .get(at + call.len()..)
+                .unwrap_or_default()
+                .trim_start();
+            let literal = argument
+                .chars()
+                .next()
+                .filter(|c| matches!(c, '"' | '\'' | '`'));
+            found.push(literal.and_then(|quote| {
+                let (url, _) = argument.get(1..)?.split_once(quote)?;
+                (!url.contains("${")).then_some(url)
+            }));
+        }
+    }
+    found
+}
+
 fn css_urls(css: &str) -> Vec<&str> {
     css.split("url(")
         .skip(1)
@@ -281,6 +351,26 @@ mod tests {
         assert_eq!(
             problems(&site(&[("index.html", page)], &["assets/fonts/o.woff2"])),
             ["index.html: loads //cdn.example/x.png from another origin"]
+        );
+    }
+
+    #[test]
+    fn a_scripts_loads_come_from_the_site_too() {
+        let mut files = site(
+            &[("index.html", "<script src=\"assets/site.js\"></script>")],
+            &["assets/strings.js"],
+        );
+        files.insert(
+            "assets/site.js".into(),
+            Some("new Worker(\"assets/strings.js\"); new Worker(\"assets/gone.js\"); fetch(\"https://t.example/p\"); fetch(url); prefetch(x)".into()),
+        );
+        assert_eq!(
+            problems(&files),
+            [
+                "assets/site.js: assets/gone.js is not in the site",
+                "assets/site.js: loads https://t.example/p from another origin",
+                "assets/site.js: loads a URL the check cannot read",
+            ]
         );
     }
 
