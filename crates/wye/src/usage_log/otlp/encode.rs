@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn a_span_is_an_error_unless_wye_refused_the_request() {
-        use crate::usage_log::UpstreamError;
+        use crate::upstream::UpstreamError;
         let status = |outcome, status| {
             let line = Line {
                 outcome,

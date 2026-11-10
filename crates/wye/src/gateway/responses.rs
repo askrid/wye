@@ -8,7 +8,7 @@ use http_body_util::{Either, Full};
 use super::ResBody;
 use crate::{
     request_body::HoldError,
-    upstream::{ForwardError, PolicyRefusal},
+    upstream::{ForwardError, PolicyRefusal, UpstreamError},
 };
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
@@ -47,13 +47,13 @@ fn unreadable_body(api: Api) -> Response<ResBody> {
 
 pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
     match e {
-        ForwardError::HeaderTimeout => error(
+        ForwardError::Upstream(UpstreamError::Timeout) => error(
             api,
             StatusCode::GATEWAY_TIMEOUT,
             "timeout_error",
             "upstream did not respond in time",
         ),
-        ForwardError::Connect | ForwardError::Upstream => error(
+        ForwardError::Upstream(UpstreamError::Connect | UpstreamError::Reset) => error(
             api,
             StatusCode::BAD_GATEWAY,
             "api_error",
@@ -209,10 +209,17 @@ mod tests {
             let bytes = body.collect().await.unwrap().to_bytes();
             serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
         };
-        let timeout = forward_error(Api::Messages, ForwardError::HeaderTimeout);
+        let timeout = forward_error(
+            Api::Messages,
+            ForwardError::Upstream(UpstreamError::Timeout),
+        );
         assert_eq!(timeout.status(), StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(body(timeout).await["error"]["type"], "timeout_error");
-        let timeout = body(forward_error(Api::Responses, ForwardError::HeaderTimeout)).await;
+        let timeout = body(forward_error(
+            Api::Responses,
+            ForwardError::Upstream(UpstreamError::Timeout),
+        ))
+        .await;
         assert_eq!(timeout["error"]["type"], "server_error");
         assert_eq!(timeout["error"]["code"], "timeout_error");
 

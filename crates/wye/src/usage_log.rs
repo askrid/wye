@@ -41,7 +41,9 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot};
+use crate::{
+    diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot, upstream::UpstreamError,
+};
 
 pub(crate) use agent::AgentHeaders;
 pub use file::UsageFile;
@@ -84,27 +86,6 @@ impl Outcome {
             Self::UpstreamError(_) => "upstream_error",
             Self::GatewayError => "gateway_error",
             Self::Truncated => "truncated",
-        }
-    }
-}
-
-/// Why an upstream gave no usable response, in records as `upstream_error`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UpstreamError {
-    /// No connection or TLS handshake.
-    Connect,
-    /// No response headers within `response_header_timeout`.
-    Timeout,
-    /// The request failed after connecting, before response headers.
-    Reset,
-}
-
-impl UpstreamError {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Connect => "connect",
-            Self::Timeout => "timeout",
-            Self::Reset => "reset",
         }
     }
 }

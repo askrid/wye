@@ -28,8 +28,8 @@ use crate::{
     failover::{Bounds, FailoverBody, Handback, Resend},
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
-    upstream::{ForwardError, Upstream, UpstreamBody},
-    usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UpstreamError, UsageLog},
+    upstream::{ForwardError, Upstream, UpstreamBody, UpstreamError},
+    usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UsageLog},
 };
 
 /// How long a rejected attempt may take to hand its body back: hyper drops a
@@ -88,16 +88,10 @@ impl Gateway {
                 Response::from_parts(parts, Either::Right(body))
             }
             Err(e) => {
-                let upstream_error = match e {
-                    ForwardError::Connect => Some(UpstreamError::Connect),
-                    ForwardError::HeaderTimeout => Some(UpstreamError::Timeout),
-                    ForwardError::Upstream => Some(UpstreamError::Reset),
-                    ForwardError::Policy(_) => None,
-                };
                 let res = forward_error(api, e);
-                match upstream_error {
-                    Some(error) => log.upstream_error(info, error, res),
-                    None => log.refused(info, res),
+                match e {
+                    ForwardError::Upstream(error) => log.upstream_error(info, error, res),
+                    ForwardError::Policy(_) => log.refused(info, res),
                 }
             }
         }
@@ -178,7 +172,7 @@ impl Gateway {
             if let (Some(reason), Some(handback), Some(next)) =
                 (rejection(&result), handback.as_mut(), next)
             {
-                let cut = matches!(result, Err(ForwardError::Upstream));
+                let cut = matches!(result, Err(ForwardError::Upstream(UpstreamError::Reset)));
                 if let Some(resend) = handed_back(handback, cut).await.and_then(|resend| {
                     with_model_id(resend, model_span.as_ref(), next, &mut prefix_sent)
                 }) {
@@ -235,7 +229,9 @@ fn rejection(
 ) -> Option<FailoverReason> {
     match result {
         Ok(res) => FailoverReason::of_status(res.status().as_u16()),
-        Err(ForwardError::Connect | ForwardError::Upstream) => Some(FailoverReason::Connect),
+        Err(ForwardError::Upstream(UpstreamError::Connect | UpstreamError::Reset)) => {
+            Some(FailoverReason::Connect)
+        }
         Err(_) => None,
     }
 }

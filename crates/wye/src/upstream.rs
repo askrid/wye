@@ -98,19 +98,39 @@ const HOP_BY_HOP: [HeaderName; 9] = [
     UPGRADE,
 ];
 
-#[derive(Debug)]
+/// Why an attempt got no response to relay.
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum ForwardError {
-    /// No response headers within the configured timeout.
-    HeaderTimeout,
-    /// The connection could not be made: the request never reached the
-    /// provider.
-    Connect,
-    /// TLS or protocol failure, or a connection lost. A failing client body
-    /// is `Policy(PolicyRefusal::Broken)` instead.
-    Upstream,
+    /// The upstream gave no usable response.
+    Upstream(UpstreamError),
     /// The request body broke the policy or the size limit after
     /// forwarding began; the upstream request was aborted.
     Policy(PolicyRefusal),
+}
+
+/// Why an upstream gave no usable response, in records as `upstream_error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UpstreamError {
+    /// The connection could not be made, TLS included: the request never
+    /// reached the provider.
+    Connect,
+    /// No response headers within `response_header_timeout`.
+    Timeout,
+    /// TLS or protocol failure, or a connection lost, after connecting and
+    /// before response headers. A failing client body is
+    /// `Policy(PolicyRefusal::Broken)` instead.
+    Reset,
+}
+
+impl UpstreamError {
+    /// The record's `upstream_error`.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Connect => "connect",
+            Self::Timeout => "timeout",
+            Self::Reset => "reset",
+        }
+    }
 }
 
 /// HTTP/2 receive window per upstream stream: what one response may buffer
@@ -239,13 +259,13 @@ impl Upstream {
         let (client, slot) = self.clients.acquire();
         let res = tokio::time::timeout(self.response_header_timeout, client.request(req))
             .await
-            .map_err(|_| ForwardError::HeaderTimeout)?
+            .map_err(|_| ForwardError::Upstream(UpstreamError::Timeout))?
             .map_err(|e| {
                 let refusal = refused.as_ref().and_then(|r| r.get().copied());
                 match refusal.or_else(|| policy_refusal(&e)) {
                     Some(refusal) => ForwardError::Policy(refusal),
-                    None if e.is_connect() => ForwardError::Connect,
-                    None => ForwardError::Upstream,
+                    None if e.is_connect() => ForwardError::Upstream(UpstreamError::Connect),
+                    None => ForwardError::Upstream(UpstreamError::Reset),
                 }
             })?;
 
@@ -270,7 +290,7 @@ impl Upstream {
             (false, pq) => {
                 let suffix = pq.map_or("/", PathAndQuery::as_str);
                 PathAndQuery::try_from(format!("{}{suffix}", self.path_prefix))
-                    .map_err(|_| ForwardError::Upstream)?
+                    .map_err(|_| ForwardError::Upstream(UpstreamError::Reset))?
             }
         };
         Uri::builder()
@@ -278,7 +298,7 @@ impl Upstream {
             .authority(self.authority.clone())
             .path_and_query(path_and_query)
             .build()
-            .map_err(|_| ForwardError::Upstream)
+            .map_err(|_| ForwardError::Upstream(UpstreamError::Reset))
     }
 }
 
