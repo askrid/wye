@@ -207,12 +207,8 @@ async fn client_that_stops_reading_is_disconnected() {
         });
         Response::new(Either::Right(ChannelBody(rx)))
     });
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\n\
-         provider_key = {{ env = \"UNUSED\" }}\n"
-    );
+    let (addr, hits) = spawn_counted(handler).await;
+    let config = config("", &upstream(addr, ""));
     // The timeout is fixed at a minute; a second here.
     let h = Harness::launch_adjusted(&config, keyed_resources(), hits, |gateway| {
         gateway.with_client_write_timeout(Duration::from_secs(1))

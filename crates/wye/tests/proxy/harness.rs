@@ -78,6 +78,8 @@ pub(crate) type Handler =
 
 pub(crate) struct Harness {
     pub(crate) gateway: SocketAddr,
+    /// The config the gateway serves, for `explain` to answer from.
+    pub(crate) config: Config,
     pub(crate) upstream_hits: Arc<AtomicUsize>,
     pub(crate) client: Client<HttpConnector, Full<Bytes>>,
     pub(crate) usage: Mutex<Lines<BufReader<DuplexStream>>>,
@@ -91,11 +93,15 @@ impl Harness {
     /// Passthrough gateway in front of a plain-HTTP mock upstream: the
     /// caller's own credential goes upstream.
     pub(crate) async fn passthrough(handler: Handler) -> Self {
-        let (upstream, hits) = spawn_counted(handler).await;
         let resources = with_upstreams(vec![UpstreamResources::new(UpstreamAuth::ForwardCaller)]);
-        let base_url = format!("http://{upstream}");
-        let extra = "forward_caller_credential = true";
-        Self::launch(&base_url, "", extra, resources, hits).await
+        let write = |addr: SocketAddr| {
+            let entry = "forward_caller_credential = true";
+            config(
+                "",
+                &format!("[[upstreams]]\nbase_url = \"http://{addr}\"\n{entry}\n"),
+            )
+        };
+        Self::configured(handler, write, resources).await
     }
 
     /// Provider-key gateway in front of a plain mock upstream, with extra
@@ -107,10 +113,8 @@ impl Harness {
         upstream_extra: &str,
         resources: Resources,
     ) -> Self {
-        let (upstream, hits) = spawn_counted(handler).await;
-        let base_url = format!("http://{upstream}");
-        let extra = format!("provider_key = {{ env = \"UNUSED\" }}\n{upstream_extra}");
-        Self::launch(&base_url, server_extra, &extra, resources, hits).await
+        let write = |addr| config(server_extra, &upstream(addr, upstream_extra));
+        Self::configured(handler, write, resources).await
     }
 
     /// Provider-key gateway in front of a plain mock upstream.
@@ -168,9 +172,12 @@ impl Harness {
                 Vec::new()
             },
         }]);
-        let base_url = format!("https://{upstream}");
-        let extra = format!("provider_key = {{ env = \"UNUSED\" }}\n{upstream_extra}");
-        Self::launch(&base_url, "", &extra, resources, hits).await
+        // The entry `upstream` writes, over TLS.
+        let entry = format!(
+            "[[upstreams]]\nbase_url = \"https://{upstream}\"\n\
+             provider_key = {{ env = \"UNUSED\" }}\n{upstream_extra}\n"
+        );
+        Self::launch_config(&config("", &entry), resources, hits).await
     }
 
     /// Gateway with one upstream, whose provider (in `upstream_lines`)
@@ -181,28 +188,20 @@ impl Harness {
         upstream_lines: &str,
         auth: UpstreamAuth,
     ) -> Self {
-        let (upstream, hits) = spawn_counted(handler).await;
-        let config = format!(
-            "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
-             [[upstreams]]\n{upstream_lines}\n\
-             base_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
-        );
+        let write = |addr| config(server_extra, &upstream(addr, upstream_lines));
         let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
-        Self::launch_config(&config, resources, hits).await
+        Self::configured(handler, write, resources).await
     }
 
-    pub(crate) async fn launch(
-        base_url: &str,
-        server_extra: &str,
-        upstream_extra: &str,
+    /// Gateway in front of the mock serving `handler`, from the config
+    /// `config` writes for the mock's address.
+    pub(crate) async fn configured(
+        handler: Handler,
+        config: impl FnOnce(SocketAddr) -> String,
         resources: Resources,
-        upstream_hits: Arc<AtomicUsize>,
     ) -> Self {
-        let config = format!(
-            "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n\
-             [[upstreams]]\nbase_url = \"{base_url}\"\n{upstream_extra}"
-        );
-        Self::launch_config(&config, resources, upstream_hits).await
+        let (addr, hits) = spawn_counted(handler).await;
+        Self::launch_config(&config(addr), resources, hits).await
     }
 
     /// Gateway serving the whole TOML document `config`.
@@ -243,6 +242,7 @@ impl Harness {
         ));
         Self {
             gateway: addr,
+            config,
             upstream_hits,
             client: Client::builder(TokioExecutor::new()).build_http(),
             usage: Mutex::new(BufReader::new(usage_in).lines()),
@@ -365,6 +365,22 @@ pub(crate) fn keyed_resources() -> Resources {
     with_upstreams(vec![UpstreamResources::new(
         UpstreamAuth::api_key(PROVIDER_KEY).unwrap(),
     )])
+}
+
+/// A config on a free loopback port with a 1 KiB body limit, `server_extra`
+/// lines in `[server]`, then `rest`: upstream entries and other sections.
+pub(crate) fn config(server_extra: &str, rest: &str) -> String {
+    format!(
+        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n{server_extra}\n{rest}"
+    )
+}
+
+/// An `[[upstreams]]` entry for the plain mock at `addr`, with `lines`, its
+/// provider key from an unset variable.
+pub(crate) fn upstream(addr: SocketAddr, lines: &str) -> String {
+    format!(
+        "[[upstreams]]\nbase_url = \"http://{addr}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{lines}\n"
+    )
 }
 
 /// A plain-HTTP mock upstream, and the count of requests it receives.

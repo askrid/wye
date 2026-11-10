@@ -65,13 +65,8 @@ async fn a_gateway_without_auth_refuses_what_a_web_page_sends() {
 /// it either.
 #[tokio::test]
 async fn model_discovery_without_auth_refuses_a_web_page() {
-    let (upstream, hits) = spawn_counted(ok()).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
-         [discovery]\nmodels = [{{ id = \"claude-sonnet-4-6\" }}]\n"
-    );
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let catalog = "[discovery]\nmodels = [{ id = \"claude-sonnet-4-6\" }]";
+    let h = Harness::keyed(ok(), catalog).await;
     let res = h
         .send(
             Request::get("/v1/models").header("origin", "http://evil.example"),
@@ -90,13 +85,7 @@ async fn model_discovery_without_auth_refuses_a_web_page() {
 #[tokio::test]
 async fn a_gateway_with_auth_checks_the_token_not_the_host() {
     let key = keypair();
-    let (upstream, hits) = spawn_counted(ok()).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}",
-        auth_section(&key, "")
-    );
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let h = Harness::keyed(ok(), &auth_section(&key, "")).await;
     let token = token(&key, "alice", None, None);
     for (name, value) in from_pages(h.gateway.port()) {
         let res = h
@@ -110,13 +99,7 @@ async fn a_gateway_with_auth_checks_the_token_not_the_host() {
 /// explains a request without headers as a local client's.
 #[tokio::test]
 async fn explain_and_the_server_answer_alike_for_web_pages() {
-    let (upstream, hits) = spawn_counted(ok()).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
-    );
-    let parsed = Config::from_toml_str(&config).unwrap();
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let h = Harness::provider_key(ok()).await;
     let body = r#"{"model":"claude-haiku-4-5","max_tokens":5}"#;
     let mut cases: Vec<(&str, String)> = from_pages(h.gateway.port()).into();
     cases.push(("sec-fetch-site", "none".to_owned()));
@@ -124,7 +107,7 @@ async fn explain_and_the_server_answer_alike_for_web_pages() {
         let line = format!("{name}: {value}");
         let headers = request_headers("/v1/messages", None, &[&line]).unwrap();
         let explained = explain(
-            &parsed,
+            &h.config,
             "/v1/messages",
             CallerToken::None,
             &headers,
@@ -149,7 +132,7 @@ async fn explain_and_the_server_answer_alike_for_web_pages() {
         h.usage_record().await;
     }
     let local = explain(
-        &parsed,
+        &h.config,
         "/v1/messages",
         CallerToken::None,
         &HeaderMap::new(),

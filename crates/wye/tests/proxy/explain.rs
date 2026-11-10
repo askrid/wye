@@ -8,19 +8,13 @@ use super::harness::*;
 #[tokio::test]
 async fn explain_and_the_server_answer_alike() {
     let key = keypair();
-    let (upstream, hits) = spawn_counted(ok()).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}\n\
-         [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n",
-        auth_section(
-            &key,
-            "models = [\"claude-sonnet-*\", \"claude-haiku-*\"]\nmax_output_tokens = 1000"
-        )
+    let auth = auth_section(
+        &key,
+        "models = [\"claude-sonnet-*\", \"claude-haiku-*\"]\nmax_output_tokens = 1000",
     );
-    let parsed = Config::from_toml_str(&config).unwrap();
-    let verifier = wye::verifier(&parsed, Path::new("/")).unwrap().unwrap();
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let aliases = "[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"";
+    let h = Harness::keyed(ok(), &format!("{auth}\n{aliases}")).await;
+    let verifier = wye::verifier(&h.config, Path::new("/")).unwrap().unwrap();
 
     let open = token(&key, "alice", None, None);
     let haiku_only = token(&key, "alice", Some(&["claude-haiku-*"]), None);
@@ -66,7 +60,7 @@ async fn explain_and_the_server_answer_alike() {
     ];
     for (name, token, body) in cases {
         let explained = explain(
-            &parsed,
+            &h.config,
             "/v1/messages",
             CallerToken::Token(token, &verifier),
             &HeaderMap::new(),
@@ -99,16 +93,13 @@ async fn explain_and_the_server_answer_alike() {
 #[tokio::test]
 async fn explain_and_the_server_answer_alike_on_responses() {
     let key = keypair();
-    let (upstream, hits) = spawn_counted(ok()).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n\
-         [[upstreams]]\nprovider = \"openai\"\nid = \"openai\"\n\
-         base_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n{}\n",
-        auth_section(&key, "models = [\"gpt-5*\"]\nmax_output_tokens = 1000")
-    );
-    let parsed = Config::from_toml_str(&config).unwrap();
-    let verifier = wye::verifier(&parsed, Path::new("/")).unwrap().unwrap();
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let auth = auth_section(&key, "models = [\"gpt-5*\"]\nmax_output_tokens = 1000");
+    let h = Harness::keyed(
+        ok(),
+        &format!("provider = \"openai\"\nid = \"openai\"\n{auth}"),
+    )
+    .await;
+    let verifier = wye::verifier(&h.config, Path::new("/")).unwrap().unwrap();
     let open = token(&key, "alice", None, None);
     let cases: [(&str, &str, &str); 6] = [
         (
@@ -144,7 +135,7 @@ async fn explain_and_the_server_answer_alike_on_responses() {
     ];
     for (name, path, body) in cases {
         let explained = explain(
-            &parsed,
+            &h.config,
             path,
             CallerToken::Token(&open, &verifier),
             &HeaderMap::new(),

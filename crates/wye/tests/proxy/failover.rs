@@ -42,7 +42,7 @@ fn base_url(addr: SocketAddr) -> String {
 
 /// The config of two upstreams tried in order, each given as its own
 /// lines: the second a standby.
-fn config(max_body: usize, a: &str, b: &str) -> String {
+fn two_upstreams(max_body: usize, a: &str, b: &str) -> String {
     format!(
         "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = {max_body}\n\
          [[upstreams]]\nid = \"a\"\n{a}\nprovider_key = {{ env = \"UNUSED\" }}\n\
@@ -61,14 +61,14 @@ async fn launch(config: &str, a: UpstreamResources) -> Harness {
 
 /// Two plain upstreams.
 async fn gateway(a: SocketAddr, b: SocketAddr) -> Harness {
-    let config = config(1024, &base_url(a), &base_url(b));
+    let config = two_upstreams(1024, &base_url(a), &base_url(b));
     launch(&config, key("key-a")).await
 }
 
 /// Two plain upstreams, for bodies larger than failover keeps.
 async fn large_bodies(a: SocketAddr, b: SocketAddr) -> Harness {
     let max_body = usize::try_from(FAILOVER_MAX_BODY_BYTES).unwrap() * 2;
-    let config = config(max_body, &base_url(a), &base_url(b));
+    let config = two_upstreams(max_body, &base_url(a), &base_url(b));
     launch(&config, key("key-a")).await
 }
 
@@ -137,7 +137,7 @@ async fn a_stalled_tls_handshake_moves_the_request_on() {
         }
     });
     let (b, mut seen_b) = upstream(StatusCode::OK).await;
-    let config = config(
+    let config = two_upstreams(
         1024,
         &format!("base_url = \"https://{a}\"\nconnect_timeout = \"1s\""),
         &base_url(b),
@@ -192,7 +192,7 @@ async fn failover_sends_each_provider_its_own_model_id() {
         let (a, mut seen_a) = upstream(StatusCode::TOO_MANY_REQUESTS).await;
         let (b, mut seen_b) = upstream(StatusCode::OK).await;
         let lines = |provider: &str, addr| format!("provider = \"{provider}\"\n{}", base_url(addr));
-        let config = config(1024, &lines(providers.0, a), &lines(providers.1, b));
+        let config = two_upstreams(1024, &lines(providers.0, a), &lines(providers.1, b));
         let h = launch(&config, key("key-a")).await;
         let res = h.send(messages(), BODY).await;
         assert_eq!(res.status(), StatusCode::OK, "{providers:?}");
@@ -297,7 +297,7 @@ async fn an_upload_cut_off_by_the_upstream_moves_on() {
         }
     });
     let (b, mut seen_b) = upstream(StatusCode::OK).await;
-    let config = config(8 << 20, &base_url(cut_addr), &base_url(b));
+    let config = two_upstreams(8 << 20, &base_url(cut_addr), &base_url(b));
     let h = launch(&config, key("key-a")).await;
     let body = format!(
         r#"{{"model":"claude-opus-5-5","pad":"{}"}}"#,
@@ -320,7 +320,7 @@ async fn early_rejections_over_http2_move_concurrent_uploads_on() {
     let ca = TestCa::generate();
     let a = rejecting(Some(&ca)).await;
     let (b, mut seen_b) = upstream(StatusCode::OK).await;
-    let config = config(
+    let config = two_upstreams(
         4 << 20,
         &format!("base_url = \"https://{a}\""),
         &base_url(b),
@@ -421,18 +421,10 @@ async fn when_every_upstream_rejects_the_last_rejection_is_the_answer() {
 
 #[tokio::test]
 async fn a_route_with_one_upstream_answers_its_rejection() {
-    let hits = Arc::new(AtomicUsize::new(0));
-    let (a, _seen_a) = counted(StatusCode::TOO_MANY_REQUESTS, &hits).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         [[upstreams]]\n{}\nprovider_key = {{ env = \"UNUSED\" }}\n",
-        base_url(a)
-    );
-    let h =
-        Harness::launch_config(&config, with_upstreams(vec![key("key-a")]), Arc::default()).await;
+    let h = Harness::provider_key(answering(|| full(StatusCode::TOO_MANY_REQUESTS, "{}"))).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     read_body(res).await;
-    assert_eq!(hits.load(Ordering::Relaxed), 1);
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 1);
     assert!(h.usage_record().await.get("failovers").is_none());
 }

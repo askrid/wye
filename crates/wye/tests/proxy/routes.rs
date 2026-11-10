@@ -1,8 +1,6 @@
 //! A route with several upstreams: the choice per session, each upstream's
 //! own provider key, and the upstream in usage records.
 
-use gateway_core::config::Config;
-
 use super::harness::*;
 
 /// An upstream that answers with its name and the `x-api-key` it received.
@@ -22,22 +20,13 @@ async fn sessions_stick_to_one_upstream_with_its_own_key() {
     let hits = Arc::new(AtomicUsize::new(0));
     let a = named_upstream("team-a", &hits).await;
     let b = named_upstream("team-b", &hits).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 1024\n\
-         \
-         [[upstreams]]\nid = \"team-a\"\nbase_url = \"http://{a}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
-         [[upstreams]]\nid = \"team-b\"\nbase_url = \"http://{b}\"\nprovider_key = {{ env = \"UNUSED\" }}\n"
-    );
-    let route = Config::from_toml_str(&config)
-        .unwrap()
-        .routes
-        .claude
-        .unwrap();
+    let upstreams = upstream(a, "id = \"team-a\"") + &upstream(b, "id = \"team-b\"");
     let resources = with_upstreams(vec![
         UpstreamResources::new(UpstreamAuth::api_key("key-team-a").unwrap()),
         UpstreamResources::new(UpstreamAuth::api_key("key-team-b").unwrap()),
     ]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = Harness::launch_config(&config("", &upstreams), resources, hits).await;
+    let route = h.config.routes.claude.as_ref().unwrap();
 
     let mut used = [false; 2];
     for i in 0..16 {

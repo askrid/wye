@@ -76,13 +76,14 @@ async fn connections_past_the_limit_wait_until_one_closes() {
 async fn requests_beyond_the_hold_budget_get_an_overload_error() {
     // An alias makes the gateway hold each body until its model is read.
     let (handler, _bodies) = recording(|seen| seen.body);
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 512\n\
-         [[upstreams]]\nbase_url = \"http://{upstream}\"\nprovider_key = {{ env = \"UNUSED\" }}\n\
-         [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n"
-    );
-    let h = Harness::launch_config(&config, keyed_resources(), hits).await;
+    let write = |addr| {
+        let rest = upstream(
+            addr,
+            "[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"",
+        );
+        format!("[server]\nlisten = \"127.0.0.1:0\"\nmax_request_body_bytes = 512\n{rest}")
+    };
+    let h = Harness::configured(handler, write, keyed_resources()).await;
     // A first request holds 400 bytes, its model still to come: a chunk
     // counts at least 1 KiB, the whole budget of twice the 512-byte limit.
     let (tx, rx) = mpsc::channel::<Bytes>(2);

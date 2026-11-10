@@ -87,13 +87,12 @@ async fn responses_reach_openai_with_the_provider_key() {
 #[tokio::test]
 async fn a_passthrough_upstream_forwards_the_callers_key() {
     let (handler, mut seen) = recording_reply(|seen| seen, || sse(full(StatusCode::OK, EVENTS)));
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[[upstreams]]\n{UPSTREAM}\n\
-         base_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
-    );
+    let write = |addr: SocketAddr| {
+        let entry = format!("[[upstreams]]\n{UPSTREAM}\nbase_url = \"http://{addr}\"\n");
+        config("", &(entry + "forward_caller_credential = true\n"))
+    };
     let resources = with_upstreams(vec![UpstreamResources::new(UpstreamAuth::ForwardCaller)]);
-    let h = Harness::launch_config(&config, resources, hits).await;
+    let h = Harness::configured(handler, write, resources).await;
     let req = responses_as("sk-caller").header("openai-project", "proj_mine");
     let res = h.send(req, BODY).await;
     assert_eq!(res.status(), StatusCode::OK);

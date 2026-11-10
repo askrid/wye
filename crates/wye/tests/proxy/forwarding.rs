@@ -261,26 +261,21 @@ async fn a_provider_key_from_a_file_is_read_relative_to_the_config_and_trimmed()
     std::fs::create_dir_all(dir.join("secrets")).unwrap();
     std::fs::write(dir.join("secrets/provider-key"), "sk-from-file\n").unwrap();
     let (handler, mut rx) = recording(|seen| seen.headers);
-    let (upstream, hits) = spawn_counted(handler).await;
-    let config = Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:0\"\n[[upstreams]]\nbase_url = \"http://{upstream}\"\n\
-         provider_key = {{ file = \"secrets/provider-key\" }}"
-    ))
-    .unwrap();
-    let resources = Resources::resolve(&config, &dir).unwrap();
-    let h = Harness::launch(
-        &format!("http://{upstream}"),
+    let (addr, hits) = spawn_counted(handler).await;
+    let text = config(
         "",
-        "provider_key = { file = \"unused\" }",
-        resources,
-        hits,
-    )
-    .await;
+        &format!(
+            "[[upstreams]]\nbase_url = \"http://{addr}\"\n\
+             provider_key = {{ file = \"secrets/provider-key\" }}\n"
+        ),
+    );
+    let resources = Resources::resolve(&Config::from_toml_str(&text).unwrap(), &dir).unwrap();
+    let h = Harness::launch_config(&text, resources, hits).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(rx.recv().await.unwrap()["x-api-key"], "sk-from-file");
 
     std::fs::write(dir.join("secrets/provider-key"), " \n").unwrap();
-    let err = Resources::resolve(&config, &dir).unwrap_err().to_string();
+    let err = Resources::resolve(&h.config, &dir).unwrap_err().to_string();
     assert!(err.contains("file is empty"), "{err}");
 }
