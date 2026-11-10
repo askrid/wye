@@ -118,13 +118,11 @@ pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, boo
 }
 
 fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
+    let cannot_read = |path: &Path, e| format!("cannot read {}: {e}", path.display());
     let expect_path = request.with_extension("expect.toml");
-    let expect: Expect = toml::from_str(
-        &std::fs::read_to_string(&expect_path)
-            .map_err(|e| format!("{}: {e}", expect_path.display()))?,
-    )
-    .map_err(|e| format!("{}: {e}", expect_path.display()))?;
-    let body = std::fs::read(request).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&expect_path).map_err(|e| cannot_read(&expect_path, e))?;
+    let expect: Expect = files::named(&expect_path, toml::from_str(&text))?;
+    let body = std::fs::read(request).map_err(|e| cannot_read(request, e))?;
     let credential = match expect.token {
         None => CallerToken::None,
         Some(claims) => CallerToken::Trusted(Identity {
@@ -324,6 +322,30 @@ mod tests {
             "FAIL  b-error: expected error permission_error, got decision: refuse 401 ",
         ] {
             assert!(report.contains(line), "{line}\n---\n{report}");
+        }
+    }
+
+    /// A case whose files cannot be read fails, naming the file.
+    #[test]
+    fn a_case_it_cannot_read_names_the_file() {
+        let dir = wye_testkit::TempDir::new("policy-unreadable");
+        let config = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n\
+             [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n",
+        )
+        .unwrap();
+        // A request that is a directory, and one without its expectation.
+        std::fs::create_dir(dir.join("a-dir.json")).unwrap();
+        std::fs::write(dir.join("a-dir.expect.toml"), "decision = \"forward\"\n").unwrap();
+        std::fs::write(dir.join("b-alone.json"), "{}").unwrap();
+        let (report, passed) = policy_test(&config, &dir, 0).unwrap();
+        assert!(!passed, "{report}");
+        for (name, file) in [("a-dir", "a-dir.json"), ("b-alone", "b-alone.expect.toml")] {
+            let shown = dir.join(file).display().to_string();
+            assert!(
+                report.contains(&format!("FAIL  {name}: cannot read {shown}: ")),
+                "{report}"
+            );
         }
     }
 }
