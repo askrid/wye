@@ -21,7 +21,9 @@ pub enum StartupError {
     MissingEnv(String),
     /// A secret's environment variable is set but blank.
     EmptyEnv(String),
-    InvalidApiKey,
+    /// A header value from config, by the setting it comes from, holds
+    /// characters no HTTP header allows.
+    InvalidHeader(&'static str),
     /// The cache diagnostics key, from this source, is too short.
     HashKeyTooShort(Secret),
     /// A file the configuration names, by the setting that names it.
@@ -52,9 +54,10 @@ impl fmt::Display for StartupError {
                 "environment variable {name} is not set or not valid UTF-8"
             ),
             Self::EmptyEnv(name) => write!(f, "environment variable {name} is empty"),
-            Self::InvalidApiKey => f.write_str(
-                "upstream API key contains characters not allowed in an HTTP header \
-                 (a trailing newline, for example)",
+            Self::InvalidHeader(what) => write!(
+                f,
+                "{what} contains characters not allowed in an HTTP header \
+                 (a trailing newline, for example)"
             ),
             Self::HashKeyTooShort(source) => write!(
                 f,
@@ -413,7 +416,8 @@ impl UpstreamAuth {
 }
 
 fn secret(value: &str) -> Result<HeaderValue, StartupError> {
-    let mut value = HeaderValue::from_str(value).map_err(|_| StartupError::InvalidApiKey)?;
+    let mut value = HeaderValue::from_str(value)
+        .map_err(|_| StartupError::InvalidHeader("upstream API key"))?;
     value.set_sensitive(true);
     Ok(value)
 }

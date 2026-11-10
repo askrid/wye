@@ -192,7 +192,7 @@ impl Upstream {
                 .as_deref()
                 .map(HeaderValue::from_str)
                 .transpose()
-                .map_err(|_| StartupError::InvalidApiKey)?,
+                .map_err(|_| StartupError::InvalidHeader("workspace_id"))?,
             clients: ClientPool::new(|| {
                 Client::builder(TokioExecutor::new())
                     .http2_initial_stream_window_size(STREAM_WINDOW)
