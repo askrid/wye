@@ -9,6 +9,7 @@
 //! first, but the whole log can.
 
 use std::{
+    borrow::Cow,
     collections::HashMap,
     io::BufRead,
     path::{Path, PathBuf},
@@ -38,55 +39,86 @@ const TOP: usize = 10;
 
 /// The usage-record fields the report reads; everything else is ignored, so
 /// every format version reads alike: v2 renamed only `path`, which the
-/// report does not read.
+/// report does not read. Its strings borrow from the line.
 #[derive(Deserialize)]
-struct Record {
-    event: String,
+struct Record<'a> {
+    #[serde(borrow)]
+    event: Text<'a>,
     #[serde(default)]
     unix_ms: u64,
     #[serde(default)]
     duration_ms: f64,
     status: Option<u16>,
-    outcome: Option<String>,
+    #[serde(borrow)]
+    outcome: Option<Text<'a>>,
     /// Why an upstream gave no usable response: `connect`, `timeout`, or
     /// `reset`.
-    upstream_error: Option<String>,
-    upstream: Option<String>,
-    subject: Option<String>,
-    session_id: Option<String>,
-    agent_id: Option<String>,
-    request_class: Option<String>,
-    prompt_id: Option<String>,
-    compaction: Option<String>,
-    cache_miss: Option<String>,
+    #[serde(borrow)]
+    upstream_error: Option<Text<'a>>,
+    #[serde(borrow)]
+    upstream: Option<Text<'a>>,
+    #[serde(borrow)]
+    subject: Option<Text<'a>>,
+    #[serde(borrow)]
+    session_id: Option<Text<'a>>,
+    #[serde(borrow)]
+    agent_id: Option<Text<'a>>,
+    #[serde(borrow)]
+    request_class: Option<Text<'a>>,
+    #[serde(borrow)]
+    prompt_id: Option<Text<'a>>,
+    #[serde(borrow)]
+    compaction: Option<Text<'a>>,
+    #[serde(borrow)]
+    cache_miss: Option<Text<'a>>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     cache_creation_input_tokens: Option<u64>,
     cache_read_input_tokens: Option<u64>,
-    cost_usd: Option<String>,
-    cost_status: Option<String>,
+    #[serde(borrow)]
+    cost_usd: Option<Text<'a>>,
+    #[serde(borrow)]
+    cost_status: Option<Text<'a>>,
     /// Target model to the rules it would break.
-    #[serde(default)]
-    upgrade_issues: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    tool_durations: Vec<Tool>,
-    #[serde(default)]
-    tool_calls: HashMap<String, u64>,
-    #[serde(default)]
-    failovers: Vec<FailoverRecord>,
+    #[serde(borrow, default)]
+    upgrade_issues: HashMap<Text<'a>, Vec<Text<'a>>>,
+    #[serde(borrow, default)]
+    tool_durations: Vec<Tool<'a>>,
+    #[serde(borrow, default)]
+    tool_calls: HashMap<Text<'a>, u64>,
+    #[serde(borrow, default)]
+    failovers: Vec<FailoverRecord<'a>>,
+}
+
+/// A string in a record, borrowed from the line unless it holds an escape,
+/// which serde unescapes into a string of its own. A `&str` would fail on
+/// such a string, and drop its record into the skipped lines.
+#[derive(Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+struct Text<'a>(#[serde(borrow)] Cow<'a, str>);
+
+impl std::ops::Deref for Text<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 /// An upstream that rejected the request before another answered.
 #[derive(Deserialize)]
-struct FailoverRecord {
-    upstream: Option<String>,
+struct FailoverRecord<'a> {
+    #[serde(borrow)]
+    upstream: Option<Text<'a>>,
     /// `429`, `529`, or `connect`.
-    reason: String,
+    #[serde(borrow)]
+    reason: Text<'a>,
 }
 
 #[derive(Deserialize)]
-struct Tool {
-    name: String,
+struct Tool<'a> {
+    #[serde(borrow)]
+    name: Text<'a>,
     ms: u64,
 }
 
@@ -99,7 +131,7 @@ struct Tokens {
 }
 
 impl Tokens {
-    fn add(&mut self, r: &Record) {
+    fn add(&mut self, r: &Record<'_>) {
         // Saturating: a corrupt line must not wrap the totals.
         let add = |sum: &mut u64, n: Option<u64>| *sum = sum.saturating_add(n.unwrap_or(0));
         add(&mut self.input, r.input_tokens);
@@ -138,10 +170,10 @@ struct Cost {
 }
 
 impl Cost {
-    fn add(&mut self, r: &Record) {
+    fn add(&mut self, r: &Record<'_>) {
         let mut tokens = Tokens::default();
         tokens.add(r);
-        let Some(status) = &r.cost_status else {
+        let Some(status) = r.cost_status.as_deref() else {
             // Written without `[pricing]` (before it was added, or by a
             // replica without it): its tokens are not in the sum.
             self.lower_bound |= tokens.total() > 0;
@@ -173,7 +205,7 @@ struct Group {
 }
 
 impl Group {
-    fn add(&mut self, r: &Record) {
+    fn add(&mut self, r: &Record<'_>) {
         self.requests += 1;
         self.tokens.add(r);
         self.cost.add(r);
@@ -187,11 +219,42 @@ struct Session {
     group: Group,
     subject: Option<String>,
     compactions: u64,
+    /// The first cache write of the session's main thread. Earlier requests
+    /// that use no cache (`count_tokens`, refusals) do not count.
+    first_write: Option<FirstWrite>,
+    /// The first cache write of each subagent, by agent id: a conversation
+    /// of its own, with a prompt cache of its own.
+    subagents: HashMap<String, Option<FirstWrite>>,
 }
 
-/// One conversation with its own prompt cache: a session's main thread
-/// (no agent id) or one of its subagents.
-type Conversation = (String, Option<String>);
+/// When a conversation first wrote to its cache, and the cache-miss label
+/// of that request.
+type FirstWrite = (u64, Option<String>);
+
+/// Keeps the earlier of `first` and a cache write at `unix_ms` labeled
+/// `miss`.
+fn earliest(first: &mut Option<FirstWrite>, unix_ms: u64, miss: Option<&str>) {
+    if first.as_ref().is_none_or(|(at, _)| unix_ms < *at) {
+        *first = Some((unix_ms, miss.map(str::to_owned)));
+    }
+}
+
+/// Whether a conversation's first cache write was an unexplained miss: its
+/// start, which is expected.
+fn unexplained(first: &Option<FirstWrite>) -> bool {
+    first
+        .as_ref()
+        .is_some_and(|(_, miss)| miss.as_deref() == Some(CacheMiss::Unexplained.as_str()))
+}
+
+/// Applies `f` to `map`'s value for `key`, a default one if there is none:
+/// an owned key is made only for a key not seen before.
+fn at<V: Default>(map: &mut HashMap<String, V>, key: &str, f: impl FnOnce(&mut V)) {
+    match map.get_mut(key) {
+        Some(value) => f(value),
+        None => f(map.entry(key.to_owned()).or_default()),
+    }
+}
 
 /// The records a report covers, by `unix_ms`: from `since` on. An end is
 /// a filter for a pipe (`jq 'select(.unix_ms < ...)'`), not a flag.
@@ -262,10 +325,6 @@ struct Summary {
     /// Rejections that moved requests on, by (upstream, reason).
     failovers: HashMap<(String, String), u64>,
     sessions: HashMap<String, Session>,
-    /// Time and cache-miss label of each conversation's first cache write.
-    /// Earlier requests that use no cache (`count_tokens`, refusals) do not
-    /// count.
-    first_writes: HashMap<Conversation, (u64, Option<String>)>,
     prompts: HashMap<String, Group>,
     /// Per tool: calls with a reported duration, their total ms, and calls
     /// responses requested.
@@ -276,39 +335,41 @@ struct Summary {
 }
 
 impl Summary {
-    fn add(&mut self, r: Record) {
-        self.total.add(&r);
-        *self
-            .outcomes
-            .entry(r.outcome.clone().unwrap_or_default())
-            .or_default() += 1;
+    fn add(&mut self, r: &Record<'_>) {
+        self.total.add(r);
+        at(
+            &mut self.outcomes,
+            r.outcome.as_deref().unwrap_or_default(),
+            |n| *n += 1,
+        );
         if let Some(status) = r.status.filter(|s| *s >= 400) {
             *self.errors.entry(status).or_default() += 1;
         }
-        if let Some(error) = &r.upstream_error {
-            *self.upstream_errors.entry(error.clone()).or_default() += 1;
+        if let Some(error) = r.upstream_error.as_deref() {
+            at(&mut self.upstream_errors, error, |n| *n += 1);
         }
         // No request-class hint: an SDK caller, or an agent without them.
         let class = r.request_class.as_deref().unwrap_or("(unclassified)");
-        self.classes.entry(class.to_owned()).or_default().add(&r);
-        if let Some(upstream) = &r.upstream {
-            self.upstreams.entry(upstream.clone()).or_default().add(&r);
+        at(&mut self.classes, class, |group| group.add(r));
+        if let Some(upstream) = r.upstream.as_deref() {
+            at(&mut self.upstreams, upstream, |group| group.add(r));
         }
+        // Rare: a failover, an upgrade issue.
         for failover in &r.failovers {
-            let upstream = failover.upstream.clone().unwrap_or_default();
+            let upstream = failover.upstream.as_deref().unwrap_or_default();
             *self
                 .failovers
-                .entry((upstream, failover.reason.clone()))
+                .entry((upstream.to_owned(), failover.reason.to_string()))
                 .or_default() += 1;
         }
-        if let Some(miss) = &r.cache_miss {
-            *self.misses.entry(miss.clone()).or_default() += 1;
+        if let Some(miss) = r.cache_miss.as_deref() {
+            at(&mut self.misses, miss, |n| *n += 1);
         }
         for (target, rules) in &r.upgrade_issues {
             for rule in rules {
                 let entry = self
                     .upgrades
-                    .entry((target.clone(), rule.clone()))
+                    .entry((target.to_string(), rule.to_string()))
                     .or_default();
                 entry.0 += 1;
                 let client = r.subject.as_deref().unwrap_or("(no token)");
@@ -318,32 +379,34 @@ impl Summary {
             }
         }
         for tool in &r.tool_durations {
-            let entry = self.tools.entry(tool.name.clone()).or_default();
-            entry.0 += 1;
-            entry.1 += tool.ms;
+            at(&mut self.tools, &tool.name, |entry| {
+                entry.0 += 1;
+                entry.1 += tool.ms;
+            });
         }
         for (name, count) in &r.tool_calls {
-            self.tools.entry(name.clone()).or_default().2 += count;
+            at(&mut self.tools, name, |entry| entry.2 += count);
         }
-        if let Some(prompt) = &r.prompt_id {
-            self.prompts.entry(prompt.clone()).or_default().add(&r);
+        if let Some(prompt) = r.prompt_id.as_deref() {
+            at(&mut self.prompts, prompt, |group| group.add(r));
         }
-        if let Some(id) = &r.session_id {
-            let session = self.sessions.entry(id.clone()).or_default();
-            session.group.add(&r);
-            session.compactions += u64::from(r.compaction.is_some());
-            if session.subject.is_none() {
-                session.subject.clone_from(&r.subject);
-            }
-            if r.cache_creation_input_tokens.is_some_and(|n| n > 0) {
-                let first = self
-                    .first_writes
-                    .entry((id.clone(), r.agent_id.clone()))
-                    .or_insert_with(|| (r.unix_ms, r.cache_miss.clone()));
-                if r.unix_ms < first.0 {
-                    *first = (r.unix_ms, r.cache_miss.clone());
+        if let Some(id) = r.session_id.as_deref() {
+            at(&mut self.sessions, id, |session| {
+                session.group.add(r);
+                session.compactions += u64::from(r.compaction.is_some());
+                if session.subject.is_none() {
+                    session.subject = r.subject.as_deref().map(str::to_owned);
                 }
-            }
+                if r.cache_creation_input_tokens.is_some_and(|n| n > 0) {
+                    let miss = r.cache_miss.as_deref();
+                    match r.agent_id.as_deref() {
+                        None => earliest(&mut session.first_write, r.unix_ms, miss),
+                        Some(agent) => at(&mut session.subagents, agent, |first| {
+                            earliest(first, r.unix_ms, miss);
+                        }),
+                    }
+                }
+            });
         }
     }
 
@@ -351,13 +414,13 @@ impl Summary {
     /// main thread and of its subagents: expected.
     fn starts(&self) -> Starts {
         let mut starts = Starts::default();
-        for ((_, agent), (_, miss)) in &self.first_writes {
-            if miss.as_deref() == Some(CacheMiss::Unexplained.as_str()) {
-                match agent {
-                    None => starts.sessions += 1,
-                    Some(_) => starts.subagents += 1,
-                }
-            }
+        for session in self.sessions.values() {
+            starts.sessions += u64::from(unexplained(&session.first_write));
+            starts.subagents += session
+                .subagents
+                .values()
+                .filter(|w| unexplained(w))
+                .count() as u64;
         }
         starts
     }
@@ -365,17 +428,25 @@ impl Summary {
     /// Adds a usage log's records in the window. Lines that are not request
     /// records (shutdown notices, other output) are skipped and counted.
     /// Records of every format version are read: those without `v` too.
-    fn read(&mut self, input: impl BufRead) -> std::io::Result<()> {
-        for line in input.lines() {
-            let line = line?;
-            match serde_json::from_str::<Record>(&line) {
-                Ok(r) if r.event == "request" && self.window.contains(r.unix_ms) => self.add(r),
-                Ok(r) if r.event == "request" => self.outside += 1,
+    fn read(&mut self, mut input: impl BufRead) -> std::io::Result<()> {
+        // One buffer for every line, which each record borrows from.
+        let mut buffer = String::new();
+        loop {
+            buffer.clear();
+            if input.read_line(&mut buffer)? == 0 {
+                return Ok(());
+            }
+            let line = match buffer.strip_suffix('\n') {
+                Some(line) => line.strip_suffix('\r').unwrap_or(line),
+                None => &buffer,
+            };
+            match serde_json::from_str::<Record<'_>>(line) {
+                Ok(r) if &*r.event == "request" && self.window.contains(r.unix_ms) => self.add(&r),
+                Ok(r) if &*r.event == "request" => self.outside += 1,
                 _ if line.starts_with("wye: ") => self.notices += 1,
                 _ => self.skipped += 1,
             }
         }
-        Ok(())
     }
 }
 

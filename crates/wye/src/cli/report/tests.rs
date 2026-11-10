@@ -479,3 +479,27 @@ fn the_home_log_is_read_after_its_rotated_files() {
     std::fs::write(&log, "").unwrap();
     assert_eq!(home_logs(&env).unwrap(), [older, newer, log]);
 }
+
+/// A record's strings are borrowed from the line, but one with an escape
+/// is unescaped into a string of its own: its record is read, not skipped.
+#[test]
+fn a_record_with_escaped_strings_is_read_unescaped() {
+    let log = r#"{"event":"request","outcome":"completed","subject":"al\"ice","session_id":"s-1","request_class":"main","input_tokens":1,"tool_calls":{"Bash":1}}
+{"event":"request","outcome":"completed","subject":"bob","session_id":"s-1","request_class":"main","input_tokens":1,"tool_calls":{"Bash":2}}
+"#;
+    let out = report(log.as_bytes(), Paint::OFF).unwrap();
+    assert!(
+        flat(&out).starts_with("2 requests in 1 session; outcomes: completed 2 "),
+        "{out}"
+    );
+    // The first subject seen is the session's.
+    assert!(out.contains("\n    al\"ice\n"), "{out}");
+    let row = |name: &str| {
+        out.lines()
+            .find(|l| l.trim_start().starts_with(name))
+            .map(flat)
+            .unwrap_or_else(|| panic!("no {name} row in\n{out}"))
+    };
+    assert!(row("main ").starts_with("main 2 "), "{out}");
+    assert!(row("Bash ").starts_with("Bash 3 "), "{out}");
+}
