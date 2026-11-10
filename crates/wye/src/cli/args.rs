@@ -12,10 +12,13 @@ use commands::{FAMILIES, GROUPS};
 /// One option of a command.
 #[derive(Debug)]
 pub struct Opt {
+    /// The name after `--`.
     pub long: &'static str,
+    /// The letter after `-`, if it has one.
     pub short: Option<char>,
     /// The value's name in help (`path`); `None` for a flag.
     pub value: Option<&'static str>,
+    /// What it does, in help.
     pub help: &'static str,
     /// May be given more than once; every value is kept.
     pub repeats: bool,
@@ -81,14 +84,17 @@ pub enum Id {
 /// One command: what it does and what it takes.
 #[derive(Debug)]
 pub struct Command {
+    /// Which command it is.
     pub id: Id,
     /// As typed after `wye`: `serve`, `token issue`.
     pub name: &'static str,
+    /// What it does, in one line of help.
     pub summary: &'static str,
     /// Positional arguments as help shows them: `<dir>`, `[<usage-log>]`.
     pub args: &'static str,
     /// Fewest and most positional arguments.
     pub arity: (usize, usize),
+    /// Its options, in the order help lists them.
     pub options: &'static [Opt],
     /// The first argument the command does not know, and everything after
     /// it, goes to the program it starts (`wye claude -p "fix the tests"`).
@@ -104,6 +110,7 @@ pub struct Command {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Parsed<'a> {
     values: Vec<(&'static str, &'a str)>,
+    /// The positional arguments, in order.
     pub positional: Vec<&'a str>,
 }
 

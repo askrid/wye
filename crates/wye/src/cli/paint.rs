@@ -1,10 +1,11 @@
-//! Color on a terminal, only where it carries meaning: an error, a verdict, a
-//! heading, a command to copy. Off when the output is not a terminal, `NO_COLOR`
-//! is set (no-color.org), or `TERM` is `dumb`.
+//! Color on a terminal, only where it carries meaning: an error, a verdict,
+//! a heading, a command to copy. Off when the output is not a terminal,
+//! `NO_COLOR` is set (no-color.org), or `TERM` is `dumb`.
 
 use std::io::IsTerminal;
 
-/// How `doctor` and `policy-test` start a line; [`Paint::style`] colors the word.
+/// How `doctor` and `policy-test` start a line; [`Paint::style`] colors the
+/// word.
 const OK: &str = "ok ";
 const FAIL: &str = "FAIL ";
 /// How `explain` and `policy-diff` start the lines [`Paint::style`] colors:
@@ -30,6 +31,7 @@ pub(super) fn verdict(ok: bool, text: &str) -> String {
 pub struct Paint(bool);
 
 impl Paint {
+    /// No color: for text that is not shown on a terminal.
     pub const OFF: Self = Self(false);
 
     /// For standard output.
@@ -56,18 +58,22 @@ impl Paint {
         }
     }
 
+    /// `text` in bold: a heading.
     pub fn bold(self, text: &str) -> String {
         self.paint("1", text)
     }
 
+    /// `text` in bold red: an error, a failed check, widened access.
     pub fn red(self, text: &str) -> String {
         self.paint("1;31", text)
     }
 
+    /// `text` in green: a check passed, access narrowed, a request forwarded.
     pub fn green(self, text: &str) -> String {
         self.paint("32", text)
     }
 
+    /// `text` in cyan: a command to copy.
     pub fn cyan(self, text: &str) -> String {
         self.paint("36", text)
     }

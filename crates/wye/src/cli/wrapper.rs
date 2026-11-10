@@ -35,11 +35,15 @@ const HINT_HEADERS_ENV: &str = "CLAUDE_CODE_GATEWAY_HINT_HEADERS";
 /// The agents the wrapper can launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Agent {
+    /// Claude Code.
     Claude,
+    /// OpenAI's Codex.
     Codex,
 }
 
 impl Agent {
+    /// The program to run: `$WYE_CLAUDE_BIN` or `$WYE_CODEX_BIN`, else its
+    /// usual name, found on the `PATH`.
     fn program(self) -> OsString {
         let default = match self {
             Self::Claude => "claude",
@@ -70,6 +74,7 @@ impl Agent {
 /// Where the wrapper sends the agent, and with which gateway token.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Launch {
+    /// The gateway's base URL.
     pub gateway: String,
     /// A gateway token, sent as `Authorization: Bearer`; `None` keeps
     /// Claude Code's own login (subscription passthrough), or lets Codex
@@ -138,7 +143,8 @@ impl Launch {
                 command.env(HINT_HEADERS_ENV, &self.hint_headers);
                 if let Some(token) = &self.token {
                     command.env("ANTHROPIC_AUTH_TOKEN", token);
-                    // An API key would be sent too and take precedence in Claude Code.
+                    // An API key would be sent too, and take precedence in
+                    // Claude Code.
                     command.env_remove("ANTHROPIC_API_KEY");
                 }
             }

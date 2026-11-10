@@ -11,10 +11,11 @@ pub(super) const UNIT: &str = "wye.service";
 /// The service's open-file limit, soft and hard. Each client connection
 /// takes a file descriptor, and so does its upstream connection while a
 /// request is in flight: about twice the open connections, which are at
-/// most twice `server.max_concurrent_requests` (20,000 by default). Without it, launchd starts the service with 256 and systemd
-/// with 1024. launchd sets it even above `kern.maxfilesperproc` (122,880 on
-/// a 2026 Mac), which still caps what the process opens; systemd's default
-/// hard limit is 524,288.
+/// most twice `server.max_concurrent_requests` (20,000 by default). Without
+/// it, launchd starts the service with 256 and systemd with 1024. launchd
+/// sets it even above `kern.maxfilesperproc` (122,880 on a 2026 Mac), which
+/// still caps what the process opens; systemd's default hard limit is
+/// 524,288.
 pub(super) const OPEN_FILES: u32 = 65_536;
 /// Width of the labels in the plan `install` shows and in `status`:
 /// "Installed", "Usage log".
@@ -22,7 +23,9 @@ pub(super) const LABEL_WIDTH: usize = 9;
 /// The service manager of this operating system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Manager {
+    /// launchd, on macOS: a LaunchAgent.
     Launchd,
+    /// systemd, on Linux: a user unit.
     Systemd,
 }
 
@@ -78,7 +81,9 @@ impl Manager {
 /// What the service runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Service {
+    /// The wye it runs.
     pub program: PathBuf,
+    /// The config it serves: its `--config`.
     pub config: PathBuf,
     /// The usage log: the gateway's `--usage-log`, which it rotates.
     pub usage_log: PathBuf,
@@ -230,12 +235,14 @@ impl Service {
     }
 }
 
+/// `text` escaped for a plist's `<string>`.
 fn xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
 
+/// A plist `<string>`'s text, unescaped.
 fn unxml(text: &str) -> String {
     text.replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -245,6 +252,7 @@ fn unxml(text: &str) -> String {
 /// The commands a step runs, each as program and arguments.
 pub(super) type Commands = Vec<Vec<String>>;
 
+/// `launchctl` with `args`.
 fn launchctl(args: &[&str]) -> Vec<String> {
     std::iter::once("launchctl")
         .chain(args.iter().copied())
@@ -252,6 +260,7 @@ fn launchctl(args: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// `systemctl --user` with `args`.
 pub(super) fn systemctl(args: &[&str]) -> Vec<String> {
     ["systemctl", "--user"]
         .into_iter()
@@ -285,6 +294,7 @@ pub(super) fn start_commands(
     }
 }
 
+/// The commands that restart the loaded service, as its definition stands.
 pub(super) fn restart_commands(manager: Manager, uid: &str) -> Commands {
     match manager {
         Manager::Launchd => vec![launchctl(&[
@@ -296,6 +306,7 @@ pub(super) fn restart_commands(manager: Manager, uid: &str) -> Commands {
     }
 }
 
+/// The commands that stop the service and keep it from starting again.
 pub(super) fn stop_commands(manager: Manager, uid: &str) -> Commands {
     match manager {
         Manager::Launchd => vec![launchctl(&["bootout", &format!("gui/{uid}/{LABEL}")])],

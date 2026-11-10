@@ -9,10 +9,11 @@ use crate::cli::{current_thread, probe::Checker};
 /// finishes its requests.
 const RETRY_EVERY: Duration = Duration::from_millis(500);
 
-/// Runs each command, printing it first, to stderr with the other messages. A `bootout` of a service that is not
-/// loaded is not an error. launchd reports `bootout` done while the old gateway
-/// still finishes its requests, and refuses `bootstrap` until it has exited, so
-/// that one is retried for as long as the old gateway may take: `settle`.
+/// Runs each command, printing it first, to stderr with the other messages.
+/// A `bootout` of a service that is not loaded is not an error. launchd
+/// reports `bootout` done while the old gateway still finishes its requests,
+/// and refuses `bootstrap` until it has exited, so that one is retried for as
+/// long as the old gateway may take: `settle`.
 pub(super) fn run_all(
     commands: &Commands,
     show: &dyn Fn(&Path) -> String,

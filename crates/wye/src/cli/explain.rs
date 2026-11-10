@@ -31,8 +31,10 @@ use super::{
 
 /// The gateway token a request carries.
 pub enum CallerToken<'a> {
+    /// No gateway token.
     None,
-    /// A bearer token, verified as the server would, with the server's verifier.
+    /// A bearer token, verified as the server would, with the server's
+    /// verifier.
     Token(&'a str, &'a Verifier),
     /// Claims taken as verified (policy tests; tokens in CI would expire).
     Trusted(Identity),
@@ -139,6 +141,7 @@ fn missing_request(flag: Option<&str>, config: &Path, env: &impl Env) -> String 
 /// The decision and the steps that led to it.
 #[derive(Debug, Default)]
 pub struct Explanation {
+    /// One line per step, in the server's order; the last is the decision.
     pub steps: Vec<String>,
     /// `Some((status, error type, message))` when the request is refused.
     pub refused: Option<(u16, &'static str, String)>,
@@ -178,6 +181,7 @@ impl Explanation {
         self.refuse(refusal.status(), refusal.kind(), refusal.to_string())
     }
 
+    /// The steps as text, a line each.
     pub fn report(&self) -> String {
         self.steps.join("\n") + "\n"
     }
@@ -525,7 +529,8 @@ pub fn explain(
         let path = path.split_once('?').map_or(path, |(path, _)| path);
         let (endpoint, route) = out.endpoint(config, path)?;
         let api = endpoint.api;
-        // Chat Completions carries no session header: the server never sees one.
+        // Chat Completions carries no session header: the server never sees
+        // one.
         let session = api
             .session_header()
             .and_then(|name| headers.get(name))

@@ -174,10 +174,13 @@ fn ceiling(n: &str) -> Result<u64, String> {
 /// What `wye token issue` was asked for.
 #[derive(Debug, Default)]
 pub struct Issue<'a> {
+    /// Who the token is for: its `sub`.
     pub subject: &'a str,
+    /// Its lifetime, in seconds; `None` for the config's longest.
     pub ttl_secs: Option<u64>,
     /// Model names or prefixes ending in `*`.
     pub models: Option<Vec<&'a str>>,
+    /// An output-token ceiling lower than the config's.
     pub max_output_tokens: Option<u64>,
 }
 

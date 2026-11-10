@@ -18,6 +18,7 @@ const NAME: usize = 14;
 /// Width of a tool name.
 const TOOL: usize = 36;
 
+/// The report of `s`, colored by `paint`.
 pub(super) fn render(s: &Summary, paint: Paint) -> String {
     let mut out = String::new();
     // The window, when one was given: ` since 2026-11-01 00:00:00 UTC`.

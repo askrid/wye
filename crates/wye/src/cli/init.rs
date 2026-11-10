@@ -17,10 +17,9 @@ use super::{
 };
 
 /// The setup `wye init` writes (the glossary's term), from two choices: who
-/// can reach the gateway, and whose credential pays. A local
-/// gateway passes callers' credentials through or holds a provider key; a
-/// shared one always holds the provider key, since it cannot forward
-/// credentials.
+/// can reach the gateway, and whose credential pays. A local gateway passes
+/// callers' credentials through or holds a provider key; a shared one always
+/// holds the provider key, since it cannot forward credentials.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Setup {
     /// One developer: each caller's own credential goes through, whether
@@ -40,6 +39,7 @@ pub enum Setup {
 /// What `wye init` writes, and where.
 #[derive(Debug, PartialEq, Eq)]
 pub struct InitOptions {
+    /// The setup it writes.
     pub setup: Setup,
     /// Also serve OpenAI Responses and Chat Completions (for Codex).
     pub openai: bool,
@@ -58,7 +58,9 @@ pub struct InitOptions {
 pub struct Sample {
     /// The case's name: `<name>.json` and `<name>.expect.toml`.
     pub name: &'static str,
+    /// The request body: `<name>.json`.
     pub request: &'static str,
+    /// The decision it expects: `<name>.expect.toml`.
     pub expect: String,
 }
 

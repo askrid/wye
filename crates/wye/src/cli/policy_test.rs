@@ -37,6 +37,7 @@ use super::{
     paint::verdict,
 };
 
+/// A case's `<name>.expect.toml`, as the module docs describe it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expect {
@@ -50,6 +51,7 @@ struct Expect {
     token: Option<Claims>,
 }
 
+/// What the gateway does with a request.
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 enum Decision {
@@ -57,6 +59,7 @@ enum Decision {
     Refuse,
 }
 
+/// A case's `[token]`: the gateway token's claims, taken as verified.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Claims {
@@ -117,6 +120,8 @@ pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, boo
     Ok((report, failed == 0))
 }
 
+/// Checks the case of the request file `request` against `config`; the
+/// error is what follows `FAIL <name>:` in the report.
 fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
     let cannot_read = |path: &Path, e| format!("cannot read {}: {e}", path.display());
     let expect_path = request.with_extension("expect.toml");

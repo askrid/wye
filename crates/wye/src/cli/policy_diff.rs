@@ -179,6 +179,8 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
     diff
 }
 
+/// Who may send requests: the models, ceilings, token lifetimes, Wye's own
+/// tokens, and the identity providers of two `[auth]` tables.
 fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
     models(
         diff,
