@@ -1,6 +1,5 @@
 //! The commands: every command's options, summary, and notes, and how help
 //! groups them. The parser and the help both read these tables.
-
 //!
 //! A flag one command shares with another is defined here once, so it reads
 //! the same everywhere (docs/development.md, "Command-line conventions").
@@ -9,11 +8,12 @@ use super::{Command, Id, Opt};
 
 /// `-c, --config <path>`: the config a command reads, or `init` creates.
 const CONFIG: Opt = Opt {
-    long: "config",
     short: Some('c'),
-    value: Some("path"),
-    help: "The config (default: $WYE_CONFIG, else $WYE_HOME/wye.toml)",
-    repeats: false,
+    ..Opt::value(
+        "config",
+        "path",
+        "The config (default: $WYE_CONFIG, else $WYE_HOME/wye.toml)",
+    )
 };
 
 /// `--url <url>`: the gateway a client uses.
@@ -42,6 +42,14 @@ const YES: Opt = Opt {
 
 /// `--dry-run`, on a command that asks before it changes something.
 const DRY_RUN: Opt = Opt::flag("dry-run", "Show what it would change; change nothing");
+
+/// The options of `wye claude` and `wye codex`.
+const WRAPPER: [Opt; 2] = [URL, TOKEN_FILE];
+
+/// The notes of `wye claude` and `wye codex`.
+const WRAPPER_NOTES: &str = "Without a token the agent keeps its own login. Arguments \
+    after `--`, or from the first one wye does not know, go to the agent unchanged. A \
+    gateway beyond this machine must be https.";
 
 /// A command with no arguments, options, or notes.
 const BASE: Command = Command {
@@ -126,7 +134,7 @@ pub const COMMANDS: &[Command] = &[
         options: &WRAPPER,
         passthrough: true,
         notes: WRAPPER_NOTES,
-        missing: "",
+        ..BASE
     },
     Command {
         id: Id::Codex,
@@ -137,7 +145,7 @@ pub const COMMANDS: &[Command] = &[
         options: &WRAPPER,
         passthrough: true,
         notes: WRAPPER_NOTES,
-        missing: "",
+        ..BASE
     },
     Command {
         id: Id::Report,
@@ -171,7 +179,8 @@ pub const COMMANDS: &[Command] = &[
             ),
             Opt::flag(
                 "shared",
-                "Reachable from other machines: gateway tokens, a signing key, the provider key from the environment",
+                "Reachable from other machines: gateway tokens, a signing key, the provider \
+                 key from the environment",
             ),
             Opt::flag("openai", "Also serve the OpenAI APIs (for Codex)"),
         ],
@@ -180,8 +189,8 @@ pub const COMMANDS: &[Command] = &[
                 for you on this machine: Claude Code's login, or any API key a caller \
                 sends, goes through, and the gateway holds no secret. A shared \
                 gateway's config belongs in the repository it is reviewed in: -c wye.toml \
-                there. Sample policy tests go in policy-tests, next to the config, for `wye policy-test`. Never \
-                overwrites a file.",
+                there. Sample policy tests go in policy-tests, next to the config, for \
+                `wye policy-test`. Never overwrites a file.",
         ..BASE
     },
     Command {
@@ -308,12 +317,6 @@ pub const COMMANDS: &[Command] = &[
         ..BASE
     },
 ];
-
-const WRAPPER: [Opt; 2] = [URL, TOKEN_FILE];
-
-const WRAPPER_NOTES: &str = "Without a token the agent keeps its own login. Arguments \
-    after `--`, or from the first one wye does not know, go to the agent unchanged. A \
-    gateway beyond this machine must be https.";
 
 /// Commands with subcommands, as the command list shows them.
 pub(super) const FAMILIES: &[(&str, &str)] = &[
