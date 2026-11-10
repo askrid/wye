@@ -51,42 +51,49 @@ pub enum Variant {
     Refused,
 }
 
+impl Variant {
+    /// Every variant but [`Self::Plain`], in the order a run measures them.
+    pub const ALL: [Self; 8] = [
+        Self::Auth,
+        Self::Models,
+        Self::Diag,
+        Self::Otlp,
+        Self::Openai,
+        Self::Bedrock,
+        Self::Failover,
+        Self::Refused,
+    ];
+}
+
 impl Gateway<'_> {
-    pub fn name(self) -> &'static str {
+    /// The gateway's name in progress lines and file names, and the prefix of
+    /// its metrics' names.
+    fn labels(self) -> (&'static str, &'static str) {
         match self {
-            Self::Wye(_, Variant::Plain) => "wye",
-            Self::Wye(_, Variant::Auth) => "wye-auth",
-            Self::Wye(_, Variant::Diag) => "wye-diag",
-            Self::Wye(_, Variant::Otlp) => "wye-otlp",
-            Self::Wye(_, Variant::Models) => "wye-models",
-            Self::Wye(_, Variant::Openai) => "wye-openai",
-            Self::Wye(_, Variant::Bedrock) => "wye-bedrock",
-            Self::Wye(_, Variant::Failover) => "wye-failover",
-            Self::Wye(_, Variant::Refused) => "wye-refused",
-            Self::KrakenD(_) => "krakend",
-            Self::LiteLlm(_) => "litellm",
-            Self::Bifrost(_) => "bifrost",
-            Self::Agentgateway(_) => "agentgateway",
+            Self::Wye(_, Variant::Plain) => ("wye", ""),
+            Self::Wye(_, Variant::Auth) => ("wye-auth", "auth_"),
+            Self::Wye(_, Variant::Diag) => ("wye-diag", "diag_"),
+            Self::Wye(_, Variant::Otlp) => ("wye-otlp", "otlp_"),
+            Self::Wye(_, Variant::Models) => ("wye-models", "models_"),
+            Self::Wye(_, Variant::Openai) => ("wye-openai", "openai_"),
+            Self::Wye(_, Variant::Bedrock) => ("wye-bedrock", "bedrock_"),
+            Self::Wye(_, Variant::Failover) => ("wye-failover", "failover_"),
+            Self::Wye(_, Variant::Refused) => ("wye-refused", "refused_"),
+            Self::KrakenD(_) => ("krakend", "krakend_"),
+            Self::LiteLlm(_) => ("litellm", "litellm_"),
+            Self::Bifrost(_) => ("bifrost", "bifrost_"),
+            Self::Agentgateway(_) => ("agentgateway", "agentgateway_"),
         }
     }
 
-    /// Metric name prefix for this gateway.
+    /// The gateway's name in progress lines and file names.
+    pub fn name(self) -> &'static str {
+        self.labels().0
+    }
+
+    /// The prefix of the gateway's metric names.
     pub fn prefix(self) -> &'static str {
-        match self {
-            Self::Wye(_, Variant::Plain) => "",
-            Self::Wye(_, Variant::Auth) => "auth_",
-            Self::Wye(_, Variant::Diag) => "diag_",
-            Self::Wye(_, Variant::Otlp) => "otlp_",
-            Self::Wye(_, Variant::Models) => "models_",
-            Self::Wye(_, Variant::Openai) => "openai_",
-            Self::Wye(_, Variant::Bedrock) => "bedrock_",
-            Self::Wye(_, Variant::Failover) => "failover_",
-            Self::Wye(_, Variant::Refused) => "refused_",
-            Self::KrakenD(_) => "krakend_",
-            Self::LiteLlm(_) => "litellm_",
-            Self::Bifrost(_) => "bifrost_",
-            Self::Agentgateway(_) => "agentgateway_",
-        }
+        self.labels().1
     }
 
     /// Whether the gateway relays SSE events as they arrive. KrakenD CE buffers

@@ -96,17 +96,7 @@ pub async fn run(
             };
             out.put("direct_throughput_mb_s", direct.mb_s);
             out.put_percentiles("direct_unary", &direct.latency.unary);
-            let variants = [
-                Variant::Auth,
-                Variant::Models,
-                Variant::Diag,
-                Variant::Otlp,
-                Variant::Openai,
-                Variant::Bedrock,
-                Variant::Failover,
-                Variant::Refused,
-            ]
-            .map(|variant| Gateway::Wye(wye, variant));
+            let variants = Variant::ALL.map(|variant| Gateway::Wye(wye, variant));
             let variants = if path.variants { &variants[..] } else { &[] };
             for &gateway in gateways.iter().chain(variants) {
                 eprintln!(
@@ -120,23 +110,11 @@ pub async fn run(
                     GatewayProcess::start(gateway, &path.base_url, path.ca_pem, dir, path.name)
                         .await;
                 let prefix = format!("{}{}", path.prefix, gateway.prefix());
-                let scope = Scope {
-                    streams_sse: gateway.streams_sse(),
-                    per_request_only: matches!(gateway, Gateway::Wye(_, v) if v != Variant::Plain),
-                    uploads: matches!(
-                        gateway,
-                        Gateway::Wye(
-                            _,
-                            Variant::Models | Variant::Diag | Variant::Failover | Variant::Refused
-                        )
-                    ),
-                    event_cpu: matches!(gateway, Gateway::Wye(_, Variant::Openai)),
-                };
                 let mut out = Out {
                     metrics: &mut metrics,
                     prefix: &prefix,
                 };
-                measure::measure(&direct, &process, scope, &mut out).await;
+                measure::measure(&direct, &process, Scope::of(gateway), &mut out).await;
             }
         }
         if let Some(binary) = wye_alloc {

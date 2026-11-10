@@ -20,7 +20,7 @@ use stress::{Cold, Stress, measure_cold, measure_stress};
 
 use crate::{
     client::Target,
-    gateway_process::GatewayProcess,
+    gateway_process::{Gateway, GatewayProcess, Variant},
     scenarios::{self, Stream},
     stats::{Out, event_delays, percentile, phase, sorted},
 };
@@ -135,6 +135,27 @@ pub(crate) struct Scope {
     /// CPU per streamed event even with `per_request_only`: for variants
     /// whose cost is per event, such as another API's usage scanner.
     pub(crate) event_cpu: bool,
+}
+
+impl Scope {
+    /// The scenarios that apply to `gateway`: every one for Wye and the
+    /// competitors, the per-request ones for a Wye variant, and each variant's
+    /// own cost on top.
+    pub(crate) fn of(gateway: Gateway<'_>) -> Self {
+        let variant = match gateway {
+            Gateway::Wye(_, variant) => Some(variant),
+            _ => None,
+        };
+        Self {
+            streams_sse: gateway.streams_sse(),
+            per_request_only: variant.is_some_and(|v| v != Variant::Plain),
+            uploads: matches!(
+                variant,
+                Some(Variant::Models | Variant::Diag | Variant::Failover | Variant::Refused)
+            ),
+            event_cpu: variant == Some(Variant::Openai),
+        }
+    }
 }
 
 /// Measures `process` against the `direct` baseline, adding metrics to `out`.

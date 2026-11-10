@@ -240,21 +240,21 @@ pub async fn measure(
         metrics,
         prefix: "alloc_",
     };
-    for (variant, name, bytes, agent_upload) in [
-        (Variant::Auth, "auth", false, false),
-        (Variant::Models, "models", false, false),
-        (Variant::Bedrock, "bedrock", true, false),
-        (Variant::Failover, "failover", true, true),
-        (Variant::Diag, "diag", true, true),
+    for (variant, bytes, agent_upload) in [
+        (Variant::Auth, false, false),
+        (Variant::Models, false, false),
+        (Variant::Bedrock, true, false),
+        (Variant::Failover, true, true),
+        (Variant::Diag, true, true),
     ] {
         let gateway = Gateway::Wye(binary, variant);
         let process = GatewayProcess::start(gateway, upstream_base_url, None, dir, "alloc").await;
         let t = process.target();
         scenarios::unary(t, CONCURRENCY, 2_000).await;
-        let unary_name = format!("{name}_unary");
+        let unary_name = format!("{}unary", gateway.prefix());
         per_request(t, &mut out, &unary_name, UNARY_REQUESTS, bytes, unary(t)).await;
         if agent_upload {
-            let upload_name = format!("{name}_agent_upload");
+            let upload_name = format!("{}agent_upload", gateway.prefix());
             per_request(
                 t,
                 &mut out,
