@@ -197,7 +197,7 @@ async fn head(
             super::error_chain(&e)
         )),
         Err(_) => Err(format!(
-            "{name}: {uri} did not answer within {}s",
+            "{name}: {uri} unreachable: no response within {}s",
             CHECK_TIMEOUT.as_secs()
         )),
     }

@@ -171,3 +171,25 @@ async fn a_key_serve_would_refuse_fails_the_check() {
         "{report}"
     );
 }
+
+/// An endpoint that takes the connection and never answers is unreachable
+/// once the check's time is up, worded as `wye probe` words it.
+#[tokio::test(start_paused = true)]
+async fn an_endpoint_that_never_answers_is_unreachable() {
+    // Connections queue in the backlog, and nothing ever reads them.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = silent.local_addr().unwrap();
+    let config = Config::from_toml_str(&format!(
+        "[server]\nlisten = \"127.0.0.1:8080\"\n\
+         [[upstreams]]\nid = \"silent\"\nbase_url = \"http://{addr}\"\nprovider_key = {{ env = \"PATH\" }}\n"
+    ))
+    .unwrap();
+    let (report, ok) = doctor(&config, Path::new("."), None).await;
+    assert!(!ok, "{report}");
+    assert!(
+        report.contains(&format!(
+            "FAIL  upstream silent: http://{addr}/ unreachable: no response within 5s\n"
+        )),
+        "{report}"
+    );
+}
