@@ -18,8 +18,10 @@ impl Body for ChannelBody {
     }
 }
 
+/// The body of a mock upstream's response: whole, or sent by the test.
 pub(crate) type UpBody = Either<Full<Bytes>, ChannelBody>;
 
+/// A request as the mock upstream received it, its body read whole.
 pub(crate) struct Seen {
     pub(crate) version: Version,
     pub(crate) method: Method,
@@ -28,6 +30,7 @@ pub(crate) struct Seen {
     pub(crate) body: Bytes,
 }
 
+/// How a mock upstream answers each request it receives.
 pub(crate) type Handler =
     Arc<dyn Fn(Seen) -> Pin<Box<dyn Future<Output = Response<UpBody>> + Send>> + Send + Sync>;
 
@@ -38,6 +41,8 @@ pub(crate) async fn spawn_counted(handler: Handler) -> (SocketAddr, Arc<AtomicUs
     (upstream, hits)
 }
 
+/// A mock upstream serving `handler`, over TLS with `tls`, counting its
+/// requests in `hits`; `max_streams` limits its HTTP/2 streams per connection.
 pub(crate) async fn spawn_upstream(
     handler: Handler,
     hits: Arc<AtomicUsize>,
@@ -66,6 +71,7 @@ pub(crate) async fn spawn_upstream(
     wye_testkit::spawn_upstream(serve, tls, max_streams).await
 }
 
+/// A response of `status` with the whole `body`.
 pub(crate) fn full(status: StatusCode, body: impl Into<Bytes>) -> Response<UpBody> {
     let mut res = Response::new(Either::Left(Full::new(body.into())));
     *res.status_mut() = status;

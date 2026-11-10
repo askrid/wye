@@ -26,9 +26,11 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Per-stream SSE sample.
 pub struct Stream {
+    /// Time to the first body frame, in µs; 0 when none came.
     pub ttfb_us: u64,
     /// Delay of each event from mock send to client receive.
     pub event_delays_us: Vec<u64>,
+    /// Body bytes received.
     pub bytes: u64,
     /// The request or body failed, or the stream ended before all its
     /// events.
@@ -195,6 +197,8 @@ async fn read_stream(target: &Target, events: u32, size: usize, interval_us: u64
     .unwrap_or_else(|_| Stream::failed())
 }
 
+/// One SSE stream of `events` events of `size` bytes, `interval_us` apart,
+/// read to its end.
 async fn stream_events(target: &Target, events: u32, size: usize, interval_us: u64) -> Stream {
     let start = Instant::now();
     let req = target.messages(&[
@@ -244,10 +248,12 @@ async fn stream_events(target: &Target, events: u32, size: usize, interval_us: u
     }
 }
 
+/// Where `needle` first starts in `haystack`.
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
+/// The mock's send time in an event (`"t"`, ns since process start).
 fn event_timestamp(event: &[u8]) -> Option<u64> {
     let start = find(event, b"\"t\":")? + 4;
     let digits = event[start..]

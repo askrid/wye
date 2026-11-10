@@ -42,7 +42,10 @@ pub(crate) use tokio::{
 pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources, UsageOut};
 pub(crate) use wye_testkit::{TestCa, ed25519_keypair as keypair};
 
+/// The provider key of the harness's provider-key gateways.
 pub(crate) const PROVIDER_KEY: &str = "sk-test-provider-key";
+/// How long a test waits for something that must happen: an answer, a
+/// frame, a record.
 pub(crate) const WAIT: Duration = Duration::from_secs(5);
 /// How long a check that something never arrives waits for it: far longer
 /// than a request over loopback takes, so a bug shows within it.
@@ -55,12 +58,17 @@ pub(crate) async fn assert_quiet<T: std::fmt::Debug>(rx: &mut mpsc::Receiver<T>,
     }
 }
 
+/// A gateway serving on a loopback port in this process, in front of a mock
+/// upstream, with a client and the usage log's reading end.
 pub(crate) struct Harness {
+    /// Where the gateway listens.
     pub(crate) gateway: SocketAddr,
     /// The config the gateway serves, for `explain` to answer from.
     pub(crate) config: Config,
+    /// Requests the mock upstream received.
     pub(crate) upstream_hits: Arc<AtomicUsize>,
     pub(crate) client: Client<HttpConnector, Full<Bytes>>,
+    /// The usage log, a record per line.
     pub(crate) usage: Mutex<Lines<BufReader<DuplexStream>>>,
     /// Sending (or dropping) triggers the gateway's shutdown.
     pub(crate) shutdown: Option<oneshot::Sender<()>>,
@@ -280,6 +288,8 @@ impl Harness {
             .unwrap()
     }
 
+    /// The answer to `req`, sent to the gateway with `body`, within
+    /// [`WAIT`].
     pub(crate) async fn send(
         &self,
         req: http::request::Builder,
@@ -393,6 +403,8 @@ pub(crate) fn upstream(addr: SocketAddr, lines: &str) -> String {
     )
 }
 
+/// A Messages request as Claude Code sends it: its version and beta
+/// headers and a session id.
 pub(crate) fn messages() -> http::request::Builder {
     Request::post("/v1/messages?beta=true")
         .header("content-type", "application/json")
@@ -415,6 +427,7 @@ pub(crate) async fn next_frame(body: &mut Incoming) -> Frame<Bytes> {
         .unwrap()
 }
 
+/// The whole body of `res`, which must end within [`WAIT`].
 pub(crate) async fn read_body(res: Response<Incoming>) -> Bytes {
     tokio::time::timeout(WAIT, res.into_body().collect())
         .await

@@ -51,6 +51,8 @@ pub struct TestCa {
 }
 
 impl TestCa {
+    /// A fresh CA and server certificate, whose server negotiates HTTP/2 or
+    /// HTTP/1.1 by ALPN.
     pub fn generate() -> Self {
         let ca_key = KeyPair::generate().expect("CA key");
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");

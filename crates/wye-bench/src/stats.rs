@@ -12,6 +12,7 @@ pub(crate) struct Out<'a> {
 }
 
 impl Out<'_> {
+    /// Puts `{prefix}{name}`, rounded to two decimals.
     pub(crate) fn put(&mut self, name: &str, value: f64) {
         let prefix = self.prefix;
         self.metrics
@@ -67,7 +68,8 @@ pub(crate) fn merge(runs: &[BTreeMap<String, f64>]) -> BTreeMap<String, f64> {
         .collect()
 }
 
-/// `NaN` (written as `null`) when a gateway produced no samples, e.g. every request failed.
+/// The `p`th percentile of `sorted`; `NaN` (written as `null`) when there
+/// are no samples, as when every request failed.
 pub(crate) fn percentile(sorted: &[u64], p: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;
@@ -90,6 +92,7 @@ pub(crate) fn event_delays(streams: Vec<crate::scenarios::Stream>) -> Vec<u64> {
     )
 }
 
+/// `v`, sorted.
 pub(crate) fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v.sort_unstable();
     v

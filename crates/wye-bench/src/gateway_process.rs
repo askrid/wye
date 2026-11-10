@@ -105,6 +105,7 @@ impl Gateway<'_> {
     }
 }
 
+/// A running gateway under test, stopped with its process tree on drop.
 pub struct GatewayProcess {
     /// Held so the process lives as long as this value; `kill_on_drop` stops it.
     _child: Child,
@@ -181,10 +182,12 @@ impl GatewayProcess {
         panic!("{} did not become healthy", launch.program);
     }
 
+    /// The gateway's process id, for a profiler.
     pub fn pid(&self) -> u32 {
         self.pid
     }
 
+    /// Where clients reach the gateway.
     pub fn target(&self) -> &Target {
         &self.target
     }

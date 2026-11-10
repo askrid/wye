@@ -76,6 +76,8 @@ pub(crate) struct Direct {
 }
 
 impl Direct {
+    /// Every scenario run against `target` directly; `paced` adds the
+    /// paced and stress scenarios, the agent upload otherwise.
     pub(crate) async fn measure(target: &Target, paced: bool) -> Self {
         let latency = Latency::measure(target).await;
         let (mb_s, _, throughput_failed) = throughput(target).await;
@@ -295,6 +297,7 @@ pub(crate) struct Latency {
 }
 
 impl Latency {
+    /// The unary and SSE scenarios against `target`, after a warm-up.
     async fn measure(target: &Target) -> Self {
         // Warm up connection pools and allocators.
         scenarios::unary(target, UNARY_CONCURRENCY, 2_000).await;
@@ -329,7 +332,7 @@ fn successes(samples: Vec<Option<u64>>) -> (Vec<u64>, usize) {
     (ok, failed)
 }
 
-/// Returns (MB/s, MB streamed, failed streams) for large back-to-back events.
+/// MB/s, MB streamed, and failed streams of large back-to-back events.
 async fn throughput(target: &Target) -> (f64, f64, usize) {
     let start = std::time::Instant::now();
     let streams: Vec<Stream> = scenarios::sse(

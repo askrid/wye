@@ -80,6 +80,7 @@ pub fn report_drops_to(tx: mpsc::UnboundedSender<u64>) {
 /// concurrency per client pool, so the direct baseline never queues.
 const MAX_STREAMS: u32 = 1_000;
 
+/// A mock upstream, over TLS with `tls`, as the module describes.
 pub async fn spawn(tls: Option<&TestCa>) -> SocketAddr {
     wye_testkit::spawn_upstream(handle, tls, Some(MAX_STREAMS)).await
 }
@@ -104,6 +105,7 @@ pub async fn spawn_refusing(every: u64) -> SocketAddr {
     wye_testkit::spawn_upstream(handler, None, Some(MAX_STREAMS)).await
 }
 
+/// The mock's answer to `req`, as its headers ask.
 async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>> {
     let headers = req.headers().clone();
     let responses = req.uri().path() == "/v1/responses";
@@ -143,6 +145,7 @@ async fn handle(req: Request<Incoming>) -> Response<Either<Full<Bytes>, SseBody>
     res
 }
 
+/// A `200` JSON response of `body`.
 fn json_response(body: Bytes) -> Response<Either<Full<Bytes>, SseBody>> {
     let mut res = Response::new(Either::Left(Full::new(body)));
     res.headers_mut()
@@ -210,6 +213,7 @@ fn padded_json(head: &str, tail: &str, size: usize) -> Bytes {
     Bytes::from(body)
 }
 
+/// The header `name` as a number.
 fn header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
     headers.get(name)?.to_str().ok()?.parse().ok()
 }

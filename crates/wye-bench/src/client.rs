@@ -47,6 +47,7 @@ pub struct Target {
 }
 
 impl Target {
+    /// Plain-HTTP endpoint.
     pub fn plain(addr: SocketAddr) -> Self {
         Self::new(format!("http://{addr}"), None)
     }
@@ -178,6 +179,7 @@ fn pools(root: Option<&CertificateDer<'static>>) -> Arc<[HttpClient]> {
     (0..POOLS).map(|_| build_client(root)).collect()
 }
 
+/// A client over HTTP/1.1, or TLS trusting `root` with HTTP/2 by ALPN.
 fn build_client(root: Option<&CertificateDer<'static>>) -> HttpClient {
     let mut roots = RootCertStore::empty();
     if let Some(root) = root {
