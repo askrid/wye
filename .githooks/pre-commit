@@ -2,9 +2,10 @@
 # Blocks commits that fail correctness or regress performance. See scripts/check.sh.
 # Commits that touch only docs, the website (site/ and its workflow,
 # .github/workflows/site.yml), or bench/baseline.json skip the run, except
-# docs/policy.md, which a test reads. The website has its own check,
-# site/check.sh, run for a commit that changes the site or a file the site
-# reads.
+# docs/policy.md, which a test reads; one that changes README.md or
+# docs/guide.md runs the one test that reads their install command. The
+# website has its own check, site/check.sh, run for a commit that changes
+# the site, a file the site reads, or a file its check uses.
 set -euo pipefail
 # A variable, not a pipe: with pipefail, grep -q leaving early could fail
 # the pipeline and skip the gate.
@@ -12,11 +13,12 @@ staged=$(git diff --cached --name-only)
 
 site_files=$(grep -E '^(site/|\.github/workflows/site\.yml$)' <<<"$staged" | grep -vE '\.md$' || true)
 if [[ -n $site_files ]] || grep -qxE \
-  'README\.md|CHANGELOG\.md|docs/operations\.md|docs/benchmarks\.md|Cargo\.toml|crates/wye/Cargo\.toml' \
+  'README\.md|CHANGELOG\.md|docs/operations\.md|docs/benchmarks\.md|Cargo\.toml|crates/wye/Cargo\.toml|clippy\.toml|rust-toolchain\.toml|scripts/machine-lock\.sh' \
   <<<"$staged"; then
   # site/check.sh builds the working tree too, site/ and the files it reads.
   if ! git diff --quiet -- site .github/workflows/site.yml README.md CHANGELOG.md \
-    docs/operations.md docs/benchmarks.md Cargo.toml crates/wye/Cargo.toml; then
+    docs/operations.md docs/benchmarks.md Cargo.toml crates/wye/Cargo.toml clippy.toml \
+    rust-toolchain.toml scripts/machine-lock.sh; then
     echo "pre-commit: unstaged changes the site reads would be checked but not" \
       "committed; stage or stash them" >&2
     exit 1
@@ -49,4 +51,16 @@ if [[ -n $staged ]] && { grep -qvE '^(bench/baseline\.json|.*\.md|site/.*|\.gith
     exit 1
   fi
   exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
+fi
+
+# Only docs, then: the install command a test checks is in these two.
+if grep -qxE 'README\.md|docs/guide\.md' <<<"$staged"; then
+  if ! git diff --quiet -- README.md docs/guide.md; then
+    echo "pre-commit: unstaged changes to README.md or docs/guide.md would be" \
+      "tested but not committed; stage or stash them" >&2
+    exit 1
+  fi
+  cd "$(git rev-parse --show-toplevel)"
+  exec scripts/machine-lock.sh cargo test --locked --quiet -p wye --test proxy \
+    the_documented_install
 fi
