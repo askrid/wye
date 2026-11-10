@@ -14,53 +14,38 @@ use std::{
     time::Duration,
 };
 
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    time::{Instant, Sleep},
-};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::idle::IdleTimer;
 
 /// `io` whose writes fail with `TimedOut` once none has made progress for
-/// `timeout`. The timer is allocated at the first blocked write, so
-/// connections whose writes never block pay nothing.
+/// `timeout`.
 pub(super) struct WriteTimeout<T> {
     io: T,
-    timeout: Duration,
-    /// Armed while a write is blocked; `None` until the first one.
-    stalled: Option<Pin<Box<Sleep>>>,
-    armed: bool,
+    /// Runs while a write is blocked.
+    idle: IdleTimer,
 }
 
 impl<T> WriteTimeout<T> {
     pub(super) fn new(io: T, timeout: Duration) -> Self {
         Self {
             io,
-            timeout,
-            stalled: None,
-            armed: false,
+            idle: IdleTimer::new(timeout),
         }
     }
 
-    /// Tracks the outcome of a write: progress disarms the timer; a blocked
-    /// write arms it (once per stall) and fails when it fires. Polling the
-    /// timer registers the waker, so the connection task is woken to see it.
+    /// Tracks the outcome of a write: progress restarts the timer; a blocked
+    /// write fails once the stall has lasted the timeout.
     fn observe<R>(
         &mut self,
         cx: &mut Context<'_>,
         poll: Poll<io::Result<R>>,
     ) -> Poll<io::Result<R>> {
         if poll.is_ready() {
-            self.armed = false;
+            self.idle.progressed();
             return poll;
         }
-        let deadline = Instant::now() + self.timeout;
-        let sleep = self
-            .stalled
-            .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(deadline)));
-        if !self.armed {
-            sleep.as_mut().reset(deadline);
-            self.armed = true;
-        }
-        ready!(sleep.as_mut().poll(cx));
+        ready!(self.idle.poll_expired(cx));
         Poll::Ready(Err(io::Error::new(
             io::ErrorKind::TimedOut,
             "client accepted no response bytes within the client write timeout",

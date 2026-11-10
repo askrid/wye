@@ -10,6 +10,7 @@ mod discovery;
 mod failover;
 mod gateway;
 mod gauge;
+mod idle;
 mod log_files;
 mod request_body;
 mod scanned_body;

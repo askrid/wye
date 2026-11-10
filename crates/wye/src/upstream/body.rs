@@ -1,26 +1,23 @@
-//! Upstream response body: holds the connection slot and fails when the upstream goes silent.
+//! Upstream response body: holds the connection slot and fails when the
+//! upstream goes silent.
 
 use std::{
-    future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 
 use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
-use tokio::time::{Instant, Sleep};
 
-use crate::{BoxError, gauge::Reserved};
+use crate::{BoxError, gauge::Reserved, idle::IdleTimer};
 
 /// Fails the stream when the upstream sends nothing for `timeout`. The timer
 /// runs only while this body waits on the upstream: time the downstream is not
 /// polling (backpressure) never counts.
 pub(crate) struct UpstreamBody<B> {
     inner: B,
-    timeout: Duration,
-    sleep: Pin<Box<Sleep>>,
-    waiting: bool,
+    idle: IdleTimer,
     _slot: Reserved,
 }
 
@@ -28,9 +25,7 @@ impl<B> UpstreamBody<B> {
     pub(super) fn new(inner: B, timeout: Duration, slot: Reserved) -> Self {
         Self {
             inner,
-            timeout,
-            sleep: Box::pin(tokio::time::sleep(timeout)),
-            waiting: false,
+            idle: IdleTimer::new(timeout),
             _slot: slot,
         }
     }
@@ -51,20 +46,12 @@ where
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_frame(cx) {
             Poll::Ready(frame) => {
-                this.waiting = false;
+                this.idle.progressed();
                 Poll::Ready(frame.map(|f| f.map_err(Into::into)))
             }
             Poll::Pending => {
-                if !this.waiting {
-                    this.waiting = true;
-                    this.sleep.as_mut().reset(Instant::now() + this.timeout);
-                }
-                match this.sleep.as_mut().poll(cx) {
-                    Poll::Ready(()) => {
-                        Poll::Ready(Some(Err("upstream stream idle timeout".into())))
-                    }
-                    Poll::Pending => Poll::Pending,
-                }
+                ready!(this.idle.poll_expired(cx));
+                Poll::Ready(Some(Err("upstream stream idle timeout".into())))
             }
         }
     }
