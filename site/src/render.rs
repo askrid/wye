@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::{chart, markdown};
+use crate::{chart, highlight, markdown};
 
 mod directive;
 mod sources;
@@ -55,12 +55,12 @@ impl Sources {
             Directive::Stylesheet => Ok(self.stylesheet.clone()),
             Directive::Fence { file, prefix, mark } => {
                 let (lang, code) = self.fence(file, prefix)?;
-                let mut html = markdown::highlight(lang, &code);
+                let mut html = highlight::highlight(lang, &code);
                 // A third argument marks that word in the block's text (the
                 // accent), never inside the highlighting's own tags; every
                 // occurrence in the source must be marked.
                 if let Some(mark) = mark {
-                    let (marked, count) = markdown::mark(&html, &markdown::escape(mark));
+                    let (marked, count) = highlight::mark(&html, &markdown::escape(mark));
                     let wanted = code.matches(mark).count();
                     if count == 0 || count != wanted {
                         return Err(format!(

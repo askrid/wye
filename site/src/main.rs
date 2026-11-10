@@ -9,6 +9,7 @@
 
 mod chart;
 mod check;
+mod highlight;
 mod markdown;
 mod render;
 
