@@ -332,7 +332,7 @@ async fn usage_records_omit_prompt_without_diagnostics() {
 #[tokio::test]
 async fn cache_diagnostics_sample_whole_sessions() {
     let h = Harness::with_cache_diagnostics(ok(), &[7; 32], "sample_percent = 50").await;
-    let sampled = |id: &String| gateway_core::prompt::session_sampled(Some(id.as_bytes()), 50);
+    let sampled = |id: &String| gateway_core::route::sampled(Some(id.as_bytes()), 50);
     let ids: Vec<String> = (0..100).map(|i| format!("s-{i}")).collect();
     let (inside, outside) = (
         ids.iter().find(|id| sampled(id)).unwrap(),

@@ -202,3 +202,23 @@ fn the_unit_is_never_zero_or_one() {
         assert!(u > 0.0 && u < 1.0, "{hash}: {u}");
     }
 }
+
+#[test]
+fn sampling_is_deterministic_and_proportional() {
+    let ids: Vec<String> = (0..10_000).map(|i| format!("session-{i}")).collect();
+    let count = |percent| {
+        ids.iter()
+            .filter(|id| sampled(Some(id.as_bytes()), percent))
+            .count()
+    };
+    assert_eq!(count(100), 10_000);
+    let ten = count(10);
+    assert!((800..1_200).contains(&ten), "{ten}");
+    // A session sampled at a lower rate stays sampled at a higher one.
+    assert!(
+        ids.iter()
+            .all(|id| !sampled(Some(id.as_bytes()), 10) || sampled(Some(id.as_bytes()), 50))
+    );
+    assert!(sampled(None, 100));
+    assert!(!sampled(None, 99));
+}

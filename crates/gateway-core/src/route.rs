@@ -94,6 +94,21 @@ pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> 
     session.or(subject.map(str::as_bytes))
 }
 
+/// Whether requests with affinity `key` are sampled when `percent` are: by
+/// session for cache diagnostics, by [`affinity_key`] for upgrade checks.
+///
+/// A pure function of the key, so every replica decides alike and a sampled
+/// session keeps its complete request sequence, which explaining a cache
+/// miss needs. Requests without a key have nothing to be compared with and
+/// are sampled only at 100%.
+pub fn sampled(key: Option<&[u8]>, percent: u8) -> bool {
+    match key {
+        _ if percent >= 100 => true,
+        Some(key) => xxh3_64(key) % 100 < u64::from(percent),
+        None => false,
+    }
+}
+
 /// A route: the upstreams that serve one provider family's native APIs.
 /// Each `[[upstreams]]` entry serves the route its provider speaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

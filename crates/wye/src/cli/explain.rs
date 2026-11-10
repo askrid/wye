@@ -17,7 +17,6 @@ use gateway_core::{
     config::{Config, ProviderKey, Upstream},
     policy,
     pricing::{Pico, PriceEntry, Usd},
-    prompt,
     route::{self, FAILOVER_MAX_BODY_BYTES, FailoverReason, Route},
     token::{Identity, Verifier},
     upgrade::{self, UpgradeScanner},
@@ -476,7 +475,7 @@ impl Explanation {
         targets: &[&str],
     ) {
         if let Some(diagnostics) = &config.cache_diagnostics {
-            let sampled = prompt::session_sampled(session, diagnostics.sample_percent);
+            let sampled = route::sampled(session, diagnostics.sample_percent);
             self.step(format!(
                 "cache diagnostics: {} (sample_percent {})",
                 if sampled {

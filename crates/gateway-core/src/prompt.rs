@@ -28,7 +28,6 @@ mod scanner;
 use std::fmt;
 
 use ring::hmac;
-use xxhash_rust::xxh3::xxh3_64;
 
 pub use scanner::PromptScanner;
 
@@ -136,21 +135,6 @@ impl PromptHashes {
         }
         self.prefixes_next = (self.prefixes_next + 1) % MESSAGE_PREFIXES;
         self.prefixes_len = (self.prefixes_len + 1).min(MESSAGE_PREFIXES);
-    }
-}
-
-/// Whether requests with affinity key `session_id` (a client session id, or
-/// a token subject for upgrade checks) are sampled when `percent` are.
-///
-/// A pure function of the session id, so every replica decides alike and a
-/// sampled session keeps its complete request sequence, which explaining a
-/// miss needs. Requests without a session id have nothing to be compared
-/// with and are diagnosed only at 100%.
-pub fn session_sampled(session_id: Option<&[u8]>, percent: u8) -> bool {
-    match session_id {
-        _ if percent >= 100 => true,
-        Some(id) => xxh3_64(id) % 100 < u64::from(percent),
-        None => false,
     }
 }
 

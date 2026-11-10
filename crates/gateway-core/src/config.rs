@@ -204,7 +204,7 @@ pub struct CacheDiagnostics {
     /// could be matched against guessed prompts.
     pub hash_key: Secret,
     /// Percentage of Claude Code sessions diagnosed, 1-100 (see
-    /// [`crate::prompt::session_sampled`]).
+    /// [`crate::route::sampled`]).
     pub sample_percent: u8,
 }
 

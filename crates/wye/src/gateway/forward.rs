@@ -8,8 +8,7 @@ use tokio::sync::oneshot::error::TryRecvError;
 use bytes::Bytes;
 use gateway_core::{
     api::Api,
-    prompt,
-    route::{FAILOVER_MAX_BODY_BYTES, FailoverReason, affinity_key},
+    route::{FAILOVER_MAX_BODY_BYTES, FailoverReason, affinity_key, sampled},
 };
 use http::{
     HeaderValue, Request, Response,
@@ -116,7 +115,7 @@ impl Gateway {
         declared_len: Option<u64>,
         info: &mut RequestInfo,
     ) -> Result<Response<UpstreamBody<Incoming>>, ForwardError> {
-        // Session affinity: prompt caches are per provider account.
+        // Cache affinity: prompt caches are per provider account.
         let ranking = route.route.rank(
             affinity_key(
                 info.session_id.as_ref().map(HeaderValue::as_bytes),
@@ -213,12 +212,11 @@ impl Gateway {
             return;
         }
         let session = info.session_id.as_ref().map(HeaderValue::as_bytes);
-        if self.prompt_key.is_some() && prompt::session_sampled(session, self.prompt_sample_percent)
-        {
+        if self.prompt_key.is_some() && sampled(session, self.prompt_sample_percent) {
             info.prompt = Some(PromptSlot::default());
         }
         if let Some(check) = &self.upgrade_check
-            && prompt::session_sampled(
+            && sampled(
                 affinity_key(session, info.identity.as_ref().map(|i| &*i.subject)),
                 check.sample_percent,
             )
