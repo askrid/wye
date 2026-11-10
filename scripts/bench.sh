@@ -60,9 +60,14 @@ gate() {
   if [[ -e $tree/.git ]]; then
     git -C "$tree" checkout --quiet --detach --force "$sha"
   else
+    # A restored build cache (CI) holds the tree's target/ but no worktree:
+    # keep the build across the worktree's re-creation.
+    rm -rf target/reference-target
+    if [[ -d $tree/target ]]; then mv "$tree/target" target/reference-target; fi
     rm -rf "$tree"
     git worktree prune
     git worktree add --quiet --detach "$tree" "$sha"
+    if [[ -d target/reference-target ]]; then mv target/reference-target "$tree/target"; fi
   fi
   build "$tree"
   build .
