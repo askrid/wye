@@ -86,23 +86,23 @@ impl fmt::Display for ModelPattern {
 }
 
 /// The output-token ceiling of a request: the stricter of the configured
-/// and the credential's limit, if either is set.
-pub(crate) fn output_ceiling(configured: Option<u64>, credential: Option<u64>) -> Option<u64> {
-    configured.into_iter().chain(credential).min()
+/// and the token's limit, if either is set.
+pub(crate) fn output_ceiling(configured: Option<u64>, token: Option<u64>) -> Option<u64> {
+    configured.into_iter().chain(token).min()
 }
 
 /// Whether `model` is allowed by both lists; an absent list allows every
-/// model. The configured list is the ceiling and a credential's list can only
-/// narrow it, so the stricter one always applies.
+/// model. Model permissions are the configured list narrowed by the token's:
+/// a token's list can only narrow it, so the stricter one always applies.
 pub fn permitted(
     configured: Option<&[ModelPattern]>,
-    credential: Option<&[ModelPattern]>,
+    token: Option<&[ModelPattern]>,
     model: &str,
 ) -> bool {
     let allows = |list: Option<&[ModelPattern]>| {
         list.is_none_or(|patterns| patterns.iter().any(|p| p.matches(model)))
     };
-    allows(configured) && allows(credential)
+    allows(configured) && allows(token)
 }
 
 /// Why a request body's `model` cannot be checked.
@@ -121,9 +121,9 @@ pub enum PolicyError {
     /// The body is not a JSON object, or its brackets do not match.
     Malformed,
     /// The output-token field is not a non-negative integer.
-    InvalidMaxTokens,
+    InvalidOutputTokens,
     /// A second top-level output-token field.
-    RepeatedMaxTokens,
+    RepeatedOutputTokens,
 }
 
 impl PolicyError {
@@ -135,10 +135,10 @@ impl PolicyError {
             Self::Repeated => "request names model more than once",
             Self::EscapedKey => "top-level keys must be ASCII without escapes",
             Self::Malformed => "request body is not a JSON object",
-            Self::InvalidMaxTokens => {
+            Self::InvalidOutputTokens => {
                 "the output-token field (max_tokens, max_output_tokens, or max_completion_tokens) must be a non-negative integer"
             }
-            Self::RepeatedMaxTokens => "request names its output-token field more than once",
+            Self::RepeatedOutputTokens => "request names its output-token field more than once",
         }
     }
 }

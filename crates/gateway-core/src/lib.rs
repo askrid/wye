@@ -1,5 +1,5 @@
 //! Portable gateway policy: configuration types and validation, gateway
-//! credentials, model aliases, upstream selection and failover order,
+//! tokens, model aliases, upstream selection and failover order,
 //! request policy (model permissions, output-token ceilings), upgrade
 //! checks, agent headers (Claude Code's and Codex's), prompt hashes for
 //! cache-miss diagnostics, usage extraction from provider responses, and

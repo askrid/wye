@@ -224,7 +224,7 @@ fn rejects_unknown_fields() {
 }
 
 #[test]
-fn credential_must_be_exactly_one() {
+fn a_provider_key_or_forwarding_exactly() {
     let error = |lines: &str| {
         parse(&format!(
             "base_url = \"https://api.anthropic.com\"\n{lines}"

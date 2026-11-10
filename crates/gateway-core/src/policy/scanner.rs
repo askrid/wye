@@ -31,7 +31,7 @@ pub struct PolicyScanner {
     capture: Capture,
     key: Kept<KEY_CAP>,
     /// The API's output-token fields.
-    token_keys: &'static [&'static str],
+    output_token_fields: &'static [&'static str],
     /// The string has an escape, or (a key) a non-ASCII byte: it may read
     /// as another key once decoded or case-folded.
     escaped: bool,
@@ -43,14 +43,15 @@ pub struct PolicyScanner {
     found: bool,
     /// Body bytes fed before the current chunk.
     offset: u64,
-    /// The last top-level key was the token field and its value comes next.
-    tokens_next: bool,
-    /// Digits of the token field are being read.
-    tokens_reading: bool,
-    tokens_value: u64,
-    tokens_seen: bool,
-    /// The token field, once its value has been read completely.
-    max_tokens: Option<u64>,
+    /// The last top-level key was an output-token field and its value comes
+    /// next.
+    output_tokens_next: bool,
+    /// Digits of the output-token field are being read.
+    output_tokens_reading: bool,
+    output_tokens_value: u64,
+    output_tokens_seen: bool,
+    /// The output-token field, once its value has been read completely.
+    output_tokens: Option<u64>,
 }
 
 impl PolicyScanner {
@@ -64,25 +65,25 @@ impl PolicyScanner {
             expect_key: false,
             capture: Capture::None,
             key: Kept::default(),
-            token_keys: api.output_token_fields(),
+            output_token_fields: api.output_token_fields(),
             escaped: false,
             model_next: false,
             model: Kept::default(),
             model_start: 0,
             found: false,
             offset: 0,
-            tokens_next: false,
-            tokens_reading: false,
-            tokens_value: 0,
-            tokens_seen: false,
-            max_tokens: None,
+            output_tokens_next: false,
+            output_tokens_reading: false,
+            output_tokens_value: 0,
+            output_tokens_seen: false,
+            output_tokens: None,
         }
     }
 
     /// Leaves the output-token field alone: without a ceiling, what it holds
     /// is between the client and the provider.
     pub(crate) fn without_token_field(mut self) -> Self {
-        self.token_keys = &[];
+        self.output_token_fields = &[];
         self
     }
 
@@ -106,7 +107,7 @@ impl PolicyScanner {
 
     /// The requested output-token maximum, once its value was read completely.
     pub fn max_output_tokens(&self) -> Option<u64> {
-        self.max_tokens
+        self.output_tokens
     }
 
     /// The first problem found, if any. Scanning stops there.
@@ -157,8 +158,8 @@ impl PolicyScanner {
     #[inline(always)]
     fn structural(&mut self, chunk: &[u8], byte: u8, i: &mut usize) -> Result<(), PolicyError> {
         if is_space(byte) {
-            if self.tokens_reading {
-                self.end_tokens()?;
+            if self.output_tokens_reading {
+                self.end_output_tokens()?;
             }
             return Ok(());
         }
@@ -174,8 +175,8 @@ impl PolicyScanner {
         }
         match byte {
             b'"' => {
-                if self.tokens_next {
-                    return Err(PolicyError::InvalidMaxTokens);
+                if self.output_tokens_next {
+                    return Err(PolicyError::InvalidOutputTokens);
                 }
                 let top_key = self.nest.depth() == 1 && self.expect_key;
                 let model_value = self.nest.depth() == 1 && self.model_next;
@@ -204,14 +205,14 @@ impl PolicyScanner {
             }
             b'{' | b'[' => {
                 self.check_not_model_value()?;
-                if self.tokens_next {
-                    return Err(PolicyError::InvalidMaxTokens);
+                if self.output_tokens_next {
+                    return Err(PolicyError::InvalidOutputTokens);
                 }
                 self.nest.open(byte == b'[');
                 self.expect_key = byte == b'{';
             }
             b'}' | b']' => {
-                self.end_tokens()?;
+                self.end_output_tokens()?;
                 if !self.nest.closes(byte == b']') {
                     return Err(PolicyError::Malformed);
                 }
@@ -220,7 +221,7 @@ impl PolicyScanner {
                 self.expect_key = false;
             }
             b',' => {
-                self.end_tokens()?;
+                self.end_output_tokens()?;
                 self.check_not_model_value()?;
                 self.expect_key = self.nest.in_object();
             }
@@ -244,15 +245,15 @@ impl PolicyScanner {
             | b't'
             | b'u' => {
                 self.check_not_model_value()?;
-                if self.tokens_next || self.tokens_reading {
-                    self.tokens_next = false;
-                    self.tokens_reading = true;
+                if self.output_tokens_next || self.output_tokens_reading {
+                    self.output_tokens_next = false;
+                    self.output_tokens_reading = true;
                     let digit = byte.wrapping_sub(b'0');
-                    self.tokens_value = (digit < 10)
-                        .then(|| self.tokens_value.checked_mul(10))
+                    self.output_tokens_value = (digit < 10)
+                        .then(|| self.output_tokens_value.checked_mul(10))
                         .flatten()
                         .and_then(|v| v.checked_add(u64::from(digit)))
-                        .ok_or(PolicyError::InvalidMaxTokens)?;
+                        .ok_or(PolicyError::InvalidOutputTokens)?;
                 }
             }
             _ => return Err(PolicyError::Malformed),
@@ -271,12 +272,12 @@ impl PolicyScanner {
 
     /// Completes a token-field value at a terminator; a key whose value
     /// never started is an error.
-    fn end_tokens(&mut self) -> Result<(), PolicyError> {
-        if self.tokens_reading {
-            self.tokens_reading = false;
-            self.max_tokens = Some(self.tokens_value);
-        } else if self.tokens_next {
-            return Err(PolicyError::InvalidMaxTokens);
+    fn end_output_tokens(&mut self) -> Result<(), PolicyError> {
+        if self.output_tokens_reading {
+            self.output_tokens_reading = false;
+            self.output_tokens = Some(self.output_tokens_value);
+        } else if self.output_tokens_next {
+            return Err(PolicyError::InvalidOutputTokens);
         }
         Ok(())
     }
@@ -312,15 +313,15 @@ impl PolicyScanner {
                     self.model_next = true;
                 } else if let Some(key) = key
                     && self
-                        .token_keys
+                        .output_token_fields
                         .iter()
                         .any(|k| k.as_bytes().eq_ignore_ascii_case(key))
                 {
-                    if self.tokens_seen {
-                        self.error = Some(PolicyError::RepeatedMaxTokens);
+                    if self.output_tokens_seen {
+                        self.error = Some(PolicyError::RepeatedOutputTokens);
                     }
-                    self.tokens_seen = true;
-                    self.tokens_next = true;
+                    self.output_tokens_seen = true;
+                    self.output_tokens_next = true;
                 }
             }
             Capture::Model => {

@@ -53,24 +53,20 @@ fn patterns_match_exact_names_or_prefixes() {
 #[test]
 fn the_stricter_list_applies() {
     let config = patterns(&["claude-sonnet-*", "claude-haiku-*"]);
-    let credential = patterns(&["claude-haiku-*"]);
+    let granted = patterns(&["claude-haiku-*"]);
     assert!(permitted(None, None, "any"));
     assert!(permitted(Some(&config), None, "claude-sonnet-4-5"));
     assert!(!permitted(Some(&config), None, "claude-opus-4-1"));
-    assert!(permitted(
-        Some(&config),
-        Some(&credential),
-        "claude-haiku-4-5"
-    ));
+    assert!(permitted(Some(&config), Some(&granted), "claude-haiku-4-5"));
     assert!(!permitted(
         Some(&config),
-        Some(&credential),
+        Some(&granted),
         "claude-sonnet-4-5"
     ));
-    // A credential cannot widen the configured ceiling.
+    // A token cannot widen the configured list.
     let wide = patterns(&["*"]);
     assert!(!permitted(Some(&config), Some(&wide), "claude-opus-4-1"));
-    assert!(!permitted(None, Some(&credential), "claude-sonnet-4-5"));
+    assert!(!permitted(None, Some(&granted), "claude-sonnet-4-5"));
 }
 
 #[test]
@@ -129,7 +125,7 @@ fn reads_only_what_a_strict_json_parser_reads() {
         (br#"{"model":"a","MODEL":"b"}"#, PolicyError::Repeated),
         (
             br#"{"model":"a","max_tokens":1,"Max_Tokens":9000}"#,
-            PolicyError::RepeatedMaxTokens,
+            PolicyError::RepeatedOutputTokens,
         ),
         // ...and folds the Kelvin sign into `k`.
         (
@@ -268,14 +264,14 @@ fn reads_max_tokens_and_rejects_bad_values() {
     ] {
         assert_eq!(
             tokens(bad),
-            Err(PolicyError::InvalidMaxTokens),
+            Err(PolicyError::InvalidOutputTokens),
             "{}",
             String::from_utf8_lossy(bad)
         );
     }
     assert_eq!(
         tokens(br#"{"max_tokens":1,"max_tokens":2}"#),
-        Err(PolicyError::RepeatedMaxTokens)
+        Err(PolicyError::RepeatedOutputTokens)
     );
     assert_eq!(output_ceiling(None, None), None);
     assert_eq!(output_ceiling(Some(8000), None), Some(8000));
@@ -297,7 +293,7 @@ fn chat_completions_take_either_token_field_but_not_both() {
     assert_eq!(scan(br#"{"model":"m","max_tokens":60}"#), (Some(60), None));
     assert_eq!(
         scan(br#"{"model":"m","max_tokens":60,"max_completion_tokens":9000}"#).1,
-        Some(PolicyError::RepeatedMaxTokens)
+        Some(PolicyError::RepeatedOutputTokens)
     );
     // Messages reads only its own field.
     let mut s = PolicyScanner::for_api(Api::Messages);

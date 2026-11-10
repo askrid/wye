@@ -43,7 +43,7 @@ pub struct Tier {
 #[derive(Debug, Clone)]
 pub struct PriceEntry {
     pub models: Box<[ModelPattern]>,
-    /// Route upstream ids the entry is limited to; empty: every upstream.
+    /// Upstream ids the entry is limited to; empty: every upstream.
     /// Providers and regions can price the same model differently.
     pub upstreams: Box<[Box<str>]>,
     pub prices: Prices,
@@ -96,7 +96,7 @@ impl Cost {
 }
 
 impl Pricing {
-    /// The entry that prices `model` served by `upstream` (a route
+    /// The entry that prices `model` served by `upstream` (an
     /// upstream's id): one scoped to the upstream before any unscoped one;
     /// within each, the first match.
     pub fn entry(&self, model: &str, upstream: Option<&str>) -> Option<&PriceEntry> {

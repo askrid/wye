@@ -73,8 +73,8 @@ pub struct IdentityProvider {
     pub jwks_file: PathBuf,
     /// The claim that names the token's subject (default `sub`).
     pub subject_claim: String,
-    /// Models granted by claim values. Empty: the `[auth] models` ceiling
-    /// applies alone. Otherwise a token gets the union of its matching
+    /// Models granted by claim values. Empty: `[auth] models` applies
+    /// alone. Otherwise a token gets the union of its matching
     /// grants, and one matching none may use no model.
     pub grants: Vec<Grant>,
 }

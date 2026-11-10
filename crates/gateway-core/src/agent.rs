@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn tokens_are_bounded_and_plain() {
+    fn labels_are_bounded_and_plain() {
         assert_eq!(
             label(b"5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a"),
             Some("5f0c1a2e-0b7d-4a51-9a39-2b0f5c3d1e7a")

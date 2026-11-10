@@ -8,8 +8,8 @@
 //! algorithm-confusion attacks have nothing to select. Claims are parsed only
 //! after the signature verifies, and then must name that key's issuer.
 //!
-//! Wye's own tokens reject unknown header fields (including `crit`). Identity
-//! identity-provider tokens carry extra header fields (`typ`, `x5t`), which are
+//! Wye's own tokens reject unknown header fields (including `crit`).
+//! Identity-provider tokens carry extra header fields (`typ`, `x5t`), which are
 //! ignored, except `crit`, which is rejected (RFC 7515 §4.1.11). Unknown
 //! claims are ignored.
 //!

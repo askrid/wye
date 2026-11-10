@@ -66,10 +66,7 @@ pub(super) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigErr
                 .filter(move |(_, p)| p.route() == route)
                 .map(|(entry, _)| entry)
         };
-        let problem = |problem| ConfigError::Route {
-            route: route.label(),
-            problem,
-        };
+        let problem = |problem| ConfigError::Route { route, problem };
         if entries().count() > MAX_UPSTREAMS {
             return Err(problem("takes at most 16 upstreams"));
         }

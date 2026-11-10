@@ -273,10 +273,9 @@ pub enum ConfigError {
     },
     Percent(&'static str),
     Invalid(&'static str),
-    /// A problem with the upstreams that serve one route, named by its
-    /// label ([`RouteId::label`]).
+    /// A problem with the upstreams that serve one route.
     Route {
-        route: &'static str,
+        route: RouteId,
         problem: &'static str,
     },
     /// A problem in one `[[upstreams]]` entry, named by its id, written or
@@ -323,7 +322,7 @@ impl fmt::Display for ConfigError {
             Self::Percent(field) => write!(f, "{field} must be between 1 and 100"),
             Self::Invalid(message) => f.write_str(message),
             Self::Route { route, problem } => {
-                write!(f, "upstreams: the {route} route {problem}")
+                write!(f, "upstreams: the {} route {problem}", route.label())
             }
             Self::Upstream { id, error } => write!(f, "upstreams {id:?}: {error}"),
         }

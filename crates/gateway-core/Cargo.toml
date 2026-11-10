@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Portable policy: config, credentials, permissions, pricing, and the body and SSE scanners"
+description = "Wye's decisions with no I/O: config, gateway tokens, model permissions, upstream selection, pricing, and the body and SSE scanners"
 
 [dependencies]
 base64.workspace = true

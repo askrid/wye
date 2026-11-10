@@ -68,7 +68,10 @@ fn each_algorithm_verifies_and_names_the_subject() {
         let identity = v.verify(&key.token("idp-1", &claims("")), NOW).unwrap();
         assert_eq!(&*identity.subject, "user-1", "{}", key.alg());
         assert_eq!(&*identity.key_id, "idp-1");
-        assert_eq!(identity.models, None, "no grants: the ceiling decides");
+        assert_eq!(
+            identity.models, None,
+            "no grants: the configured list decides"
+        );
         assert_eq!(identity.max_output_tokens, None);
     }
 }
