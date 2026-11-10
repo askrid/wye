@@ -2,7 +2,7 @@
 //! sampling, the upstream choice and failover, and the response or Wye's own
 //! error answer, recorded by whose it is.
 
-use std::time::Duration;
+use std::{ops::Range, time::Duration};
 use tokio::sync::oneshot::error::TryRecvError;
 
 use bytes::Bytes;
@@ -125,11 +125,13 @@ impl Gateway {
         // The provider prefix the body's model carries now; the first
         // attempt gets its upstream's model id.
         let mut prefix_sent = None;
-        if let (Some(at), Some(upstream)) = (&model_span, route.upstreams.get(ranking.first()))
-            && let Some((prefix, value)) = model_id_for(at, upstream, prefix_sent)
-            && body.splice(&at.span, value)
-        {
-            prefix_sent = prefix;
+        if let Some(first) = route.upstreams.get(ranking.first()) {
+            give_model_id(
+                model_span.as_ref(),
+                first,
+                &mut prefix_sent,
+                |span, value| body.splice(span, value),
+            );
         }
         let (mut body, mut handback) = if failover {
             let (body, handback) = FailoverBody::kept(body, &self.kept_bytes, self.bounds());
@@ -173,8 +175,12 @@ impl Gateway {
                 (rejection(&result), handback.as_mut(), next)
             {
                 let cut = matches!(result, Err(ForwardError::Upstream(UpstreamError::Reset)));
-                if let Some(resend) = handed_back(handback, cut).await.and_then(|resend| {
-                    with_model_id(resend, model_span.as_ref(), next, &mut prefix_sent)
+                if let Some(resend) = handed_back(handback, cut).await.and_then(|mut resend| {
+                    let at = model_span.as_ref();
+                    give_model_id(at, next, &mut prefix_sent, |span, value| {
+                        resend.splice(span, value)
+                    })
+                    .then_some(resend)
                 }) {
                     drop(result);
                     info.failovers.push(RejectedAttempt {
@@ -259,29 +265,6 @@ async fn handed_back(
     resend.filter(|resend| !cut || !resend.sent_whole())
 }
 
-/// `resend` with the model id `next`'s provider needs, or `None` when the
-/// value is split between the sent bytes and the unread rest and cannot be
-/// rewritten: the rejection is then answered as it is.
-fn with_model_id(
-    mut resend: Resend<RequestBody<ClientBody>>,
-    at: Option<&ModelSpan>,
-    next: &Upstream,
-    prefix_sent: &mut Option<&'static str>,
-) -> Option<Resend<RequestBody<ClientBody>>> {
-    let Some(at) = at else { return Some(resend) };
-    match model_id_for(at, next, *prefix_sent) {
-        None => Some(resend),
-        Some((prefix, value)) => {
-            // Where the value is while it carries the prefix sent.
-            let span = at.span.start..at.span.end + prefix_sent.map_or(0, |p| p.len() as u64);
-            resend.splice(&span, value).then(|| {
-                *prefix_sent = prefix;
-                resend
-            })
-        }
-    }
-}
-
 /// The request's method, URI, version, and headers; extensions are not
 /// forwarded anyway.
 fn copy_parts(parts: &http::request::Parts) -> http::request::Parts {
@@ -293,21 +276,32 @@ fn copy_parts(parts: &http::request::Parts) -> http::request::Parts {
     copy
 }
 
-/// The prefix and value the body's model needs for `upstream`, when it now
-/// carries `prefix_sent` and that differs. A client that sent an
-/// already-prefixed id keeps it.
-fn model_id_for(
-    at: &ModelSpan,
+/// Gives the body's model, at `at`, the id `upstream`'s provider needs
+/// through `splice`, when that differs from the `prefix_sent` it carries
+/// now. `false` when `splice` cannot rewrite the value: a resend whose value
+/// is split between the sent bytes and the unread rest, answered as it is
+/// then. A client that sent an already-prefixed id keeps it.
+fn give_model_id(
+    at: Option<&ModelSpan>,
     upstream: &Upstream,
-    prefix_sent: Option<&'static str>,
-) -> Option<(Option<&'static str>, Bytes)> {
+    prefix_sent: &mut Option<&'static str>,
+    splice: impl FnOnce(&Range<u64>, Bytes) -> bool,
+) -> bool {
+    let Some(at) = at else { return true };
     let wanted = upstream.provider.prefix_for(&at.model);
-    (wanted != prefix_sent).then(|| {
-        let value = match wanted {
-            // Exact capacity: the Vec becomes the Bytes without another allocation.
-            Some(prefix) => Bytes::from([prefix.as_bytes(), at.model.as_bytes()].concat()),
-            None => Bytes::copy_from_slice(at.model.as_bytes()),
-        };
-        (wanted, value)
-    })
+    if wanted == *prefix_sent {
+        return true;
+    }
+    let value = match wanted {
+        // Exact capacity: the Vec becomes the Bytes without another allocation.
+        Some(prefix) => Bytes::from([prefix.as_bytes(), at.model.as_bytes()].concat()),
+        None => Bytes::copy_from_slice(at.model.as_bytes()),
+    };
+    // Where the value is while it carries the prefix sent.
+    let span = at.span.start..at.span.end + prefix_sent.map_or(0, |p| p.len() as u64);
+    let spliced = splice(&span, value);
+    if spliced {
+        *prefix_sent = wanted;
+    }
+    spliced
 }
