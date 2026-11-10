@@ -34,7 +34,7 @@ pub(crate) use tokio::{
 pub(crate) use wye::{Gateway, Resources, UpstreamAuth, UpstreamResources, UsageOut};
 pub(crate) use wye_testkit::{TestCa, ed25519_keypair as keypair};
 
-pub(crate) const API_KEY: &str = "sk-test-provider-key";
+pub(crate) const PROVIDER_KEY: &str = "sk-test-provider-key";
 pub(crate) const WAIT: Duration = Duration::from_secs(5);
 /// How long a check that something never arrives waits for it: far longer
 /// than a request over loopback takes, so a bug shows within it.
@@ -88,15 +88,17 @@ pub(crate) struct Harness {
 }
 
 impl Harness {
-    /// Gateway in front of a plain-HTTP mock upstream.
-    pub(crate) async fn start(handler: Handler, upstream_extra: &str, auth: UpstreamAuth) -> Self {
+    /// Passthrough gateway in front of a plain-HTTP mock upstream: the
+    /// caller's own credential goes upstream.
+    pub(crate) async fn passthrough(handler: Handler) -> Self {
         let (upstream, hits) = spawn_counted(handler).await;
-        let resources = with_upstreams(vec![UpstreamResources::new(auth)]);
+        let resources = with_upstreams(vec![UpstreamResources::new(UpstreamAuth::ForwardCaller)]);
         let base_url = format!("http://{upstream}");
-        Self::launch(&base_url, "", upstream_extra, resources, hits).await
+        let extra = "forward_caller_credential = true";
+        Self::launch(&base_url, "", extra, resources, hits).await
     }
 
-    /// API-key gateway in front of a plain mock upstream, with extra
+    /// Provider-key gateway in front of a plain mock upstream, with extra
     /// `[server]` lines, extra lines after the upstream's key (further
     /// sections included), and `resources`.
     async fn keyed_with(
@@ -111,18 +113,22 @@ impl Harness {
         Self::launch(&base_url, server_extra, &extra, resources, hits).await
     }
 
-    /// API-key gateway in front of a plain mock upstream, with extra lines in
-    /// its upstream entry.
+    /// Provider-key gateway in front of a plain mock upstream.
+    pub(crate) async fn provider_key(handler: Handler) -> Self {
+        Self::keyed(handler, "").await
+    }
+
+    /// [`Self::provider_key`], with extra lines in its upstream entry.
     pub(crate) async fn keyed(handler: Handler, upstream_extra: &str) -> Self {
         Self::keyed_with(handler, "", upstream_extra, keyed_resources()).await
     }
 
-    /// API-key gateway in front of a plain mock upstream, with extra `[server]` lines.
+    /// [`Self::provider_key`], with extra `[server]` lines.
     pub(crate) async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
         Self::keyed_with(handler, server_extra, "", keyed_resources()).await
     }
 
-    /// API-key gateway with cache diagnostics on, keyed with `key`, with extra
+    /// Provider-key gateway with cache diagnostics on, keyed with `key`, with extra
     /// `[cache_diagnostics]` lines.
     pub(crate) async fn with_cache_diagnostics(
         handler: Handler,
@@ -155,7 +161,7 @@ impl Harness {
         let hits = Arc::new(AtomicUsize::new(0));
         let upstream = spawn_upstream(handler, Arc::clone(&hits), Some(ca), mock_max_streams).await;
         let resources = with_upstreams(vec![UpstreamResources {
-            auth: UpstreamAuth::api_key(API_KEY).unwrap(),
+            auth: UpstreamAuth::api_key(PROVIDER_KEY).unwrap(),
             extra_roots: if trusted {
                 vec![ca.ca_cert()]
             } else {
@@ -285,10 +291,6 @@ impl Harness {
             .unwrap()
     }
 
-    pub(crate) async fn api_key(handler: Handler) -> Self {
-        Self::keyed(handler, "").await
-    }
-
     pub(crate) async fn send(
         &self,
         req: http::request::Builder,
@@ -358,10 +360,10 @@ pub(crate) fn with_upstreams(upstreams: Vec<UpstreamResources>) -> Resources {
     }
 }
 
-/// [`with_upstreams`] of one upstream with the provider key [`API_KEY`].
+/// [`with_upstreams`] of one upstream with the provider key [`PROVIDER_KEY`].
 pub(crate) fn keyed_resources() -> Resources {
     with_upstreams(vec![UpstreamResources::new(
-        UpstreamAuth::api_key(API_KEY).unwrap(),
+        UpstreamAuth::api_key(PROVIDER_KEY).unwrap(),
     )])
 }
 
@@ -516,7 +518,7 @@ pub(crate) async fn read_body(res: Response<Incoming>) -> Bytes {
         .to_bytes()
 }
 
-/// Unix time in seconds, for credential claims.
+/// Unix time in seconds, for gateway-token claims.
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

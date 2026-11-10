@@ -22,7 +22,7 @@ async fn valid_token_is_replaced_by_the_provider_key() {
     let res = h.send(bearer(&t), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     let headers = seen.recv().await.unwrap();
-    assert_eq!(headers["x-api-key"], API_KEY);
+    assert_eq!(headers["x-api-key"], PROVIDER_KEY);
     assert!(headers.get("authorization").is_none());
     let record = h.usage_record().await;
     assert_eq!(record["subject"], "alice");
@@ -30,7 +30,7 @@ async fn valid_token_is_replaced_by_the_provider_key() {
     // Claude Code's ANTHROPIC_API_KEY sends the token as x-api-key.
     let res = h.send(messages().header("x-api-key", &t), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(seen.recv().await.unwrap()["x-api-key"], API_KEY);
+    assert_eq!(seen.recv().await.unwrap()["x-api-key"], PROVIDER_KEY);
 }
 
 #[tokio::test]

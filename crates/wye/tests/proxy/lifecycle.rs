@@ -173,7 +173,7 @@ async fn shutdown_drains_then_stops_within_the_deadline() {
 
 #[tokio::test]
 async fn shutdown_does_not_wait_on_a_usage_log_nobody_reads() {
-    let mut h = Harness::api_key(ok()).await;
+    let mut h = Harness::provider_key(ok()).await;
     // Nothing reads the usage stream, so its 64 KiB buffer fills and the
     // writer waits on it.
     for _ in 0..400 {

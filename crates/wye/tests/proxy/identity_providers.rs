@@ -49,7 +49,7 @@ async fn granted_provider_token_reaches_upstream_with_the_provider_key() {
         let res = h.send(bearer(&t), HAIKU).await;
         assert_eq!(res.status(), StatusCode::OK, "{}", key.alg());
         let headers = seen.recv().await.unwrap();
-        assert_eq!(headers["x-api-key"], API_KEY);
+        assert_eq!(headers["x-api-key"], PROVIDER_KEY);
         assert!(headers.get("authorization").is_none());
         assert_eq!(h.usage_record().await["subject"], "acme/app");
 

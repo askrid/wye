@@ -5,7 +5,7 @@ use super::harness::*;
 #[tokio::test]
 async fn streams_events_before_upstream_completes() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(4);
-    let h = Harness::api_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
+    let h = Harness::provider_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
 
     chunks_tx
         .send(Bytes::from_static(b"event: ping\ndata: {}\n\n"))
@@ -37,7 +37,7 @@ async fn client_disconnect_releases_upstream_stream() {
     let handler = once(chunks_rx, |rx| async {
         Response::new(Either::Right(ChannelBody(rx)))
     });
-    let h = Harness::api_key(handler).await;
+    let h = Harness::provider_key(handler).await;
 
     chunks_tx
         .send(Bytes::from_static(b"data: 1\n\n"))
@@ -173,7 +173,7 @@ async fn slow_reader_backpressures_the_upstream() {
             Response::new(Either::Right(ChannelBody(rx)))
         })
     });
-    let h = Harness::api_key(handler).await;
+    let h = Harness::provider_key(handler).await;
 
     // Receive headers, then read nothing.
     let res = h.send(messages(), "{}").await;

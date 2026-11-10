@@ -130,7 +130,7 @@ pub(super) fn err(output: &Output) -> String {
 
 #[tokio::test]
 async fn probe_succeeds_only_for_a_2xx_answer() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let base = format!("http://{}", h.gateway);
     let health = format!("{base}/healthz");
     assert_eq!(wye::probe(&health).await.unwrap(), health);
@@ -157,7 +157,7 @@ async fn probe_succeeds_only_for_a_2xx_answer() {
 #[cfg(unix)]
 #[tokio::test]
 async fn wye_claude_runs_claude_against_the_gateway() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let dir = TempDir::new("claude");
     // A stand-in for claude that records what it was given and exits 3.
     let fake = dir.join("claude");

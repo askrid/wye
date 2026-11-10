@@ -16,7 +16,7 @@ const USAGE_STREAM: &str = concat!(
 #[tokio::test]
 async fn an_empty_response_is_completed() {
     // hyper sends an empty body with the headers and never polls it.
-    let h = Harness::api_key(answering(|| full(StatusCode::OK, ""))).await;
+    let h = Harness::provider_key(answering(|| full(StatusCode::OK, ""))).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(read_body(res).await.is_empty());
@@ -25,7 +25,7 @@ async fn an_empty_response_is_completed() {
 
 #[tokio::test]
 async fn completed_stream_logs_usage_without_changing_bytes() {
-    let h = Harness::api_key(answering(|| sse(full(StatusCode::OK, USAGE_STREAM)))).await;
+    let h = Harness::provider_key(answering(|| sse(full(StatusCode::OK, USAGE_STREAM)))).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(read_body(res).await, USAGE_STREAM);
 
@@ -68,7 +68,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
         "event: message_stop\n",
         "data: {\"type\":\"message_stop\"}\n\n",
     );
-    let h = Harness::api_key(answering(|| sse(full(StatusCode::OK, MISS)))).await;
+    let h = Harness::provider_key(answering(|| sse(full(StatusCode::OK, MISS)))).await;
     let req = messages()
         .header("x-claude-code-request-class", "subagent")
         .header("x-claude-code-agent-type", "Explore")
@@ -116,7 +116,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
 #[tokio::test]
 async fn cancelled_stream_logs_partial_usage() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
-    let h = Harness::api_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
+    let h = Harness::provider_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
     let start_event = &USAGE_STREAM[..USAGE_STREAM.find("event: content_block_delta").unwrap()];
     chunks_tx
         .send(Bytes::from_static(start_event.as_bytes()))
@@ -138,7 +138,7 @@ async fn cancelled_stream_logs_partial_usage() {
 async fn a_client_that_leaves_before_the_headers_is_recorded() {
     use tokio::io::AsyncWriteExt;
     // The upstream never answers; the client stops waiting.
-    let h = Harness::api_key(Arc::new(|_| Box::pin(std::future::pending()))).await;
+    let h = Harness::provider_key(Arc::new(|_| Box::pin(std::future::pending()))).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
         .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}")
@@ -196,7 +196,7 @@ async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
 #[tokio::test]
 async fn a_broken_client_body_is_the_clients_error() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
     client
         .write_all(
@@ -231,7 +231,7 @@ async fn a_broken_client_body_is_the_clients_error() {
 
 #[tokio::test]
 async fn refusals_and_count_tokens_are_logged_without_usage() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let big = "x".repeat(2048);
     assert_eq!(
         h.send(messages(), big).await.status(),
@@ -323,7 +323,7 @@ async fn cache_diagnostics_log_keyed_prompt_hashes() {
 
 #[tokio::test]
 async fn usage_records_omit_prompt_without_diagnostics() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let res = h.send(messages(), r#"{"messages":[]}"#).await;
     read_body(res).await;
     assert!(h.usage_record().await.get("prompt_hashes").is_none());
@@ -525,7 +525,7 @@ async fn checked_requests_record_what_each_target_would_reject() {
 #[tokio::test]
 async fn non_streaming_json_responses_report_usage() {
     const BODY: &str = r#"{"id":"msg_1","type":"message","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t","name":"Read","input":{}}],"usage":{"input_tokens":12,"output_tokens":34}}"#;
-    let h = Harness::api_key(answering(|| json(full(StatusCode::OK, BODY)))).await;
+    let h = Harness::provider_key(answering(|| json(full(StatusCode::OK, BODY)))).await;
     assert_eq!(read_body(h.send(messages(), "{}").await).await, BODY);
     let record = h.usage_record().await;
     assert_eq!(record["usage_status"], "complete");
@@ -547,7 +547,8 @@ async fn tool_calls_past_eight_names_go_under_other() {
         blocks.join(",")
     );
     let body = Bytes::from(body);
-    let h = Harness::api_key(answering(move || json(full(StatusCode::OK, body.clone())))).await;
+    let h =
+        Harness::provider_key(answering(move || json(full(StatusCode::OK, body.clone())))).await;
     read_body(h.send(messages(), "{}").await).await;
     let calls = &h.usage_record().await["tool_calls"];
     assert_eq!(calls.as_object().unwrap().len(), 9, "{calls}");

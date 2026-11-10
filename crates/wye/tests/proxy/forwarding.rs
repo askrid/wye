@@ -19,7 +19,7 @@ async fn forwards_request_unchanged_and_replaces_credential() {
             res
         },
     );
-    let h = Harness::api_key(handler).await;
+    let h = Harness::provider_key(handler).await;
 
     let res = h
         .send(
@@ -48,7 +48,7 @@ async fn forwards_request_unchanged_and_replaces_credential() {
         seen.body,
         r#"{"model":"claude-x","unknown_field":{"kept":true}}"#
     );
-    assert_eq!(seen.headers["x-api-key"], API_KEY);
+    assert_eq!(seen.headers["x-api-key"], PROVIDER_KEY);
     assert!(seen.headers.get("authorization").is_none());
     assert_eq!(
         seen.headers["anthropic-beta"],
@@ -64,12 +64,7 @@ async fn forwards_request_unchanged_and_replaces_credential() {
 #[tokio::test]
 async fn forward_caller_credential_keeps_caller_headers() {
     let (handler, mut rx) = recording(|seen| seen.headers);
-    let h = Harness::start(
-        handler,
-        "forward_caller_credential = true",
-        UpstreamAuth::ForwardCaller,
-    )
-    .await;
+    let h = Harness::passthrough(handler).await;
     let res = h
         .send(
             messages().header("authorization", "Bearer oauth-login"),
@@ -107,7 +102,7 @@ fn naming_its_account() -> Handler {
 /// passthrough the account is the caller's own.
 #[tokio::test]
 async fn the_provider_keys_account_is_not_shown_to_callers() {
-    let keyed = Harness::api_key(naming_its_account()).await;
+    let keyed = Harness::provider_key(naming_its_account()).await;
     let res = keyed.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::OK);
     for name in ACCOUNT_HEADERS {
@@ -115,12 +110,7 @@ async fn the_provider_keys_account_is_not_shown_to_callers() {
     }
     assert_eq!(res.headers()["request-id"], "req_1");
 
-    let passthrough = Harness::start(
-        naming_its_account(),
-        "forward_caller_credential = true",
-        UpstreamAuth::ForwardCaller,
-    )
-    .await;
+    let passthrough = Harness::passthrough(naming_its_account()).await;
     let res = passthrough
         .send(messages().header("x-api-key", "caller-key"), "{}")
         .await;
@@ -144,7 +134,7 @@ async fn preserves_upstream_errors() {
             res
         })
     });
-    let h = Harness::api_key(handler).await;
+    let h = Harness::provider_key(handler).await;
     let res = h.send(messages(), "{}").await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(res.headers()["retry-after"], "7");
@@ -157,7 +147,7 @@ async fn preserves_upstream_errors() {
 
 #[tokio::test]
 async fn oversized_body_is_rejected_before_upstream() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let big = "x".repeat(2048);
     let res = h.send(messages(), big).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
@@ -172,7 +162,7 @@ async fn oversized_body_is_rejected_before_upstream() {
 #[tokio::test]
 async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
     let (handler, mut bodies) = recording(|seen| seen.body);
-    let h = Harness::api_key(handler).await;
+    let h = Harness::provider_key(handler).await;
     // The harness allows 1024 bytes; the second chunk passes it mid-upload.
     let rest = vec![b' '; 1100];
     let res = h
@@ -189,7 +179,7 @@ async fn a_body_without_a_length_is_refused_when_it_passes_the_limit() {
 
 #[tokio::test]
 async fn local_endpoints_and_unknown_paths() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     assert_eq!(
         h.send(Request::head("/api/hello"), "").await.status(),
         StatusCode::OK
@@ -225,7 +215,7 @@ async fn local_endpoints_and_unknown_paths() {
 
 #[tokio::test]
 async fn count_tokens_is_forwarded() {
-    let h = Harness::api_key(Arc::new(|seen: Seen| {
+    let h = Harness::provider_key(Arc::new(|seen: Seen| {
         Box::pin(async move {
             assert_eq!(seen.uri.path(), "/v1/messages/count_tokens");
             full(StatusCode::OK, r#"{"input_tokens":3}"#)
@@ -240,7 +230,7 @@ async fn count_tokens_is_forwarded() {
 
 #[tokio::test]
 async fn large_headers_fit_the_connection_buffer_and_oversized_ones_are_rejected() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     // An 8 KiB gateway token plus other headers fits the connection buffer.
     let credential = "x".repeat(8 * 1024);
     let res = h

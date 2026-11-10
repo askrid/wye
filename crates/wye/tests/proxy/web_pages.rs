@@ -21,7 +21,7 @@ fn from_pages(port: u16) -> [(&'static str, String); 4] {
 
 #[tokio::test]
 async fn a_gateway_without_auth_refuses_what_a_web_page_sends() {
-    let h = Harness::api_key(ok()).await;
+    let h = Harness::provider_key(ok()).await;
     let port = h.gateway.port();
     for (name, value) in from_pages(port) {
         let res = h.send(messages().header(name, value.as_str()), "{}").await;

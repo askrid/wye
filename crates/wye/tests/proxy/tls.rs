@@ -17,7 +17,7 @@ async fn forwards_over_tls_with_http2_to_a_trusted_upstream() {
     assert_eq!(read_body(res).await, r#"{"id":"msg_tls"}"#);
     let (version, headers, body) = rx.recv().await.unwrap();
     assert_eq!(version, Version::HTTP_2);
-    assert_eq!(headers["x-api-key"], API_KEY);
+    assert_eq!(headers["x-api-key"], PROVIDER_KEY);
     assert_eq!(body, r#"{"model":"claude-x"}"#);
 }
 
