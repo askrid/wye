@@ -22,7 +22,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios::{self, Stream},
-    stats::{Out, PERCENTILES, event_delays, percentile, phase, sorted},
+    stats::{Out, event_delays, percentile, phase, sorted},
 };
 
 const UNARY_CONCURRENCY: usize = 32;
@@ -161,63 +161,45 @@ pub(crate) async fn measure(
         Latency::measure(process.target()),
     )
     .await;
-    let cpu_before = process.cpu_secs();
-    let (_, failed) = successes(
-        phase(
+    let (requests, cpu) = process
+        .cpu_during(phase(
             format!("{prefix}cpu-per-request"),
             scenarios::unary(process.target(), UNARY_CONCURRENCY, CPU_PER_REQUEST_TOTAL),
-        )
-        .await,
-    );
-    let cpu_after = process.cpu_secs();
+        ))
+        .await;
+    let (_, failed) = successes(requests);
     // `ps` reports CPU time in 10 ms steps; 20,000 requests make that ~0.5 µs per request.
     out.put(
         "unary_cpu_us_per_request",
-        (cpu_after - cpu_before) * 1e6 / (CPU_PER_REQUEST_TOTAL - failed).max(1) as f64,
+        cpu * 1e6 / (CPU_PER_REQUEST_TOTAL - failed).max(1) as f64,
     );
 
     let base = &direct.latency;
     // Failures in the CPU phases count too: for some variants they run last.
     out.put("unary_failed_requests", (via.unary_failed + failed) as f64);
     let mut sse_failed = via.sse_failed;
-    for (label, p) in PERCENTILES {
-        let added = |via: &[u64], direct: &[u64]| percentile(via, p) - percentile(direct, p);
-        out.put(&format!("via_unary_{label}_us"), percentile(&via.unary, p));
-        out.put(
-            &format!("unary_added_{label}_us"),
-            added(&via.unary, &base.unary),
-        );
-        out.put(
-            &format!("sse_ttfb_added_{label}_us"),
-            added(&via.ttfb, &base.ttfb),
-        );
-        out.put(
-            &format!("sse_event_added_{label}_us"),
-            added(&via.event_delay, &base.event_delay),
-        );
-    }
+    out.put_percentiles("via_unary", &via.unary);
+    out.put_added("unary", &via.unary, &base.unary);
+    out.put_added("sse_ttfb", &via.ttfb, &base.ttfb);
+    out.put_added("sse_event", &via.event_delay, &base.event_delay);
     if !scope.per_request_only || scope.event_cpu {
-        let cpu_before = process.cpu_secs();
-        let streams = phase(
-            format!("{prefix}cpu-per-event"),
-            scenarios::sse(
-                process.target(),
-                EVENT_CPU_CONCURRENCY,
-                EVENT_CPU_STREAMS,
-                EVENT_CPU_EVENTS,
-                EVENT_CPU_BYTES,
-                0,
-            ),
-        )
-        .await;
-        let cpu_after = process.cpu_secs();
+        let (streams, cpu) = process
+            .cpu_during(phase(
+                format!("{prefix}cpu-per-event"),
+                scenarios::sse(
+                    process.target(),
+                    EVENT_CPU_CONCURRENCY,
+                    EVENT_CPU_STREAMS,
+                    EVENT_CPU_EVENTS,
+                    EVENT_CPU_BYTES,
+                    0,
+                ),
+            ))
+            .await;
         sse_failed += scenarios::count_failed(&streams);
         let events = scenarios::count_events(&streams);
         // CPU time comes in 10 ms steps; 128,000 events make that < 0.1 µs per event.
-        out.put(
-            "sse_cpu_us_per_event",
-            (cpu_after - cpu_before) * 1e6 / events.max(1) as f64,
-        );
+        out.put("sse_cpu_us_per_event", cpu * 1e6 / events.max(1) as f64);
     }
     out.put("sse_failed_streams", sse_failed as f64);
     if scope.per_request_only {
@@ -234,18 +216,17 @@ pub(crate) async fn measure(
         .await;
     }
 
-    let cpu_before = process.cpu_secs();
-    let (mb_s, mb, failed) =
-        phase(format!("{prefix}throughput"), throughput(process.target())).await;
-    let cpu_after = process.cpu_secs();
+    let ((mb_s, mb, failed), cpu) = process
+        .cpu_during(phase(
+            format!("{prefix}throughput"),
+            throughput(process.target()),
+        ))
+        .await;
     out.add("sse_failed_streams", failed as f64);
     out.put("via_throughput_mb_s", mb_s);
     // CPU time comes in 10 ms steps; the scenario streams enough data to
     // make that negligible.
-    out.put(
-        "throughput_cpu_ms_per_mb",
-        (cpu_after - cpu_before) * 1_000.0 / mb,
-    );
+    out.put("throughput_cpu_ms_per_mb", cpu * 1_000.0 / mb);
 
     measure_uploads(direct, process, out).await;
 

@@ -11,7 +11,7 @@ use crate::{
     gateway_process::{Gateway, GatewayProcess, Variant},
     measure::{self, Direct, Scope},
     mock,
-    stats::{Out, PERCENTILES, merge, percentile, phase},
+    stats::{Out, merge, phase},
 };
 
 /// One way of reaching the mock upstream.
@@ -95,10 +95,7 @@ pub async fn run(
                 prefix: path.prefix,
             };
             out.put("direct_throughput_mb_s", direct.mb_s);
-            for (label, p) in PERCENTILES {
-                let name = format!("direct_unary_{label}_us");
-                out.put(&name, percentile(&direct.latency.unary, p));
-            }
+            out.put_percentiles("direct_unary", &direct.latency.unary);
             let variants = [
                 Variant::Auth,
                 Variant::Models,

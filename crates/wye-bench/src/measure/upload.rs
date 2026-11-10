@@ -8,7 +8,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     mock, scenarios,
-    stats::{Out, PERCENTILES, percentile, phase},
+    stats::{Out, phase},
 };
 
 pub(crate) const UPLOAD_BYTES: usize = 1024 * 1024;
@@ -31,21 +31,17 @@ pub(super) async fn measure_uploads(direct: &Direct, process: &GatewayProcess, o
         std::iter::once(upload_scenario).chain(agent_scenario)
     {
         let uploaded_mb = (body.len() * requests) as f64 / 1e6;
-        let cpu_before = process.cpu_secs();
-        let (via, failed) = phase(
-            format!("{}{name}", out.prefix),
-            upload(process.target(), body, requests),
-        )
-        .await;
-        let cpu_after = process.cpu_secs();
+        let ((via, failed), cpu) = process
+            .cpu_during(phase(
+                format!("{}{name}", out.prefix),
+                upload(process.target(), body, requests),
+            ))
+            .await;
         out.put(&format!("{name}_failed_requests"), failed as f64);
-        for (label, p) in PERCENTILES {
-            let added = percentile(&via, p) - percentile(direct_samples, p);
-            out.put(&format!("{name}_added_{label}_us"), added);
-        }
+        out.put_added(name, &via, direct_samples);
         out.put(
             &format!("{name}_cpu_ms_per_mb"),
-            (cpu_after - cpu_before) * 1_000.0 / uploaded_mb,
+            cpu * 1_000.0 / uploaded_mb,
         );
     }
 }

@@ -11,7 +11,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{Out, PERCENTILES, event_delays, percentile, phase},
+    stats::{Out, added, event_delays, phase},
 };
 
 /// Token-paced streams in the mixed and stalled scenarios.
@@ -106,12 +106,7 @@ pub(super) async fn measure_cold(direct: &Cold, process: &GatewayProcess, out: &
         Cold::measure(process.target()),
     )
     .await;
-    for (name, p) in PERCENTILES {
-        out.put(
-            &format!("cold_unary_added_{name}_us"),
-            percentile(&via.0, p) - percentile(&direct.0, p),
-        );
-    }
+    out.put_added("cold_unary", &via.0, &direct.0);
     out.put("cold_failed_requests", via.1 as f64);
 }
 
@@ -122,13 +117,7 @@ pub(super) async fn measure_stress(direct: &Stress, process: &GatewayProcess, ou
         Stress::measure(process.target(), || process.rss_kb()),
     )
     .await;
-    let added = |via: &[u64], direct: &[u64], p| percentile(via, p) - percentile(direct, p);
-    for (name, p) in PERCENTILES {
-        out.put(
-            &format!("mixed_event_added_{name}_us"),
-            added(&via.mixed_events, &direct.mixed_events, p),
-        );
-    }
+    out.put_added("mixed_event", &via.mixed_events, &direct.mixed_events);
     out.put(
         "mixed_upload_added_p50_us",
         added(&via.mixed_uploads, &direct.mixed_uploads, 50.0),

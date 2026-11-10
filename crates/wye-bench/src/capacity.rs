@@ -67,9 +67,8 @@ pub async fn run(direct: &Target, gateway: &GatewayProcess, threads: usize) {
     let mut best: Option<Step> = None;
     for streams in STEPS {
         let (direct_delays, _, direct_failed, _) = batch(direct, streams).await;
-        let cpu_before = gateway.cpu_secs();
-        let (delays, events, failed, wall) = batch(gateway.target(), streams).await;
-        let cpu = gateway.cpu_secs() - cpu_before;
+        let ((delays, events, failed, wall), cpu) =
+            gateway.cpu_during(batch(gateway.target(), streams)).await;
         let direct_p99_us = stats::percentile(&direct_delays, 99.0);
         let step = Step {
             streams,

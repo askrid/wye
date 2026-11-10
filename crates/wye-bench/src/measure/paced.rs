@@ -7,7 +7,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{Out, PERCENTILES, event_delays, percentile, phase, sorted},
+    stats::{Out, added, event_delays, phase, sorted},
 };
 
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
@@ -73,25 +73,21 @@ impl Paced {
 /// Runs the paced scenario through `process` and adds what it costs over `direct`.
 pub(super) async fn measure_paced(direct: &Paced, process: &GatewayProcess, out: &mut Out<'_>) {
     let rss_before = process.rss_kb();
-    let cpu_before = process.cpu_secs();
     let mut rss_loaded = 0.0;
-    let paced = phase(
-        format!("{}paced", out.prefix),
-        Paced::measure(process.target(), || rss_loaded = process.rss_kb()),
-    )
-    .await;
-    let cpu_after = process.cpu_secs();
-    for (label, p) in PERCENTILES {
-        let added = percentile(&paced.event_delay, p) - percentile(&direct.event_delay, p);
-        out.put(&format!("paced_event_added_{label}_us"), added);
-    }
+    let (paced, cpu) = process
+        .cpu_during(phase(
+            format!("{}paced", out.prefix),
+            Paced::measure(process.target(), || rss_loaded = process.rss_kb()),
+        ))
+        .await;
+    out.put_added("paced_event", &paced.event_delay, &direct.event_delay);
     out.put(
         "paced_ttfb_added_p99_us",
-        percentile(&paced.ttfb, 99.0) - percentile(&direct.ttfb, 99.0),
+        added(&paced.ttfb, &direct.ttfb, 99.0),
     );
     out.put(
         "paced_cpu_us_per_event",
-        (cpu_after - cpu_before) * 1e6 / paced.event_delay.len().max(1) as f64,
+        cpu * 1e6 / paced.event_delay.len().max(1) as f64,
     );
     out.put("paced_failed_streams", paced.failed_streams as f64);
     out.put(

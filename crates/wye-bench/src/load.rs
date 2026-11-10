@@ -84,15 +84,17 @@ async fn soak_uploads(process: &GatewayProcess, scenario: &str, seconds: u64) {
         process.pid()
     );
     let deadline = Instant::now() + Duration::from_secs(seconds);
-    let cpu_before = process.cpu_secs();
-    let mut requests = 0;
-    let mut failed = 0;
-    while Instant::now() < deadline {
-        let results = run().await;
-        failed += results.iter().filter(|r| r.is_none()).count();
-        requests += results.len();
-    }
-    let cpu = process.cpu_secs() - cpu_before;
+    let ((requests, failed), cpu) = process
+        .cpu_during(async {
+            let (mut requests, mut failed) = (0, 0);
+            while Instant::now() < deadline {
+                let results = run().await;
+                failed += results.iter().filter(|r| r.is_none()).count();
+                requests += results.len();
+            }
+            (requests, failed)
+        })
+        .await;
     let mb = (requests * UPLOAD_BYTES) as f64 / 1e6;
     println!(
         "{requests} requests ({failed} failed), {mb:.0} MB, gateway CPU {:.2} ms/MB",
@@ -121,14 +123,17 @@ async fn soak_events(process: &GatewayProcess, seconds: u64) {
     run().await;
     eprintln!("gateway pid {} under events for {seconds}s", process.pid());
     let deadline = Instant::now() + Duration::from_secs(seconds);
-    let cpu_before = process.cpu_secs();
-    let (mut events, mut failed) = (0usize, 0usize);
-    while Instant::now() < deadline {
-        let streams = run().await;
-        failed += scenarios::count_failed(&streams);
-        events += scenarios::count_events(&streams);
-    }
-    let cpu = process.cpu_secs() - cpu_before;
+    let ((events, failed), cpu) = process
+        .cpu_during(async {
+            let (mut events, mut failed) = (0usize, 0usize);
+            while Instant::now() < deadline {
+                let streams = run().await;
+                failed += scenarios::count_failed(&streams);
+                events += scenarios::count_events(&streams);
+            }
+            (events, failed)
+        })
+        .await;
     println!(
         "{events} events ({failed} streams failed), gateway CPU {:.2} us/event",
         cpu * 1e6 / events.max(1) as f64
@@ -143,32 +148,34 @@ async fn soak_paced(process: &GatewayProcess, seconds: u64) {
     eprintln!("gateway pid {} under paced for {seconds}s", process.pid());
     let started = Instant::now();
     let deadline = started + Duration::from_secs(seconds);
-    let cpu_before = process.cpu_secs();
     let (mut events, mut failed, mut batches) = (0usize, 0usize, 0usize);
     let mut rss = Vec::new();
     let mut live = Vec::new();
-    while Instant::now() < deadline {
-        let streams = run().await;
-        failed += scenarios::count_failed(&streams);
-        events += scenarios::count_events(&streams);
-        batches += 1;
-        // Idle between batches: what the gateway keeps once streams end.
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        rss.push(process.rss_kb());
-        let live_kb = allocations::live_bytes(process.target())
-            .await
-            .map(|bytes| bytes / 1024.0);
-        live.extend(live_kb);
-        // One line per batch as it ends, so an interrupted multi-hour run
-        // still leaves its series.
-        eprintln!(
-            "batch {batches} at {:.0}s: {failed} failed streams so far, idle RSS {:.0} KB, live heap {} KB",
-            started.elapsed().as_secs_f64(),
-            rss.last().copied().unwrap_or_default(),
-            live_kb.map_or_else(|| "-".to_owned(), |kb| format!("{kb:.0}")),
-        );
-    }
-    let cpu = process.cpu_secs() - cpu_before;
+    let ((), cpu) = process
+        .cpu_during(async {
+            while Instant::now() < deadline {
+                let streams = run().await;
+                failed += scenarios::count_failed(&streams);
+                events += scenarios::count_events(&streams);
+                batches += 1;
+                // Idle between batches: what the gateway keeps once streams end.
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                rss.push(process.rss_kb());
+                let live_kb = allocations::live_bytes(process.target())
+                    .await
+                    .map(|bytes| bytes / 1024.0);
+                live.extend(live_kb);
+                // One line per batch as it ends, so an interrupted multi-hour run
+                // still leaves its series.
+                eprintln!(
+                    "batch {batches} at {:.0}s: {failed} failed streams so far, idle RSS {:.0} KB, live heap {} KB",
+                    started.elapsed().as_secs_f64(),
+                    rss.last().copied().unwrap_or_default(),
+                    live_kb.map_or_else(|| "-".to_owned(), |kb| format!("{kb:.0}")),
+                );
+            }
+        })
+        .await;
     let first = rss.first().copied().unwrap_or_default();
     let last = rss.last().copied().unwrap_or_default();
     let max = rss.iter().copied().fold(0.0, f64::max);

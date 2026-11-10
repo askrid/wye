@@ -226,6 +226,14 @@ impl GatewayProcess {
         }
     }
 
+    /// `work`'s output, and the CPU seconds the gateway's process tree
+    /// spent while it ran.
+    pub async fn cpu_during<T>(&self, work: impl Future<Output = T>) -> (T, f64) {
+        let before = self.cpu_secs();
+        let out = work.await;
+        (out, self.cpu_secs() - before)
+    }
+
     fn tree_sum(&self, field: &str, parse: impl Fn(&str) -> f64) -> f64 {
         let pids: Vec<String> = process_tree(self.pid).iter().map(u32::to_string).collect();
         let out = std::process::Command::new("ps")

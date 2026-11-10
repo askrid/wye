@@ -2,7 +2,8 @@
 
 use std::{collections::BTreeMap, fmt::Display, future::Future, time::Instant};
 
-pub(crate) const PERCENTILES: [(&str, f64); 2] = [("p50", 50.0), ("p99", 99.0)];
+/// The percentiles a latency metric reports, with their name labels.
+const PERCENTILES: [(&str, f64); 2] = [("p50", 50.0), ("p99", 99.0)];
 
 /// Where a scenario writes its metrics: `prefix` goes before every name.
 pub(crate) struct Out<'a> {
@@ -15,6 +16,21 @@ impl Out<'_> {
         let prefix = self.prefix;
         self.metrics
             .insert(format!("{prefix}{name}"), (value * 100.0).round() / 100.0);
+    }
+
+    /// `{stem}_p50_us` and `{stem}_p99_us` of the sorted `samples`.
+    pub(crate) fn put_percentiles(&mut self, stem: &str, samples: &[u64]) {
+        for (label, p) in PERCENTILES {
+            self.put(&format!("{stem}_{label}_us"), percentile(samples, p));
+        }
+    }
+
+    /// `{stem}_added_p50_us` and `{stem}_added_p99_us`: what `via` adds over
+    /// `direct`, both sorted.
+    pub(crate) fn put_added(&mut self, stem: &str, via: &[u64], direct: &[u64]) {
+        for (label, p) in PERCENTILES {
+            self.put(&format!("{stem}_added_{label}_us"), added(via, direct, p));
+        }
     }
 
     /// Adds `value` to a metric already put: failures a later phase found.
@@ -57,6 +73,11 @@ pub(crate) fn percentile(sorted: &[u64], p: f64) -> f64 {
         return f64::NAN;
     }
     sorted[((p / 100.0) * (sorted.len() - 1) as f64).round() as usize] as f64
+}
+
+/// What the sorted `via` adds over the sorted `direct` at percentile `p`.
+pub(crate) fn added(via: &[u64], direct: &[u64], p: f64) -> f64 {
+    percentile(via, p) - percentile(direct, p)
 }
 
 /// Every event delay of `streams`, sorted.
