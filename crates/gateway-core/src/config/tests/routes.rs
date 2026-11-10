@@ -3,9 +3,7 @@
 use super::*;
 
 fn parse_upstreams(upstreams: &str) -> Result<Config, ConfigError> {
-    Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n\n{upstreams}"
-    ))
+    Config::from_toml_str(upstreams)
 }
 
 const ACCOUNT: &str = "base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";

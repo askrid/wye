@@ -63,17 +63,8 @@ fn every_two_way_split_gives_the_same_result() {
 proptest! {
     #[test]
     fn arbitrary_chunking_gives_the_same_result(sizes in proptest::collection::vec(1usize..64, 1..400)) {
-        let bytes = STREAM.as_bytes();
         let mut scanner = MessagesUsageScanner::new();
-        let mut pos = 0;
-        for size in sizes.iter().cycle() {
-            if pos >= bytes.len() {
-                break;
-            }
-            let end = (pos + size).min(bytes.len());
-            scanner.feed(&bytes[pos..end]);
-            pos = end;
-        }
+        crate::test_support::feed_sized(STREAM.as_bytes(), &sizes, |chunk| scanner.feed(chunk));
         prop_assert_eq!(scanner.usage(), EXPECTED);
         prop_assert_eq!(scanner.status(), UsageStatus::Complete);
     }

@@ -1,16 +1,30 @@
 use super::*;
 use crate::config::Config;
 
-/// A route with one upstream per `(id, weight)`.
-fn route(upstreams: &[(&str, u32)]) -> Route {
-    let mut toml = String::from("[server]\nlisten = \"127.0.0.1:8080\"\n");
-    for (id, weight) in upstreams {
+/// A route with one upstream per `(id, extra lines)`.
+fn route_with(upstreams: &[(&str, &str)]) -> Route {
+    let mut toml = String::new();
+    for (id, extra) in upstreams {
         toml.push_str(&format!(
-            "[[upstreams]]\nid = \"{id}\"\nweight = {weight}\n\
+            "[[upstreams]]\nid = \"{id}\"\n{extra}\n\
              base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n"
         ));
     }
     Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
+}
+
+/// A route with one upstream per `(id, weight)`.
+fn route(upstreams: &[(&str, u32)]) -> Route {
+    let weights: Vec<_> = upstreams
+        .iter()
+        .map(|(_, w)| format!("weight = {w}"))
+        .collect();
+    let lines: Vec<_> = upstreams
+        .iter()
+        .zip(&weights)
+        .map(|((id, _), w)| (*id, w.as_str()))
+        .collect();
+    route_with(&lines)
 }
 
 fn picks(route: &Route, keys: usize) -> Vec<usize> {
@@ -96,18 +110,6 @@ fn choice_is_pinned_across_versions() {
     assert_eq!(got, PINNED);
 }
 const PINNED: [usize; 7] = [0, 2, 2, 2, 2, 2, 2];
-
-/// A route with one upstream per `(id, extra lines)`.
-fn route_with(upstreams: &[(&str, &str)]) -> Route {
-    let mut toml = String::from("[server]\nlisten = \"127.0.0.1:8080\"\n");
-    for (id, extra) in upstreams {
-        toml.push_str(&format!(
-            "[[upstreams]]\nid = \"{id}\"\n{extra}\n\
-             base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n"
-        ));
-    }
-    Config::from_toml_str(&toml).unwrap().routes.claude.unwrap()
-}
 
 #[test]
 fn the_ranking_starts_with_the_pick_and_holds_every_upstream() {

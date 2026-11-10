@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::config;
 
 fn claude(config: &Config) -> &Route {
     config.routes.claude.as_ref().unwrap()
@@ -11,9 +12,7 @@ const FORWARDING: &str =
 const PUBLIC_KEY: &str = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";
 
 fn parse(upstream: &str) -> Result<Config, ConfigError> {
-    Config::from_toml_str(&format!(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n\n[[upstreams]]\n{upstream}"
-    ))
+    Config::from_toml_str(&format!("[[upstreams]]\n{upstream}"))
 }
 
 /// `error` in the only upstream, named by its provider.
@@ -83,135 +82,6 @@ fn rejects_non_loopback_listen() {
     ))
     .unwrap_err();
     assert!(matches!(err, ConfigError::NonLoopbackListen(_)));
-}
-
-#[test]
-fn auth_allows_network_listen_and_validates_keys() {
-    let with_auth = |listen: &str, upstream: &str, auth: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"{listen}\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             {upstream}\n[auth]\naudience = \"wye-prod\"\n{auth}"
-        ))
-    };
-    let keys = format!("signing_keys = [\"{PUBLIC_KEY}\"]");
-    let config = with_auth("0.0.0.0:8080", "provider_key = { env = \"K\" }", &keys).unwrap();
-    let auth = config.auth.unwrap();
-    let own = auth.own.unwrap();
-    assert_eq!(own.keys.len(), 1);
-    // Named by its RFC 7638 thumbprint (RFC 8037, appendix A.3).
-    assert_eq!(
-        own.keys[0].thumbprint,
-        "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
-    );
-    assert_eq!(
-        crate::token::encode_public_key(&own.keys[0].ed25519_public_key),
-        PUBLIC_KEY
-    );
-    assert_eq!(
-        auth.max_gateway_token_ttl,
-        Duration::from_secs(7 * 24 * 3600)
-    );
-
-    let error = |upstream: &str, auth: &str| {
-        with_auth("127.0.0.1:8080", upstream, auth)
-            .unwrap_err()
-            .to_string()
-    };
-    let key = "provider_key = { env = \"K\" }";
-    assert!(
-        error("forward_caller_credential = true", &keys)
-            .starts_with("auth: cannot be combined with forward_caller_credential")
-    );
-    assert_eq!(
-        error(key, "signing_keys = []"),
-        "auth: audience needs at least one key in signing_keys"
-    );
-    assert_eq!(
-        error(key, "signing_keys = [\"not-a-key\"]"),
-        "auth: signing_keys: \"not-a-key\" is not an Ed25519 public key, 32 bytes in \
-         unpadded base64url"
-    );
-    assert_eq!(
-        error(
-            key,
-            &format!("signing_keys = [\"{PUBLIC_KEY}\", \"{PUBLIC_KEY}\"]")
-        ),
-        format!("auth: signing_keys: \"{PUBLIC_KEY}\" is listed twice")
-    );
-    // Wye's own tokens always name the issuer "wye", and keys need no id.
-    assert!(error(key, &format!("{keys}\nissuer = \"wye\"")).contains("unknown field"));
-    let table =
-        format!("[[auth.signing_keys]]\nid = \"k1\"\ned25519_public_key = \"{PUBLIC_KEY}\"");
-    assert!(error(key, &table).starts_with("invalid configuration"));
-}
-
-/// Gateway tokens cannot be revoked one by one, so how long one may live
-/// has a hard cap.
-#[test]
-fn gateway_token_lifetimes_are_capped_at_30_days() {
-    let with_ttl = |ttl: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
-             base_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
-             [auth]\naudience = \"wye-prod\"\nmax_gateway_token_ttl = \"{ttl}\"\n\
-             signing_keys = [\"{PUBLIC_KEY}\"]"
-        ))
-    };
-    let ttl = |text| with_ttl(text).unwrap().auth.unwrap().max_gateway_token_ttl;
-    assert_eq!(ttl("30d"), Duration::from_secs(2_592_000));
-    assert_eq!(ttl("1h"), Duration::from_secs(3600));
-    assert_eq!(
-        with_ttl("2592001s").unwrap_err(),
-        ConfigError::TooLong {
-            field: "auth.max_gateway_token_ttl",
-            max: MAX_GATEWAY_TOKEN_TTL
-        }
-    );
-    assert_eq!(
-        with_ttl("31d").unwrap_err().to_string(),
-        "auth.max_gateway_token_ttl must be at most 30d"
-    );
-    assert_eq!(
-        with_ttl("0s").unwrap_err(),
-        ConfigError::Zero("auth.max_gateway_token_ttl")
-    );
-}
-
-#[test]
-fn auth_models_are_validated_patterns() {
-    let with_models = |models: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             provider_key = {{ env = \"K\" }}\n[auth]\naudience = \"wye-prod\"\n{models}\n\
-             signing_keys = [\"{PUBLIC_KEY}\"]"
-        ))
-    };
-    assert!(with_models("").unwrap().auth.unwrap().models.is_none());
-    let models = with_models("models = [\"claude-haiku-*\", \"claude-sonnet-4-5\"]")
-        .unwrap()
-        .auth
-        .unwrap()
-        .models
-        .unwrap();
-    assert!(models[0].matches("claude-haiku-4-5"));
-    for bad in ["models = []", "models = [\"a*b\"]", "models = [\"\"]"] {
-        assert!(
-            matches!(with_models(bad), Err(ConfigError::Auth(_))),
-            "{bad}"
-        );
-    }
-    assert_eq!(
-        with_models("max_output_tokens = 8000")
-            .unwrap()
-            .auth
-            .unwrap()
-            .max_output_tokens,
-        Some(8000)
-    );
-    assert_eq!(
-        with_models("max_output_tokens = 0").unwrap_err(),
-        ConfigError::Zero("auth.max_output_tokens")
-    );
 }
 
 #[test]
@@ -359,15 +229,8 @@ fn internal_bounds_are_derived_not_configured() {
 
 #[test]
 fn cache_diagnostics_require_a_key() {
-    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
-                base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
-    assert!(
-        Config::from_toml_str(base)
-            .unwrap()
-            .cache_diagnostics
-            .is_none()
-    );
-    let with = |lines: &str| Config::from_toml_str(&format!("{base}[cache_diagnostics]\n{lines}"));
+    assert!(config("").unwrap().cache_diagnostics.is_none());
+    let with = |lines: &str| config(&format!("[cache_diagnostics]\n{lines}"));
     let diagnostics = with("hash_key = { env = \"WYE_CACHE_HASH_KEY\" }")
         .unwrap()
         .cache_diagnostics
@@ -477,9 +340,7 @@ fn rejects_zero_timeouts_and_timers_past_a_day() {
 
 #[test]
 fn telemetry_endpoint_gets_the_logs_path() {
-    let base = "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\n\
-                base_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
-    let with = |t: &str| Config::from_toml_str(&format!("{base}[telemetry]\n{t}"));
+    let with = |t: &str| config(&format!("[telemetry]\n{t}"));
     let telemetry = with("otlp_endpoint = \"http://localhost:4318\"")
         .unwrap()
         .telemetry
@@ -531,7 +392,7 @@ fn telemetry_endpoint_gets_the_logs_path() {
             "{bad}"
         );
     }
-    assert!(Config::from_toml_str(base).unwrap().telemetry.is_none());
+    assert!(config("").unwrap().telemetry.is_none());
     for local in ["http://127.0.0.1:4318", "http://[::1]:4318"] {
         let endpoint = format!("otlp_endpoint = \"{local}\"");
         assert!(with(&endpoint).is_ok(), "{local}");
@@ -595,221 +456,7 @@ fn http_version_is_auto_unless_pinned_to_1_1() {
     );
 }
 
-#[test]
-fn discovery_lists_unique_model_names() {
-    let with = |models: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"127.0.0.1:8080\"\n\
-             [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = {{ env = \"K\" }}\n\
-             [discovery]\nmodels = [{models}]"
-        ))
-    };
-    let config = with(
-        r#"{ id = "claude-sonnet-4-6", display_name = "Claude Sonnet 4.6", description = "Daily driver" }, { id = "claude-haiku-4-5" }"#,
-    )
-    .unwrap();
-    let models = config.discovery.unwrap().models;
-    assert_eq!(models.len(), 2);
-    assert_eq!(models[0].display_name.as_deref(), Some("Claude Sonnet 4.6"));
-    assert_eq!(models[1].description, None);
-
-    for bad in [
-        "",
-        r#"{ id = "" }"#,
-        r#"{ id = "claude-*" }"#,
-        // Listed, but a request naming it would be refused.
-        r#"{ id = "claude\"x" }"#,
-        r#"{ id = "a" }, { id = "a" }"#,
-        r#"{ id = "a", extra = 1 }"#,
-    ] {
-        assert!(with(bad).is_err(), "{bad}");
-    }
-    let long = "x".repeat(1025);
-    assert!(with(&format!(r#"{{ id = "a", description = "{long}" }}"#)).is_err());
-}
-
-#[test]
-fn identity_provider_issuers_are_validated() {
-    let parse_auth = |auth: &str| {
-        Config::from_toml_str(&format!(
-            "[server]\nlisten = \"0.0.0.0:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
-             provider_key = {{ env = \"K\" }}\n[auth]\n{auth}"
-        ))
-    };
-    let idp = "[[auth.identity_providers]]\nissuer = \"https://token.actions.githubusercontent.com\"\n\
-               audience = \"wye-prod\"\nalgorithm = \"RS256\"\njwks_file = \"github.jwks\"\n";
-    // Issuers alone are enough: Wye's own keys are optional.
-    let auth = parse_auth(idp).unwrap().auth.unwrap();
-    assert!(auth.own.is_none());
-    let issuer = &auth.identity_providers[0];
-    assert_eq!(issuer.algorithm, Algorithm::Rs256);
-    assert_eq!(issuer.subject_claim, "sub");
-    assert!(issuer.grants.is_empty());
-
-    let grants = format!(
-        "{idp}subject_claim = \"repository\"\n[[auth.identity_providers.grants]]\nclaim = \"repository_owner\"\n\
-         value = \"acme\"\nmodels = [\"claude-haiku-*\"]\n"
-    );
-    let auth = parse_auth(&grants).unwrap().auth.unwrap();
-    assert_eq!(auth.identity_providers[0].subject_claim, "repository");
-    assert_eq!(
-        auth.identity_providers[0].grants[0].models[0].to_string(),
-        "claude-haiku-*"
-    );
-
-    let own = format!("audience = \"wye-prod\"\nsigning_keys = [\"{PUBLIC_KEY}\"]\n");
-    let auth = parse_auth(&format!("{own}{idp}")).unwrap().auth.unwrap();
-    assert!(auth.own.is_some() && auth.identity_providers.len() == 1);
-
-    for bad in [
-        String::new(),                          // neither own keys nor identity providers
-        "audience = \"wye-prod\"\n".to_owned(), // own audience without keys
-        format!("signing_keys = [\"{PUBLIC_KEY}\"]\n"), // own keys without an audience
-        idp.replace("RS256", "HS256"),          // HMAC is never accepted
-        idp.replace("RS256", "none"),
-        idp.replace("github.jwks", ""),
-        format!("{idp}{idp}"), // duplicate issuer
-        // Wye's own tokens name the issuer "wye".
-        format!(
-            "{own}{}",
-            idp.replace("https://token.actions.githubusercontent.com", "wye")
-        ),
-        format!("{idp}subject_claim = \"\"\n"),
-        format!(
-            "{idp}[[auth.identity_providers.grants]]\nclaim = \"groups\"\nvalue = \"x\"\nmodels = []\n"
-        ),
-        format!(
-            "{idp}[[auth.identity_providers.grants]]\nclaim = \"\"\nvalue = \"x\"\nmodels = [\"a\"]\n"
-        ),
-        format!(
-            "{idp}[[auth.identity_providers.grants]]\nclaim = \"g\"\nvalue = \"x\"\nmodels = [\"a*b\"]\n"
-        ),
-        format!("{idp}jwks_url = \"https://example.com\"\n"), // no runtime fetching
-    ] {
-        assert!(parse_auth(&bad).is_err(), "accepted:\n{bad}");
-    }
-}
-
-#[test]
-fn aliases_parse_and_reject_duplicates() {
-    assert!(parse(FORWARDING).unwrap().aliases.is_none());
-    let config = parse(&format!(
-        "{FORWARDING}[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
-         when = [{{ subjects = [\"canary-*\"], model = \"claude-sonnet-5-5\" }}]\n"
-    ))
-    .unwrap();
-    let aliases = config.aliases.unwrap();
-    let alias = aliases.get("coding").unwrap();
-    assert_eq!(&**alias.model_for(Some("canary-1")), "claude-sonnet-5-5");
-    assert_eq!(&**alias.model_for(Some("main")), "claude-opus-5-5");
-
-    let twice = "[[aliases]]\nname = \"a\"\nmodel = \"m\"\n";
-    assert_eq!(
-        parse(&format!("{FORWARDING}{twice}{twice}")).unwrap_err(),
-        ConfigError::Invalid("aliases: duplicate name")
-    );
-    assert!(
-        parse(&format!(
-            "{FORWARDING}[[aliases]]\nname = \"a\"\nmodel = \"m*\"\n"
-        ))
-        .is_err()
-    );
-}
-
-/// The pricing example in docs/policy.md parses, so the documented format
-/// and the parser cannot drift apart.
-#[test]
-fn documented_pricing_example_parses() {
-    let doc = include_str!("../../../../docs/policy.md");
-    let start = doc.find("```toml\n[pricing]").unwrap() + "```toml\n".len();
-    let example = &doc[start..start + doc[start..].find("```").unwrap()];
-    let pricing = parse(&format!("{FORWARDING}{example}"))
-        .unwrap()
-        .pricing
-        .unwrap();
-    assert_eq!(&*pricing.version, "anthropic-2026-11-01");
-    assert_eq!(pricing.entries.len(), 4);
-    assert_eq!(pricing.entries[0].prices.input, 4_000_000);
-    // Opus 5.5 reads its cache at 0.05 times input, not the usual 0.1.
-    assert_eq!(pricing.entries[0].prices.cache_read, Some(200_000));
-    assert_eq!(pricing.entries[3].prices.cache_read, None);
-    assert_eq!(pricing.entries[3].tiers[0].above_prompt_tokens, 100_000);
-
-    let one = |extra: &str| {
-        parse(&format!(
-            "{FORWARDING}[pricing]\nversion = \"v\"\n[[pricing.prices]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n{extra}"
-        ))
-    };
-    assert!(one("").is_ok());
-    assert!(one("cache_read = \"0.1234567\"").is_err());
-    assert!(one("cache_read = \"-1\"").is_err());
-    assert!(one("upstreams = [\"x\"]").is_err());
-    assert!(
-        one("[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n[[pricing.prices.tiers]]\nabove_prompt_tokens = 5\n")
-            .is_err()
-    );
-}
-
-/// Without `version`, a price table is named by its content: the same on
-/// every replica and run, whatever its comments and layout, and another
-/// whenever a price changes.
-#[test]
-fn a_price_table_without_a_version_is_named_by_its_prices() {
-    let version = |table: &str| {
-        parse(&format!("{FORWARDING}[pricing]\n{table}"))
-            .unwrap()
-            .pricing
-            .unwrap()
-            .version
-    };
-    let table = "[[pricing.prices]]\nmodels = [\"claude-*\"]\ninput = \"1\"\noutput = \"2\"\n";
-    let hashed = version(table);
-    assert_eq!(hashed.len(), 16, "{hashed}");
-    assert!(hashed.bytes().all(|b| b.is_ascii_hexdigit()), "{hashed}");
-    let reformatted = "# Copied from the pricing page.\n[[pricing.prices]]\n\
-                       output = \"2.00\"   # per million\ninput = \"1.0\"\nmodels = [ \"claude-*\" ]\n";
-    assert_eq!(version(reformatted), hashed);
-    for changed in [
-        table.replace("\"2\"", "\"3\""),
-        table.replace("claude-*", "claude-opus-*"),
-        format!("{table}cache_read = \"0.1\"\n"),
-        format!("{table}[[pricing.prices.tiers]]\nabove_prompt_tokens = 9\n"),
-        format!("{table}[[pricing.prices]]\nmodels = [\"m\"]\ninput = \"1\"\noutput = \"2\"\n"),
-    ] {
-        assert_ne!(version(&changed), hashed, "{changed}");
-    }
-    // A cache read of zero is a price; an absent one is not.
-    assert_ne!(version(&format!("{table}cache_read = \"0\"\n")), hashed);
-    // A written version is kept as it is.
-    assert_eq!(&*version(&format!("version = \"v1\"\n{table}")), "v1");
-}
-
-#[test]
-fn upgrade_check_targets_are_unique_model_names() {
-    let check = |body: &str| parse(&format!("{FORWARDING}[upgrade_check]\n{body}"));
-    let ok = check("targets = [\"claude-opus-5-5\"]\nsample_percent = 10").unwrap();
-    let ok = ok.upgrade_check.unwrap();
-    assert_eq!(&*ok.targets[0], "claude-opus-5-5");
-    assert_eq!(ok.sample_percent, 10);
-    assert_eq!(
-        check("targets = [\"claude-opus-5-5\"]")
-            .unwrap()
-            .upgrade_check
-            .unwrap()
-            .sample_percent,
-        100
-    );
-    for bad in [
-        "targets = []",
-        "targets = [\"claude-*\"]",
-        "targets = [\"claude\\\\x\"]",
-        "targets = [\"a\", \"a\"]",
-        "targets = [\"a\"]\nsample_percent = 0",
-    ] {
-        assert!(check(bad).is_err(), "{bad}");
-    }
-}
-
-mod routes;
-
+mod auth;
 mod examples;
+mod models;
+mod routes;

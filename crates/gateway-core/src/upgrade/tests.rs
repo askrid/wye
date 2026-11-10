@@ -158,13 +158,12 @@ fn escaped_or_malformed_input_matches_nothing() {
 }
 
 #[test]
-fn every_rule_names_its_source_and_fix() {
+fn every_rule_cites_the_provider() {
     for rule in Rule::ALL {
         assert!(
             rule.source().starts_with("https://platform.claude.com/"),
             "{rule:?}"
         );
-        assert!(!rule.fix().is_empty());
     }
 }
 

@@ -2,7 +2,19 @@
 
 use proptest::prelude::*;
 
-use crate::policy::ModelPattern;
+use crate::{
+    config::{Config, ConfigError},
+    policy::ModelPattern,
+};
+
+/// The smallest valid `[[upstreams]]` entry, with its own provider key.
+pub(crate) const KEYED: &str =
+    "[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n";
+
+/// A config of a [`KEYED`] upstream and `extra`, the sections after it.
+pub(crate) fn config(extra: &str) -> Result<Config, ConfigError> {
+    Config::from_toml_str(&format!("{KEYED}{extra}"))
+}
 
 /// Feeds `body` to `feed` in chunks of `sizes`, repeated until the body
 /// ends; a size of 0 counts as 1.

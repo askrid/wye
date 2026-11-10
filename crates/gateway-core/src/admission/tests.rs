@@ -1,12 +1,9 @@
 use super::*;
-use crate::config::Config;
-use crate::test_support::patterns;
+use crate::test_support::{config, patterns};
 
 fn aliases() -> Aliases {
-    Config::from_toml_str(
-        "[server]\nlisten = \"127.0.0.1:8080\"\n\
-         [[upstreams]]\nbase_url = \"https://api.anthropic.com\"\nprovider_key = { env = \"K\" }\n\
-         [[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
+    config(
+        "[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5-5\"\n\
          when = [{ subjects = [\"canary-*\"], model = \"claude-sonnet-5-5\" }]\n",
     )
     .unwrap()
