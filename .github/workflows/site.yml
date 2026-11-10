@@ -4,13 +4,14 @@
 
 name: site
 
-# The two path lists are the same: the site, the files its build reads
-# (render.rs), and the files this job's checks use: deny.toml for cargo-deny
-# and rust-toolchain.toml for the toolchain.
+# One path list, for pushes and pull requests alike: the site, the files its
+# build reads (render.rs), and the files its checks use: clippy.toml for the
+# lints, rust-toolchain.toml for the toolchain, deny.toml for cargo-deny, and
+# scripts/machine-lock.sh, which site/check.sh runs.
 on:
   push:
     branches: [main]
-    paths:
+    paths: &site-inputs
       - "site/**"
       - README.md
       - CHANGELOG.md
@@ -18,21 +19,13 @@ on:
       - docs/benchmarks.md
       - Cargo.toml
       - crates/wye/Cargo.toml
+      - clippy.toml
       - deny.toml
       - rust-toolchain.toml
+      - scripts/machine-lock.sh
       - .github/workflows/site.yml
   pull_request:
-    paths:
-      - "site/**"
-      - README.md
-      - CHANGELOG.md
-      - docs/operations.md
-      - docs/benchmarks.md
-      - Cargo.toml
-      - crates/wye/Cargo.toml
-      - deny.toml
-      - rust-toolchain.toml
-      - .github/workflows/site.yml
+    paths: *site-inputs
 
 permissions:
   contents: read
@@ -50,6 +43,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # rustup installs the toolchain and components pinned in rust-toolchain.toml.
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
