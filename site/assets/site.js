@@ -1,14 +1,15 @@
-// Copy buttons on command and config blocks, a convenience the page works
-// without: with scripts off the text stays selectable. A shell block is
-// copied without its comments: zsh, macOS's shell, runs a pasted "# ..." as
-// arguments unless interactivecomments is set.
-const uncommented = (text) =>
-  text
-    .split("\n")
-    .filter((line) => !/^\s*#/.test(line))
-    .map((line) => line.replace(/\s+#\s.*$/, ""))
-    .join("\n");
-for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.code[data-lang="toml"]')) {
+// Copy buttons on the blocks the build marks (data-copy), a convenience the
+// page works without: with scripts off the text stays selectable. A shell
+// block is copied without the comments the build marked (.c): zsh, macOS's
+// shell, runs a pasted "# ..." as arguments unless interactivecomments is
+// set.
+const copied = (pre) => {
+  if (pre.dataset.copy !== "shell") return pre.textContent;
+  const commands = pre.cloneNode(true);
+  for (const comment of commands.querySelectorAll(".c")) comment.remove();
+  return commands.textContent.split("\n").map((line) => line.trimEnd()).filter(Boolean).join("\n");
+};
+for (const pre of document.querySelectorAll("pre.code[data-copy]")) {
   const wrap = document.createElement("div");
   wrap.className = "code-wrap";
   pre.before(wrap);
@@ -27,7 +28,7 @@ for (const pre of document.querySelectorAll('pre.code[data-lang="bash"], pre.cod
     // Emptied first, so a second copy is announced again.
     status.textContent = "";
     try {
-      await navigator.clipboard.writeText(pre.dataset.lang === "bash" ? uncommented(pre.innerText) : pre.innerText);
+      await navigator.clipboard.writeText(copied(pre));
       button.textContent = "[copied]";
       status.textContent = "Copied";
     } catch {

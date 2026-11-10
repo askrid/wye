@@ -65,10 +65,17 @@ impl Sources {
                     }
                     html = marked;
                 }
+                // Commands and config get a copy button (assets/site.js); a
+                // shell block is copied without its comments.
+                let copy = match lang {
+                    "bash" | "sh" => " data-copy=\"shell\"",
+                    "toml" => " data-copy=\"text\"",
+                    _ => "",
+                };
                 Ok(format!(
                     // Focusable, so a keyboard can scroll a block wider
                     // than the page.
-                    "<pre class=\"code\" data-lang=\"{}\" tabindex=\"0\"><code>{html}</code></pre>",
+                    "<pre class=\"code\" data-lang=\"{}\"{copy} tabindex=\"0\"><code>{html}</code></pre>",
                     markdown::escape(lang)
                 ))
             }
@@ -281,6 +288,7 @@ mod tests {
                 "# Wye\n\n**LLM gateway without bloat.**\n\n\
                  Small and [fast](#performance): one\n`binary`.\n\n\
                  ```console\n$ wye report\n3 requests\n```\n\n\
+                 ```sh\nwye init  # once\n```\n\n\
                  ```json\n{\n  \"cost_usd\": \"0.0181\",\n  \"input_tokens\": 12,\n  \"failovers\": [{ \"upstream\": \"a\", \"reason\": \"429\" }]\n}\n```\n\n\
                  ## Status\n\nBuilt.\n\n\
                  ## Performance\n\nNumbers.\n\n\
@@ -435,6 +443,12 @@ mod tests {
         .unwrap();
         assert!(page.starts_with("<pre class=\"code\" data-lang=\"console\" tabindex=\"0\"><code><span class=\"prompt\">$</span> wye report\n3 requests</code></pre>"));
         assert!(page.ends_with("<p>Built.</p>\n"));
+        // Commands get a copy button, copied without their comments.
+        let shell = render("{{fence README.md|wye init}}", &sources()).unwrap();
+        assert!(
+            shell.starts_with("<pre class=\"code\" data-lang=\"sh\" data-copy=\"shell\""),
+            "{shell}"
+        );
     }
 
     #[test]
