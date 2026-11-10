@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use gateway_core::config::Config;
 
-use super::args::Parsed;
+use super::{Env, args::Parsed};
 
 /// The config, in the home directory.
 pub const CONFIG_FILE: &str = "wye.toml";
@@ -19,18 +19,16 @@ pub const MESSAGE_LOG_FILE: &str = "wye.log";
 pub const POLICY_TESTS_DIR: &str = "policy-tests";
 
 /// Where a user's files live: `$WYE_HOME`, else `~/.wye`.
-pub fn home(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let set = |name| env(name).filter(|v| !v.is_empty());
-    set("WYE_HOME")
+pub fn home(env: &impl Env) -> Option<PathBuf> {
+    env.var("WYE_HOME")
         .map(PathBuf::from)
-        .or_else(|| set("HOME").map(|home| Path::new(&home).join(".wye")))
+        .or_else(|| env.var("HOME").map(|home| Path::new(&home).join(".wye")))
 }
 
 /// The config a command reads without `-c`: `$WYE_CONFIG`, else `wye.toml`
 /// in the home directory; `None` without a home.
-pub fn default_config(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    env("WYE_CONFIG")
-        .filter(|v| !v.is_empty())
+pub fn default_config(env: &impl Env) -> Option<PathBuf> {
+    env.var("WYE_CONFIG")
         .map(PathBuf::from)
         .or_else(|| home(env).map(|home| home.join(CONFIG_FILE)))
 }
@@ -43,13 +41,10 @@ pub fn default_config(env: &impl Fn(&str) -> Option<String>) -> Option<PathBuf> 
 /// apply unless it is named.
 pub fn find_config(
     flag: Option<&str>,
-    env: &impl Fn(&str) -> Option<String>,
+    env: &impl Env,
     exists: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf, String> {
-    if let Some(path) = flag
-        .map(str::to_owned)
-        .or_else(|| env("WYE_CONFIG").filter(|v| !v.is_empty()))
-    {
+    if let Some(path) = flag.map(str::to_owned).or_else(|| env.var("WYE_CONFIG")) {
         return Ok(path.into());
     }
     let home = home(env).map(|home| home.join(CONFIG_FILE));
@@ -66,8 +61,8 @@ pub fn find_config(
 }
 
 /// `path` with the home directory shown as `~`.
-pub fn tilde(path: &Path, env: &impl Fn(&str) -> Option<String>) -> String {
-    match env("HOME").filter(|h| !h.is_empty()) {
+pub fn tilde(path: &Path, env: &impl Env) -> String {
+    match env.var("HOME") {
         Some(home) => match path.strip_prefix(&home) {
             Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
             Ok(rest) => format!("~/{}", rest.display()),
@@ -78,21 +73,14 @@ pub fn tilde(path: &Path, env: &impl Fn(&str) -> Option<String>) -> String {
 }
 
 /// The file `name` in the home directory; `flag` is how to do without one.
-pub fn in_home(
-    name: &str,
-    flag: &str,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<PathBuf, String> {
+pub fn in_home(name: &str, flag: &str, env: &impl Env) -> Result<PathBuf, String> {
     home(env)
         .map(|home| home.join(name))
         .ok_or_else(|| format!("no home directory: {flag}"))
 }
 
 /// The config a command was given or finds.
-pub fn config_path(
-    parsed: &Parsed<'_>,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<PathBuf, String> {
+pub fn config_path(parsed: &Parsed<'_>, env: &impl Env) -> Result<PathBuf, String> {
     find_config(parsed.value("config"), env, Path::exists)
 }
 
@@ -117,10 +105,7 @@ pub fn config_dir(path: &Path) -> &Path {
 /// The gateway token a client presents: the one in the file `token_file`
 /// (`--token-file`), else the one in `$WYE_TOKEN`, where an empty one is an
 /// error rather than no token.
-pub fn caller_token(
-    token_file: Option<&str>,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<Option<String>, String> {
+pub fn caller_token(token_file: Option<&str>, env: &impl Env) -> Result<Option<String>, String> {
     match token_file {
         Some(path) => read_token(path).map(Some),
         None => match env("WYE_TOKEN") {

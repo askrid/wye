@@ -19,7 +19,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    Error,
+    Env, Error,
     files::{self, MESSAGE_LOG_FILE, USAGE_LOG_FILE},
     paint::Paint,
     probe_blocking as probe, say,
@@ -100,10 +100,8 @@ pub struct Context {
 
 impl Context {
     /// The context of whoever runs this command.
-    pub fn new(env: impl Fn(&str) -> Option<String> + 'static) -> Result<Self, String> {
-        let user_home = env("HOME")
-            .filter(|home| !home.is_empty())
-            .ok_or("no home directory ($HOME)")?;
+    pub fn new(env: impl Env + 'static) -> Result<Self, String> {
+        let user_home = env.var("HOME").ok_or("no home directory ($HOME)")?;
         Ok(Self {
             manager: Manager::here()?,
             user_home: user_home.into(),

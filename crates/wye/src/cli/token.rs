@@ -19,7 +19,7 @@ use ring::{
 };
 
 use super::{
-    Error,
+    Env, Error,
     args::Parsed,
     emit,
     files::{self, SIGNING_KEY_FILE},
@@ -62,10 +62,7 @@ pub fn public_key(key: &Ed25519KeyPair) -> String {
 
 /// `wye token keygen`: a new key. Returns what to tell the user, and the
 /// result: the `signing_keys` line to put under `[auth]`.
-pub fn run_keygen(
-    parsed: &Parsed<'_>,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<(String, String), String> {
+pub fn run_keygen(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, String), String> {
     let out = match parsed.value("out") {
         Some(out) => out.into(),
         None => {
@@ -93,7 +90,7 @@ pub fn run_keygen(
 }
 
 /// `wye token issue`, from its options.
-pub fn run_issue(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<(), Error> {
+pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<(), Error> {
     let ttl_secs = parsed
         .value("ttl")
         .map(|ttl| {

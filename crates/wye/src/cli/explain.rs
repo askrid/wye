@@ -10,7 +10,7 @@ use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use http::{HeaderMap, HeaderName, HeaderValue, header::HOST};
 
-use super::{Error, args::Parsed, files};
+use super::{Env, Error, args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
@@ -39,10 +39,7 @@ pub enum CallerToken<'a> {
 
 /// `wye explain`, from its options: the report, with the config it read, and
 /// whether the request would be forwarded.
-pub fn run(
-    parsed: &Parsed<'_>,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<(String, bool), Error> {
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, bool), Error> {
     let path = files::config_path(parsed, env)?;
     let config = files::load(&path)?;
     let verifier = files::named(
@@ -124,11 +121,7 @@ pub fn request_headers(
 
 /// The error for `wye explain` without a request: a command to copy, with a
 /// sample `wye init` wrote next to the config when there is one.
-fn missing_request(
-    flag: Option<&str>,
-    config: &Path,
-    env: &impl Fn(&str) -> Option<String>,
-) -> String {
+fn missing_request(flag: Option<&str>, config: &Path, env: &impl Env) -> String {
     let samples = files::config_dir(config).join(files::POLICY_TESTS_DIR);
     let sample = std::fs::read_dir(&samples)
         .into_iter()

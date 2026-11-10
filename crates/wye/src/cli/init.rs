@@ -12,7 +12,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    REPO_AT_RELEASE,
+    Env, REPO_AT_RELEASE,
     args::Parsed,
     files::{self, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
     plural, token,
@@ -293,7 +293,7 @@ impl InitOptions {
 }
 
 /// `wye init`: what the options ask for, written; returns what to print.
-pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result<String, String> {
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<String, String> {
     // A shared gateway always holds the provider key, so --provider-key
     // beside --shared changes nothing.
     let setup = match (parsed.flag("provider-key"), parsed.flag("shared")) {
@@ -322,10 +322,7 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Fn(&str) -> Option<String>) -> Result
 /// Writes the starter config to `options.config`, never over an existing file
 /// (or through a symlink); with `--shared`, also the signing key, unless one is
 /// there to reuse; then the sample policy tests, keeping any that exist.
-pub fn init(
-    options: &InitOptions,
-    env: &impl Fn(&str) -> Option<String>,
-) -> Result<String, String> {
+pub fn init(options: &InitOptions, env: &impl Env) -> Result<String, String> {
     let show = |path: &Path| files::tilde(path, env);
     let path = &options.config;
     // Checked first so a refused run creates no key; `create_new` below

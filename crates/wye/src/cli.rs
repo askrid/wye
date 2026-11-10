@@ -35,6 +35,16 @@ pub const REPO_AT_RELEASE: &str = concat!(
     env!("CARGO_PKG_VERSION")
 );
 
+/// The environment a command reads: the process's, or a test's stand-in.
+pub trait Env: Fn(&str) -> Option<String> {
+    /// The variable `name`, unless it is unset or empty.
+    fn var(&self, name: &str) -> Option<String> {
+        self(name).filter(|value| !value.is_empty())
+    }
+}
+
+impl<F: Fn(&str) -> Option<String>> Env for F {}
+
 /// A runtime for a command that makes a request or two.
 pub fn current_thread() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()

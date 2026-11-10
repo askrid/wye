@@ -21,7 +21,7 @@ use gateway_core::{
 use serde::Deserialize;
 
 use super::{
-    Error,
+    Env, Error,
     args::Parsed,
     files::{self, USAGE_LOG_FILE},
     paint::Paint,
@@ -378,11 +378,7 @@ impl Summary {
 
 /// `wye report`: the usage logs it was given, or the one in the home
 /// directory with its rotated files.
-pub fn run(
-    parsed: &Parsed<'_>,
-    env: &impl Fn(&str) -> Option<String>,
-    paint: Paint,
-) -> Result<String, Error> {
+pub fn run(parsed: &Parsed<'_>, env: &impl Env, paint: Paint) -> Result<String, Error> {
     let mut summary = Summary {
         window: Window::parse(parsed.value("since"), super::unix_secs()?).map_err(Error::Usage)?,
         ..Summary::default()
@@ -404,7 +400,7 @@ pub fn run(
 
 /// The usage log in the home directory and its rotated files, oldest first:
 /// rotated ones by name (their UTC times), then the log itself.
-fn home_logs(env: &impl Fn(&str) -> Option<String>) -> Result<Vec<PathBuf>, String> {
+fn home_logs(env: &impl Env) -> Result<Vec<PathBuf>, String> {
     let log = files::in_home(USAGE_LOG_FILE, "pass a usage log", env)?;
     let mut paths: Vec<PathBuf> = std::fs::read_dir(log.parent().unwrap_or(Path::new(".")))
         .into_iter()

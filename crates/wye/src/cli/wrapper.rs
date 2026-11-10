@@ -10,7 +10,7 @@ use std::{ffi::OsString, process::Command};
 
 use gateway_core::config::{is_cleartext_remote, is_loopback_host};
 
-use super::{args::Parsed, files};
+use super::{Env, args::Parsed, files};
 
 /// Gateway URL when neither `--url` nor `WYE_URL` is set: a gateway on its
 /// default listen address.
@@ -91,7 +91,7 @@ impl Launch {
         url: Option<&str>,
         token_file: Option<&str>,
         args: &[&str],
-        env: impl Fn(&str) -> Option<String>,
+        env: impl Env,
     ) -> Result<Self, String> {
         let token = files::caller_token(token_file, &env)?;
         let gateway = gateway_url(url, &env);
@@ -173,7 +173,7 @@ impl Launch {
 /// `OPENAI_API_KEY`, to a gateway on this machine only, so the key never
 /// travels to another. A passthrough gateway forwards it; one with a
 /// provider key replaces it.
-pub fn codex_key(launch: &Launch, env: &impl Fn(&str) -> Option<String>) -> Option<String> {
+pub fn codex_key(launch: &Launch, env: &impl Env) -> Option<String> {
     let local = launch
         .gateway
         .parse::<http::Uri>()
@@ -183,7 +183,7 @@ pub fn codex_key(launch: &Launch, env: &impl Fn(&str) -> Option<String>) -> Opti
     if launch.token.is_some() || !local {
         return None;
     }
-    env(OPENAI_KEY_ENV).filter(|key| !key.is_empty())
+    env.var(OPENAI_KEY_ENV)
 }
 
 /// `value` as a TOML basic string, as Codex parses `-c` values.
@@ -192,9 +192,9 @@ fn toml_string(value: &str) -> String {
 }
 
 /// The gateway to use: `url` (`--url`), else `$WYE_URL`, else this machine's.
-pub fn gateway_url(url: Option<&str>, env: &impl Fn(&str) -> Option<String>) -> String {
+pub fn gateway_url(url: Option<&str>, env: &impl Env) -> String {
     url.map(str::to_owned)
-        .or_else(|| env("WYE_URL").filter(|v| !v.is_empty()))
+        .or_else(|| env.var("WYE_URL"))
         .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
         .trim_end_matches('/')
         .to_owned()
@@ -203,11 +203,7 @@ pub fn gateway_url(url: Option<&str>, env: &impl Fn(&str) -> Option<String>) -> 
 /// Runs the agent through the gateway, as the module docs describe. On
 /// Unix the process becomes the agent and this returns only if it cannot
 /// start; elsewhere it returns the agent's exit code.
-pub fn run(
-    agent: Agent,
-    parsed: &Parsed<'_>,
-    env: impl Fn(&str) -> Option<String>,
-) -> Result<i32, String> {
+pub fn run(agent: Agent, parsed: &Parsed<'_>, env: impl Env) -> Result<i32, String> {
     let mut launch = Launch::resolve(
         parsed.value("url"),
         parsed.value("token-file"),
@@ -238,12 +234,7 @@ pub fn run(
 /// Why nothing answered at `gateway`, and what to run: a gateway on this
 /// machine is started, after `wye init` when there is no config to start it
 /// with; another is named with `another`.
-pub fn no_gateway(
-    gateway: &str,
-    why: &str,
-    another: &str,
-    env: &impl Fn(&str) -> Option<String>,
-) -> String {
+pub fn no_gateway(gateway: &str, why: &str, another: &str, env: &impl Env) -> String {
     let local = gateway
         .parse::<http::Uri>()
         .ok()
