@@ -21,7 +21,7 @@ use gateway_core::{
     policy::ModelPattern,
     pricing::Pricing,
     prompt::HashKey,
-    route::Route,
+    route::{FAILOVER_MAX_BODY_BYTES, Route},
     token::{Identity, Verifier},
 };
 use http::{HeaderName, Method, Request, Response, StatusCode};
@@ -32,6 +32,7 @@ use crate::{
     Resources, StartupError,
     auth::{ConnectionAuth, authenticate},
     discovery::ModelCatalog,
+    failover::Bounds,
     gauge::Gauge,
     upstream::{Upstream, UpstreamBody},
     usage_log::{AgentHeaders, Observed, OtlpTarget, RequestInfo, Sinks, UsageLog},
@@ -71,7 +72,9 @@ pub struct Gateway {
     /// Request bytes kept for failover, across all requests.
     kept_bytes: Gauge,
     max_total_held_bytes: usize,
-    max_total_kept_bytes: usize,
+    /// What a body kept for failover stays within: the per-request bound
+    /// and the process-wide one.
+    failover_bounds: Bounds,
     /// Keys prompt hashes in the usage log; `None` when cache diagnostics are off.
     prompt_key: Option<Arc<HashKey>>,
     /// Percentage of sessions whose requests are diagnosed.
@@ -150,7 +153,10 @@ impl Gateway {
             kept_bytes: Gauge::default(),
             max_total_held_bytes: usize::try_from(config.server.max_total_held_bytes())
                 .unwrap_or(usize::MAX),
-            max_total_kept_bytes: usize::try_from(MAX_TOTAL_KEPT_BYTES).unwrap_or(usize::MAX),
+            failover_bounds: Bounds {
+                max_body: usize::try_from(FAILOVER_MAX_BODY_BYTES).unwrap_or(usize::MAX),
+                max_kept: usize::try_from(MAX_TOTAL_KEPT_BYTES).unwrap_or(usize::MAX),
+            },
             otlp: config
                 .telemetry
                 .as_ref()

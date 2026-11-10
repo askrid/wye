@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     diagnostics::PromptSlot,
-    failover::{Bounds, FailoverBody, Handback, Resend},
+    failover::{FailoverBody, Handback, Resend},
     request_body::{ClientBody, RequestBody},
     upgrade_check::UpgradeSlot,
     upstream::{ForwardError, Upstream, UpstreamBody, UpstreamError},
@@ -134,7 +134,7 @@ impl Gateway {
             );
         }
         let (mut body, mut handback) = if failover {
-            let (body, handback) = FailoverBody::kept(body, &self.kept_bytes, self.bounds());
+            let (body, handback) = FailoverBody::kept(body, &self.kept_bytes, self.failover_bounds);
             (body, Some(handback))
         } else {
             (FailoverBody::once(body), None)
@@ -187,20 +187,11 @@ impl Gateway {
                         upstream: upstream.id.clone(),
                         reason,
                     });
-                    (body, *handback) = FailoverBody::resume(resend, self.bounds());
+                    (body, *handback) = FailoverBody::resume(resend, self.failover_bounds);
                     continue;
                 }
             }
             return result;
-        }
-    }
-
-    /// The bounds a body kept for failover stays within: the per-request
-    /// bound and the process-wide one.
-    fn bounds(&self) -> Bounds {
-        Bounds {
-            max_body: usize::try_from(FAILOVER_MAX_BODY_BYTES).unwrap_or(usize::MAX),
-            max_kept: self.max_total_kept_bytes,
         }
     }
 
