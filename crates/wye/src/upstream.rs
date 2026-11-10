@@ -40,8 +40,8 @@ use rustls::pki_types::CertificateDer;
 pub(crate) use body::UpstreamBody;
 use connect::ConnectTimeout;
 use pool::ClientPool;
-pub(crate) use refusal::PolicyRefusal;
-use refusal::{RefusalSlot, Refusing, policy_refusal};
+pub(crate) use refusal::BodyRefusal;
+use refusal::{RefusalSlot, Refusing, body_refusal};
 
 use gateway_core::{prompt::PromptScanner, upgrade::UpgradeScanner};
 
@@ -103,9 +103,9 @@ const HOP_BY_HOP: [HeaderName; 9] = [
 pub(crate) enum ForwardError {
     /// The upstream gave no usable response.
     Upstream(UpstreamError),
-    /// The request body broke the policy or the size limit after
-    /// forwarding began; the upstream request was aborted.
-    Policy(PolicyRefusal),
+    /// The request body broke the policy or the size limit, or failed,
+    /// after forwarding began; the upstream request was aborted.
+    Body(BodyRefusal),
 }
 
 /// Why an upstream gave no usable response, in records as `upstream_error`.
@@ -118,7 +118,7 @@ pub(crate) enum UpstreamError {
     Timeout,
     /// TLS or protocol failure, or a connection lost, after connecting and
     /// before response headers. A failing client body is
-    /// `Policy(PolicyRefusal::Broken)` instead.
+    /// `Body(BodyRefusal::Broken)` instead.
     Reset,
 }
 
@@ -262,8 +262,8 @@ impl Upstream {
             .map_err(|_| ForwardError::Upstream(UpstreamError::Timeout))?
             .map_err(|e| {
                 let refusal = refused.as_ref().and_then(|r| r.get().copied());
-                match refusal.or_else(|| policy_refusal(&e)) {
-                    Some(refusal) => ForwardError::Policy(refusal),
+                match refusal.or_else(|| body_refusal(&e)) {
+                    Some(refusal) => ForwardError::Body(refusal),
                     None if e.is_connect() => ForwardError::Upstream(UpstreamError::Connect),
                     None => ForwardError::Upstream(UpstreamError::Reset),
                 }

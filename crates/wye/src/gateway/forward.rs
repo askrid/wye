@@ -91,7 +91,7 @@ impl Gateway {
                 let res = forward_error(api, e);
                 match e {
                     ForwardError::Upstream(error) => log.upstream_error(info, error, res),
-                    ForwardError::Policy(_) => log.refused(info, res),
+                    ForwardError::Body(_) => log.refused(info, res),
                 }
             }
         }
@@ -132,7 +132,7 @@ impl Gateway {
             prefix_sent = prefix;
         }
         let (mut body, mut handback) = if failover {
-            let (body, handback) = FailoverBody::kept(body, &self.failover_kept, self.bounds());
+            let (body, handback) = FailoverBody::kept(body, &self.kept_bytes, self.bounds());
             (body, Some(handback))
         } else {
             (FailoverBody::once(body), None)

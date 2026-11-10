@@ -57,28 +57,28 @@ impl Gauge {
         self.0.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn hold(&self) -> Reserved {
+    pub(crate) fn reserve(&self) -> Reserved {
         self.0.fetch_add(1, Ordering::Relaxed);
-        self.held(1)
+        self.reserved(1)
     }
 
-    /// A guard holding nothing yet, to grow with [`Reserved::try_grow`].
-    pub(crate) fn hold_none(&self) -> Reserved {
-        self.held(0)
+    /// A guard of no units yet, to grow with [`Reserved::try_grow`].
+    pub(crate) fn reserve_none(&self) -> Reserved {
+        self.reserved(0)
     }
 
-    fn held(&self, units: usize) -> Reserved {
+    fn reserved(&self, units: usize) -> Reserved {
         Reserved {
             gauge: Arc::clone(&self.0),
             units,
         }
     }
 
-    /// Holds one unit unless `max` are already held. Concurrent callers cannot
-    /// both take the last unit: the increment itself decides.
+    /// Reserves one unit unless `max` are already reserved. Concurrent
+    /// callers cannot both take the last unit: the increment itself decides.
     pub(crate) fn try_reserve(&self, max: usize) -> Option<Reserved> {
         if self.0.fetch_add(1, Ordering::Relaxed) < max {
-            Some(self.held(1))
+            Some(self.reserved(1))
         } else {
             self.0.fetch_sub(1, Ordering::Relaxed);
             None
@@ -93,8 +93,8 @@ mod tests {
     #[test]
     fn held_units_are_released_on_drop() {
         let gauge = Gauge::default();
-        let a = gauge.hold();
-        let b = gauge.hold();
+        let a = gauge.reserve();
+        let b = gauge.reserve();
         assert_eq!(gauge.current(), 2);
         drop(a);
         drop(b);
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn grown_units_stop_at_max_and_release_in_parts() {
         let gauge = Gauge::default();
-        let mut bytes = gauge.hold_none();
+        let mut bytes = gauge.reserve_none();
         assert!(bytes.try_grow(60, 100));
         assert!(!bytes.try_grow(41, 100));
         assert_eq!(gauge.current(), 60);

@@ -8,7 +8,7 @@ use http_body_util::{Either, Full};
 use super::ResBody;
 use crate::{
     request_body::HoldError,
-    upstream::{ForwardError, PolicyRefusal, UpstreamError},
+    upstream::{BodyRefusal, ForwardError, UpstreamError},
 };
 
 /// Anthropic's status for an overloaded API; clients back off and retry.
@@ -31,7 +31,7 @@ pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
             "invalid_request_error",
             "request body stalled while the gateway read its model",
         ),
-        HoldError::Body => unreadable_body(api),
+        HoldError::Broken => unreadable_body(api),
     }
 }
 
@@ -59,12 +59,12 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "api_error",
             "upstream request failed",
         ),
-        ForwardError::Policy(PolicyRefusal::Invalid(e)) => refuse(api, &Refusal::Invalid(e)),
-        ForwardError::Policy(PolicyRefusal::OutputCeiling(e)) => {
+        ForwardError::Body(BodyRefusal::Invalid(e)) => refuse(api, &Refusal::Invalid(e)),
+        ForwardError::Body(BodyRefusal::OutputCeiling(e)) => {
             refuse(api, &Refusal::OutputCeiling(e))
         }
-        ForwardError::Policy(PolicyRefusal::TooLarge) => too_large(api),
-        ForwardError::Policy(PolicyRefusal::Broken) => unreadable_body(api),
+        ForwardError::Body(BodyRefusal::TooLarge) => too_large(api),
+        ForwardError::Body(BodyRefusal::Broken) => unreadable_body(api),
     }
 }
 

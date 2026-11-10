@@ -111,7 +111,7 @@ pub(crate) enum HoldError {
     /// the model after [`HOLD_TIMEOUT`].
     Stalled,
     /// The client's body failed (for example, the connection dropped).
-    Body,
+    Broken,
 }
 
 /// What a held request carries until its body is fully sent: the start of the
@@ -206,7 +206,7 @@ where
 {
     let mut hold = Box::new(Hold {
         chunks: Chunks::default(),
-        budget: budget.hold_none(),
+        budget: budget.reserve_none(),
         scanner: admission::scanner(api, output_ceiling),
         ended: false,
         ceiling: output_ceiling.map(|limit| OutputCeiling { api, limit }),
@@ -254,7 +254,7 @@ fn held_body_error(error: impl Into<BoxError>) -> HoldError {
     if error.into().is::<LengthLimitError>() {
         HoldError::TooLarge
     } else {
-        HoldError::Body
+        HoldError::Broken
     }
 }
 

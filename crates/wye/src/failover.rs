@@ -124,12 +124,12 @@ impl<B> FailoverBody<B> {
     }
 
     /// The client's body, kept within `bounds` for another attempt.
-    pub(crate) fn kept(inner: B, held: &Gauge, bounds: Bounds) -> (Self, Handback<B>) {
+    pub(crate) fn kept(inner: B, kept: &Gauge, bounds: Bounds) -> (Self, Handback<B>) {
         Self::resume(
             Resend {
                 chunks: VecDeque::new(),
                 rest: Some(inner),
-                budget: held.hold_none(),
+                budget: kept.reserve_none(),
                 bytes: 0,
                 whole: false,
             },

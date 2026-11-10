@@ -20,9 +20,10 @@ use hyper::body::{Body, Frame, SizeHint};
 
 use crate::{BoxError, Slot};
 
-/// A refusal raised after forwarding began; the upstream request was aborted.
+/// A refusal the request body raised after forwarding began; the upstream
+/// request was aborted.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum PolicyRefusal {
+pub(crate) enum BodyRefusal {
     /// A repeated `model`, an escaped top-level key, or a bad output-token field.
     Invalid(PolicyError),
     /// The output-token maximum above the request's ceiling, or missing.
@@ -51,24 +52,24 @@ impl std::error::Error for BrokenBody {
 }
 
 /// The refusal an attempt's request body raised.
-pub(super) type RefusalSlot = Slot<PolicyRefusal>;
+pub(super) type RefusalSlot = Slot<BodyRefusal>;
 
 /// The refusal among `error` and its sources, if Wye's request body raised it.
-pub(super) fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Option<PolicyRefusal> {
+pub(super) fn body_refusal(error: &(dyn std::error::Error + 'static)) -> Option<BodyRefusal> {
     let mut cause = Some(error);
     while let Some(e) = cause {
         if let Some(e) = e.downcast_ref::<PolicyError>() {
-            return Some(PolicyRefusal::Invalid(*e));
+            return Some(BodyRefusal::Invalid(*e));
         }
         if let Some(e) = e.downcast_ref::<OutputCeilingError>() {
-            return Some(PolicyRefusal::OutputCeiling(*e));
+            return Some(BodyRefusal::OutputCeiling(*e));
         }
         if e.is::<LengthLimitError>() {
-            return Some(PolicyRefusal::TooLarge);
+            return Some(BodyRefusal::TooLarge);
         }
         if e.is::<BrokenBody>() {
             // Wraps only an error with none of the refusals above in it.
-            return Some(PolicyRefusal::Broken);
+            return Some(BodyRefusal::Broken);
         }
         cause = e.source();
     }
@@ -76,7 +77,7 @@ pub(super) fn policy_refusal(error: &(dyn std::error::Error + 'static)) -> Optio
 }
 
 /// `inner`, leaving the refusal its error carries in a slot when given, and
-/// marking any other error of the client's body as [`PolicyRefusal::Broken`].
+/// marking any other error of the client's body as [`BodyRefusal::Broken`].
 pub(crate) struct Refusing<B> {
     inner: B,
     slot: Option<RefusalSlot>,
@@ -102,9 +103,9 @@ where
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_frame(cx) {
             Poll::Ready(Some(Err(e))) => {
-                let (refusal, e) = match policy_refusal(&*e) {
+                let (refusal, e) = match body_refusal(&*e) {
                     Some(refusal) => (refusal, e),
-                    None => (PolicyRefusal::Broken, Box::new(BrokenBody(e)) as BoxError),
+                    None => (BodyRefusal::Broken, Box::new(BrokenBody(e)) as BoxError),
                 };
                 if let Some(slot) = &this.slot {
                     // Set before hyper resets the stream, so the request

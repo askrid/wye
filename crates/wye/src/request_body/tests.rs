@@ -247,7 +247,7 @@ async fn refuses_beyond_the_budget_or_without_a_model() {
     let budget = Gauge::default();
     let max = 8 * MIN_CHUNK_CHARGE;
     let _other = {
-        let mut other = budget.hold_none();
+        let mut other = budget.reserve_none();
         assert!(other.try_grow(7 * MIN_CHUNK_CHARGE, max));
         other
     };

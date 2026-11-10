@@ -63,7 +63,7 @@ impl ClientPool {
         let Some((lane, _)) = least else {
             unreachable!("LANES > 0")
         };
-        (&lane.client, lane.in_flight.hold())
+        (&lane.client, lane.in_flight.reserve())
     }
 }
 

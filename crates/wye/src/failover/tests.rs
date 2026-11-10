@@ -56,7 +56,7 @@ async fn a_body_beyond_either_bound_is_not_kept() {
 
     let busy = Gauge::default();
     let _others = {
-        let mut h = busy.hold_none();
+        let mut h = busy.reserve_none();
         assert!(h.try_grow(9, 10));
         h
     };
