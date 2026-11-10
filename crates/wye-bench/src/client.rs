@@ -97,21 +97,18 @@ impl Target {
             control_prefix: "",
             anthropic_version: true,
             responses: false,
-            clients: (0..POOLS).map(|_| build_client(root.as_ref())).collect(),
+            clients: pools(root.as_ref()),
             root,
             next: Arc::default(),
         }
     }
 
-    /// Same endpoint with its own connection pool.
+    /// Same endpoint with its own connection pools.
     pub fn fresh(&self) -> Self {
         Self {
-            api_prefix: Arc::clone(&self.api_prefix),
-            extra_headers: Arc::clone(&self.extra_headers),
-            control_prefix: self.control_prefix,
-            anthropic_version: self.anthropic_version,
-            responses: self.responses,
-            ..Self::new(self.origin.to_string(), self.root.clone())
+            clients: pools(self.root.as_ref()),
+            next: Arc::default(),
+            ..self.clone()
         }
     }
 
@@ -174,6 +171,11 @@ impl Target {
             .body(Full::new(Bytes::new()))
             .unwrap()
     }
+}
+
+/// [`POOLS`] clients that trust `root`.
+fn pools(root: Option<&CertificateDer<'static>>) -> Arc<[HttpClient]> {
+    (0..POOLS).map(|_| build_client(root)).collect()
 }
 
 fn build_client(root: Option<&CertificateDer<'static>>) -> HttpClient {

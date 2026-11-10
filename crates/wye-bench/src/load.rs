@@ -43,7 +43,7 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     } else {
         &[]
     };
-    let process = GatewayProcess::start_with_env(
+    let process = GatewayProcess::start(
         gateway,
         &base_url,
         tls.then_some(ca.ca_pem()),
@@ -66,6 +66,27 @@ pub async fn load(gateway: Gateway<'_>, scenario: &str, seconds: u64) {
     }
 }
 
+/// Runs `batch` once to warm up connection pools, prints the gateway's pid,
+/// then repeats it until `seconds` pass, handing each result to `each`; the
+/// CPU seconds the gateway spent on the repeats.
+async fn soak<T, F: Future<Output = T>>(
+    process: &GatewayProcess,
+    label: &str,
+    seconds: u64,
+    batch: impl Fn() -> F,
+    mut each: impl FnMut(T),
+) -> f64 {
+    batch().await;
+    eprintln!("gateway pid {} under {label} for {seconds}s", process.pid());
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let repeats = async {
+        while Instant::now() < deadline {
+            each(batch().await);
+        }
+    };
+    process.cpu_during(repeats).await.1
+}
+
 /// Batches of agent-sized uploads until `seconds` pass; prints the gateway's CPU per MB.
 async fn soak_uploads(process: &GatewayProcess, scenario: &str, seconds: u64) {
     let body = mock::message_json(UPLOAD_BYTES);
@@ -77,24 +98,12 @@ async fn soak_uploads(process: &GatewayProcess, scenario: &str, seconds: u64) {
             body.clone(),
         )
     };
-    // Warm up connection pools before the measured window.
-    run().await;
-    eprintln!(
-        "gateway pid {} under {scenario} for {seconds}s",
-        process.pid()
-    );
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-    let ((requests, failed), cpu) = process
-        .cpu_during(async {
-            let (mut requests, mut failed) = (0, 0);
-            while Instant::now() < deadline {
-                let results = run().await;
-                failed += results.iter().filter(|r| r.is_none()).count();
-                requests += results.len();
-            }
-            (requests, failed)
-        })
-        .await;
+    let (mut requests, mut failed) = (0, 0);
+    let cpu = soak(process, scenario, seconds, run, |results| {
+        failed += results.iter().filter(|r| r.is_none()).count();
+        requests += results.len();
+    })
+    .await;
     let mb = (requests * UPLOAD_BYTES) as f64 / 1e6;
     println!(
         "{requests} requests ({failed} failed), {mb:.0} MB, gateway CPU {:.2} ms/MB",
@@ -120,20 +129,12 @@ async fn soak_events(process: &GatewayProcess, seconds: u64) {
             0,
         )
     };
-    run().await;
-    eprintln!("gateway pid {} under events for {seconds}s", process.pid());
-    let deadline = Instant::now() + Duration::from_secs(seconds);
-    let ((events, failed), cpu) = process
-        .cpu_during(async {
-            let (mut events, mut failed) = (0usize, 0usize);
-            while Instant::now() < deadline {
-                let streams = run().await;
-                failed += scenarios::count_failed(&streams);
-                events += scenarios::count_events(&streams);
-            }
-            (events, failed)
-        })
-        .await;
+    let (mut events, mut failed) = (0, 0);
+    let cpu = soak(process, "events", seconds, run, |streams| {
+        failed += scenarios::count_failed(&streams);
+        events += scenarios::count_events(&streams);
+    })
+    .await;
     println!(
         "{events} events ({failed} streams failed), gateway CPU {:.2} us/event",
         cpu * 1e6 / events.max(1) as f64

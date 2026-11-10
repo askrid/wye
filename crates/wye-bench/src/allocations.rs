@@ -9,6 +9,7 @@
 
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
+use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use serde_json::Value;
@@ -42,8 +43,9 @@ struct Counters {
     live_bytes: f64,
 }
 
-/// Live heap bytes of an alloc-stats build, or `None` for other builds.
-pub(crate) async fn live_bytes(target: &Target) -> Option<f64> {
+/// The counters an alloc-stats build serves at `/debug/alloc`, or `None`
+/// for other builds.
+async fn alloc_json(target: &Target) -> Option<Value> {
     let res = target
         .client()
         .request(target.get("/debug/alloc"))
@@ -53,18 +55,18 @@ pub(crate) async fn live_bytes(target: &Target) -> Option<f64> {
         return None;
     }
     let body = res.into_body().collect().await.ok()?.to_bytes();
-    serde_json::from_slice::<Value>(&body).ok()?["live_bytes"].as_f64()
+    serde_json::from_slice(&body).ok()
+}
+
+/// Live heap bytes of an alloc-stats build, or `None` for other builds.
+pub(crate) async fn live_bytes(target: &Target) -> Option<f64> {
+    alloc_json(target).await?["live_bytes"].as_f64()
 }
 
 async fn counters(target: &Target) -> Counters {
-    let res = target
-        .client()
-        .request(target.get("/debug/alloc"))
-        .await
-        .expect("instrumented wye unreachable");
-    let body = res.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&body)
-        .expect("no /debug/alloc: is the binary built with --features alloc-stats?");
+    let json = alloc_json(target).await.expect(
+        "no /debug/alloc: is the instrumented wye running, built with --features alloc-stats?",
+    );
     let field = |name: &str| json[name].as_f64().unwrap();
     Counters {
         allocations: field("allocations"),
@@ -144,16 +146,9 @@ async fn put_idle(t: &Target, out: &mut Out<'_>) {
     );
 }
 
-async fn agent_uploads(t: &Target) {
-    no_failures(
-        &scenarios::upload(
-            t,
-            UPLOAD_CONCURRENCY,
-            UPLOAD_REQUESTS,
-            mock::agent_json(UPLOAD_BYTES),
-        )
-        .await,
-    );
+/// `UPLOAD_REQUESTS` uploads of `body`; failures abort, as in [`unary`].
+async fn uploads(t: &Target, body: Bytes) {
+    no_failures(&scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await);
 }
 
 /// Runs the allocation scenarios against `binary`: the full set in front of the
@@ -172,7 +167,7 @@ pub async fn measure(
         metrics: &mut *metrics,
         prefix: "alloc_",
     };
-    let wye = GatewayProcess::start(plain, upstream_base_url, None, dir, "alloc").await;
+    let wye = GatewayProcess::start(plain, upstream_base_url, None, dir, "alloc", &[]).await;
     let t = wye.target();
     // Warm up pools, buffers, and lazily initialized state, so steady state is measured.
     scenarios::unary(t, CONCURRENCY, 2_000).await;
@@ -194,10 +189,15 @@ pub async fn measure(
     );
 
     let body = mock::message_json(UPLOAD_BYTES);
-    let uploads = async {
-        no_failures(&scenarios::upload(t, UPLOAD_CONCURRENCY, UPLOAD_REQUESTS, body).await);
-    };
-    per_request(t, &mut out, "upload", UPLOAD_REQUESTS, true, uploads).await;
+    per_request(
+        t,
+        &mut out,
+        "upload",
+        UPLOAD_REQUESTS,
+        true,
+        uploads(t, body),
+    )
+    .await;
     // The same size shaped like Claude Code's, for comparison with the
     // cache-diagnostics variant below.
     per_request(
@@ -206,14 +206,15 @@ pub async fn measure(
         "agent_upload",
         UPLOAD_REQUESTS,
         true,
-        agent_uploads(t),
+        uploads(t, mock::agent_json(UPLOAD_BYTES)),
     )
     .await;
 
     put_idle(t, &mut out).await;
     drop(wye);
 
-    let tls = GatewayProcess::start(plain, tls_base_url, Some(tls_ca_pem), dir, "alloc-tls").await;
+    let tls =
+        GatewayProcess::start(plain, tls_base_url, Some(tls_ca_pem), dir, "alloc-tls", &[]).await;
     let t = tls.target();
     scenarios::unary(t, CONCURRENCY, 2_000).await;
     let mut tls_out = Out {
@@ -248,7 +249,8 @@ pub async fn measure(
         (Variant::Diag, true, true),
     ] {
         let gateway = Gateway::Wye(binary, variant);
-        let process = GatewayProcess::start(gateway, upstream_base_url, None, dir, "alloc").await;
+        let process =
+            GatewayProcess::start(gateway, upstream_base_url, None, dir, "alloc", &[]).await;
         let t = process.target();
         scenarios::unary(t, CONCURRENCY, 2_000).await;
         let unary_name = format!("{}unary", gateway.prefix());
@@ -261,7 +263,7 @@ pub async fn measure(
                 &upload_name,
                 UPLOAD_REQUESTS,
                 true,
-                agent_uploads(t),
+                uploads(t, mock::agent_json(UPLOAD_BYTES)),
             )
             .await;
         }

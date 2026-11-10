@@ -106,9 +106,15 @@ pub async fn run(
                 );
                 // A fresh process per run, so memory retained from earlier
                 // runs cannot hide new allocations.
-                let process =
-                    GatewayProcess::start(gateway, &path.base_url, path.ca_pem, dir, path.name)
-                        .await;
+                let process = GatewayProcess::start(
+                    gateway,
+                    &path.base_url,
+                    path.ca_pem,
+                    dir,
+                    path.name,
+                    &[],
+                )
+                .await;
                 let prefix = format!("{}{}", path.prefix, gateway.prefix());
                 let mut out = Out {
                     metrics: &mut metrics,

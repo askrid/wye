@@ -41,17 +41,14 @@ struct Step {
     failed: usize,
 }
 
-async fn batch(target: &Target, streams: usize) -> (Vec<u64>, usize, usize, f64) {
+/// One batch of `streams` token-paced streams: the sorted event delays, the
+/// failed streams, and the wall time in seconds.
+async fn batch(target: &Target, streams: usize) -> (Vec<u64>, usize, f64) {
     let start = Instant::now();
     let results = token_streams(target, streams, PACED_RAMP).await;
     let wall = start.elapsed().as_secs_f64();
     let failed = scenarios::count_failed(&results);
-    let delays: Vec<u64> = results
-        .into_iter()
-        .flat_map(|s| s.event_delays_us)
-        .collect();
-    let events = delays.len();
-    (stats::sorted(delays), events, failed, wall)
+    (stats::event_delays(results), failed, wall)
 }
 
 /// Runs the steps and prints one row per step and the sustainable maximum.
@@ -66,9 +63,10 @@ pub async fn run(direct: &Target, gateway: &GatewayProcess, threads: usize) {
     );
     let mut best: Option<Step> = None;
     for streams in STEPS {
-        let (direct_delays, _, direct_failed, _) = batch(direct, streams).await;
-        let ((delays, events, failed, wall), cpu) =
+        let (direct_delays, direct_failed, _) = batch(direct, streams).await;
+        let ((delays, failed, wall), cpu) =
             gateway.cpu_during(batch(gateway.target(), streams)).await;
+        let events = delays.len();
         let direct_p99_us = stats::percentile(&direct_delays, 99.0);
         let step = Step {
             streams,

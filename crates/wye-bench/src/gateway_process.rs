@@ -113,21 +113,10 @@ pub struct GatewayProcess {
 }
 
 impl GatewayProcess {
-    /// Starts `gateway` as a pass-through proxy for `POST /v1/messages` in front of
-    /// `upstream_base_url`, trusting `ca_pem` for the upstream when given.
-    pub async fn start(
-        gateway: Gateway<'_>,
-        upstream_base_url: &str,
-        ca_pem: Option<&str>,
-        dir: &Path,
-        name: &str,
-    ) -> Self {
-        Self::start_with_env(gateway, upstream_base_url, ca_pem, dir, name, &[]).await
-    }
-
-    /// [`Self::start`] with extra environment variables for the gateway
+    /// Starts `gateway` in front of `upstream_base_url`, trusting `ca_pem`
+    /// for the upstream when given, with `extra_env` set for the gateway
     /// process only (for example `TOKIO_WORKER_THREADS`).
-    pub async fn start_with_env(
+    pub async fn start(
         gateway: Gateway<'_>,
         upstream_base_url: &str,
         ca_pem: Option<&str>,
