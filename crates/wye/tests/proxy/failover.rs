@@ -249,6 +249,9 @@ async fn a_rejection_during_the_upload_resends_the_whole_body() {
         body.len()
     );
     let mut client = h.raw(head.as_bytes()).await;
+    // Time for the rejection to arrive first. Nothing signals it: a hit on
+    // the rejecting upstream proves only that the head arrived. The test
+    // passes either way, but exercises the hand-back only when the 429 wins.
     tokio::time::sleep(Duration::from_millis(200)).await;
     client.write_all(rest.as_bytes()).await.unwrap();
     let mut head = [0u8; 12];
@@ -370,12 +373,19 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
         }
         drop(socket);
     });
-    let (b, mut seen_b) = upstream(StatusCode::OK).await;
+    let hits = Arc::new(AtomicUsize::new(0));
+    let (b, _seen_b) = counted(StatusCode::OK, &hits).await;
     let h = gateway(lost_addr, b).await;
     let res = h.send(messages(), BODY).await;
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
     read_body(res).await;
-    assert!(seen_b.try_recv().is_err(), "the request was sent twice");
+    // A failover would have waited for b's answer, so b's hit would have
+    // come before the 502.
+    assert_eq!(
+        hits.load(Ordering::Relaxed),
+        0,
+        "the request was sent twice"
+    );
     let record = h.usage_record().await;
     assert!(record.get("failovers").is_none());
     assert_eq!(record["outcome"], "upstream_error");

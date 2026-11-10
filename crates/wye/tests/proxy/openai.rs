@@ -222,14 +222,15 @@ data: [DONE]\n\n";
 
 #[tokio::test]
 async fn a_body_past_the_limit_gets_openais_error_shape() {
-    let (h, mut seen) = harness("").await;
+    let (h, _seen) = harness("").await;
     // The harness allows 1024 bytes.
     let big = format!(r#"{{"input":"{}"}}"#, "x".repeat(2048));
     let res = h.send(responses(), big).await;
     assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let body: serde_json::Value = serde_json::from_slice(&read_body(res).await).unwrap();
     assert_eq!(body["error"]["code"], "request_too_large", "{body}");
-    assert!(seen.try_recv().is_err());
+    // A declared length over the limit is refused before forwarding.
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 0);
 }
 
 #[tokio::test]

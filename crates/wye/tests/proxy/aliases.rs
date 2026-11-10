@@ -68,5 +68,7 @@ async fn rollout_follows_the_subject_and_permissions_apply_to_the_resolved_model
         let res = send(sub, model).await;
         assert_eq!(res.status(), StatusCode::FORBIDDEN, "{sub} {model}");
     }
-    assert!(seen.try_recv().is_err());
+    // A refusal is answered before any upstream work: only Alice's request
+    // reached the upstream.
+    assert_eq!(h.upstream_hits.load(Ordering::Relaxed), 1);
 }
