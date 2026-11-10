@@ -20,16 +20,28 @@ cargo test --locked --quiet
 cargo run --locked --quiet
 
 # What a first visit to one page downloads, compressed as a server sends it:
-# the page with its stylesheet inline, and every other stylesheet, script, and
-# SVG, gzipped, the fonts as they are.
+# the page with its stylesheet inline, and every file under out/assets but
+# those a visit never fetches (the share image, the home-screen icon, the
+# fonts' licenses), text gzipped, fonts and images as they are. A new asset
+# is counted until it is named here.
 shopt -s nullglob
 budget=$((150 * 1024))
 gz() { gzip -9c "$1" | wc -c; }
-shared=$(cat out/assets/fonts/*.woff2 | wc -c)
-for asset in out/assets/*.css out/assets/*.js out/assets/*.svg; do
-  shared=$(( shared + $(gz "$asset") ))
-done
-for page in out/*.html; do
+fonts=(out/assets/fonts/*.woff2)
+pages=(out/*.html)
+if (( ${#fonts[@]} == 0 || ${#pages[@]} == 0 )); then
+  echo "site: no fonts or no pages in out/ to weigh" >&2
+  exit 1
+fi
+shared=0
+while IFS= read -r -d '' asset; do
+  case $asset in
+    out/assets/share.png | out/assets/*-180.png | *.txt) ;;
+    *.woff2 | *.png) shared=$(( shared + $(wc -c <"$asset") )) ;;
+    *) shared=$(( shared + $(gz "$asset") )) ;;
+  esac
+done < <(find out/assets -type f -print0)
+for page in "${pages[@]}"; do
   total=$(( $(gz "$page") + shared ))
   echo "site: ${page#out/} weighs $(( total / 1024 )) KiB of its $(( budget / 1024 )) KiB budget"
   if (( total > budget )); then
