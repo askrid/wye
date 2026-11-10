@@ -21,7 +21,8 @@ struct Bar {
 
 /// A chart of one column of a table whose cells are other gateways' figures
 /// as multiples of Wye's ("7×"), with Wye added as 1×. A cell that is not a
-/// multiple ("cannot stream") is left out.
+/// figure ("cannot stream") is left out; one that starts as a figure but is
+/// not a multiple ("9.7x") is an error, so a typo never drops a gateway.
 pub fn ratios(text: &str, column: &str) -> Result<String, String> {
     let (rows, index) = markdown::tables(text)
         .into_iter()
@@ -45,9 +46,13 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
             continue;
         }
         let label = cell.split(' ').next().unwrap_or(cell);
-        let Some(value) = label.strip_suffix('×').and_then(number) else {
+        if !label.starts_with(|c: char| c.is_ascii_digit()) {
             continue;
-        };
+        }
+        let value = label
+            .strip_suffix('×')
+            .and_then(number)
+            .ok_or_else(|| format!("{gateway}: {cell:?} is not a multiple like \"7×\""))?;
         bars.push(Bar {
             name: gateway,
             label: label.to_owned(),
@@ -64,7 +69,8 @@ pub fn ratios(text: &str, column: &str) -> Result<String, String> {
 /// A chart of one row of a table whose columns are gateways, Wye among them:
 /// each gateway's first figure ("282 µs" of "282 µs (230-367)") as a multiple
 /// of Wye's, units normalized. A cell without a figure ("not run") is left
-/// out.
+/// out; one that starts as a figure but cannot be read ("1.0ms", "9 us") is
+/// an error.
 pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
     let tables = markdown::tables(text);
     let (header, row) = tables
@@ -78,12 +84,12 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
             Some((header, row))
         })
         .ok_or_else(|| format!("no table row starts with {row_start:?}"))?;
-    let figures: Vec<(String, f64)> = header
-        .iter()
-        .zip(row)
-        .skip(1)
-        .filter_map(|(name, cell)| Some((name.clone(), measure(cell)?)))
-        .collect();
+    let mut figures: Vec<(String, f64)> = Vec::new();
+    for (name, cell) in header.iter().zip(row).skip(1) {
+        if let Some(value) = measure(cell).map_err(|e| format!("{row_start:?}, {name}: {e}"))? {
+            figures.push((name.clone(), value));
+        }
+    }
     let wye = figures
         .iter()
         .find(|(name, _)| name == "Wye")
@@ -109,11 +115,16 @@ pub fn relative(text: &str, row_start: &str) -> Result<String, String> {
     draw(bars)
 }
 
-/// A cell's first figure in base units: "1.0 ms (0.7-1.1)" is 0.001.
-fn measure(cell: &str) -> Option<f64> {
+/// A cell's first figure in base units: "1.0 ms (0.7-1.1)" is 0.001; None
+/// for a cell that is not a figure ("not run").
+fn measure(cell: &str) -> Result<Option<f64>, String> {
+    if !cell.starts_with(|c: char| c.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let unreadable = || format!("{cell:?} is not a figure with a known unit");
     let mut words = cell.split(' ');
-    let value = number(words.next()?)?;
-    let scale = match words.next()? {
+    let value = words.next().and_then(number).ok_or_else(unreadable)?;
+    let scale = match words.next().ok_or_else(unreadable)? {
         "ns" => 1e-9,
         "µs" => 1e-6,
         "ms" => 1e-3,
@@ -121,9 +132,9 @@ fn measure(cell: &str) -> Option<f64> {
         "KB" => 1e3,
         "MB" => 1e6,
         "GB" => 1e9,
-        _ => return None,
+        _ => return Err(unreadable()),
     };
-    Some(value * scale)
+    Ok(Some(value * scale))
 }
 
 /// A multiple as the comparison table prints one: "1×", "3.5×", "1,738×".
@@ -293,6 +304,24 @@ mod tests {
             chart.contains("<span style=\"--at:1.0000\">1,000×</span>"),
             "{chart}"
         );
+    }
+
+    #[test]
+    fn refuses_a_figure_it_cannot_read() {
+        let row = |cell: &str| format!("| T | Wye | B |\n|---|---|---|\n| D | 1 ms | {cell} |\n");
+        assert!(
+            relative(&row("2.0ms"), "D")
+                .unwrap_err()
+                .contains("\"2.0ms\"")
+        );
+        assert!(
+            relative(&row("9 us"), "D")
+                .unwrap_err()
+                .contains("\"9 us\"")
+        );
+        assert!(relative(&row("not run"), "D").is_err()); // Wye alone: no chart
+        let column = "| Gateway | L |\n|---|---|\n| [A](x) 1 | 9.7x |\n| [B](y) 1 | 3× |\n";
+        assert!(ratios(column, "L").unwrap_err().contains("\"9.7x\""));
     }
 
     #[test]
