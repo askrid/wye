@@ -127,7 +127,7 @@ pub(crate) struct Scope {
     /// The gateway relays SSE events as they arrive (idle and cancel scenarios).
     pub(crate) streams_sse: bool,
     /// Only per-request scenarios (latency and CPU per request): for variants
-    /// whose cost is per request, such as credential verification.
+    /// whose cost is per request, such as gateway-token verification.
     pub(crate) per_request_only: bool,
     /// The upload scenarios even with `per_request_only`: for variants whose
     /// cost grows with the request body, such as cache diagnostics.

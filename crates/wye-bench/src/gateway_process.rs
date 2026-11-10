@@ -7,7 +7,9 @@ use tokio::process::Child;
 
 use crate::client::Target;
 
+mod competitors;
 mod launch;
+mod wye;
 
 use launch::{Launch, Setup};
 
@@ -31,7 +33,7 @@ pub enum Variant {
     Diag,
     /// `[telemetry]`: every usage record is also exported as OTLP.
     Otlp,
-    /// `[auth]` and model permissions in config and credential: every request
+    /// `[auth]` and model permissions in config and token: every request
     /// is held until its `model` is read, and its body checked.
     Models,
     /// An OpenAI upstream: OpenAI Responses requests, framed as Responses
@@ -40,7 +42,7 @@ pub enum Variant {
     /// A Claude route to a Bedrock upstream: every request is held until its
     /// `model` is read, and the model id rewritten for Bedrock.
     Bedrock,
-    /// A Claude route of two accounts and failover: every request body is
+    /// A Claude route of two upstreams and failover: every request body is
     /// kept for resending until the response arrives.
     Failover,
     /// [`Self::Failover`] whose first upstream (tried first) rejects every

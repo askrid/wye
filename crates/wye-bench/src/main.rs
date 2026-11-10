@@ -22,7 +22,6 @@ mod allocations;
 mod capacity;
 mod client;
 mod gate;
-mod gateway_config;
 mod gateway_process;
 mod load;
 mod measure;
