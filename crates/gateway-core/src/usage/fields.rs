@@ -5,53 +5,16 @@
 //! tool calls among its content blocks or output items, and skips
 //! everything else, the generated text included.
 
-use serde::Deserialize;
-
-use super::{MAX_TOOL_NAME_BYTES, ToolCalls, Usage, count_tool};
+use super::{
+    MAX_TOOL_NAME_BYTES, ToolCalls, count_tool,
+    openai::{OpenAiUsage, openai_tool},
+};
 use crate::json::{Kept, Lexeme, Lexer};
 
 /// Longest `response.usage` object kept; larger marks usage unknown.
 const MAX_USAGE_BYTES: usize = 2 * 1024;
 /// Longest `model` or `service_tier` kept.
 const MAX_FIELD_BYTES: usize = super::MAX_RECORDED_MODEL_BYTES;
-
-/// `usage`, as OpenAI's Responses API reports it.
-#[derive(Deserialize)]
-pub(super) struct OpenAiUsage {
-    pub(super) input_tokens: Option<u64>,
-    pub(super) output_tokens: Option<u64>,
-    pub(super) input_tokens_details: Option<InputDetails>,
-}
-
-#[derive(Deserialize)]
-pub(super) struct InputDetails {
-    pub(super) cached_tokens: Option<u64>,
-}
-
-impl OpenAiUsage {
-    pub(super) fn merge_into(self, usage: &mut Usage) {
-        merge_openai(
-            usage,
-            self.input_tokens,
-            self.output_tokens,
-            self.input_tokens_details,
-        );
-    }
-}
-
-/// Into Wye's meaning: OpenAI's input count includes cached tokens, ours
-/// does not, so the cached share becomes `cache_read_input_tokens`.
-pub(super) fn merge_openai(
-    usage: &mut Usage,
-    input: Option<u64>,
-    output: Option<u64>,
-    details: Option<InputDetails>,
-) {
-    let cached = details.and_then(|d| d.cached_tokens).unwrap_or(0);
-    usage.input_tokens = input.map(|i| i.saturating_sub(cached));
-    usage.cache_read_input_tokens = input.map(|_| cached);
-    usage.output_tokens = output;
-}
 
 /// The response object's member keys that are read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -82,27 +45,6 @@ enum ItemKey {
     Other,
     Type,
     Name,
-}
-
-/// Hosted tools OpenAI bills per call, outside token prices.
-const HOSTED_TOOLS: [&str; 4] = [
-    "web_search",
-    "file_search",
-    "code_interpreter",
-    "image_generation",
-];
-
-/// The tool call a Responses output item of type `kind` stands for: the
-/// name counted, and whether it is a hosted tool billed per call. `None`
-/// for messages, reasoning, and anything else that is not a call.
-pub(super) fn openai_tool<'a>(kind: &'a str, name: Option<&'a str>) -> Option<(&'a str, bool)> {
-    match kind {
-        "function_call" | "custom_tool_call" => Some((name.unwrap_or_default(), false)),
-        kind => {
-            let tool = kind.strip_suffix("_call")?;
-            Some((tool, HOSTED_TOOLS.contains(&tool)))
-        }
-    }
 }
 
 #[derive(Debug, Default)]

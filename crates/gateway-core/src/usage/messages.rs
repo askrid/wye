@@ -7,9 +7,9 @@
 
 use super::{
     CLASSIFY_PREFIX_BYTES, Lines, MAX_BLOCK_START_LINE_BYTES, MAX_USAGE_LINE_BYTES, Scanned,
-    ToolCalls, Usage, UsageStatus, count_tool,
-    raw::{BlockStartData, DeltaData, StartData},
-    record_model,
+    ToolCalls, Usage, UsageStatus,
+    anthropic::{BlockStartData, DeltaData, StartData},
+    count_tool, record_model,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

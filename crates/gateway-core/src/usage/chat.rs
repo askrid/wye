@@ -16,9 +16,7 @@ use memchr::memmem;
 use serde::Deserialize;
 
 use super::{
-    Lines, Scanned, ToolCalls, Usage, UsageStatus, count_tool,
-    fields::{InputDetails, merge_openai},
-    record_model,
+    Lines, Scanned, ToolCalls, Usage, UsageStatus, count_tool, openai::ChatUsage, record_model,
 };
 
 /// Longest data line kept when it continues into the next chunk; longer
@@ -130,26 +128,6 @@ impl ChatUsageScanner {
             model: self.model,
             tool_calls: self.tools,
         }
-    }
-}
-
-/// `usage`, as Chat Completions reports it.
-#[derive(Deserialize)]
-pub(super) struct ChatUsage {
-    prompt_tokens: Option<u64>,
-    completion_tokens: Option<u64>,
-    prompt_tokens_details: Option<InputDetails>,
-}
-
-impl ChatUsage {
-    /// Reasoning tokens are part of `completion_tokens`, as billed.
-    pub(super) fn merge_into(self, usage: &mut Usage) {
-        merge_openai(
-            usage,
-            self.prompt_tokens,
-            self.completion_tokens,
-            self.prompt_tokens_details,
-        );
     }
 }
 

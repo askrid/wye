@@ -19,8 +19,8 @@ use crate::json::Kept;
 
 use super::{
     Scanned, ToolCalls, Usage, UsageStatus, count_tool,
-    fields::{Items, ResponseFields, openai_tool},
-    raw::ContentBlock,
+    fields::{Items, ResponseFields},
+    openai::{OutputItem, openai_tool},
     record_model,
 };
 
@@ -279,7 +279,7 @@ impl ResponsesUsageScanner {
 #[derive(Deserialize)]
 struct ItemAdded<'a> {
     #[serde(borrow)]
-    item: ContentBlock<'a>,
+    item: OutputItem<'a>,
 }
 
 #[cfg(test)]

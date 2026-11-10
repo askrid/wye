@@ -6,9 +6,9 @@
 
 use super::{
     Scanned, Usage, UsageStatus,
-    chat::ChatUsage,
-    fields::{Items, OpenAiUsage, ResponseFields},
-    raw::RawUsage,
+    anthropic::RawUsage,
+    fields::{Items, ResponseFields},
+    openai::{ChatUsage, OpenAiUsage},
 };
 use crate::api::Api;
 

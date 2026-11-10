@@ -5,11 +5,12 @@
 //! are not SSE boundaries: the stream scanners take lines split anywhere,
 //! including inside UTF-8.
 
+mod anthropic;
 mod chat;
 mod fields;
 mod json;
 mod messages;
-mod raw;
+mod openai;
 mod responses;
 
 pub use chat::ChatUsageScanner;
