@@ -199,22 +199,19 @@ impl InitOptions {
     pub fn next_steps(&self, show: impl Fn(&Path) -> String) -> String {
         let c = self.config_flag();
         let dir = files::config_dir(&self.config);
-        let mut steps: Vec<(String, String)> = vec![];
-        let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
-        let mut keys = Vec::new();
+        let mut steps: Vec<(String, Option<String>)> = vec![];
         if self.setup == Setup::ProviderKey {
-            keys.push(key("Anthropic API key", "anthropic.key"));
-        }
-        if self.openai && self.setup == Setup::ProviderKey {
-            keys.push(key("OpenAI key", "openai.key"));
-        }
-        if !keys.is_empty() {
+            let key = |name: &str, file: &str| format!("{name} in {}", show(&dir.join(file)));
+            let mut keys = vec![key("Anthropic API key", "anthropic.key")];
+            if self.openai {
+                keys.push(key("OpenAI key", "openai.key"));
+            }
             steps.push((
                 format!(
                     "Put your {}, readable only by you (chmod 600).",
                     keys.join(" and your ")
                 ),
-                String::new(),
+                None,
             ));
         }
         if self.setup == Setup::Shared {
@@ -223,16 +220,14 @@ impl InitOptions {
             } else {
                 "ANTHROPIC_API_KEY"
             };
-            steps.push((format!("Set {keys} where the gateway runs."), String::new()));
-        }
-        if self.setup == Setup::Shared {
+            steps.push((format!("Set {keys} where the gateway runs."), None));
             steps.push((
                 "Check the config's secrets, files, and upstreams:".to_owned(),
-                format!("wye doctor{c}"),
+                Some(format!("wye doctor{c}")),
             ));
             steps.push((
                 "Issue a gateway token for each person or service:".to_owned(),
-                format!("wye token issue alice{c} --out alice.token"),
+                Some(format!("wye token issue alice{c} --out alice.token")),
             ));
             // Whoever holds the key mints tokens, which cannot be revoked
             // one by one.
@@ -246,11 +241,11 @@ impl InitOptions {
                      off the hosts that serve (move it, if this is one), with whoever \
                      issues tokens."
                 ),
-                String::new(),
+                None,
             ));
             steps.push((
                 format!("Deploy it: {REPO_AT_RELEASE}/docs/operations.md#deployment"),
-                String::new(),
+                None,
             ));
         } else {
             // Install checks the config as the service will start it.
@@ -259,7 +254,7 @@ impl InitOptions {
                  the config, shows what it sets up, and asks first; or run `wye serve` \
                  in a terminal):"
                     .to_owned(),
-                format!("wye service install{c}"),
+                Some(format!("wye service install{c}")),
             ));
             let agents = match (self.setup, self.openai) {
                 (Setup::Passthrough, false) => {
@@ -275,8 +270,11 @@ impl InitOptions {
                 (_, true) => "Start Claude Code, or Codex, through it:",
                 (_, false) => "Start Claude Code through it:",
             };
-            steps.push((agents.to_owned(), "wye claude".to_owned()));
-            steps.push(("See what it recorded:".to_owned(), "wye report".to_owned()));
+            steps.push((agents.to_owned(), Some("wye claude".to_owned())));
+            steps.push((
+                "See what it recorded:".to_owned(),
+                Some("wye report".to_owned()),
+            ));
         }
         let mut out = "Next:\n".to_owned();
         for (i, (words, command)) in steps.iter().enumerate() {
@@ -284,7 +282,7 @@ impl InitOptions {
             // it can be copied.
             let wrapped = super::text::wrap(words, 5);
             out.push_str(&format!("  {}. {}", i + 1, wrapped.trim_start()));
-            if !command.is_empty() {
+            if let Some(command) = command {
                 out.push_str(&format!("     {command}\n"));
             }
         }
