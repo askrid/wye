@@ -152,9 +152,9 @@ impl GatewayProcess {
             }
             None => (Stdio::null(), Stdio::null()),
         };
+        // In the caller's process group, so a terminal's Ctrl-C stops the
+        // gateway too: `wye-bench` dies of it without running `Drop`.
         let child = tokio::process::Command::new(&launch.program)
-            // Own process group, so `Drop` can stop workers the gateway forks.
-            .process_group(0)
             .args(&launch.args)
             .envs(launch.env)
             .envs(extra_env.iter().copied())
@@ -192,14 +192,16 @@ impl GatewayProcess {
 
 impl Drop for GatewayProcess {
     /// `kill_on_drop` stops only the direct child; LiteLLM's workers would
-    /// outlive it and disturb later runs. Kill the whole process group.
+    /// outlive it and disturb later runs. Kill the whole process tree.
     fn drop(&mut self) {
+        let pids: Vec<String> = process_tree(self.pid).iter().map(u32::to_string).collect();
         let killed = std::process::Command::new("kill")
-            .args(["-KILL", "--", &format!("-{}", self.pid)])
+            .arg("-KILL")
+            .args(&pids)
             .status();
         if !killed.as_ref().is_ok_and(|status| status.success()) {
             eprintln!(
-                "warning: could not stop process group {}: {killed:?}",
+                "warning: could not stop the process tree of {}: {killed:?}",
                 self.pid
             );
         }
