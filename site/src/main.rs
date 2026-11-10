@@ -125,4 +125,36 @@ mod tests {
             "const a = 1;\nif (a) {\ngo(\"//x\");\n}"
         );
     }
+
+    #[test]
+    fn keeps_a_shader_and_a_trailing_comment() {
+        assert_eq!(
+            compact_script(
+                "const s = `\n    void main() {\n      // glsl\n      x = 1; // keep\n    }`;\n"
+            ),
+            "const s = `\nvoid main() {\nx = 1; // keep\n}`;"
+        );
+    }
+
+    /// The site's own scripts keep every template literal whole: as many
+    /// backticks and `${` after compaction as before.
+    #[test]
+    fn compacts_the_sites_scripts_without_breaking_literals() {
+        let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for entry in sorted_entries(&assets).unwrap() {
+            if entry.extension().is_none_or(|ext| ext != "js") {
+                continue;
+            }
+            let script = fs::read_to_string(&entry).unwrap();
+            let compact = compact_script(&script);
+            for mark in ["`", "${"] {
+                assert_eq!(
+                    script.matches(mark).count(),
+                    compact.matches(mark).count(),
+                    "{}: {mark}",
+                    entry.display()
+                );
+            }
+        }
+    }
 }

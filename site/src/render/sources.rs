@@ -107,6 +107,11 @@ mod tests {
             minify_css(css),
             ".a>b,.c{color:#fff;font:1em \"Wye Mono\"}@media (max-width:40rem){.a{margin:0 auto}}"
         );
+        // A space before a pseudo-class is a descendant combinator: kept.
+        assert_eq!(
+            minify_css(".period :is(svg, canvas) { x: 1 }\n.part > :is(a, b) {}"),
+            ".period :is(svg,canvas){x:1}.part>:is(a,b){}"
+        );
     }
 
     #[test]
