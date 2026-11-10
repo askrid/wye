@@ -219,7 +219,7 @@ Records, OTLP logs, and the `wye.failovers` metric name each rejected attempt's 
 
 Anthropic, Claude Platform on AWS, and Bedrock serve the Messages API, and OpenAI serves `/v1/responses` and `/v1/chat/completions`; Vertex is planned (M4).
 
-A closed `Provider` enum (`config::Provider`) selects how Wye authenticates (`x-api-key` or `Authorization: Bearer`), any header the provider requires (Claude Platform on AWS's workspace), and its model-id prefix (Bedrock's `anthropic.`). A closed `Api` enum (`gateway-core/src/api.rs`) holds what differs per native API (the output-token field, the session header, the error shape).
+A closed `Provider` enum (`config::Provider`) selects how Wye authenticates (`x-api-key` or `Authorization: Bearer`), any header the provider requires (Claude Platform on AWS's workspace), and its model-id prefix (Bedrock's `anthropic.`). A closed `Api` enum (`gateway-core/src/api.rs`) holds what differs per native API (the output-token fields, the session header, the route that serves it), and `wye/src/gateway/responses.rs` writes Wye's own answers in each API's error shape.
 
 Passing provider-native options through does not mean Wye interprets or enforces them.
 
@@ -348,7 +348,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 | `ACCEPT_ERROR_PAUSE` | `wye/src/server.rs` | The pause after an accept error (such as running out of file descriptors), which would otherwise spin a core |
 | `MAX_TOKEN_BYTES`, `MAX_JWKS_BYTES` | `gateway-core/src/token.rs`, `token/keys.rs` | A presented gateway token; an identity provider's key set |
 | `CLOCK_SKEW_SECS` | `gateway-core/src/token.rs` | How far a token's `iat` or `nbf` may lie ahead of this clock |
-| `MAX_TIMER_SECS` | `gateway-core/src/config/validate.rs` | Any configured timeout or interval (one day), so no deadline overflows |
+| `MAX_TIMER` | `gateway-core/src/config/validate.rs` | Any configured timeout or interval (one day), so no deadline overflows |
 | `MAX_USAGE_LINE_BYTES`, `MAX_BLOCK_START_LINE_BYTES`, `CLASSIFY_PREFIX_BYTES`, `MAX_TOOL_NAMES`, `MAX_TOOL_NAME_BYTES`, `MAX_RECORDED_MODEL_BYTES` | `gateway-core/src/usage.rs` | Messages SSE lines, tool names, and a recorded model name (below) |
 | `MAX_ITEM_LINE_BYTES` | `gateway-core/src/usage/responses.rs` | A Responses `response.output_item.added` line |
 | `MAX_LINE_BYTES` | `gateway-core/src/usage/chat.rs` | A Chat Completions `data:` line kept across chunks |
