@@ -1,44 +1,16 @@
-//! Page directives: each `{{name ARG|ARG}}` in a page becomes text drawn from
-//! the repository (`render/sources.rs` reads it). One that cannot be filled
-//! fails the build, and the error names the directive as written.
-//!
-//! - `{{version}}`: the wye crate's version.
-//! - `{{release}}`: `prerelease` while the version has a pre-release part,
-//!   else `stable`.
-//! - `{{commit}}`: the commit the page is built from: `GITHUB_SHA` in CI, else
-//!   the checkout's `HEAD`.
-//! - `{{license}}`, `{{repo}}`: the workspace's license and repository URL.
-//! - `{{homepage}}`: the site's own address, `homepage` in site/Cargo.toml, so
-//!   a move changes one line.
-//! - `{{stylesheet}}`: site/pages/site.css minified (render/sources.rs),
-//!   for a `<style>` element, so the page draws without waiting for a second file.
-//! - `{{fence FILE|PREFIX|WORD}}`: the first fenced block in FILE whose first
-//!   line starts with PREFIX, highlighted; WORD, if given, in the accent
-//!   wherever it appears in the block's text.
-//! - `{{field FILE|PREFIX|KEY}}`: KEY's value in that block, read as a JSON
-//!   object; a dotted KEY reaches inside (`failovers.0.reason`).
-//! - `{{opening FILE|PART}}`: FILE's opening `tagline`, its bold first
-//!   paragraph without the closing period; the paragraph after it, rendered
-//!   (`lede`) or as plain `text`.
-//! - `{{section FILE|HEADING}}`: the Markdown under `## HEADING`, rendered.
-//! - `{{item FILE|HEADING|LEAD}}`: the item of that section's list whose bold
-//!   lead starts with LEAD, rendered.
-//! - `{{rest FILE|HEADING}}`: every item of that list the page has not placed
-//!   yet, so a new one is never dropped.
-//! - `{{paragraph FILE|HEADING|START}}`: the paragraph of that section that
-//!   starts with START, rendered.
-//! - `{{numbers FILE|HEADING|FIRST}}`: that section's table whose first column
-//!   is headed FIRST, as a table of figures.
-//! - `{{relative FILE|HEADING|ROW}}`: a bar chart of the table row that
-//!   starts with ROW, each gateway column's figure as a multiple of Wye's.
-//! - `{{ratios FILE|HEADING|COLUMN}}`: a bar chart of that section's table
-//!   column of multiples of Wye ("7×").
+//! Page rendering: each `{{name ARG|ARG}}` in a page becomes text drawn from
+//! the repository (`render/sources.rs` reads it; `render/directive.rs` lists
+//! the directives). One that cannot be filled fails the build, and the error
+//! names the directive as written.
 
 use std::collections::{BTreeSet, HashMap};
 
 use crate::{chart, markdown};
 
+mod directive;
 mod sources;
+
+use directive::{Directive, Heading, Part};
 
 /// The documents directives may read, relative to the repository root.
 const DOCUMENTS: [&str; 4] = [
@@ -46,18 +18,6 @@ const DOCUMENTS: [&str; 4] = [
     "CHANGELOG.md",
     "docs/operations.md",
     "docs/benchmarks.md",
-];
-
-/// The directives whose first two arguments name a document and one of its
-/// headings.
-const HEADED: [&str; 7] = [
-    "section",
-    "item",
-    "rest",
-    "paragraph",
-    "numbers",
-    "ratios",
-    "relative",
 ];
 
 /// Everything a page may draw from the repository, read once per build.
@@ -78,60 +38,28 @@ struct Page {
     anchors: markdown::Anchors,
 }
 
-/// Every directive's name, so one with the wrong arguments says so.
-const DIRECTIVES: [&str; 17] = [
-    "version",
-    "release",
-    "commit",
-    "license",
-    "repo",
-    "homepage",
-    "stylesheet",
-    "fence",
-    "field",
-    "opening",
-    "section",
-    "item",
-    "rest",
-    "paragraph",
-    "numbers",
-    "relative",
-    "ratios",
-];
-
-/// A directive's name and its `|`-separated arguments, trimmed.
-fn parse(directive: &str) -> (&str, Vec<&str>) {
-    let (name, args) = directive.split_once(' ').unwrap_or((directive, ""));
-    let args = match args.trim() {
-        "" => Vec::new(),
-        args => args.split('|').map(str::trim).collect(),
-    };
-    (name, args)
-}
-
 impl Sources {
     fn expand(&self, directive: &str, page: &mut Page) -> Result<String, String> {
-        let (name, args) = parse(directive);
-        match (name, args.as_slice()) {
-            ("version", []) => Ok(markdown::escape(&self.version)),
-            ("release", []) => Ok(if self.version.contains('-') {
+        match Directive::parse(directive)? {
+            Directive::Version => Ok(markdown::escape(&self.version)),
+            Directive::Release => Ok(if self.version.contains('-') {
                 "prerelease"
             } else {
                 "stable"
             }
             .to_owned()),
-            ("commit", []) => Ok(markdown::escape(&self.commit)),
-            ("license", []) => Ok(markdown::escape(&self.license)),
-            ("repo", []) => Ok(markdown::escape(&self.repo_url)),
-            ("homepage", []) => Ok(markdown::escape(&self.homepage)),
-            ("stylesheet", []) => Ok(self.stylesheet.clone()),
-            ("fence", [file, prefix, marks @ ..]) if marks.len() <= 1 => {
+            Directive::Commit => Ok(markdown::escape(&self.commit)),
+            Directive::License => Ok(markdown::escape(&self.license)),
+            Directive::Repo => Ok(markdown::escape(&self.repo_url)),
+            Directive::Homepage => Ok(markdown::escape(&self.homepage)),
+            Directive::Stylesheet => Ok(self.stylesheet.clone()),
+            Directive::Fence { file, prefix, mark } => {
                 let (lang, code) = self.fence(file, prefix)?;
                 let mut html = markdown::highlight(lang, &code);
                 // A third argument marks that word in the block's text (the
                 // accent), never inside the highlighting's own tags; every
                 // occurrence in the source must be marked.
-                if let [mark] = marks {
+                if let Some(mark) = mark {
                     let (marked, count) = markdown::mark(&html, &markdown::escape(mark));
                     let wanted = code.matches(mark).count();
                     if count == 0 || count != wanted {
@@ -149,7 +77,7 @@ impl Sources {
                     markdown::escape(lang)
                 ))
             }
-            ("field", [file, prefix, key]) => {
+            Directive::Field { file, prefix, key } => {
                 let (_, code) = self.fence(file, prefix)?;
                 let object: serde_json::Value = serde_json::from_str(&code).map_err(|e| {
                     format!("{file}: the block starting with {prefix:?} is not JSON: {e}")
@@ -169,77 +97,68 @@ impl Sources {
                     other => other.to_string(),
                 }))
             }
-            ("opening", [file, part]) => {
+            Directive::Opening { file, part } => {
                 let (tagline, lede) = markdown::opening(self.document(file)?).ok_or_else(|| {
                     format!(
                         "{file}: no opening paragraph with a bold tagline before its first section"
                     )
                 })?;
-                match *part {
-                    "tagline" => Ok(markdown::escape(tagline.trim_end_matches('.'))),
-                    "lede" | "text" => {
-                        let lede =
-                            lede.ok_or_else(|| format!("{file}: no paragraph after the tagline"))?;
-                        if *part == "lede" {
-                            return Ok(self.html(lede, file, &page.anchors));
-                        }
-                        Ok(markdown::escape(&markdown::plain(lede)))
-                    }
-                    other => Err(format!("{other:?} is not tagline, text, or lede")),
+                let lede = || lede.ok_or_else(|| format!("{file}: no paragraph after the tagline"));
+                match part {
+                    Part::Tagline => Ok(markdown::escape(tagline.trim_end_matches('.'))),
+                    Part::Lede => Ok(self.html(lede()?, file, &page.anchors)),
+                    Part::Text => Ok(markdown::escape(&markdown::plain(lede()?))),
                 }
             }
-            ("section", [file, heading]) => {
-                Ok(self.html(self.section(file, heading)?, file, &page.anchors))
-            }
-            ("item", [file, heading, prefix]) => {
-                let items = self.items(file, heading)?;
+            Directive::Section(at) => Ok(self.html(self.section(at)?, at.file, &page.anchors)),
+            Directive::Item(at, prefix) => {
+                let items = self.items(at)?;
                 let item = items
                     .iter()
                     .find(|item| markdown::lead(item).is_some_and(|lead| lead.starts_with(prefix)))
                     .ok_or_else(|| {
-                        format!("{file}: no item under \"## {heading}\" opens with {prefix:?}")
+                        format!(
+                            "{}: no item under \"## {}\" opens with {prefix:?}",
+                            at.file, at.heading
+                        )
                     })?;
-                if !page.placed.insert(item_key(file, heading, item)) {
-                    return Err(format!("{file}: the item {prefix:?} is placed twice"));
+                if !page.placed.insert(item_key(at, item)) {
+                    return Err(format!("{}: the item {prefix:?} is placed twice", at.file));
                 }
-                Ok(self.item_html(item, file, &page.anchors))
+                Ok(self.item_html(item, at.file, &page.anchors))
             }
-            ("rest", [file, heading]) => {
+            Directive::Rest(at) => {
                 let mut out = String::new();
-                for item in self.items(file, heading)? {
-                    if page.placed.insert(item_key(file, heading, &item)) {
-                        out.push_str(&self.item_html(&item, file, &page.anchors));
+                for item in self.items(at)? {
+                    if page.placed.insert(item_key(at, &item)) {
+                        out.push_str(&self.item_html(&item, at.file, &page.anchors));
                     }
                 }
                 Ok(out)
             }
-            ("paragraph", [file, heading, start]) => {
-                let paragraph = markdown::paragraph(self.section(file, heading)?, start)
-                    .ok_or_else(|| {
-                        format!("{file}: no paragraph under \"## {heading}\" starts with {start:?}")
-                    })?;
-                Ok(self.html(paragraph, file, &page.anchors))
+            Directive::Paragraph(at, start) => {
+                let paragraph = markdown::paragraph(self.section(at)?, start).ok_or_else(|| {
+                    format!(
+                        "{}: no paragraph under \"## {}\" starts with {start:?}",
+                        at.file, at.heading
+                    )
+                })?;
+                Ok(self.html(paragraph, at.file, &page.anchors))
             }
-            ("numbers", [file, heading, first]) => {
-                markdown::numbers(self.section(file, heading)?, first).ok_or_else(|| {
-                    format!("{file}: no table under \"## {heading}\" has a first column {first:?}")
-                })
-            }
-            ("relative", [file, heading, row]) => {
-                chart::relative(self.section(file, heading)?, row)
-            }
-            ("ratios", [file, heading, column]) => {
-                chart::ratios(self.section(file, heading)?, column)
-            }
-            (name, args) if DIRECTIVES.contains(&name) => {
-                Err(format!("{name} does not take {} arguments", args.len()))
-            }
-            _ => Err("unknown directive".to_owned()),
+            Directive::Numbers(at, first) => markdown::numbers(self.section(at)?, first)
+                .ok_or_else(|| {
+                    format!(
+                        "{}: no table under \"## {}\" has a first column {first:?}",
+                        at.file, at.heading
+                    )
+                }),
+            Directive::Relative(at, row) => chart::relative(self.section(at)?, row),
+            Directive::Ratios(at, column) => chart::ratios(self.section(at)?, column),
         }
     }
 
-    fn items(&self, file: &str, heading: &str) -> Result<Vec<String>, String> {
-        Ok(markdown::list_items(self.section(file, heading)?))
+    fn items(&self, at: Heading) -> Result<Vec<String>, String> {
+        Ok(markdown::list_items(self.section(at)?))
     }
 
     fn fence(&self, file: &str, prefix: &str) -> Result<(&str, String), String> {
@@ -247,9 +166,9 @@ impl Sources {
             .ok_or_else(|| format!("{file}: no fenced block starts with {prefix:?}"))
     }
 
-    fn section(&self, file: &str, heading: &str) -> Result<&str, String> {
-        markdown::section(self.document(file)?, heading)
-            .ok_or_else(|| format!("{file}: no section \"## {heading}\""))
+    fn section(&self, at: Heading) -> Result<&str, String> {
+        markdown::section(self.document(at.file)?, at.heading)
+            .ok_or_else(|| format!("{}: no section \"## {}\"", at.file, at.heading))
     }
 
     fn item_html(&self, item: &str, file: &str, anchors: &markdown::Anchors) -> String {
@@ -319,9 +238,11 @@ fn anchors(template: &str) -> markdown::Anchors {
             let Some((directive, _)) = opened.split_once("}}") else {
                 continue;
             };
-            let (name, args) = parse(directive.trim());
-            if let (true, [file, heading, ..]) = (HEADED.contains(&name), args.as_slice()) {
-                let key = format!("{file}#{}", markdown::slug(heading));
+            if let Some(at) = Directive::parse(directive.trim())
+                .ok()
+                .and_then(|directive| directive.heading())
+            {
+                let key = format!("{}#{}", at.file, markdown::slug(at.heading));
                 found.entry(key).or_default().insert(id);
             }
         }
@@ -339,8 +260,13 @@ fn anchors(template: &str) -> markdown::Anchors {
 
 /// Names a list item by its document, section, and lead (the whole item if it
 /// has no lead).
-fn item_key(file: &str, heading: &str, item: &str) -> String {
-    format!("{file}|{heading}|{}", markdown::lead(item).unwrap_or(item))
+fn item_key(at: Heading, item: &str) -> String {
+    format!(
+        "{}|{}|{}",
+        at.file,
+        at.heading,
+        markdown::lead(item).unwrap_or(item)
+    )
 }
 
 #[cfg(test)]
