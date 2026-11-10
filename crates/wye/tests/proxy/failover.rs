@@ -12,7 +12,7 @@ async fn counted(
     status: StatusCode,
     hits: &Arc<AtomicUsize>,
 ) -> (SocketAddr, mpsc::Receiver<Bytes>) {
-    let (handler, rx) = recording_with(status, |seen| seen.body);
+    let (handler, rx) = recording_reply(|seen| seen.body, move || full(status, "{}"));
     (
         spawn_upstream(handler, Arc::clone(hits), None, None).await,
         rx,
@@ -207,25 +207,19 @@ async fn failover_sends_each_provider_its_own_model_id() {
 /// started: a body without a declared length.
 #[tokio::test]
 async fn a_chunked_body_too_large_to_keep_answers_the_rejection() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncReadExt;
 
     let hits = Arc::new(AtomicUsize::new(0));
     let (a, _seen_a) = counted(StatusCode::TOO_MANY_REQUESTS, &hits).await;
     let (b, _seen_b) = counted(StatusCode::OK, &hits).await;
     let h = large_bodies(a, b).await;
     let body = too_large_to_keep();
-    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
-    client
-        .write_all(
-            format!(
-                "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\
-                 connection: close\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n",
-                body.len()
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
+    let request = format!(
+        "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\
+         connection: close\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n",
+        body.len()
+    );
+    let mut client = h.raw(request.as_bytes()).await;
     let mut answer = Vec::new();
     client.read_to_end(&mut answer).await.unwrap();
     let answer = String::from_utf8_lossy(&answer);
@@ -249,18 +243,12 @@ async fn a_rejection_during_the_upload_resends_the_whole_body() {
         "x".repeat(900)
     );
     let (start, rest) = body.split_at(40);
-    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
-    client
-        .write_all(
-            format!(
-                "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
-                 anthropic-version: 2023-06-01\r\ncontent-length: {}\r\n\r\n{start}",
-                body.len()
-            )
-            .as_bytes(),
-        )
-        .await
-        .unwrap();
+    let head = format!(
+        "POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+         anthropic-version: 2023-06-01\r\ncontent-length: {}\r\n\r\n{start}",
+        body.len()
+    );
+    let mut client = h.raw(head.as_bytes()).await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     client.write_all(rest.as_bytes()).await.unwrap();
     let mut head = [0u8; 12];

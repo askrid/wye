@@ -317,8 +317,8 @@ impl Harness {
             .unwrap()
     }
 
-    /// Sends `chunks` as a body without a declared length, pausing after
-    /// each, so the gateway forwards the first before the rest arrive.
+    /// Sends `chunks` as a body without a declared length, pausing between
+    /// them, so the gateway forwards the first before the rest arrive.
     pub(crate) async fn send_chunked(
         &self,
         req: http::request::Builder,
@@ -333,12 +333,14 @@ impl Harness {
             .body(ChannelBody(rx))
             .unwrap();
         let response = tokio::spawn(async move { client.request(req).await });
-        for chunk in chunks {
+        for (i, chunk) in chunks.iter().enumerate() {
+            if i > 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
             // A refusal may close the request before the last chunk.
             if tx.send(Bytes::copy_from_slice(chunk)).await.is_err() {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(50)).await;
         }
         drop(tx);
         tokio::time::timeout(WAIT, response)
@@ -346,6 +348,25 @@ impl Harness {
             .unwrap()
             .unwrap()
             .unwrap()
+    }
+
+    /// A connection to the gateway that has sent `head`, for requests the
+    /// client cannot send.
+    pub(crate) async fn raw(&self, head: &[u8]) -> tokio::net::TcpStream {
+        use tokio::io::AsyncWriteExt;
+        let mut stream = tokio::net::TcpStream::connect(self.gateway).await.unwrap();
+        stream.write_all(head).await.unwrap();
+        stream
+    }
+
+    /// Waits, within [`WAIT`], until the upstream has received `n` requests.
+    pub(crate) async fn reached(&self, n: usize) {
+        let reached = async {
+            while self.upstream_hits.load(Ordering::Relaxed) < n {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        tokio::time::timeout(WAIT, reached).await.unwrap();
     }
 
     /// Next usage record written by the gateway.
@@ -509,15 +530,7 @@ pub(crate) fn ok() -> Handler {
 /// An upstream that answers `200 {}` and passes `pick` of each request it
 /// receives to the returned channel.
 pub(crate) fn recording<T: Send + 'static>(pick: fn(Seen) -> T) -> (Handler, mpsc::Receiver<T>) {
-    recording_with(StatusCode::OK, pick)
-}
-
-/// [`recording`], answering `status`.
-pub(crate) fn recording_with<T: Send + 'static>(
-    status: StatusCode,
-    pick: fn(Seen) -> T,
-) -> (Handler, mpsc::Receiver<T>) {
-    recording_reply(pick, move || full(status, "{}"))
+    recording_reply(pick, || full(StatusCode::OK, "{}"))
 }
 
 /// [`recording`], answering `reply()`. A receiver the test dropped is
@@ -609,11 +622,6 @@ pub(crate) fn claims(sub: &str) -> NewToken<'_> {
     }
 }
 
-/// A gateway token signed with `key`.
-pub(crate) fn issue(key: &Ed25519KeyPair, claims: &NewToken<'_>) -> String {
-    token::issue(key, claims)
-}
-
 /// A gateway token for `sub` with its own model list and output ceiling, if any.
 pub(crate) fn token(
     key: &Ed25519KeyPair,
@@ -621,7 +629,7 @@ pub(crate) fn token(
     models: Option<&[&str]>,
     max_output_tokens: Option<u64>,
 ) -> String {
-    issue(
+    token::issue(
         key,
         &NewToken {
             models,

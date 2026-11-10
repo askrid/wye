@@ -13,6 +13,9 @@ const USAGE_STREAM: &str = concat!(
     "data: {\"type\":\"message_stop\"}\n\n",
 );
 
+/// A small request, sent raw, so a test can leave before its answer.
+const POST: &[u8] = b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}";
+
 #[tokio::test]
 async fn an_empty_response_is_completed() {
     // hyper sends an empty body with the headers and never polls it.
@@ -136,21 +139,10 @@ async fn cancelled_stream_logs_partial_usage() {
 
 #[tokio::test]
 async fn a_client_that_leaves_before_the_headers_is_recorded() {
-    use tokio::io::AsyncWriteExt;
     // The upstream never answers; the client stops waiting.
     let h = Harness::provider_key(Arc::new(|_| Box::pin(std::future::pending()))).await;
-    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
-    client
-        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}")
-        .await
-        .unwrap();
-    tokio::time::timeout(WAIT, async {
-        while h.upstream_hits.load(Ordering::Relaxed) == 0 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
+    let client = h.raw(POST).await;
+    h.reached(1).await;
     drop(client);
 
     let record = h.usage_record().await;
@@ -163,7 +155,6 @@ async fn a_client_that_leaves_before_the_headers_is_recorded() {
 /// upstream request: on HTTP/2 the stream is reset, and the provider stops.
 #[tokio::test]
 async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
-    use tokio::io::AsyncWriteExt;
     let ca = TestCa::generate();
     let (guard, released) = oneshot::channel::<()>();
     // The upstream holds `guard` until its request is dropped.
@@ -172,18 +163,8 @@ async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
         std::future::pending::<Response<UpBody>>().await
     });
     let h = Harness::start_tls(handler, &ca, true).await;
-    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
-    client
-        .write_all(b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ncontent-length: 2\r\n\r\n{}")
-        .await
-        .unwrap();
-    tokio::time::timeout(WAIT, async {
-        while h.upstream_hits.load(Ordering::Relaxed) == 0 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
+    let client = h.raw(POST).await;
+    h.reached(1).await;
     drop(client);
     assert!(
         tokio::time::timeout(WAIT, released).await.is_ok(),
@@ -195,16 +176,14 @@ async fn a_client_that_leaves_before_the_headers_cancels_the_upstream() {
 /// client's error, `400`, never an upstream failure (`502`).
 #[tokio::test]
 async fn a_broken_client_body_is_the_clients_error() {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncReadExt;
     let h = Harness::provider_key(ok()).await;
-    let mut client = tokio::net::TcpStream::connect(h.gateway).await.unwrap();
-    client
-        .write_all(
+    let mut client = h
+        .raw(
             b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\ntransfer-encoding: chunked\r\n\r\n\
               2\r\n{}\r\nzz\r\n",
         )
-        .await
-        .unwrap();
+        .await;
     let mut answer = Vec::new();
     tokio::time::timeout(WAIT, async {
         let mut buf = [0; 1024];
@@ -396,12 +375,7 @@ async fn usage_records_are_exported_as_otlp_logs() {
     let end: u64 = span["endTimeUnixNano"].as_str().unwrap().parse().unwrap();
     assert!(start <= end);
     assert_eq!(metrics.uri.path(), "/v1/metrics");
-    let metrics: serde_json::Value = serde_json::from_slice(&metrics.body).unwrap();
-    let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
-        .as_array()
-        .unwrap()
-        .clone();
-    let metric = |name: &str| list.iter().find(|m| m["name"] == name).unwrap().clone();
+    let metric = |name: &str| otlp_metric(&metrics.body, name);
     assert_eq!(metric("wye.requests")["sum"]["dataPoints"][0]["asInt"], "1");
     let tokens = metric("wye.tokens")["sum"]["dataPoints"].clone();
     assert!(
@@ -553,6 +527,14 @@ async fn tool_calls_past_eight_names_go_under_other() {
     assert_eq!(calls["(other)"], 2, "{calls}");
 }
 
+/// The metric `name` in the OTLP metrics export `export`.
+fn otlp_metric(export: &[u8], name: &str) -> serde_json::Value {
+    let export: serde_json::Value = serde_json::from_slice(export).unwrap();
+    let metrics = export["resourceMetrics"][0]["scopeMetrics"][0]["metrics"].as_array();
+    let metric = metrics.unwrap().iter().find(|m| m["name"] == name);
+    metric.unwrap_or_else(|| panic!("no {name}")).clone()
+}
+
 /// Log records in an OTLP logs export; other exports hold none.
 fn exported_records(seen: &Seen) -> usize {
     if seen.uri.path() != "/v1/logs" {
@@ -595,15 +577,10 @@ async fn a_closed_log_leaves_otlp_export_running() {
             metrics = Some(seen);
         }
     }
-    let metrics: serde_json::Value =
-        serde_json::from_slice(&metrics.expect("metrics exported").body).unwrap();
-    let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
-        .as_array()
-        .unwrap();
-    let lost = list
-        .iter()
-        .find(|m| m["name"] == "wye.records.dropped")
-        .unwrap();
+    let lost = otlp_metric(
+        &metrics.expect("metrics exported").body,
+        "wye.records.dropped",
+    );
     assert_eq!(lost["sum"]["dataPoints"][0]["asInt"], "2", "{lost}");
 }
 
@@ -667,11 +644,7 @@ async fn shutdown_exports_metrics_while_the_log_is_blocked() {
         if seen.uri.path() != "/v1/metrics" {
             continue;
         }
-        let metrics: serde_json::Value = serde_json::from_slice(&seen.body).unwrap();
-        let list = metrics["resourceMetrics"][0]["scopeMetrics"][0]["metrics"]
-            .as_array()
-            .unwrap();
-        let requests = list.iter().find(|m| m["name"] == "wye.requests").unwrap();
+        let requests = otlp_metric(&seen.body, "wye.requests");
         assert_eq!(
             requests["sum"]["dataPoints"][0]["asInt"],
             REQUESTS.to_string(),

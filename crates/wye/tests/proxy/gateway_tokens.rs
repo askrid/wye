@@ -36,7 +36,7 @@ async fn valid_token_is_replaced_by_the_provider_key() {
 async fn missing_expired_or_foreign_tokens_never_reach_upstream() {
     let key = keypair();
     let (h, _seen) = harness(&key).await;
-    let expired = issue(
+    let expired = token::issue(
         &key,
         &NewToken {
             iat: now() - 600,
