@@ -42,6 +42,12 @@ The pre-commit hook runs it for every commit that touches more than docs, `bench
 git config core.hooksPath .githooks
 ```
 
+`rust-toolchain.toml` pins the toolchain with only the components the gate and CI use, so CI jobs and the image build install nothing more. An editor needs two others, added once per pinned toolchain:
+
+```bash
+rustup component add rust-analyzer rust-src
+```
+
 `scripts/bench.sh gate` builds the parent in a worktree (`target/reference`, kept between checks), and `wye-bench gate` runs both commits in alternating rounds, three each, each with its own `wye-bench`. The gate compares the medians (the worst round, for failure counts) under both commits' tolerance lists, so a commit cannot pass by loosening the gate it is judged by; a comparison that fails without naming a metric fails the gate.
 
 A failed comparison reruns the benchmark, and the check fails only when the same metric is past its limit again. Load pushes a different metric past its limit now and then, while a real regression repeats ([evidence](benchmarks.md#gate-tolerances)). A failed request or stream is never noise and fails the check at once.
