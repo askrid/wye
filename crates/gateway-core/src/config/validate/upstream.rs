@@ -244,14 +244,16 @@ fn validate_upstream(
             }
             path => path,
         },
-        connect_timeout: running_timer(
+        connect_timeout: running(
             raw.connect_timeout,
             DEFAULT_CONNECT_TIMEOUT,
+            MAX_TIMER,
             "connect_timeout",
         )?,
-        response_header_timeout: running_timer(
+        response_header_timeout: running(
             raw.response_header_timeout,
             DEFAULT_RESPONSE_HEADER_TIMEOUT,
+            MAX_TIMER,
             "response_header_timeout",
         )?,
         http_version: match raw.http_version.as_deref() {
@@ -263,9 +265,10 @@ fn validate_upstream(
                 ));
             }
         },
-        stream_idle_timeout: running_timer(
+        stream_idle_timeout: running(
             raw.stream_idle_timeout,
             DEFAULT_STREAM_IDLE_TIMEOUT,
+            MAX_TIMER,
             "stream_idle_timeout",
         )?,
     })

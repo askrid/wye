@@ -106,11 +106,17 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
             "server.max_request_body_bytes",
         )?,
         max_concurrent_requests,
-        drain_delay: timer(raw.drain_delay, DEFAULT_DRAIN_DELAY, "server.drain_delay")?,
+        drain_delay: duration(
+            raw.drain_delay,
+            DEFAULT_DRAIN_DELAY,
+            MAX_TIMER,
+            "server.drain_delay",
+        )?,
         // Zero is valid: cancel active streams immediately on shutdown.
-        shutdown_grace: timer(
+        shutdown_grace: duration(
             raw.shutdown_grace,
             DEFAULT_SHUTDOWN_GRACE,
+            MAX_TIMER,
             "server.shutdown_grace",
         )?,
     })
@@ -272,7 +278,7 @@ pub(super) fn sample_percent(value: Option<u8>, field: &'static str) -> Result<u
 /// duration to an `Instant`, which must not overflow.
 const MAX_TIMER: Duration = Duration::from_secs(24 * 3600);
 
-/// A duration as written, else `default`; at most `max`.
+/// A duration as written, else `default`; at most `max`, zero allowed.
 fn duration(
     raw: Option<String>,
     default: Duration,
@@ -289,15 +295,6 @@ fn duration(
     Ok(value)
 }
 
-/// A timer as written, else `default`, zero allowed.
-fn timer(
-    raw: Option<String>,
-    default: Duration,
-    field: &'static str,
-) -> Result<Duration, ConfigError> {
-    duration(raw, default, MAX_TIMER, field)
-}
-
 /// A duration that must run: more than zero, at most `max`.
 fn running(
     raw: Option<String>,
@@ -309,13 +306,4 @@ fn running(
         Duration::ZERO => Err(ConfigError::Zero(field)),
         value => Ok(value),
     }
-}
-
-/// A timer that must run: more than zero, at most a day.
-fn running_timer(
-    raw: Option<String>,
-    default: Duration,
-    field: &'static str,
-) -> Result<Duration, ConfigError> {
-    running(raw, default, MAX_TIMER, field)
 }
