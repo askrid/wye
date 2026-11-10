@@ -15,11 +15,11 @@ pub(crate) struct Client(pub(crate) VecDeque<Bytes>);
 
 impl Client {
     /// The body of `parts`, one chunk each.
-    pub(crate) fn of(parts: &[&'static str]) -> Self {
+    pub(crate) fn of(parts: &[&str]) -> Self {
         Self(
             parts
                 .iter()
-                .map(|p| Bytes::from_static(p.as_bytes()))
+                .map(|p| Bytes::copy_from_slice(p.as_bytes()))
                 .collect(),
         )
     }

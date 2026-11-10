@@ -48,10 +48,9 @@ async fn splicing_the_model_keeps_every_other_byte_under_any_chunking() {
         let want = body.replace("coding-default", to);
         for a in 1..body.len() {
             for b in a..body.len() {
-                let parts: Vec<&'static str> = [&body[..a], &body[a..b], &body[b..]]
+                let parts: Vec<&str> = [&body[..a], &body[a..b], &body[b..]]
                     .into_iter()
                     .filter(|p| !p.is_empty())
-                    .map(|p| &*Box::leak(p.to_owned().into_boxed_str()))
                     .collect();
                 let budget = Gauge::default();
                 let mut client = Client::of(&parts);

@@ -1,11 +1,6 @@
 use super::*;
 
-fn line(
-    endpoint: &'static str,
-    status: u16,
-    ms: f64,
-    model: Option<&'static str>,
-) -> Line<'static> {
+fn line<'a>(endpoint: &'a str, status: u16, ms: f64, model: Option<&'a str>) -> Line<'a> {
     Line {
         endpoint,
         status,
@@ -80,9 +75,7 @@ fn totals_are_cumulative_and_encode_as_otlp_json() {
 #[test]
 fn series_beyond_the_limit_are_counted_not_kept() {
     let mut metrics = Metrics::new(0);
-    let routes: Vec<&'static str> = (0..MAX_SERIES + 5)
-        .map(|i| &*Box::leak(format!("/r{i}").into_boxed_str()))
-        .collect();
+    let routes: Vec<String> = (0..MAX_SERIES + 5).map(|i| format!("/r{i}")).collect();
     for route in &routes {
         metrics.record(&line(route, 200, 1.0, None));
     }
