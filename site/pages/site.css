@@ -78,16 +78,16 @@
   --caption: 0.8125rem;
   --rail: 1.15625rem;
   /* The headline is README's tagline, wrapped and balanced: "LLM
-     gateway" over "without bloat.". The longer line is 14 advances of
-     0.58 em (0.6 less the tracking), 8.12 em: / 11.3 sets it across about
-     72% of the column. On a phone (below) it is set as large but on three
+     gateway" over "without bloat.". The longer line is 13 advances of
+     0.58 em (0.6 less the tracking) and the 0.3 em period, 7.84 em: / 11.3
+     sets it across about 69% of the column. On a phone (below) it is set as large but on three
      lines, "LLM gateway", "without", "bloat.", so the dot sits short of
      the edge and its threads fan out on the screen: no line over 7 em
-     takes "without bloat." apart, and "LLM gateway", 6.38 em, spans about
+     takes "without bloat." (7.84 em) apart, and "LLM gateway", 6.38 em, spans about
      74%. */
   --h1: min(5.25rem, 100cqi / 11.3);
   /* The one column every section's blocks share, prose, panels, figures,
-     and tables, so their edges line up down the page: about 75 characters
+     and tables, so their edges line up down the page: about 80 characters
      of Wye Text, and as wide as the widest config line and report row. */
   --column: 47.5rem;
   --gutter: clamp(1rem, 4vw, 2.5rem);
@@ -538,9 +538,9 @@ pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
 }
 .foot a { color: var(--text); }
 
-/* Charts drawn in block characters (site/src/chart.rs): names and values
-   are text, the bars hidden from screen readers; Wye's line in ink and
-   its bar in the accent, the other bars in graphite. */
+/* Bar charts as tables, the bars sized by CSS (site/src/chart.rs): names
+   and values are text, the bars hidden from screen readers; Wye's line in
+   ink and its bar in the accent, the other bars in graphite. */
 .chart { margin: 0; display: grid; gap: 0.75rem; min-width: 0; }
 .chart figcaption { color: var(--graphite); font-size: var(--caption); }
 .bars {
