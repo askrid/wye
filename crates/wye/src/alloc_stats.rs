@@ -77,12 +77,17 @@ unsafe impl GlobalAlloc for Counting {
 
 /// Counter values since process start.
 pub struct Snapshot {
+    /// Heap allocations, a resize counted as one.
     pub allocations: u64,
+    /// Bytes those allocations asked for.
     pub allocated_bytes: u64,
+    /// Bytes allocated and not yet freed.
     pub live_bytes: u64,
+    /// The most `live_bytes` has been.
     pub peak_live_bytes: u64,
 }
 
+/// The counters now.
 pub fn snapshot() -> Snapshot {
     Snapshot {
         allocations: ALLOCATIONS.load(Ordering::Relaxed),
@@ -93,6 +98,7 @@ pub fn snapshot() -> Snapshot {
 }
 
 impl Snapshot {
+    /// The counters as the JSON object `GET /debug/alloc` answers.
     pub fn to_json(&self) -> String {
         format!(
             r#"{{"allocations":{},"allocated_bytes":{},"live_bytes":{},"peak_live_bytes":{}}}"#,

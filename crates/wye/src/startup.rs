@@ -18,6 +18,7 @@ use http::{HeaderMap, HeaderValue};
 /// Failures that prevent the gateway from starting.
 #[derive(Debug)]
 pub enum StartupError {
+    /// A secret's environment variable is not set, or not UTF-8.
     MissingEnv(String),
     /// A secret's environment variable is set but blank.
     EmptyEnv(String),
@@ -34,8 +35,11 @@ pub enum StartupError {
     },
     /// The OTLP headers, from this source, are not `key=value,...`.
     InvalidOtlpHeaders(Secret),
+    /// An identity provider's key set could not be used.
     KeySet(KeySetError),
+    /// The TLS client could not be set up.
     Tls(String),
+    /// `server.max_request_body_bytes` does not fit this platform's `usize`.
     BodyLimitTooLarge,
     /// The resources were not resolved from this configuration.
     UpstreamCount,
@@ -119,6 +123,7 @@ pub struct Resources {
 /// What one upstream's configuration references.
 #[derive(Debug)]
 pub struct UpstreamResources {
+    /// The credential Wye presents upstream.
     pub auth: UpstreamAuth,
     /// Root certificates trusted in addition to the built-in roots.
     pub extra_roots: Vec<CertificateDer<'static>>,
@@ -406,10 +411,12 @@ pub enum UpstreamAuth {
 }
 
 impl UpstreamAuth {
+    /// `key` sent as `x-api-key`; `Err` if no header may carry it.
     pub fn api_key(key: &str) -> Result<Self, StartupError> {
         Ok(Self::ApiKey(secret(key)?))
     }
 
+    /// `key` sent as `Authorization: Bearer`; `Err` if no header may carry it.
     pub fn bearer(key: &str) -> Result<Self, StartupError> {
         Ok(Self::Bearer(secret(&format!("Bearer {key}"))?))
     }

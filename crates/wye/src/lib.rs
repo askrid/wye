@@ -1,5 +1,5 @@
-//! Wye runtime: startup resolution, HTTP server, upstream selection, and
-//! forwarding.
+//! The binary: startup, the server and the request path, the upstream
+//! client, the usage log and OTLP, and the CLI.
 
 #[cfg(feature = "alloc-stats")]
 pub mod alloc_stats;

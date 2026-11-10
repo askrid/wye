@@ -77,6 +77,7 @@ pub(crate) enum Outcome {
 }
 
 impl Outcome {
+    /// The record's `outcome`.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Completed => "completed",
@@ -124,6 +125,7 @@ pub(crate) struct RejectedAttempt {
     pub reason: FailoverReason,
 }
 
+/// One request's usage record, as queued for the writer task.
 pub(crate) struct Record {
     info: RequestInfo,
     status: StatusCode,
@@ -186,7 +188,8 @@ pub(crate) struct UsageLog {
 }
 
 impl UsageLog {
-    /// Starts the writer task. It ends after every handle is dropped and the queue is written.
+    /// Starts the writer task. It ends after every handle is dropped and the
+    /// queue is written.
     pub(crate) fn start<W>(out: UsageOut<W>, sinks: Sinks) -> (Self, JoinHandle<()>)
     where
         W: AsyncWrite + Send + Unpin + 'static,

@@ -53,10 +53,12 @@ impl Reserved {
 }
 
 impl Gauge {
+    /// The units held now.
     pub(crate) fn current(&self) -> usize {
         self.0.load(Ordering::Relaxed)
     }
 
+    /// A guard of one unit, whatever the gauge holds.
     pub(crate) fn reserve(&self) -> Reserved {
         self.0.fetch_add(1, Ordering::Relaxed);
         self.reserved(1)

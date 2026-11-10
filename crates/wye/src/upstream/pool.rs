@@ -18,6 +18,7 @@ use crate::gauge::{Gauge, Reserved};
 /// Upper bound on connections per upstream.
 const LANES: usize = 64;
 
+/// One upstream's lanes, each a `Client` with its own connection.
 pub(crate) struct ClientPool {
     lanes: Box<[Lane]>,
 }

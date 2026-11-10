@@ -20,6 +20,7 @@ const OVERLOAD_RETRY_AFTER: HeaderValue = HeaderValue::from_static("1");
 const RETRY_AFTER: HeaderName = HeaderName::from_static("retry-after");
 const SHOULD_RETRY: HeaderName = HeaderName::from_static("x-should-retry");
 
+/// Wye's answer to a request refused while its model was read.
 pub(super) fn hold_error(api: Api, e: HoldError) -> Response<ResBody> {
     match e {
         HoldError::Model(e) => refuse(api, &Refusal::Invalid(e)),
@@ -45,6 +46,7 @@ fn unreadable_body(api: Api) -> Response<ResBody> {
     )
 }
 
+/// Wye's answer to an attempt that got no response to relay.
 pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
     match e {
         ForwardError::Upstream(UpstreamError::Timeout) => error(
@@ -99,6 +101,7 @@ pub(super) fn overloaded(api: Api, message: &str) -> Response<ResBody> {
     res
 }
 
+/// A response with `status` and no body.
 pub(super) fn empty(status: StatusCode) -> Response<ResBody> {
     let mut res = Response::new(Either::Left(Full::new(Bytes::new())));
     *res.status_mut() = status;

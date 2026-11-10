@@ -4,14 +4,20 @@
 //! change a request body can carry is the allowlisted `model` rewrite (an
 //! alias, or the provider's own model id), made before forwarding; the body
 //! is read in passing for model permissions and output-token ceilings, cache
-//! diagnostics, and upgrade checks, when those are on. Of the headers, only
-//! the URI, hop-by-hop headers, `accept-encoding` (always `identity`), the
-//! credential headers (when Wye sends its provider key, with
-//! `openai-organization` and `openai-project`), `anthropic-workspace-id`
-//! (Claude Platform on AWS), and `content-length` (after a `model` rewrite)
-//! are changed. Of the response's, hop-by-hop headers, and, with the
-//! provider key, the ones naming the account it belongs to
-//! ([`ACCOUNT_HEADERS`]).
+//! diagnostics, and upgrade checks, when those are on.
+//!
+//! Headers change only where listed. On the request:
+//!
+//! - the URI and `host`, for the upstream's;
+//! - hop-by-hop headers, removed;
+//! - `accept-encoding`, always `identity`;
+//! - the credential headers, when Wye sends its provider key, with
+//!   `openai-organization` and `openai-project`;
+//! - `anthropic-workspace-id`, for Claude Platform on AWS;
+//! - `content-length`, after a `model` rewrite.
+//!
+//! On the response: hop-by-hop headers, and, with the provider key, the
+//! ones naming the account it belongs to ([`ACCOUNT_HEADERS`]).
 
 mod body;
 mod connect;
@@ -143,6 +149,8 @@ const STREAM_WINDOW: u32 = 256 * 1024;
 /// by `STREAM_WINDOW` per stream.
 const CONNECTION_WINDOW: u32 = (1 << 31) - 1;
 
+/// One upstream of a route, ready to forward to: its connections, address,
+/// credential, and timeouts, resolved at startup.
 pub(crate) struct Upstream {
     /// The route's name for it, in usage records.
     pub(crate) id: Arc<str>,
@@ -162,6 +170,8 @@ pub(crate) struct Upstream {
 }
 
 impl Upstream {
+    /// `config`'s upstream, presenting `auth` and trusting `extra_roots`
+    /// besides the built-in roots.
     pub(crate) fn new(
         config: &config::Upstream,
         auth: UpstreamAuth,

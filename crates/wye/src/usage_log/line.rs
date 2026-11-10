@@ -36,6 +36,7 @@ pub(super) struct Context<'a> {
 /// beyond growing the writer's reused buffer.
 #[derive(Serialize)]
 pub(super) struct Line<'a> {
+    /// What the line records: `request` for a usage record.
     pub(super) event: &'static str,
     /// [`RECORD_VERSION`]; the JSON line only, not OTLP.
     pub(super) v: u8,
@@ -46,6 +47,7 @@ pub(super) struct Line<'a> {
     /// id, which config maps to its provider.
     #[serde(skip)]
     pub(super) provider_name: &'static str,
+    /// The status the client got.
     pub(super) status: u16,
     #[serde(serialize_with = "outcome")]
     pub(super) outcome: Outcome,
@@ -53,6 +55,8 @@ pub(super) struct Line<'a> {
     /// outcome only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upstream_error: Option<&'static str>,
+    /// From the request's arrival to its record: the response's end, or
+    /// Wye's own answer.
     pub(super) duration_ms: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) response_headers_ms: Option<f64>,
@@ -88,6 +92,8 @@ pub(super) struct Line<'a> {
     pub(super) requested_model: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) model: Option<&'a str>,
+    /// How much of the usage the scan saw; `none` for a response that
+    /// carries none.
     pub(super) usage_status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) input_tokens: Option<u64>,
@@ -105,8 +111,10 @@ pub(super) struct Line<'a> {
         serialize_with = "usd"
     )]
     pub(super) cost: Option<Pico>,
+    /// How complete `cost_usd` is, when `[pricing]` is configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) cost_status: Option<&'static str>,
+    /// The price table's version, when `[pricing]` is configured.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) pricing_version: Option<&'a str>,
     /// Tool calls the response requested, by tool name.
