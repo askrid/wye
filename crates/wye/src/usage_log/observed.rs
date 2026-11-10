@@ -138,16 +138,10 @@ where
 impl<B> Drop for Observed<B> {
     fn drop(&mut self) {
         let Some(info) = self.info.take() else { return };
-        let mut seen = Seen {
-            headers_after: Some(self.headers_after),
-            ..Seen::default()
+        let seen = Seen {
+            headers_after: self.headers_after,
+            scanned: self.scanner.take().map(UsageScanner::finish),
         };
-        if let Some(scanner) = self.scanner.take() {
-            let scanned = scanner.finish();
-            seen.model = scanned.model;
-            seen.usage = Some((scanned.usage, scanned.status));
-            seen.tool_calls = scanned.tool_calls;
-        }
-        self.log.record(info, self.status, self.outcome, seen);
+        self.log.record(info, self.status, self.outcome, Some(seen));
     }
 }

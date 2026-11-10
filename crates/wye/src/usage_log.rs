@@ -28,13 +28,8 @@ use std::{
 };
 
 use gateway_core::{
-    api::Endpoint,
-    config::Provider,
-    pricing::Pricing,
-    prompt::HashKey,
-    route::FailoverReason,
-    token::Identity,
-    usage::{ToolCalls, Usage, UsageStatus},
+    api::Endpoint, config::Provider, pricing::Pricing, prompt::HashKey, route::FailoverReason,
+    token::Identity, usage::Scanned,
 };
 use http::{HeaderValue, Response, StatusCode};
 use tokio::{
@@ -134,18 +129,18 @@ pub(crate) struct Record {
     status: StatusCode,
     duration: Duration,
     outcome: Outcome,
-    seen: Seen,
+    /// `None` for a request without an upstream response body: Wye's own
+    /// answers, and a client that left before one.
+    seen: Option<Seen>,
     unix_ms: u64,
 }
 
-/// What observing a response body showed; a request without one has nothing.
-#[derive(Default)]
+/// What observing a response body showed.
 struct Seen {
-    headers_after: Option<Duration>,
-    model: Option<Box<str>>,
-    usage: Option<(Usage, UsageStatus)>,
-    /// Tool calls the response started.
-    tool_calls: Option<Box<ToolCalls>>,
+    headers_after: Duration,
+    /// The usage scan, for a successful response of an endpoint that
+    /// generates, in SSE or JSON.
+    scanned: Option<Scanned>,
 }
 
 /// What the writer task writes besides the stdout log.
@@ -209,7 +204,7 @@ impl UsageLog {
         }
     }
 
-    fn record(&self, info: RequestInfo, status: StatusCode, outcome: Outcome, seen: Seen) {
+    fn record(&self, info: RequestInfo, status: StatusCode, outcome: Outcome, seen: Option<Seen>) {
         let duration = info.started.elapsed();
         self.send(Record {
             info,
@@ -243,7 +238,7 @@ impl UsageLog {
     }
 
     fn answered<B>(&self, info: RequestInfo, outcome: Outcome, res: Response<B>) -> Response<B> {
-        self.record(info, res.status(), outcome, Seen::default());
+        self.record(info, res.status(), outcome, None);
         res
     }
 }
@@ -286,8 +281,7 @@ impl Drop for Unanswered<'_> {
     fn drop(&mut self) {
         if let Some(info) = self.info.take() {
             let status = StatusCode::from_u16(CLIENT_CLOSED).unwrap_or(StatusCode::REQUEST_TIMEOUT);
-            self.log
-                .record(info, status, Outcome::Cancelled, Seen::default());
+            self.log.record(info, status, Outcome::Cancelled, None);
         }
     }
 }

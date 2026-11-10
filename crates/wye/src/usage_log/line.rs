@@ -6,7 +6,7 @@ use gateway_core::{
     agent::{self, CacheMiss},
     pricing::{CostStatus, Pico, Pricing, Usd},
     prompt::HashKey,
-    usage::{ToolCalls, UsageStatus},
+    usage::{Scanned, ToolCalls, UsageStatus},
 };
 use http::HeaderValue;
 use serde::{Serialize, Serializer};
@@ -191,14 +191,15 @@ fn usd<S: Serializer>(cost: &Option<Pico>, serializer: S) -> Result<S::Ok, S::Er
 /// never $0.
 pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
     let pricing = context.pricing;
-    let usage = r
-        .seen
-        .usage
-        .as_ref()
-        .map(|(usage, _)| *usage)
-        .unwrap_or_default();
-    let cost = pricing.map(|pricing| match (&r.seen.model, &r.seen.usage) {
-        (Some(model), Some((usage, status))) if *status != UsageStatus::Unknown => pricing.cost(
+    let scanned = r.seen.as_ref().and_then(|seen| seen.scanned.as_ref());
+    let usage = scanned.map(|s| s.usage).unwrap_or_default();
+    let cost = pricing.map(|pricing| match scanned {
+        Some(Scanned {
+            model: Some(model),
+            usage,
+            status,
+            ..
+        }) if *status != UsageStatus::Unknown => pricing.cost(
             model,
             r.info.upstream.as_deref(),
             usage,
@@ -223,7 +224,7 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             _ => None,
         },
         duration_ms: ms(r.duration),
-        response_headers_ms: r.seen.headers_after.map(ms),
+        response_headers_ms: r.seen.as_ref().map(|seen| ms(seen.headers_after)),
         upstream: r.info.upstream.as_deref(),
         subject: r.info.identity.as_ref().map(|i| &*i.subject),
         session_id: label(r.info.session_id.as_ref()),
@@ -240,12 +241,8 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
             .as_ref()
             .map(|v| ToolDurations(v.as_bytes())),
         requested_model: r.info.requested_model.as_deref(),
-        model: r.seen.model.as_deref(),
-        usage_status: r
-            .seen
-            .usage
-            .as_ref()
-            .map_or(NO_USAGE, |(_, status)| status.as_str()),
+        model: scanned.and_then(|s| s.model.as_deref()),
+        usage_status: scanned.map_or(NO_USAGE, |s| s.status.as_str()),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
         cache_creation_input_tokens: usage.cache_creation_input_tokens,
@@ -253,7 +250,9 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         cost: cost.and_then(|c| c.pico),
         cost_status: cost.map(|c| c.status.as_str()),
         pricing_version: pricing.map(|p| &*p.version),
-        tool_calls: r.seen.tool_calls.as_deref().map(ToolCallsField),
+        tool_calls: scanned
+            .and_then(|s| s.tool_calls.as_deref())
+            .map(ToolCallsField),
         cache_miss: CacheMiss::classify(
             usage.cache_read_input_tokens,
             usage.cache_creation_input_tokens,
