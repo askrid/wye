@@ -1,3 +1,5 @@
+use bytes::Bytes;
+
 use super::*;
 
 #[tokio::test]

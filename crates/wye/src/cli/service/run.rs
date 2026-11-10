@@ -2,7 +2,8 @@
 
 use std::{path::Path, time::Duration};
 
-use super::{Commands, probe, shell};
+use super::{Commands, shell};
+use crate::cli::{current_thread, probe::Checker};
 
 /// How often `install` asks launchd to load the service while the old gateway
 /// finishes its requests.
@@ -71,17 +72,26 @@ pub(super) fn wait_for(
     wait: Duration,
 ) -> Result<(), String> {
     let deadline = std::time::Instant::now() + wait;
-    while std::time::Instant::now() < deadline {
-        if probe(url).is_ok() {
-            eprintln!("The gateway answers at {url}.");
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(250));
+    let answered = current_thread()
+        .map_err(|e| e.to_string())?
+        .block_on(async {
+            let checker = Checker::new(&[])?;
+            while std::time::Instant::now() < deadline {
+                if checker.probe(url).await.is_ok() {
+                    return Ok(true);
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Ok::<_, String>(false)
+        })?;
+    if !answered {
+        return Err(format!(
+            "nothing answers at {url} yet; the end of {} may say why",
+            show(messages)
+        ));
     }
-    Err(format!(
-        "nothing answers at {url} yet; the end of {} may say why",
-        show(messages)
-    ))
+    eprintln!("The gateway answers at {url}.");
+    Ok(())
 }
 
 /// The user id, for launchd's `gui/<uid>` domain.

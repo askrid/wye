@@ -7,14 +7,19 @@ use std::{path::Path, time::Duration};
 
 use bytes::Bytes;
 use gateway_core::config::is_loopback_host;
-use http::{Request, Uri};
+use http::{Method, Request, StatusCode, Uri};
 use http_body_util::{BodyExt, Empty};
-use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use hyper_rustls::HttpsConnector;
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
+use rustls::pki_types::CertificateDer;
 
 use super::{Env, Error, Exit, args::Parsed, emit, files, paint::Paint};
 
-/// The whole probe, including the connection, must finish within this.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Each check, the connection included, must finish within this.
+const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Gateway URL when neither `--url` nor `WYE_URL` is set: a gateway on its
 /// default listen address.
@@ -89,41 +94,66 @@ pub fn health_url(gateway: &str) -> String {
 /// asked for a 2xx response within the timeout. A URL without a path names a
 /// gateway, whose health endpoint is asked: its `/` serves nothing.
 pub async fn probe(url: &str) -> Result<String, String> {
-    let uri: Uri = url.parse().map_err(|_| format!("{url}: not a valid URL"))?;
-    if !matches!(uri.scheme_str(), Some("http" | "https")) {
-        return Err(format!(
-            "{url}: the URL must start with http:// or https://"
-        ));
+    Checker::new(&[])?.probe(url).await
+}
+
+/// An HTTP and HTTPS client for checks, built once for any number of them.
+pub(super) struct Checker(Client<HttpsConnector<HttpConnector>, Empty<Bytes>>);
+
+impl Checker {
+    /// A checker that trusts the built-in web PKI roots and `roots`.
+    pub(super) fn new(roots: &[CertificateDer<'static>]) -> Result<Self, String> {
+        let https = crate::tls::https_connector(roots).map_err(|e| e.to_string())?;
+        Ok(Self(Client::builder(TokioExecutor::new()).build(https)))
     }
-    let (uri, url) = if uri.path() == "/" && uri.query().is_none() {
-        let health = health_url(url);
-        let uri = health
-            .parse()
-            .map_err(|_| format!("{health}: not a valid URL"))?;
-        (uri, health)
-    } else {
-        (uri, url.to_owned())
-    };
-    let https = crate::tls::https_connector(&[]).map_err(|e| e.to_string())?;
-    let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
-    let request = Request::get(uri)
-        .body(Empty::new())
-        .map_err(|e| format!("{url}: {e}"))?;
-    let status = tokio::time::timeout(PROBE_TIMEOUT, async {
-        let res = client
-            .request(request)
+
+    /// The status `method uri` answers with, its body read to the end,
+    /// within [`TIMEOUT`]; else why there is none.
+    pub(super) async fn status(&self, method: Method, uri: Uri) -> Result<StatusCode, String> {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Empty::new())
+            .map_err(|e| e.to_string())?;
+        tokio::time::timeout(TIMEOUT, async {
+            let res = self
+                .0
+                .request(request)
+                .await
+                .map_err(|e| super::error_chain(&e))?;
+            let status = res.status();
+            res.into_body().collect().await.map_err(|e| e.to_string())?;
+            Ok(status)
+        })
+        .await
+        .map_err(|_| format!("no response within {}s", TIMEOUT.as_secs()))?
+    }
+
+    /// [`probe`], with this checker.
+    pub(super) async fn probe(&self, url: &str) -> Result<String, String> {
+        let uri: Uri = url.parse().map_err(|_| format!("{url}: not a valid URL"))?;
+        if !matches!(uri.scheme_str(), Some("http" | "https")) {
+            return Err(format!(
+                "{url}: the URL must start with http:// or https://"
+            ));
+        }
+        let (uri, url) = if uri.path() == "/" && uri.query().is_none() {
+            let health = health_url(url);
+            let uri = health
+                .parse()
+                .map_err(|_| format!("{health}: not a valid URL"))?;
+            (uri, health)
+        } else {
+            (uri, url.to_owned())
+        };
+        let status = self
+            .status(Method::GET, uri)
             .await
-            .map_err(|e| super::error_chain(&e))?;
-        let status = res.status();
-        res.into_body().collect().await.map_err(|e| e.to_string())?;
-        Ok::<_, String>(status)
-    })
-    .await
-    .map_err(|_| format!("{url}: no response within {}s", PROBE_TIMEOUT.as_secs()))?
-    .map_err(|e| format!("{url}: {e}"))?;
-    if status.is_success() {
-        Ok(url)
-    } else {
-        Err(format!("{url}: {status}"))
+            .map_err(|e| format!("{url}: {e}"))?;
+        if status.is_success() {
+            Ok(url)
+        } else {
+            Err(format!("{url}: {status}"))
+        }
     }
 }

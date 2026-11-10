@@ -9,29 +9,21 @@
 //! are proven while no model request is made and nothing is billed. Every
 //! check runs, so one pass lists every problem.
 
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Instant};
 
-use bytes::Bytes;
 use gateway_core::config::{Config, Provider, ProviderKey, Secret, Upstream};
-use http::{Request, Uri};
-use http_body_util::Empty;
-use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use http::{Method, Uri};
 
 use super::{
     Env, Error, Exit,
     args::Parsed,
     files::{self, SIGNING_KEY_FILE},
     paint::verdict,
+    probe::Checker,
 };
 use crate::startup::{
     open_to_others, otlp_headers, prompt_key, upstream_auth, upstream_roots, verifier,
 };
-
-/// Each network check, including the connection, must finish within this.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One finding: a line of the report, for a check that passed or failed.
 type Check = Result<String, String>;
@@ -180,27 +172,17 @@ async fn head(
     uri: &Uri,
     roots: &[rustls::pki_types::CertificateDer<'static>],
 ) -> Check {
-    let https = crate::tls::https_connector(roots).map_err(|e| format!("{name}: {e}"))?;
-    let client = Client::builder(TokioExecutor::new()).build::<_, Empty<Bytes>>(https);
-    let request = Request::head(uri.clone())
-        .body(Empty::new())
-        .map_err(|_| format!("{name}: {uri} is not a valid request URL"))?;
+    let checker = Checker::new(roots).map_err(|e| format!("{name}: {e}"))?;
     let started = Instant::now();
-    match tokio::time::timeout(CHECK_TIMEOUT, client.request(request)).await {
-        Ok(Ok(res)) => Ok(format!(
-            "{name}: {uri} reachable in {} ms (HEAD answered {}; any status will do)",
-            started.elapsed().as_millis(),
-            res.status().as_u16()
-        )),
-        Ok(Err(e)) => Err(format!(
-            "{name}: {uri} unreachable: {}",
-            super::error_chain(&e)
-        )),
-        Err(_) => Err(format!(
-            "{name}: {uri} unreachable: no response within {}s",
-            CHECK_TIMEOUT.as_secs()
-        )),
-    }
+    let status = checker
+        .status(Method::HEAD, uri.clone())
+        .await
+        .map_err(|why| format!("{name}: {uri} unreachable: {why}"))?;
+    Ok(format!(
+        "{name}: {uri} reachable in {} ms (HEAD answered {}; any status will do)",
+        started.elapsed().as_millis(),
+        status.as_u16()
+    ))
 }
 
 #[cfg(test)]
