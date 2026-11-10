@@ -43,9 +43,10 @@ const start = ({ canvas, paths, ink, accent }) => {
     gl.linkProgram(p);
     return p;
   };
-  // The fade both programs share: from near the dot to nothing before the
-  // drawing's edges.
-  const fade = "clamp((640.0 - length(v_pos - vec2(850.0, 300.0))) / 416.0, 0.0, 1.0)";
+  // The fade both programs share, the drawing's own (#period-fade): an
+  // ellipse about (850, 300), 640 wide and 640 x 0.506 tall, full to 35% of
+  // the way out, then to nothing, so a string glows only where it is drawn.
+  const fade = "clamp((1.0 - length((v_pos - vec2(850.0, 300.0)) / vec2(640.0, 323.84))) / 0.65, 0.0, 1.0)";
   const strings = program(`
     attribute vec4 a;
     uniform vec4 u_dy[50];
