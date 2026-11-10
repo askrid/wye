@@ -35,7 +35,7 @@ mod encode;
 use super::Line;
 use crate::StartupError;
 pub(super) use encode::{Value, write_attributes};
-use encode::{write_log_record, write_span};
+use encode::{write_log_record, write_record_attributes, write_span};
 
 /// Records per batch before it is sent without waiting for the timer.
 const MAX_BATCH_RECORDS: usize = 512;
@@ -120,6 +120,9 @@ pub(super) struct Batch {
     pub(super) target: Arc<OtlpTarget>,
     logs: Buffer,
     spans: Buffer,
+    /// The record being pushed's attributes, which its log record and span
+    /// share; reused across records.
+    attributes: Vec<u8>,
     random: SystemRandom,
     queue: mpsc::Sender<Export>,
     /// Records lost to a full queue or a failed export; the exporter task
@@ -136,6 +139,7 @@ impl Batch {
         let batch = Self {
             logs: Buffer::default(),
             spans: Buffer::default(),
+            attributes: Vec::new(),
             random: SystemRandom::new(),
             target,
             queue,
@@ -149,12 +153,15 @@ impl Batch {
     }
 
     pub(super) fn push(&mut self, line: &Line<'_>) {
+        self.attributes.clear();
+        write_record_attributes(&mut self.attributes, line);
+        let attributes = &self.attributes;
         append(&mut self.logs, &self.target.logs_prefix, |buf| {
-            write_log_record(buf, line);
+            write_log_record(buf, line, attributes);
         });
         let random = &self.random;
         append(&mut self.spans, &self.target.spans_prefix, |buf| {
-            write_span(buf, line, random);
+            write_span(buf, line, attributes, random);
         });
     }
 

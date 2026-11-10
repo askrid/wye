@@ -1,6 +1,6 @@
 //! OTLP/JSON encoding of usage records: attributes, log records, and spans.
 
-use std::io::Write;
+use std::{fmt, io::Write};
 
 use ring::rand::{SecureRandom, SystemRandom};
 
@@ -56,8 +56,9 @@ fn write_attribute(buf: &mut Vec<u8>, key: &str, value: Value<'_>) {
     buf.extend_from_slice(b"}}");
 }
 
-/// One usage record as an OTLP `LogRecord`.
-pub(super) fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>) {
+/// One usage record as an OTLP `LogRecord`, with its `attributes` already
+/// encoded ([`write_record_attributes`]).
+pub(super) fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>, attributes: &[u8]) {
     let _ = write!(
         buf,
         r#"{{"timeUnixNano":"{}""#,
@@ -66,12 +67,13 @@ pub(super) fn write_log_record(buf: &mut Vec<u8>, line: &Line<'_>) {
     buf.extend_from_slice(br#","severityNumber":9,"severityText":"INFO","body":{"stringValue":"#);
     let _ = serde_json::to_writer(&mut *buf, line.event);
     buf.extend_from_slice(br#"},"attributes":["#);
-    write_record_attributes(buf, line);
+    buf.extend_from_slice(attributes);
     buf.extend_from_slice(b"]}");
 }
 
-/// The attributes a usage record shares between its log record and span.
-fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
+/// The attributes a usage record shares between its log record and span,
+/// encoded once for both.
+pub(super) fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
     fn json(value: &impl serde::Serialize) -> String {
         serde_json::to_string(value).unwrap_or_default()
     }
@@ -160,35 +162,44 @@ const EXECUTE_TOOL: &str = "execute_tool";
 /// session as one trace with no coordination; else a new random trace.
 /// Tool spans are siblings of the request span: they ran before it, ending
 /// at the latest when it started.
-pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRandom) {
+pub(super) fn write_span(
+    buf: &mut Vec<u8>,
+    line: &Line<'_>,
+    attributes: &[u8],
+    random: &SystemRandom,
+) {
     let mut ids = [0u8; 24];
     // A failed draw leaves zeros, which collectors reject: the span is lost,
     // never the request.
     let _ = random.fill(&mut ids);
+    let (drawn, span_id) = ids.split_at(16);
     let (trace_id, parent) = match line.traceparent.and_then(parse_traceparent) {
-        Some((trace, parent)) => (trace, Some(parent)),
+        Some((trace, parent)) => (TraceId::Given(trace), Some(parent)),
         None => match line.session_id {
-            Some(session) => (session_trace_id(session), None),
-            None => (hex(ids.get(..16).unwrap_or_default()), None),
+            Some(session) => (TraceId::Derived(session_trace_id(session)), None),
+            None => (TraceId::Derived(drawn.try_into().unwrap_or_default()), None),
         },
     };
-    let span_id = hex(ids.get(16..).unwrap_or_default());
     let end_ns = line.unix_ms.saturating_mul(1_000_000);
     let start_ns = end_ns.saturating_sub((line.duration_ms * 1_000_000.0) as u64);
-    let open_span = |buf: &mut Vec<u8>, span_id: &str| {
-        let _ = write!(buf, r#"{{"traceId":"{trace_id}","spanId":"{span_id}","#);
-        if let Some(parent) = &parent {
+    let open_span = |buf: &mut Vec<u8>, span_id: &[u8]| {
+        let _ = write!(
+            buf,
+            r#"{{"traceId":"{trace_id}","spanId":"{}","#,
+            Hex(span_id)
+        );
+        if let Some(parent) = parent {
             let _ = write!(buf, r#""parentSpanId":"{parent}","#);
         }
     };
-    open_span(buf, &span_id);
+    open_span(buf, span_id);
     // The endpoint is one of the API's own, so it needs no escaping.
     let _ = write!(
         buf,
         r#""name":"POST {}","kind":2,"startTimeUnixNano":"{start_ns}","endTimeUnixNano":"{end_ns}","attributes":["#,
         line.endpoint
     );
-    write_record_attributes(buf, line);
+    buf.extend_from_slice(attributes);
     buf.extend_from_slice(br#"],"events":["#);
     if let Some(ms) = line.response_headers_ms {
         let at = start_ns.saturating_add((ms * 1_000_000.0) as u64);
@@ -214,7 +225,7 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
         let mut id = [0u8; 8];
         let _ = random.fill(&mut id);
         buf.push(b',');
-        open_span(buf, &hex(&id));
+        open_span(buf, &id);
         let tool_start = start_ns.saturating_sub(ms.saturating_mul(1_000_000));
         // SPAN_KIND_INTERNAL = 1.
         buf.extend_from_slice(br#""name":"#);
@@ -238,17 +249,46 @@ pub(super) fn write_span(buf: &mut Vec<u8>, line: &Line<'_>, random: &SystemRand
     }
 }
 
+/// A span's trace id: the caller's, from `traceparent`, or 16 bytes Wye
+/// derived from the session or drew.
+enum TraceId<'a> {
+    Given(&'a str),
+    Derived([u8; 16]),
+}
+
+impl fmt::Display for TraceId<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Given(id) => f.write_str(id),
+            Self::Derived(id) => Hex(id).fmt(f),
+        }
+    }
+}
+
+/// Bytes as lowercase hex, written without allocating.
+struct Hex<'a>(&'a [u8]);
+
+impl fmt::Display for Hex<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|b| write!(f, "{b:02x}"))
+    }
+}
+
 /// The trace id of a Claude Code session: the first 16 bytes of
 /// SHA-256(`wye.session` NUL session id), so every replica derives the same id.
-fn session_trace_id(session: &str) -> String {
+fn session_trace_id(session: &str) -> [u8; 16] {
     let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
     ctx.update(b"wye.session\0");
     ctx.update(session.as_bytes());
-    hex(ctx.finish().as_ref().get(..16).unwrap_or_default())
+    ctx.finish()
+        .as_ref()
+        .first_chunk()
+        .copied()
+        .unwrap_or_default()
 }
 
 /// The trace id and parent span id of a valid version-00 `traceparent`.
-fn parse_traceparent(value: &str) -> Option<(String, String)> {
+fn parse_traceparent(value: &str) -> Option<(&str, &str)> {
     let mut parts = value.trim().split('-');
     let (version, trace, parent, flags) =
         (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
@@ -262,11 +302,7 @@ fn parse_traceparent(value: &str) -> Option<(String, String)> {
         && hex_of(flags, 2)
         && trace.bytes().any(|b| b != b'0')
         && parent.bytes().any(|b| b != b'0');
-    valid.then(|| (trace.to_owned(), parent.to_owned()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    valid.then_some((trace, parent))
 }
 
 #[cfg(test)]
@@ -278,10 +314,7 @@ mod tests {
         let valid = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
         assert_eq!(
             parse_traceparent(valid),
-            Some((
-                "4bf92f3577b34da6a3ce929d0e0e4736".into(),
-                "00f067aa0ba902b7".into()
-            ))
+            Some(("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7"))
         );
         for bad in [
             "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -307,8 +340,10 @@ mod tests {
     }
 
     fn spans(line: &Line<'_>) -> Vec<serde_json::Value> {
+        let mut attributes = Vec::new();
+        write_record_attributes(&mut attributes, line);
         let mut buf = vec![b'['];
-        write_span(&mut buf, line, &SystemRandom::new());
+        write_span(&mut buf, line, &attributes, &SystemRandom::new());
         buf.push(b']');
         serde_json::from_slice::<serde_json::Value>(&buf)
             .unwrap()
@@ -324,7 +359,7 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 3, "the request span and two tool spans");
         let trace = first[0]["traceId"].as_str().unwrap();
-        assert_eq!(trace, session_trace_id("s-1"));
+        assert_eq!(trace, Hex(&session_trace_id("s-1")).to_string());
         assert!(second.iter().all(|s| s["traceId"] == trace));
         assert_ne!(first[0]["spanId"], second[0]["spanId"]);
 
@@ -385,7 +420,7 @@ mod tests {
     #[test]
     fn session_trace_ids_are_stable_and_distinct() {
         let a = session_trace_id("s-1");
-        assert_eq!(a.len(), 32);
+        assert_eq!(Hex(&a).to_string().len(), 32);
         assert_eq!(a, session_trace_id("s-1"));
         assert_ne!(a, session_trace_id("s-2"));
     }
