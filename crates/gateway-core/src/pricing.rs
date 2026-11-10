@@ -100,18 +100,19 @@ impl Pricing {
     /// upstream's id): one scoped to the upstream before any unscoped one;
     /// within each, the first match.
     pub fn entry(&self, model: &str, upstream: Option<&str>) -> Option<&PriceEntry> {
-        let for_model = |e: &&PriceEntry| e.models.iter().any(|p| p.matches(model));
-        let scoped = self
+        let mut unscoped = None;
+        for e in self
             .entries
             .iter()
-            .filter(for_model)
-            .find(|e| upstream.is_some_and(|u| e.upstreams.iter().any(|id| &**id == u)));
-        scoped.or_else(|| {
-            self.entries
-                .iter()
-                .filter(for_model)
-                .find(|e| e.upstreams.is_empty())
-        })
+            .filter(|e| e.models.iter().any(|p| p.matches(model)))
+        {
+            if e.upstreams.is_empty() {
+                unscoped = unscoped.or(Some(e));
+            } else if upstream.is_some_and(|u| e.upstreams.iter().any(|id| &**id == u)) {
+                return Some(e);
+            }
+        }
+        unscoped
     }
 
     /// The cost of a response from `model`, served by `upstream`, that
