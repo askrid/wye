@@ -13,7 +13,6 @@
 //! request is forwarded without failover, never refused.
 
 use std::{
-    collections::VecDeque,
     ops::Range,
     pin::Pin,
     task::{Context, Poll},
@@ -31,7 +30,7 @@ use crate::{
 /// What a dropped attempt hands back: the bytes it sent, in order, then the
 /// client's body from where it stopped reading.
 pub(crate) struct Resend<B> {
-    chunks: VecDeque<Bytes>,
+    chunks: Vec<Bytes>,
     rest: Option<B>,
     /// The [`charge`] of the kept chunks, counted against the process-wide
     /// bound.
@@ -60,8 +59,8 @@ impl<B> Resend<RequestBody<B>> {
         let delta = value.len() as i64 - (span.end - span.start) as i64;
         if span.end <= sent {
             let before = charged(&self.chunks);
-            let mut out = VecDeque::with_capacity(self.chunks.len() + 2);
-            splice_chunks(self.chunks.drain(..), span, value, |c| out.push_back(c));
+            let mut out = Vec::with_capacity(self.chunks.len() + 2);
+            splice_chunks(self.chunks.drain(..), span, value, |c| out.push(c));
             self.chunks = out;
             recharge(&mut self.budget, before, charged(&self.chunks));
             self.bytes = self.bytes.saturating_add_signed(delta as isize);
@@ -90,9 +89,11 @@ pub(crate) struct Bounds {
 /// Boxed, and only on routes with failover: hyper keeps request bodies
 /// inline in its per-connection queue, so the body type stays small.
 struct Keep<B> {
-    /// Chunks an earlier attempt sent, sent again first.
-    replay: VecDeque<Bytes>,
-    sent: Vec<Bytes>,
+    /// Every chunk kept, in body order: an earlier attempt's, sent again
+    /// first, then the ones read from the client's body.
+    chunks: Vec<Bytes>,
+    /// The chunks before it were sent by this attempt.
+    next: usize,
     budget: Reserved,
     bytes: usize,
     /// The client's body was read to its end in this attempt.
@@ -127,7 +128,7 @@ impl<B> FailoverBody<B> {
     pub(crate) fn kept(inner: B, kept: &Gauge, bounds: Bounds) -> (Self, Handback<B>) {
         Self::resume(
             Resend {
-                chunks: VecDeque::new(),
+                chunks: Vec::new(),
                 rest: Some(inner),
                 budget: kept.reserve_none(),
                 bytes: 0,
@@ -144,8 +145,8 @@ impl<B> FailoverBody<B> {
             Self {
                 rest: resend.rest,
                 keep: Some(Box::new(Keep {
-                    replay: resend.chunks,
-                    sent: Vec::new(),
+                    chunks: resend.chunks,
+                    next: 0,
                     budget: resend.budget,
                     bytes: resend.bytes,
                     ended: false,
@@ -171,17 +172,16 @@ where
     ) -> Poll<Option<Result<Frame<Bytes>, B::Error>>> {
         let this = self.get_mut();
         if let Some(keep) = this.keep.as_mut()
-            && let Some(chunk) = keep.replay.pop_front()
+            && let Some(chunk) = keep.chunks.get(keep.next).cloned()
         {
             // Already counted when first sent.
-            keep.sent.push(chunk.clone());
+            keep.next += 1;
             return Poll::Ready(Some(Ok(Frame::data(chunk))));
         }
         let Some(rest) = this.rest.as_mut() else {
             return Poll::Ready(None);
         };
         let polled = Pin::new(&mut *rest).poll_frame(cx);
-        let at_end = rest.is_end_stream();
         match &polled {
             Poll::Ready(Some(Ok(frame))) => {
                 if let (Some(data), Some(keep)) = (frame.data_ref(), this.keep.as_mut()) {
@@ -191,8 +191,9 @@ where
                             .try_grow(charge(data.len()), keep.bounds.max_kept);
                     if fits {
                         keep.bytes += data.len();
-                        keep.sent.push(data.clone());
-                        keep.ended = at_end;
+                        keep.chunks.push(data.clone());
+                        keep.next = keep.chunks.len();
+                        keep.ended = rest.is_end_stream();
                     } else {
                         this.keep = None;
                     }
@@ -213,7 +214,7 @@ where
     }
 
     fn is_end_stream(&self) -> bool {
-        self.keep.as_ref().is_none_or(|k| k.replay.is_empty())
+        self.keep.as_ref().is_none_or(|k| k.next == k.chunks.len())
             && self.rest.as_ref().is_none_or(B::is_end_stream)
     }
 
@@ -221,7 +222,7 @@ where
         let replay: u64 = self
             .keep
             .iter()
-            .flat_map(|k| &k.replay)
+            .flat_map(|k| k.chunks.get(k.next..).unwrap_or_default())
             .map(|c| c.len() as u64)
             .sum();
         hint_after(replay, self.rest.as_ref())
@@ -234,17 +235,15 @@ impl<B> Drop for FailoverBody<B> {
             return;
         };
         let Keep {
-            replay,
-            sent,
+            chunks,
+            next,
             budget,
             bytes,
             ended,
             back,
             ..
         } = *keep;
-        let whole = replay.is_empty() && (ended || self.rest.is_none());
-        let mut chunks: VecDeque<Bytes> = sent.into();
-        chunks.extend(replay);
+        let whole = next == chunks.len() && (ended || self.rest.is_none());
         // A receiver gone means the request is answered; the bytes are dropped.
         let _ = back.send(Resend {
             chunks,
