@@ -144,8 +144,6 @@ fn cut(rest: &[u8], room: u64) -> usize {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-
     use wye_testkit::TempDir;
 
     use super::*;

@@ -123,8 +123,6 @@ impl ModelCatalog {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
-
     use gateway_core::config::DiscoveredModel;
 
     use super::*;
