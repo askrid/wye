@@ -84,6 +84,13 @@ pub fn config_path(parsed: &Parsed<'_>, env: &impl Env) -> Result<PathBuf, Strin
     find_config(parsed.value("config"), env, Path::exists)
 }
 
+/// The config a command was given or finds, and where it is.
+pub fn load_config(parsed: &Parsed<'_>, env: &impl Env) -> Result<(PathBuf, Config), String> {
+    let path = config_path(parsed, env)?;
+    let config = load(&path)?;
+    Ok((path, config))
+}
+
 /// The config in the file `path`; errors name the file, which may not be the
 /// one the user had in mind.
 pub fn load(path: &Path) -> Result<Config, String> {

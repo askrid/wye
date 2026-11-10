@@ -113,8 +113,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<(), Error> {
         .transpose()
         .map_err(Error::Usage)?;
     // The config first: one that takes no tokens of Wye's needs no key.
-    let path = files::config_path(parsed, env)?;
-    let config = files::load(&path)?;
+    let (path, config) = files::load_config(parsed, env)?;
     files::named(&path, issuer(&config))?;
     let key = match parsed.value("signing-key") {
         Some(key) => key.into(),

@@ -40,8 +40,7 @@ pub enum CallerToken<'a> {
 /// `wye explain`, from its options: the report, with the config it read, and
 /// whether the request would be forwarded.
 pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, bool), Error> {
-    let path = files::config_path(parsed, env)?;
-    let config = files::load(&path)?;
+    let (path, config) = files::load_config(parsed, env)?;
     let verifier = files::named(
         &path,
         crate::startup::verifier(&config, files::config_dir(&path)),

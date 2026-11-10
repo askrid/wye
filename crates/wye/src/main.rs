@@ -88,21 +88,16 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         }
     };
     let env = |name: &str| std::env::var(name).ok();
-    let config_path = || files::config_path(&parsed, &env);
     match command.id {
         Id::Serve => {
-            let path = config_path()?;
-            serve(
-                files::load(&path)?,
-                &path,
-                parsed.value("usage-log").map(Path::new),
-            )?;
+            let (path, config) = files::load_config(&parsed, &env)?;
+            serve(config, &path, parsed.value("usage-log").map(Path::new))?;
             Ok(0)
         }
         Id::ServiceInstall => {
             service::install(
                 &Context::new(env)?,
-                &config_path()?,
+                &files::config_path(&parsed, &env)?,
                 parsed.flag("yes"),
                 parsed.flag("dry-run"),
             )?;
@@ -126,8 +121,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             Ok(0)
         }
         Id::Doctor => {
-            let path = config_path()?;
-            let config = files::load(&path)?;
+            let (path, config) = files::load_config(&parsed, &env)?;
             // The key `wye token issue` signs with by default, if this
             // machine has one.
             let signing_key = files::home(&env)
@@ -168,8 +162,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
             Ok(act_on(&report, !forwarded))
         }
         Id::PolicyTest => {
-            let path = config_path()?;
-            let config = files::load(&path)?;
+            let (path, config) = files::load_config(&parsed, &env)?;
             // Key sets are files the gateway reads at startup, so CI checks
             // them too; secrets in the environment are `doctor`'s.
             files::named(&path, wye::verifier(&config, files::config_dir(&path)))?;
