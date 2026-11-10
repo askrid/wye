@@ -59,12 +59,12 @@ pub fn size(bytes: u64) -> String {
     }
 }
 
-/// A file's size as people read it: `913 KB`, `4.2 MB`.
+/// A file's size as people read it: `912 KiB`, `4.2 MiB`.
 pub fn file_size(bytes: u64) -> String {
     match bytes {
-        b if b >= 1 << 30 => format!("{:.1} GB", b as f64 / f64::from(1u32 << 30)),
-        b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / f64::from(1u32 << 20)),
-        b if b >= 1 << 10 => format!("{} KB", b >> 10),
+        b if b >= 1 << 30 => format!("{:.1} GiB", b as f64 / f64::from(1u32 << 30)),
+        b if b >= 1 << 20 => format!("{:.1} MiB", b as f64 / f64::from(1u32 << 20)),
+        b if b >= 1 << 10 => format!("{} KiB", b >> 10),
         b => format!("{b} bytes"),
     }
 }
