@@ -189,7 +189,7 @@ Every [invariant](architecture.md#invariants) and [security requirement](policy.
 - [ ] Claude Code and Codex at their target versions, Chat Completions with OpenAI, and each Claude provider pass contract tests against the live service.
 - [ ] The image, the Compose example, and the Helm release need no datastore.
 - [ ] Cost-saving claims are backed by usage, pricing, and task-quality evidence.
-- [x] Model permissions and output-token ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused (`crates/gateway-core/src/policy/tests.rs`, `crates/wye/tests/proxy/gateway_tokens.rs`).
-- [x] `wye explain` answers as `serve` does, word for word, and an endpoint no route serves is refused (`crates/wye/tests/proxy/explain.rs`).
-- [x] Shutdown drains streams within a configured deadline (`crates/wye/tests/proxy/lifecycle.rs`).
+- [x] Model permissions and output-token ceilings read the body as strict UTF-8 JSON, as the provider's parser does; a body another decoder could read differently (another charset, a content encoding, bytes outside JSON, keys differing only in case) is refused (`crates/gateway-core/src/policy/tests.rs`, `crates/wye/tests/gateway/gateway_tokens.rs`).
+- [x] `wye explain` answers as `serve` does, word for word, and an endpoint no route serves is refused (`crates/wye/tests/gateway/explain.rs`).
+- [x] Shutdown drains streams within a configured deadline (`crates/wye/tests/gateway/lifecycle.rs`).
 - [x] `wye claude` and `wye codex` start their agents against the gateway without changing the user's own configuration (`crates/wye/src/cli/wrapper.rs`).

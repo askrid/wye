@@ -61,6 +61,6 @@ if grep -qxE 'README\.md|docs/guide\.md' <<<"$staged"; then
     exit 1
   fi
   cd "$(git rev-parse --show-toplevel)"
-  exec scripts/machine-lock.sh cargo test --locked --quiet -p wye --test proxy \
+  exec scripts/machine-lock.sh cargo test --locked --quiet -p wye --test gateway \
     the_documented_install
 fi

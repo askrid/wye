@@ -1,4 +1,5 @@
-//! End-to-end forwarding tests against a local mock upstream. No network access.
+//! End-to-end tests of the binary and a gateway, against local mock
+//! upstreams. No network access.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

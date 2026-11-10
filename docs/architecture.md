@@ -377,7 +377,7 @@ Bounds operators should not need to tune are compile-time constants, each docume
 9. Only allowlisted request fields are rewritten; a caller's limit is never raised.
 10. Usage observation never alters, delays, or buffers forwarded bytes.
 11. Requests referencing upstream-held state reach the upstream that holds it, or are refused.
-12. Admission, the route, and the upstream are pure functions of request, token, config, and the time, which `serve` and `wye explain` share; explain answers as the gateway does (a `proxy` test sends both the same requests), and replicas agree.
+12. Admission, the route, and the upstream are pure functions of request, token, config, and the time, which `serve` and `wye explain` share; explain answers as the gateway does (a `gateway` test sends both the same requests), and replicas agree.
 
 ## Open design decisions
 

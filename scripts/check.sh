@@ -39,7 +39,7 @@ step() {
   echo "    $name: $((SECONDS - start))s"
 }
 
-# The proxy tests and the benchmark open thousands of sockets (2,000 paced
+# The gateway tests and the benchmark open thousands of sockets (2,000 paced
 # streams, each a client and an upstream connection); macOS allows 256 open
 # files by default.
 if (( $(ulimit -n) < 8192 )); then ulimit -n 8192 2>/dev/null || true; fi

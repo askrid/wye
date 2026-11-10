@@ -58,7 +58,7 @@ jobs:
       # the same pool, and a 7 GB macOS runner has only 96 MB of it.
       - if: runner.os == 'macOS'
         run: sudo sysctl -w net.inet.tcp.autorcvbufmax=131072
-      # The proxy tests open several hundred sockets; macOS allows 256 by default.
+      # The gateway tests open several hundred sockets; macOS allows 256 by default.
       - run: ulimit -n 8192 && cargo test --locked
       # Release builds, including the allocation-counting one the benchmark uses.
       - run: cargo build --locked --release -p wye -p wye-bench
