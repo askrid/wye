@@ -11,7 +11,7 @@ use crate::policy::{self, ModelPattern};
 /// Most aliases in one config: resolution scans them linearly.
 pub const MAX_ALIASES: usize = 256;
 /// Most `when` rules per alias.
-pub const MAX_ALIAS_RULES: usize = 32;
+pub(crate) const MAX_ALIAS_RULES: usize = 32;
 
 #[derive(Debug, Clone)]
 pub struct Alias {

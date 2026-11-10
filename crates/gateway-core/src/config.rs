@@ -22,10 +22,10 @@ pub use upstream::{Provider, ProviderKey, Upstream, UpstreamHttpVersion};
 
 use crate::{
     alias::Aliases,
-    api::{Api, RouteId},
+    api::Api,
     policy::ModelPattern,
     pricing::Pricing,
-    route::Route,
+    route::{Route, RouteId},
 };
 
 /// The default `server.listen`, as a literal for `concat!`: also the
@@ -54,7 +54,7 @@ const DEFAULT_DRAIN_DELAY: Duration = Duration::ZERO;
 const DEFAULT_MAX_GATEWAY_TOKEN_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 /// The longest `max_gateway_token_ttl`, 30 days: tokens cannot be revoked
 /// one by one, so a stolen one is good until it expires.
-pub const MAX_GATEWAY_TOKEN_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
+pub(crate) const MAX_GATEWAY_TOKEN_TTL: Duration = Duration::from_secs(30 * 24 * 3600);
 /// The most open client connections, about a million: Linux's default
 /// ceiling on one process's open files (`fs.nr_open`).
 pub const MAX_CONNECTIONS: usize = 1 << 20;
@@ -144,7 +144,7 @@ impl Routes {
 }
 
 /// Most `upgrade_check.targets`.
-pub const MAX_UPGRADE_TARGETS: usize = 16;
+pub(crate) const MAX_UPGRADE_TARGETS: usize = 16;
 
 /// Upgrade checks on a sample of requests.
 #[derive(Debug, Clone)]
@@ -158,9 +158,9 @@ pub struct UpgradeCheck {
 
 /// Most catalog entries: Claude Code asks for `limit=1000`, and Wye serves
 /// one page.
-pub const MAX_DISCOVERY_MODELS: usize = 1000;
+pub(crate) const MAX_DISCOVERY_MODELS: usize = 1000;
 /// Longest `display_name` or `description`.
-pub const MAX_DISCOVERY_TEXT_BYTES: usize = 1024;
+pub(crate) const MAX_DISCOVERY_TEXT_BYTES: usize = 1024;
 
 /// The model catalog served at `GET /v1/models`, filtered per caller by
 /// model permissions.

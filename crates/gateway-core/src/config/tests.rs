@@ -103,7 +103,10 @@ fn auth_allows_network_listen_and_validates_keys() {
         own.keys[0].thumbprint,
         "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
     );
-    assert_eq!(own.keys[0].encoded(), PUBLIC_KEY);
+    assert_eq!(
+        crate::token::encode_public_key(&own.keys[0].ed25519_public_key),
+        PUBLIC_KEY
+    );
     assert_eq!(
         auth.max_gateway_token_ttl,
         Duration::from_secs(7 * 24 * 3600)

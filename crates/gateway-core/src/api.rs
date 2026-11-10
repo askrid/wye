@@ -1,6 +1,8 @@
 //! The native APIs Wye forwards, and the few things that differ between
 //! them. Requests are never translated from one to the other.
 
+use crate::route::RouteId;
+
 /// A native API, served by its own route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Api {
@@ -45,10 +47,11 @@ impl Api {
     /// The top-level request field that bounds generated tokens, as named
     /// in error messages and diagnostics.
     pub fn output_token_field(self) -> &'static str {
-        self.output_token_fields()
-            .first()
-            .copied()
-            .unwrap_or_default()
+        match self {
+            Self::Messages => "max_tokens",
+            Self::Responses => "max_output_tokens",
+            Self::ChatCompletions => "max_completion_tokens",
+        }
     }
 
     /// Every top-level field that bounds generated tokens: Chat Completions
@@ -66,7 +69,7 @@ impl Api {
     /// field. Anthropic requires `max_tokens`, so the provider rejects such a
     /// request itself; on OpenAI's APIs the field is optional and its absence
     /// means the model's maximum, which no ceiling can allow.
-    pub fn output_token_field_required(self) -> bool {
+    pub(crate) fn output_token_field_required(self) -> bool {
         self != Self::Messages
     }
 
@@ -84,38 +87,6 @@ impl Api {
         match self {
             Self::Messages => RouteId::Claude,
             Self::Responses | Self::ChatCompletions => RouteId::OpenAi,
-        }
-    }
-}
-
-/// A route: the upstreams that serve one provider family's native APIs.
-/// Each `[[upstreams]]` entry serves the route its provider speaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteId {
-    /// Anthropic Messages: providers `anthropic`, `claude-platform-aws`, and
-    /// `bedrock`.
-    Claude,
-    /// OpenAI Responses and Chat Completions: provider `openai`.
-    OpenAi,
-}
-
-impl RouteId {
-    pub const ALL: [Self; 2] = [Self::Claude, Self::OpenAi];
-
-    /// Its name in messages: `the Claude route`.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Claude => "Claude",
-            Self::OpenAi => "OpenAI",
-        }
-    }
-
-    /// The config entry that gives it an upstream, for messages that say
-    /// what to add: an entry without a provider serves Claude.
-    pub fn entry(self) -> &'static str {
-        match self {
-            Self::Claude => "an [[upstreams]] entry",
-            Self::OpenAi => "an [[upstreams]] entry with provider = \"openai\"",
         }
     }
 }

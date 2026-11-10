@@ -61,7 +61,7 @@ pub enum Rule {
 }
 
 impl Rule {
-    pub const ALL: [Rule; 7] = [
+    pub(crate) const ALL: [Rule; 7] = [
         Rule::ThinkingDisabled,
         Rule::BudgetTokens,
         Rule::ForcedToolChoice,

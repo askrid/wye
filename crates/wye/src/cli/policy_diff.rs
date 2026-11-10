@@ -9,10 +9,10 @@
 use std::path::Path;
 
 use gateway_core::{
-    api::RouteId,
     config::{Auth, Config, IdentityProvider, OwnIssuer, ProviderKey, Upstream},
     duration::show,
     policy::ModelPattern,
+    route::RouteId,
 };
 
 use super::{

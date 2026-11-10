@@ -46,7 +46,7 @@ pub struct PublicKey {
 
 impl PublicKey {
     /// A key as config writes it: 32 bytes in unpadded base64url.
-    pub fn decode(encoded: &str) -> Option<Self> {
+    pub(crate) fn decode(encoded: &str) -> Option<Self> {
         let ed25519_public_key = crate::token::decode_public_key(encoded)?;
         Some(Self::new(ed25519_public_key))
     }
@@ -56,11 +56,6 @@ impl PublicKey {
             thumbprint: crate::token::thumbprint(&ed25519_public_key),
             ed25519_public_key,
         }
-    }
-
-    /// The key as config writes it.
-    pub fn encoded(&self) -> String {
-        crate::token::encode_public_key(&self.ed25519_public_key)
     }
 }
 
@@ -96,7 +91,7 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-    pub const ALL: [Self; 3] = [Self::Rs256, Self::Es256, Self::EdDsa];
+    pub(crate) const ALL: [Self; 3] = [Self::Rs256, Self::Es256, Self::EdDsa];
 
     /// The JOSE `alg` name.
     pub fn as_str(self) -> &'static str {

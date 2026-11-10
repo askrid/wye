@@ -51,18 +51,18 @@ pub enum Provider {
 
 impl Provider {
     /// The provider an upstream has unless it names one.
-    pub const DEFAULT: Self = Self::Anthropic;
+    pub(crate) const DEFAULT: Self = Self::Anthropic;
+
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Anthropic,
+        Self::ClaudePlatformAws,
+        Self::Bedrock,
+        Self::OpenAi,
+    ];
 
     /// The provider `name` is in config.
     pub fn parse(name: &str) -> Option<Self> {
-        [
-            Self::Anthropic,
-            Self::ClaudePlatformAws,
-            Self::Bedrock,
-            Self::OpenAi,
-        ]
-        .into_iter()
-        .find(|p| p.as_str() == name)
+        Self::ALL.into_iter().find(|p| p.as_str() == name)
     }
 
     /// The route whose API the provider speaks.
@@ -94,7 +94,7 @@ impl Provider {
 
     /// The base URL of an upstream written without one; `None` where the
     /// URL names a region, so config must.
-    pub fn default_base_url(self) -> Option<&'static str> {
+    pub(crate) fn default_base_url(self) -> Option<&'static str> {
         match self {
             Self::Anthropic => Some("https://api.anthropic.com"),
             Self::OpenAi => Some("https://api.openai.com"),

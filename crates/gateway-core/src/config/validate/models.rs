@@ -126,9 +126,10 @@ pub(super) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
             })
             .collect::<Result<Vec<_>, ConfigError>>()?;
         tiers.sort_by_key(|t| t.above_prompt_tokens);
-        if tiers.windows(2).any(|w| {
-            w.first().map(|t| t.above_prompt_tokens) == w.get(1).map(|t| t.above_prompt_tokens)
-        }) {
+        if tiers
+            .windows(2)
+            .any(|w| matches!(w, [a, b] if a.above_prompt_tokens == b.above_prompt_tokens))
+        {
             return Err(ConfigError::Invalid(
                 "pricing.prices.tiers: duplicate above_prompt_tokens",
             ));

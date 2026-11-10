@@ -21,19 +21,19 @@ use crate::api::Api;
 
 /// Longest usage-bearing data line kept. Larger events mark usage unknown
 /// instead of growing memory.
-pub const MAX_USAGE_LINE_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_USAGE_LINE_BYTES: usize = 64 * 1024;
 /// Bytes kept from lines of other events: enough to recognize `event:` lines.
 const CLASSIFY_PREFIX_BYTES: usize = 32;
 /// Longest `content_block_start` data line read; a `tool_use` start carries
 /// an empty `input`, so longer lines are other block types and are skipped.
 const MAX_BLOCK_START_LINE_BYTES: usize = 4 * 1024;
 /// Distinct tool names counted per response; further ones count as overflow.
-pub const MAX_TOOL_NAMES: usize = 8;
+pub(crate) const MAX_TOOL_NAMES: usize = 8;
 /// Longest tool name counted by name.
-pub const MAX_TOOL_NAME_BYTES: usize = 64;
+pub(crate) const MAX_TOOL_NAME_BYTES: usize = 64;
 /// Longest model name kept from a response. Every record, OTLP batch, and
 /// metric series carries it, so a longer one is dropped.
-pub const MAX_RECORDED_MODEL_BYTES: usize = 128;
+pub(crate) const MAX_RECORDED_MODEL_BYTES: usize = 128;
 
 /// Records `model` when it fits [`MAX_RECORDED_MODEL_BYTES`], allocating
 /// only when it differs from the model already recorded: streams repeat it.

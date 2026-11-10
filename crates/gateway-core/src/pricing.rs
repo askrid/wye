@@ -13,9 +13,9 @@ use crate::{policy::ModelPattern, usage::Usage};
 pub type Pico = u64;
 
 /// Most `[[pricing.prices]]` entries.
-pub const MAX_PRICE_ENTRIES: usize = 256;
+pub(crate) const MAX_PRICE_ENTRIES: usize = 256;
 /// Most tiers per entry.
-pub const MAX_TIERS: usize = 8;
+pub(crate) const MAX_TIERS: usize = 8;
 
 /// Prices for one set of models, per token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

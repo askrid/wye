@@ -16,9 +16,9 @@ use xxhash_rust::xxh3::{xxh3_64, xxh3_64_with_seed};
 use crate::config::Upstream;
 
 /// Most upstreams in a route.
-pub const MAX_UPSTREAMS: usize = 16;
+pub(crate) const MAX_UPSTREAMS: usize = 16;
 /// Largest `weight`.
-pub const MAX_WEIGHT: u32 = 1000;
+pub(crate) const MAX_WEIGHT: u32 = 1000;
 
 /// Largest request body a route with several upstreams keeps for
 /// resending: larger ones go without failover. A Claude Code turn is 1-8 MB.
@@ -92,6 +92,38 @@ impl Ranking {
 /// sampling takes such requests only at 100%.
 pub fn affinity_key<'k>(session: Option<&'k [u8]>, subject: Option<&'k str>) -> Option<&'k [u8]> {
     session.or(subject.map(str::as_bytes))
+}
+
+/// A route: the upstreams that serve one provider family's native APIs.
+/// Each `[[upstreams]]` entry serves the route its provider speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteId {
+    /// Anthropic Messages: providers `anthropic`, `claude-platform-aws`, and
+    /// `bedrock`.
+    Claude,
+    /// OpenAI Responses and Chat Completions: provider `openai`.
+    OpenAi,
+}
+
+impl RouteId {
+    pub const ALL: [Self; 2] = [Self::Claude, Self::OpenAi];
+
+    /// Its name in messages: `the Claude route`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::OpenAi => "OpenAI",
+        }
+    }
+
+    /// The config entry that gives it an upstream, for messages that say
+    /// what to add: an entry without a provider serves Claude.
+    pub fn entry(self) -> &'static str {
+        match self {
+            Self::Claude => "an [[upstreams]] entry",
+            Self::OpenAi => "an [[upstreams]] entry with provider = \"openai\"",
+        }
+    }
 }
 
 /// The upstreams that serve one API, and how a request picks one.

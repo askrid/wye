@@ -24,7 +24,7 @@ pub const MAX_MODEL_BYTES: usize = 256;
 /// A name a client can send and a permission can match exactly: what the
 /// policy scanner accepts as `model` (no escapes, so no `"` or `\`). Model
 /// names in config (aliases, discovery ids, upgrade targets) must be one.
-pub fn is_model_name(name: &str) -> bool {
+pub(crate) fn is_model_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_MODEL_BYTES
         && !name.contains(['*', '"', '\\'])
