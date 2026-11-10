@@ -160,7 +160,7 @@ macro_rules! say {
 pub(crate) use say;
 
 /// Creates `dir` if missing, readable only by its owner: it holds keys.
-fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
+fn create_private_dir(dir: &Path) -> Result<(), String> {
     let mut builder = std::fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
@@ -170,9 +170,17 @@ fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
         .map_err(|e| format!("cannot create {}: {e}", dir.display()))
 }
 
-/// Writes a secret to a new file only its owner can read, making the
-/// directory if it is missing; never over an existing file.
-pub fn write_secret(path: &std::path::Path, text: &str) -> Result<(), String> {
+/// Writes `text` to the new file `path`, never over an existing one (or
+/// through a symlink), making its directory, readable only by you, if it is
+/// missing. A `secret` file is readable only by you too. Errors show the
+/// path with `show`, and name `flag` as the way to choose another.
+fn write_new(
+    path: &Path,
+    text: &str,
+    secret: bool,
+    flag: &str,
+    show: &dyn Fn(&Path) -> String,
+) -> Result<(), String> {
     use std::io::Write;
 
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
@@ -180,15 +188,17 @@ pub fn write_secret(path: &std::path::Path, text: &str) -> Result<(), String> {
     }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
+    // 0o666, less the umask, is what a file gets by default.
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, if secret { 0o600 } else { 0o666 });
     let mut file = options.open(path).map_err(|e| match e.kind() {
         std::io::ErrorKind::AlreadyExists => {
-            format!("{} exists; choose another path with --out", path.display())
+            format!("{} exists; choose another path with {flag}", show(path))
         }
-        _ => format!("cannot create {}: {e}", path.display()),
+        _ => format!("cannot create {}: {e}", show(path)),
     })?;
-    writeln!(file, "{text}").map_err(|e| format!("cannot write {}: {e}", path.display()))
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("cannot write {}: {e}", show(path)))
 }
 
 /// An error with its causes, which carry the useful part (refused,

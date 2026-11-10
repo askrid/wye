@@ -41,7 +41,8 @@ pub fn new_key(path: &Path) -> Result<Ed25519KeyPair, String> {
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
         .map_err(|_| "cannot generate a key")?;
     let key = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).map_err(|_| "generated key invalid")?;
-    super::write_secret(path, &B64.encode(pkcs8.as_ref()))?;
+    let line = format!("{}\n", B64.encode(pkcs8.as_ref()));
+    super::write_new(path, &line, true, "--out", &|p| p.display().to_string())?;
     Ok(key)
 }
 
@@ -140,7 +141,10 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let issued = files::named(&path, issue(&request, &key, &config, super::unix_secs()?))?;
     match parsed.value("out") {
         Some(out) => {
-            super::write_secret(Path::new(out), &issued)?;
+            let line = format!("{issued}\n");
+            super::write_new(Path::new(out), &line, true, "--out", &|p| {
+                p.display().to_string()
+            })?;
             super::tell(&format!("Wrote {out}, readable only by you\n"));
         }
         None => emit(&format!("{issued}\n")),

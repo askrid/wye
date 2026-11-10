@@ -4,10 +4,7 @@
 //! The config is validated before it is written, an existing file is never
 //! overwritten, and the next commands are printed.
 
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use gateway_core::config::Config;
 
@@ -16,7 +13,7 @@ use super::{
     args::Parsed,
     files::{self, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
     text::plural,
-    token,
+    token, write_new,
 };
 
 /// The setup `wye init` writes (the glossary's term), from two choices: who
@@ -346,10 +343,7 @@ pub fn init(options: &InitOptions, env: &impl Env) -> Result<String, String> {
         String::new()
     };
     let text = options.config(&public_key)?;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        super::create_private_dir(dir)?;
-    }
-    write_new(path, &text, &show)?;
+    write_new(path, &text, false, "-c", &show)?;
     let mut done = format!("Wrote {}", show(path));
     if let Some(key) = wrote_key {
         done.push_str(&format!(
@@ -394,27 +388,11 @@ fn write_samples(
             kept.push(sample.name);
             continue;
         }
-        write_new(&request, sample.request, show)?;
-        write_new(&expect, &sample.expect, show)?;
+        write_new(&request, sample.request, false, "-c", show)?;
+        write_new(&expect, &sample.expect, false, "-c", show)?;
         wrote.push(sample.name);
     }
     Ok((wrote, kept))
-}
-
-/// Writes `text` to the new file `path`, never over an existing one.
-fn write_new(path: &Path, text: &str, show: &impl Fn(&Path) -> String) -> Result<(), String> {
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => {
-                format!("{} exists; choose another path with -c", show(path))
-            }
-            _ => format!("cannot create {}: {e}", show(path)),
-        })?;
-    file.write_all(text.as_bytes())
-        .map_err(|e| format!("cannot write {}: {e}", show(path)))
 }
 
 #[cfg(test)]
