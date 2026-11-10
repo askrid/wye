@@ -35,7 +35,7 @@ impl Manager {
             Ok(Self::Systemd)
         } else {
             Err(
-                "wye service knows macOS (launchd) and Linux (systemd); elsewhere, run \
+                "`wye service` knows macOS (launchd) and Linux (systemd); elsewhere, run \
                  `wye serve` under your own service manager"
                     .into(),
             )
@@ -314,7 +314,7 @@ pub(super) fn plan(
 ) -> String {
     let mut out = crate::cli::text::wrap(
         &format!(
-            "wye service install sets up the gateway as {}: {} No sudo; nothing outside \
+            "`wye service install` sets up the gateway as {}: {} No sudo; nothing outside \
              your home directory changes.",
             manager.kind(),
             manager.promise()
@@ -356,7 +356,7 @@ pub(super) fn uninstall_plan(
     show: &dyn Fn(&Path) -> String,
 ) -> String {
     let mut out = crate::cli::text::wrap(
-        "wye service uninstall stops the background gateway and removes its service \
+        "`wye service uninstall` stops the background gateway and removes its service \
          definition; your files stay.",
         0,
     );

@@ -80,7 +80,7 @@ pub fn run_keygen(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     };
     let key = new_key(&out)?;
     super::tell(&format!(
-        "wrote {} (keep it secret, outside the gateway); add its public half to \
+        "Wrote {} (keep it secret, outside the gateway); add its public half to \
          wye.toml, under [auth] (when rotating, after the keys already in \
          signing_keys, until their tokens expire):\n",
         files::tilde(&out, env),
@@ -141,7 +141,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     match parsed.value("out") {
         Some(out) => {
             super::write_secret(Path::new(out), &issued)?;
-            eprintln!("wrote {out}, readable only by you");
+            super::tell(&format!("Wrote {out}, readable only by you\n"));
         }
         None => emit(&format!("{issued}\n")),
     }

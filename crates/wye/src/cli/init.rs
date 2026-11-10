@@ -350,7 +350,7 @@ pub fn init(options: &InitOptions, env: &impl Env) -> Result<String, String> {
         super::create_private_dir(dir)?;
     }
     write_new(path, &text, &show)?;
-    let mut done = format!("wrote {}", show(path));
+    let mut done = format!("Wrote {}", show(path));
     if let Some(key) = wrote_key {
         done.push_str(&format!(
             ", and the signing key {} (keep it out of Git)",
@@ -361,7 +361,7 @@ pub fn init(options: &InitOptions, env: &impl Env) -> Result<String, String> {
     let (wrote, kept) = write_samples(&dir, &options.samples(), &show)?;
     if !wrote.is_empty() {
         done.push_str(&format!(
-            "\nwrote {} in {}, for `wye policy-test{}`",
+            "\nWrote {} in {}, for `wye policy-test{}`",
             plural(wrote.len() as u64, "policy test", "policy tests"),
             show(&dir),
             options.config_flag()
@@ -369,7 +369,7 @@ pub fn init(options: &InitOptions, env: &impl Env) -> Result<String, String> {
     }
     if !kept.is_empty() {
         done.push_str(&format!(
-            "\nkept the policy tests in {} that exist: {}",
+            "\nKept the policy tests in {} that exist: {}",
             show(&dir),
             kept.join(", ")
         ));
@@ -411,7 +411,7 @@ fn write_new(path: &Path, text: &str, show: &impl Fn(&Path) -> String) -> Result
             std::io::ErrorKind::AlreadyExists => {
                 format!("{} exists; choose another path with -c", show(path))
             }
-            _ => format!("cannot write {}: {e}", show(path)),
+            _ => format!("cannot create {}: {e}", show(path)),
         })?;
     file.write_all(text.as_bytes())
         .map_err(|e| format!("cannot write {}: {e}", show(path)))
@@ -489,7 +489,7 @@ mod tests {
         assert!(!printed.contains(", and the signing key"), "{printed}");
         assert!(printed.contains("\n     wye doctor -c "), "{printed}");
         assert!(
-            printed.contains("kept the policy tests in ")
+            printed.contains("Kept the policy tests in ")
                 && printed.contains(" that exist: messages, no-token\n"),
             "{printed}"
         );
@@ -550,7 +550,7 @@ mod tests {
                 // The config is where the lookup finds it: no -c.
                 assert!(
                     printed.contains(&format!(
-                        "\nwrote {} in {}, for `wye policy-test`\n",
+                        "\nWrote {} in {}, for `wye policy-test`\n",
                         plural(cases as u64, "policy test", "policy tests"),
                         dir.join("policy-tests").display(),
                     )),
@@ -574,7 +574,7 @@ mod tests {
         let options = options(Setup::Passthrough, true, &dir.join("wye.toml"));
         let printed = init(&options, &|_: &str| None).unwrap();
         assert!(printed.contains(" that exist: messages\n"), "{printed}");
-        assert!(printed.contains("\nwrote 1 policy test in "), "{printed}");
+        assert!(printed.contains("\nWrote 1 policy test in "), "{printed}");
         assert!(!cases.join("messages.json").exists());
         assert_eq!(
             std::fs::read_to_string(cases.join("messages.expect.toml")).unwrap(),

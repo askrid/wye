@@ -131,7 +131,7 @@ impl Context {
             Installed::Ours(service) => Ok(service),
             Installed::None => Err("not installed; `wye service install` sets it up".into()),
             Installed::Foreign => Err(format!(
-                "{} was not written by wye service install, so it is left alone; \
+                "{} was not written by `wye service install`, so it is left alone; \
                  `wye service install` offers to replace it",
                 (self.show)(&self.file())
             )),
@@ -167,7 +167,7 @@ pub fn install(parsed: &Parsed<'_>, env: &(impl Env + Clone + 'static)) -> Resul
     // as `wye serve` in a terminal: the service could not take its port.
     if !replacing && probe(&url).is_ok() {
         return Err(format!(
-            "a gateway already answers at {url} (a wye serve in a terminal?); stop it first"
+            "a gateway already answers at {url} (a `wye serve` in a terminal?); stop it first"
         )
         .into());
     }
@@ -183,7 +183,7 @@ pub fn install(parsed: &Parsed<'_>, env: &(impl Env + Clone + 'static)) -> Resul
     ));
     if matches!(installed, Installed::Foreign) {
         say!(
-            "{} was not written by wye service install; it is replaced.",
+            "{} was not written by `wye service install`; it is replaced.",
             show(&file)
         );
     }
@@ -263,7 +263,7 @@ pub fn status(env: &(impl Env + Clone + 'static)) -> Result<Exit, Error> {
         }
         Installed::Foreign => {
             say!(
-                "{} exists but was not written by wye service install; \
+                "{} exists but was not written by `wye service install`; \
                  `wye service install` offers to replace it.",
                 show(&context.file())
             );

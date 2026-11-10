@@ -521,7 +521,7 @@ fn the_defaults_work_on_a_fresh_home() {
     let keygen = run(&["token", "keygen"]);
     assert!(keygen.status.success(), "{}", err(&keygen));
     assert!(
-        err(&keygen).starts_with("wrote ~/.wye/signing.key "),
+        err(&keygen).starts_with("Wrote ~/.wye/signing.key "),
         "{}",
         err(&keygen)
     );
@@ -546,8 +546,8 @@ fn the_defaults_work_on_a_fresh_home() {
     assert!(init.status.success(), "{}", err(&init));
     assert!(
         err(&init).starts_with(
-            "wrote ~/.wye/wye.toml\n\
-             wrote 1 policy test in ~/.wye/policy-tests, for `wye policy-test`\n"
+            "Wrote ~/.wye/wye.toml\n\
+             Wrote 1 policy test in ~/.wye/policy-tests, for `wye policy-test`\n"
         ),
         "{}",
         err(&init)
@@ -598,7 +598,7 @@ fn the_defaults_work_on_a_fresh_home() {
     assert!(shared.status.success(), "{}", err(&shared));
     assert!(
         err(&shared).contains(
-            "\nwrote 2 policy tests in policy-tests, for `wye policy-test -c wye.toml`\n"
+            "\nWrote 2 policy tests in policy-tests, for `wye policy-test -c wye.toml`\n"
         ),
         "{}",
         err(&shared)
