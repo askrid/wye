@@ -226,7 +226,9 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
    and part into ten streams, as thick as their weights; one thread leaves
    in the accent. It fades out from the dot, so it has no edges. Drawn once,
    in em, so it scales with the headline and stays on its period; behind the
-   text, and clipped at the window's edges (html). */
+   text, and clipped at the window's edges (html). It reaches past the
+   headline, over the header's links; no layer of it takes the pointer, so
+   what lies under it stays clickable. */
 html, body { overflow-x: clip; }
 .period { position: relative; display: inline-block; width: 0.26em; height: 0.26em; margin-left: 0.04em; }
 .period :is(svg, canvas) {
@@ -236,6 +238,7 @@ html, body { overflow-x: clip; }
   top: calc(0.13em - 3.571em);
   width: 17.857em;
   height: 7.143em;
+  pointer-events: none;
 }
 /* The fade is the strokes' own paint, a gradient from the dot to nothing
    before the drawing's edges; the canvas's shaders draw the same fade
@@ -247,10 +250,7 @@ html, body { overflow-x: clip; }
 .period stop.end { stop-opacity: 0; }
 .period circle { fill: var(--ink); }
 /* Nothing here moves by itself. A string the reader plucks rings on the
-   canvas over the drawing (assets/strings.js), drawn only while it moves.
-   The drawing reaches past the headline, over the header's links; neither
-   layer takes the pointer, so what lies under it stays clickable. */
-.period :is(svg, canvas) { pointer-events: none; }
+   canvas over the drawing (assets/strings.js), drawn only while it moves. */
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,
@@ -325,7 +325,7 @@ html, body { overflow-x: clip; }
    failing over. */
 .token, .routes, .check { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; min-width: 0; }
 /* Literal data sits in a panel, as code does; drawings stand bare. */
-.token { padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
+.token, .lines, pre.code { padding: 1.1875rem 1.4375rem; background: var(--ground); border-left: 2px solid var(--rule); }
 /* Lines that must keep their shape scroll in their own box on a phone. */
 .jwt, .claims { margin: 0; font-family: var(--mono); font-size: var(--output); line-height: 1.6; }
 .jwt { color: var(--graphite); white-space: pre-wrap; word-break: break-all; max-width: 62ch; }
@@ -340,14 +340,11 @@ html, body { overflow-x: clip; }
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   column-gap: 2.5rem;
-  padding: 1.1875rem 1.4375rem;
-  background: var(--ground);
-  border-left: 2px solid var(--rule);
   font-family: var(--mono);
   font-size: var(--output);
   line-height: 1.65;
 }
-.lines code { font: inherit; color: var(--ink); white-space: pre; }
+.lines code { font: inherit; white-space: pre; }
 .lines .n { color: var(--graphite); }
 @media (max-width: 40rem) {
   .lines { grid-template-columns: minmax(0, 1fr); overflow-x: auto; padding-inline: 1rem; }
@@ -359,7 +356,7 @@ html, body { overflow-x: clip; }
 .apis td { padding: 0.6rem 1.5rem 0.6rem 0; border-bottom: 1px dashed var(--rule); color: var(--graphite); vertical-align: baseline; }
 .apis tr:first-child td { border-top: 1px dashed var(--rule); }
 .apis td:first-child { width: 1%; white-space: nowrap; }
-.apis code { color: var(--ink); font-size: 1em; }
+.apis code { font-size: 1em; }
 /* On a phone each endpoint stands over its clients. */
 @media (max-width: 40rem) {
   .apis tr { display: grid; padding-block: 0.6rem; border-bottom: 1px dashed var(--rule); }
@@ -436,17 +433,13 @@ html, body { overflow-x: clip; }
 pre.code {
   width: 100%;
   margin: 0;
-  padding: 1.1875rem 1.4375rem;
   overflow-x: auto;
-  background: var(--ground);
-  border-left: 2px solid var(--rule);
   font-family: var(--mono);
   font-size: var(--output);
   line-height: 1.65;
   tab-size: 4;
 }
 pre.code code { font: inherit; }
-.code .prompt { color: var(--ink); }
 .code .c { color: var(--graphite); }
 .code .t { color: var(--ink); font-weight: 600; }
 /* Config and JSON keys recede, so the values lead. */
