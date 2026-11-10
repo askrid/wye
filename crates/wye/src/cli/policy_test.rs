@@ -86,16 +86,11 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
 /// Runs every case in `dir` at Unix time `now`; returns the report and
 /// whether all cases passed.
 pub fn policy_test(config: &Config, dir: &Path, now: u64) -> Result<(String, bool), String> {
-    let mut cases: Vec<_> = match std::fs::read_dir(dir) {
-        Ok(entries) => entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "json"))
-            .collect(),
+    let cases = match files::json_files(dir) {
+        Ok(cases) => cases,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(format!("{}: {e}", dir.display())),
     };
-    cases.sort();
     if cases.is_empty() {
         return Err(format!(
             "no policy tests in {}: write <name>.json and <name>.expect.toml there \

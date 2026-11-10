@@ -117,13 +117,10 @@ pub fn request_headers(
 /// sample `wye init` wrote next to the config when there is one.
 fn missing_request(flag: Option<&str>, config: &Path, env: &impl Env) -> String {
     let samples = files::config_dir(config).join(files::POLICY_TESTS_DIR);
-    let sample = std::fs::read_dir(&samples)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| Some(entry.ok()?.path()))
-        .filter(|path| path.extension().is_some_and(|e| e == "json"))
-        .min();
-    match sample {
+    match files::json_files(&samples)
+        .ok()
+        .and_then(|f| f.into_iter().next())
+    {
         Some(sample) => {
             let c = flag.map_or(String::new(), |path| format!(" -c {path}"));
             format!(

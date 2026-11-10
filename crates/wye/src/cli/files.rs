@@ -109,6 +109,16 @@ pub fn config_dir(path: &Path) -> &Path {
     path.parent().unwrap_or(Path::new("."))
 }
 
+/// The `*.json` files in `dir`, in order: policy tests' requests.
+pub fn json_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .filter(|path| path.extension().is_some_and(|e| e == "json"))
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 /// The gateway token a client presents: the one in the file `token_file`
 /// (`--token-file`), else the one in `$WYE_TOKEN`, where an empty one is an
 /// error rather than no token.
