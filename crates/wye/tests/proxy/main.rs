@@ -19,6 +19,7 @@ mod lifecycle;
 mod openai;
 mod routes;
 mod streaming;
+mod telemetry;
 mod tls;
 mod usage_log;
 mod web_pages;
