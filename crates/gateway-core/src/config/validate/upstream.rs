@@ -80,7 +80,7 @@ pub(crate) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigErr
         }
     }
     let mut upstreams: Vec<Upstream> = Vec::with_capacity(raw.len());
-    for (mut entry, provider) in raw.into_iter().zip(providers.iter().copied()) {
+    for (entry, provider) in raw.into_iter().zip(providers.iter().copied()) {
         // The provider's name tells an upstream apart from the others unless
         // they share its provider.
         let shared = providers.iter().filter(|&&p| p == provider).count() > 1;
@@ -89,12 +89,12 @@ pub(crate) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigErr
                 "upstreams: entries that share a provider each need an id",
             ));
         }
-        let entry_id = entry
+        let id = entry
             .id
-            .take()
+            .clone()
             .unwrap_or_else(|| provider.as_str().to_owned());
         let in_entry = |error| ConfigError::Upstream {
-            id: entry_id.clone(),
+            id: id.clone(),
             error: Box::new(error),
         };
         // Only a route's only upstream may forward the caller's credential:
@@ -110,57 +110,17 @@ pub(crate) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigErr
                  upstreams use their own provider keys",
             )));
         }
-        if !is_upstream_id(&entry_id) {
+        if !is_upstream_id(&id) {
             return Err(in_entry(ConfigError::Invalid(
                 "id must be 1-64 letters, digits, '.', '_', or '-'",
             )));
         }
         // Ids name an upstream in usage records and price entries, across
         // routes.
-        if upstreams.iter().any(|u| *u.id == *entry_id) {
+        if upstreams.iter().any(|u| *u.id == *id) {
             return Err(in_entry(ConfigError::Invalid("id is used twice")));
         }
-        let workspace_id = match (provider, entry.workspace_id.take()) {
-            (Provider::ClaudePlatformAws, Some(id)) if is_workspace_id(&id) => Some(id.into()),
-            (Provider::ClaudePlatformAws, Some(_)) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "workspace_id must be wrkspc_ followed by letters and digits",
-                )));
-            }
-            (Provider::ClaudePlatformAws, None) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "claude-platform-aws needs workspace_id: every request names its workspace",
-                )));
-            }
-            (_, Some(_)) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "workspace_id belongs to provider \"claude-platform-aws\" only",
-                )));
-            }
-            (_, None) => None,
-        };
-        let weight = match (entry.weight, entry.standby) {
-            (None, _) => 1,
-            (Some(_), true) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "weight does not apply to a standby: standbys take failover in config \
-                     order",
-                )));
-            }
-            (Some(w @ 1..=MAX_WEIGHT), false) => w,
-            (Some(_), false) => {
-                return Err(in_entry(ConfigError::Invalid(
-                    "weight must be between 1 and 1000",
-                )));
-            }
-        };
-        let standby = entry.standby;
-        let mut upstream = validate_upstream(entry, provider, alone).map_err(in_entry)?;
-        upstream.id = entry_id.into();
-        upstream.weight = weight;
-        upstream.standby = standby;
-        upstream.workspace_id = workspace_id;
-        upstreams.push(upstream);
+        upstreams.push(validate_upstream(entry, provider, &id, alone).map_err(in_entry)?);
     }
     let (claude, openai): (Vec<_>, Vec<_>) = upstreams
         .into_iter()
@@ -187,13 +147,46 @@ fn is_upstream_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// One upstream's address, credential, and timers; `can_forward` when
-/// forward_caller_credential is one of its credential choices.
+/// The upstream `id`, from one `[[upstreams]]` entry of `provider`;
+/// `can_forward` when forward_caller_credential is one of its choices of
+/// provider key.
 fn validate_upstream(
     raw: RawUpstream,
     provider: Provider,
+    id: &str,
     can_forward: bool,
 ) -> Result<Upstream, ConfigError> {
+    let workspace_id = match (provider, raw.workspace_id) {
+        (Provider::ClaudePlatformAws, Some(ws)) if is_workspace_id(&ws) => Some(ws.into()),
+        (Provider::ClaudePlatformAws, Some(_)) => {
+            return Err(ConfigError::Invalid(
+                "workspace_id must be wrkspc_ followed by letters and digits",
+            ));
+        }
+        (Provider::ClaudePlatformAws, None) => {
+            return Err(ConfigError::Invalid(
+                "claude-platform-aws needs workspace_id: every request names its workspace",
+            ));
+        }
+        (_, Some(_)) => {
+            return Err(ConfigError::Invalid(
+                "workspace_id belongs to provider \"claude-platform-aws\" only",
+            ));
+        }
+        (_, None) => None,
+    };
+    let weight = match (raw.weight, raw.standby) {
+        (None, _) => 1,
+        (Some(_), true) => {
+            return Err(ConfigError::Invalid(
+                "weight does not apply to a standby: standbys take failover in config order",
+            ));
+        }
+        (Some(w @ 1..=MAX_WEIGHT), false) => w,
+        (Some(_), false) => {
+            return Err(ConfigError::Invalid("weight must be between 1 and 1000"));
+        }
+    };
     let provider_key = match (raw.provider_key, raw.forward_caller_credential) {
         (Some(secret), false) => ProviderKey::Secret(validate_secret(secret, "provider_key")?),
         (None, true) => ProviderKey::ForwardCaller,
@@ -227,13 +220,20 @@ fn validate_upstream(
             }));
         }
     };
-    let (scheme, authority, path_prefix) = parse_base_url("base_url", &base_url)?;
+    let (scheme, authority, path_prefix) = parse_url("base_url", &base_url)?;
+    if path_prefix.ends_with("/v1") {
+        return Err(ConfigError::InvalidUrl {
+            field: "base_url",
+            url: base_url,
+            reason: "drop the trailing /v1: Wye forwards the client's /v1/... path after it",
+        });
+    }
     Ok(Upstream {
-        id: "".into(),
-        weight: 1,
-        standby: false,
+        id: id.into(),
+        weight,
+        standby: raw.standby,
         provider,
-        workspace_id: None,
+        workspace_id,
         scheme,
         authority,
         path_prefix,
@@ -272,23 +272,4 @@ fn validate_upstream(
             "stream_idle_timeout",
         )?,
     })
-}
-
-/// `field` names the base URL in errors.
-fn parse_base_url(
-    field: &'static str,
-    url: &str,
-) -> Result<(Scheme, Authority, String), ConfigError> {
-    let invalid = |reason| ConfigError::InvalidUrl {
-        field,
-        url: url.to_owned(),
-        reason,
-    };
-    let (scheme, authority, path_prefix) = parse_url(field, url)?;
-    if path_prefix.ends_with("/v1") {
-        return Err(invalid(
-            "drop the trailing /v1: Wye forwards the client's /v1/... path after it",
-        ));
-    }
-    Ok((scheme, authority, path_prefix))
 }
