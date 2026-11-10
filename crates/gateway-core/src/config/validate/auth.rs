@@ -1,46 +1,42 @@
 //! `[auth]`: Wye's own signing keys and the identity providers.
 
-use std::path::PathBuf;
-
-use serde::Deserialize;
-
 use super::*;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawAuth {
-    pub(crate) audience: Option<String>,
-    pub(crate) max_gateway_token_ttl: Option<String>,
+pub(super) struct RawAuth {
+    audience: Option<String>,
+    max_gateway_token_ttl: Option<String>,
     /// Ed25519 public keys, unpadded base64url.
     #[serde(default)]
-    pub(crate) signing_keys: Vec<String>,
+    signing_keys: Vec<String>,
     #[serde(default)]
-    pub(crate) identity_providers: Vec<RawIdentityProvider>,
-    pub(crate) models: Option<Vec<String>>,
-    pub(crate) max_output_tokens: Option<u64>,
+    identity_providers: Vec<RawIdentityProvider>,
+    models: Option<Vec<String>>,
+    max_output_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawIdentityProvider {
-    pub(crate) issuer: String,
-    pub(crate) audience: String,
-    pub(crate) algorithm: String,
-    pub(crate) jwks_file: PathBuf,
-    pub(crate) subject_claim: Option<String>,
+struct RawIdentityProvider {
+    issuer: String,
+    audience: String,
+    algorithm: String,
+    jwks_file: PathBuf,
+    subject_claim: Option<String>,
     #[serde(default)]
-    pub(crate) grants: Vec<RawGrant>,
+    grants: Vec<RawGrant>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawGrant {
-    pub(crate) claim: String,
-    pub(crate) value: String,
-    pub(crate) models: Vec<String>,
+struct RawGrant {
+    claim: String,
+    value: String,
+    models: Vec<String>,
 }
 
-pub(crate) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
+pub(super) fn validate_auth(raw: RawAuth) -> Result<Auth, ConfigError> {
     let err = |msg: String| ConfigError::Auth(msg);
     let own = match (raw.audience, raw.signing_keys.is_empty()) {
         (None, true) => None,

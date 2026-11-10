@@ -27,11 +27,6 @@ use crate::{
     pricing::Pricing,
     route::Route,
 };
-use validate::{
-    RawConfig, sample_percent, validate_aliases, validate_auth, validate_discovery,
-    validate_pricing, validate_routes, validate_secret, validate_server, validate_telemetry,
-    validate_upgrade_check,
-};
 
 /// The default `server.listen`, as a literal for `concat!`: also the
 /// gateway the CLI's clients use without `--url` or `$WYE_URL`.
@@ -356,61 +351,9 @@ pub fn is_cleartext_remote(uri: &Uri) -> bool {
 impl Config {
     /// Parses and validates a TOML document.
     pub fn from_toml_str(source: &str) -> Result<Self, ConfigError> {
-        let raw: RawConfig =
-            toml::from_str(source).map_err(|e| ConfigError::Parse(e.to_string()))?;
-        let auth = raw.auth.map(validate_auth).transpose()?;
-        let routes = validate_routes(raw.upstreams)?;
-        if auth.is_some()
-            && routes
-                .upstreams()
-                .any(|u| u.provider_key == ProviderKey::ForwardCaller)
-        {
-            return Err(ConfigError::Auth(
-                "cannot be combined with forward_caller_credential: the caller's \
-                 credential would be the gateway token, not a provider key"
-                    .into(),
-            ));
-        }
-        let cache_diagnostics = raw
-            .cache_diagnostics
-            .map(|raw| {
-                Ok(CacheDiagnostics {
-                    sample_percent: sample_percent(
-                        raw.sample_percent,
-                        "cache_diagnostics.sample_percent",
-                    )?,
-                    hash_key: validate_secret(raw.hash_key, "cache_diagnostics.hash_key")?,
-                })
-            })
-            .transpose()?;
-        let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
-        let discovery = raw.discovery.map(validate_discovery).transpose()?;
-        let aliases = validate_aliases(raw.aliases)?;
-        let pricing = raw.pricing.map(validate_pricing).transpose()?;
-        // A price scoped to an upstream the config does not have would never apply.
-        if let Some(pricing) = &pricing
-            && pricing
-                .entries
-                .iter()
-                .flat_map(|e| &e.upstreams)
-                .any(|id| !routes.upstreams().any(|u| u.id == *id))
-        {
-            return Err(ConfigError::Invalid(
-                "pricing.prices.upstreams: every id must name one of [[upstreams]]",
-            ));
-        }
-        let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;
-        Ok(Self {
-            server: validate_server(raw.server, auth.is_some())?,
-            routes,
-            auth,
-            cache_diagnostics,
-            telemetry,
-            discovery,
-            aliases,
-            pricing,
-            upgrade_check,
-        })
+        toml::from_str(source)
+            .map_err(|e| ConfigError::Parse(e.to_string()))
+            .and_then(validate::config)
     }
 }
 

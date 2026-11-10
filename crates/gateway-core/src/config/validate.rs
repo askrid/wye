@@ -1,11 +1,5 @@
 //! Raw TOML shapes and the validation that turns them into [`Config`] types.
 
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
-
-use http::{
-    Uri,
-    uri::{Authority, Scheme},
-};
 use serde::Deserialize;
 
 use super::*;
@@ -15,78 +9,128 @@ mod auth;
 mod models;
 mod upstream;
 
-pub(super) use auth::{RawAuth, validate_auth};
-pub(super) use models::{
+use auth::{RawAuth, validate_auth};
+use models::{
     RawAlias, RawPricing, RawUpgradeCheck, validate_aliases, validate_pricing,
     validate_upgrade_check,
 };
-pub(super) use upstream::{RawUpstream, validate_routes};
+use upstream::{RawUpstream, validate_routes};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RawConfig {
     #[serde(default)]
-    pub(super) server: RawServer,
+    server: RawServer,
     #[serde(default)]
-    pub(super) upstreams: Vec<RawUpstream>,
-    pub(super) auth: Option<RawAuth>,
-    pub(super) cache_diagnostics: Option<RawCacheDiagnostics>,
-    pub(super) telemetry: Option<RawTelemetry>,
-    pub(super) discovery: Option<RawDiscovery>,
+    upstreams: Vec<RawUpstream>,
+    auth: Option<RawAuth>,
+    cache_diagnostics: Option<RawCacheDiagnostics>,
+    telemetry: Option<RawTelemetry>,
+    discovery: Option<RawDiscovery>,
     #[serde(default)]
-    pub(super) aliases: Vec<RawAlias>,
-    pub(super) pricing: Option<RawPricing>,
-    pub(super) upgrade_check: Option<RawUpgradeCheck>,
+    aliases: Vec<RawAlias>,
+    pricing: Option<RawPricing>,
+    upgrade_check: Option<RawUpgradeCheck>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawDiscovery {
-    pub(super) models: Vec<RawDiscoveredModel>,
+struct RawDiscovery {
+    models: Vec<RawDiscoveredModel>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawDiscoveredModel {
-    pub(super) id: String,
-    pub(super) display_name: Option<String>,
-    pub(super) description: Option<String>,
+struct RawDiscoveredModel {
+    id: String,
+    display_name: Option<String>,
+    description: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawTelemetry {
-    pub(super) otlp_endpoint: String,
-    pub(super) otlp_headers: Option<RawSecret>,
-    pub(super) service_name: Option<String>,
+struct RawTelemetry {
+    otlp_endpoint: String,
+    otlp_headers: Option<RawSecret>,
+    service_name: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawCacheDiagnostics {
-    pub(super) hash_key: RawSecret,
-    pub(super) sample_percent: Option<u8>,
+struct RawCacheDiagnostics {
+    hash_key: RawSecret,
+    sample_percent: Option<u8>,
 }
 
 /// A secret's source: `{ env = "NAME" }` or `{ file = "path" }`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawSecret {
-    pub(super) env: Option<String>,
-    pub(super) file: Option<PathBuf>,
+struct RawSecret {
+    env: Option<String>,
+    file: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RawServer {
-    pub(super) listen: Option<String>,
-    pub(super) max_request_body_bytes: Option<u64>,
-    pub(super) max_concurrent_requests: Option<usize>,
-    pub(super) drain_delay: Option<String>,
-    pub(super) shutdown_grace: Option<String>,
+struct RawServer {
+    listen: Option<String>,
+    max_request_body_bytes: Option<u64>,
+    max_concurrent_requests: Option<usize>,
+    drain_delay: Option<String>,
+    shutdown_grace: Option<String>,
 }
 
-pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
+/// The config `raw` describes, every section validated and the sections
+/// checked against each other.
+pub(super) fn config(raw: RawConfig) -> Result<Config, ConfigError> {
+    let auth = raw.auth.map(validate_auth).transpose()?;
+    let routes = validate_routes(raw.upstreams)?;
+    if auth.is_some()
+        && routes
+            .upstreams()
+            .any(|u| u.provider_key == ProviderKey::ForwardCaller)
+    {
+        return Err(ConfigError::Auth(
+            "cannot be combined with forward_caller_credential: the caller's \
+             credential would be the gateway token, not a provider key"
+                .into(),
+        ));
+    }
+    let cache_diagnostics = raw
+        .cache_diagnostics
+        .map(validate_cache_diagnostics)
+        .transpose()?;
+    let telemetry = raw.telemetry.map(validate_telemetry).transpose()?;
+    let discovery = raw.discovery.map(validate_discovery).transpose()?;
+    let aliases = validate_aliases(raw.aliases)?;
+    let pricing = raw.pricing.map(validate_pricing).transpose()?;
+    // A price scoped to an upstream the config does not have would never apply.
+    if let Some(pricing) = &pricing
+        && pricing
+            .entries
+            .iter()
+            .flat_map(|e| &e.upstreams)
+            .any(|id| !routes.upstreams().any(|u| u.id == *id))
+    {
+        return Err(ConfigError::Invalid(
+            "pricing.prices.upstreams: every id must name one of [[upstreams]]",
+        ));
+    }
+    let upgrade_check = raw.upgrade_check.map(validate_upgrade_check).transpose()?;
+    Ok(Config {
+        server: validate_server(raw.server, auth.is_some())?,
+        routes,
+        auth,
+        cache_diagnostics,
+        telemetry,
+        discovery,
+        aliases,
+        pricing,
+        upgrade_check,
+    })
+}
+
+fn validate_server(raw: RawServer, authenticated: bool) -> Result<Server, ConfigError> {
     let listen = raw.listen.as_deref().unwrap_or(DEFAULT_LISTEN);
     let listen: SocketAddr = listen
         .parse()
@@ -124,7 +168,7 @@ pub(super) fn validate_server(raw: RawServer, authenticated: bool) -> Result<Ser
 
 /// A secret named by exactly one source: a valid environment variable name,
 /// or a file path. `field` names it in errors.
-pub(super) fn validate_secret(raw: RawSecret, field: &'static str) -> Result<Secret, ConfigError> {
+fn validate_secret(raw: RawSecret, field: &'static str) -> Result<Secret, ConfigError> {
     match (raw.env, raw.file) {
         (Some(name), None) => env_name(name, field).map(Secret::Env),
         (None, Some(path)) if path.as_os_str().is_empty() => Err(ConfigError::Empty(field)),
@@ -138,10 +182,7 @@ pub(super) fn validate_secret(raw: RawSecret, field: &'static str) -> Result<Sec
 /// come from a [`Secret`], never from a URL in config, and what a
 /// request carries (a key, OTLP headers, prompts) never crosses a network
 /// in the clear. `field` names it in errors.
-pub(super) fn parse_url(
-    field: &'static str,
-    url: &str,
-) -> Result<(Scheme, Authority, String), ConfigError> {
+fn parse_url(field: &'static str, url: &str) -> Result<(Scheme, Authority, String), ConfigError> {
     let invalid = |reason| ConfigError::InvalidUrl {
         field,
         url: url.to_owned(),
@@ -170,7 +211,7 @@ pub(super) fn parse_url(
     Ok((scheme, authority, path))
 }
 
-pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
+fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigError> {
     const FIELD: &str = "telemetry.otlp_endpoint";
     let invalid = |reason| ConfigError::InvalidUrl {
         field: FIELD,
@@ -203,7 +244,14 @@ pub(super) fn validate_telemetry(raw: RawTelemetry) -> Result<Telemetry, ConfigE
     })
 }
 
-pub(super) fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigError> {
+fn validate_cache_diagnostics(raw: RawCacheDiagnostics) -> Result<CacheDiagnostics, ConfigError> {
+    Ok(CacheDiagnostics {
+        sample_percent: sample_percent(raw.sample_percent, "cache_diagnostics.sample_percent")?,
+        hash_key: validate_secret(raw.hash_key, "cache_diagnostics.hash_key")?,
+    })
+}
+
+fn validate_discovery(raw: RawDiscovery) -> Result<Discovery, ConfigError> {
     if raw.models.is_empty() {
         return Err(ConfigError::Invalid(
             "discovery.models must not be empty; omit [discovery] to disable GET /v1/models",
@@ -266,7 +314,7 @@ fn nonzero(value: u64, field: &'static str) -> Result<u64, ConfigError> {
 }
 
 /// A sampling share of 1-100, by default [`DEFAULT_SAMPLE_PERCENT`].
-pub(super) fn sample_percent(value: Option<u8>, field: &'static str) -> Result<u8, ConfigError> {
+fn sample_percent(value: Option<u8>, field: &'static str) -> Result<u8, ConfigError> {
     match value {
         None => Ok(DEFAULT_SAMPLE_PERCENT),
         Some(p @ 1..=100) => Ok(p),

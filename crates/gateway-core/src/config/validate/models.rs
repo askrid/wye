@@ -13,64 +13,64 @@ use crate::{
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawUpgradeCheck {
-    pub(crate) targets: Vec<String>,
-    pub(crate) sample_percent: Option<u8>,
+pub(super) struct RawUpgradeCheck {
+    targets: Vec<String>,
+    sample_percent: Option<u8>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawPricing {
-    pub(crate) version: Option<String>,
-    pub(crate) prices: Vec<RawPriceEntry>,
+pub(super) struct RawPricing {
+    version: Option<String>,
+    prices: Vec<RawPriceEntry>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawPriceEntry {
-    pub(crate) models: Vec<String>,
+struct RawPriceEntry {
+    models: Vec<String>,
     #[serde(default)]
-    pub(crate) upstreams: Vec<String>,
-    pub(crate) input: String,
-    pub(crate) output: String,
-    pub(crate) cache_read: Option<String>,
-    pub(crate) cache_write_5m: Option<String>,
-    pub(crate) cache_write_1h: Option<String>,
+    upstreams: Vec<String>,
+    input: String,
+    output: String,
+    cache_read: Option<String>,
+    cache_write_5m: Option<String>,
+    cache_write_1h: Option<String>,
     #[serde(default)]
-    pub(crate) tiers: Vec<RawTier>,
+    tiers: Vec<RawTier>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawTier {
-    pub(crate) above_prompt_tokens: u64,
-    pub(crate) input: Option<String>,
-    pub(crate) output: Option<String>,
-    pub(crate) cache_read: Option<String>,
-    pub(crate) cache_write_5m: Option<String>,
-    pub(crate) cache_write_1h: Option<String>,
+struct RawTier {
+    above_prompt_tokens: u64,
+    input: Option<String>,
+    output: Option<String>,
+    cache_read: Option<String>,
+    cache_write_5m: Option<String>,
+    cache_write_1h: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawAlias {
-    pub(crate) name: String,
-    pub(crate) model: String,
+pub(super) struct RawAlias {
+    name: String,
+    model: String,
     #[serde(default)]
-    pub(crate) when: Vec<RawAliasRule>,
+    when: Vec<RawAliasRule>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawAliasRule {
-    pub(crate) subjects: Vec<String>,
-    pub(crate) model: String,
+struct RawAliasRule {
+    subjects: Vec<String>,
+    model: String,
 }
 
 /// Longest `pricing.version`: it is recorded with every cost.
 const MAX_PRICING_VERSION_BYTES: usize = 128;
 
-pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> {
+pub(super) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> {
     if let Some(version) = &raw.version
         && (version.is_empty()
             || version.len() > MAX_PRICING_VERSION_BYTES
@@ -156,7 +156,7 @@ pub(crate) fn validate_pricing(raw: RawPricing) -> Result<Pricing, ConfigError> 
     })
 }
 
-pub(crate) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeCheck, ConfigError> {
+pub(super) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeCheck, ConfigError> {
     if raw.targets.is_empty() || raw.targets.len() > MAX_UPGRADE_TARGETS {
         return Err(ConfigError::Invalid(
             "upgrade_check.targets: 1-16 model names; omit [upgrade_check] to disable",
@@ -182,7 +182,7 @@ pub(crate) fn validate_upgrade_check(raw: RawUpgradeCheck) -> Result<UpgradeChec
     })
 }
 
-pub(crate) fn validate_aliases(raw: Vec<RawAlias>) -> Result<Option<Aliases>, ConfigError> {
+pub(super) fn validate_aliases(raw: Vec<RawAlias>) -> Result<Option<Aliases>, ConfigError> {
     if raw.is_empty() {
         return Ok(None);
     }

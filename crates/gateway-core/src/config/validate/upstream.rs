@@ -10,27 +10,27 @@ use crate::route::{MAX_UPSTREAMS, MAX_WEIGHT};
 /// One `[[upstreams]]` entry.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawUpstream {
-    pub(crate) id: Option<String>,
-    pub(crate) provider: Option<String>,
-    pub(crate) weight: Option<u32>,
+pub(super) struct RawUpstream {
+    id: Option<String>,
+    provider: Option<String>,
+    weight: Option<u32>,
     #[serde(default)]
-    pub(crate) standby: bool,
-    pub(crate) workspace_id: Option<String>,
-    pub(crate) base_url: Option<String>,
-    pub(crate) provider_key: Option<RawSecret>,
+    standby: bool,
+    workspace_id: Option<String>,
+    base_url: Option<String>,
+    provider_key: Option<RawSecret>,
     #[serde(default)]
-    pub(crate) forward_caller_credential: bool,
-    pub(crate) ca_file: Option<PathBuf>,
-    pub(crate) connect_timeout: Option<String>,
-    pub(crate) response_header_timeout: Option<String>,
-    pub(crate) stream_idle_timeout: Option<String>,
-    pub(crate) http_version: Option<String>,
+    forward_caller_credential: bool,
+    ca_file: Option<PathBuf>,
+    connect_timeout: Option<String>,
+    response_header_timeout: Option<String>,
+    stream_idle_timeout: Option<String>,
+    http_version: Option<String>,
 }
 
 /// The routes `[[upstreams]]` make: each entry in the route of its
 /// provider, in config order; at least one entry.
-pub(crate) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigError> {
+pub(super) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigError> {
     if raw.is_empty() {
         return Err(ConfigError::Invalid(
             "add an [[upstreams]] entry: its provider (by default \"anthropic\") decides \
