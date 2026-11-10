@@ -1,6 +1,7 @@
-# Weekly `cargo deny check advisories` on main: a RustSec advisory published
-# against a locked dependency fails this run even when no commit lands. ci.yml
-# runs every cargo-deny check on each push and pull request.
+# Weekly `cargo deny check advisories` on main, for the gateway's workspace and
+# the website's: a RustSec advisory published against a locked dependency
+# fails this run even when no commit lands. ci.yml and site.yml run every
+# cargo-deny check on each push and pull request.
 
 name: advisories
 
@@ -33,3 +34,5 @@ jobs:
           echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $RUNNER_TEMP/$DENY.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$DENY.tar.gz" -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/$DENY/cargo-deny" --all-features check advisories
+          # The website's own workspace and lock file.
+          "$RUNNER_TEMP/$DENY/cargo-deny" --manifest-path site/Cargo.toml --config deny.toml check advisories
