@@ -46,15 +46,10 @@ pub fn gateway_url(url: Option<&str>, env: &impl Env) -> String {
 /// machine is started, after `wye init` when there is no config to start it
 /// with; another is named with `another`.
 pub fn no_gateway(gateway: &str, why: &str, another: &str, env: &impl Env) -> String {
-    let local = gateway
-        .parse::<http::Uri>()
-        .ok()
-        .and_then(|uri| uri.host().map(is_loopback_host))
-        .unwrap_or(false);
     // No config at all: not one in the home, nor a ./wye.toml to name.
     let unconfigured = files::find_config(None, env, Path::exists).is_err()
         && !Path::new(files::CONFIG_FILE).exists();
-    let next = if !local {
+    let next = if !on_this_machine(gateway) {
         format!("name another with {another}")
     } else if unconfigured {
         format!(
@@ -68,6 +63,14 @@ pub fn no_gateway(gateway: &str, why: &str, another: &str, env: &impl Env) -> St
         )
     };
     format!("no gateway at {gateway} ({why}); {next}")
+}
+
+/// Whether the gateway at base URL `gateway` is on this machine: its host
+/// is a loopback one.
+pub(super) fn on_this_machine(gateway: &str) -> bool {
+    gateway
+        .parse::<Uri>()
+        .is_ok_and(|uri| uri.host().is_some_and(is_loopback_host))
 }
 
 /// [`probe`], for a command with no runtime of its own.

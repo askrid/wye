@@ -8,13 +8,13 @@
 
 use std::{ffi::OsString, process::Command};
 
-use gateway_core::config::{is_cleartext_remote, is_loopback_host};
+use gateway_core::config::is_cleartext_remote;
 
 use super::{
     Env, Error, Exit,
     args::Parsed,
     files,
-    probe::{self, gateway_url, health_url, no_gateway},
+    probe::{self, gateway_url, health_url, no_gateway, on_this_machine},
 };
 
 /// The environment variable Codex reads its bearer token from (the Codex
@@ -176,13 +176,7 @@ impl Launch {
 /// travels to another. A passthrough gateway forwards it; one with a
 /// provider key replaces it.
 pub fn codex_key(launch: &Launch, env: &impl Env) -> Option<String> {
-    let local = launch
-        .gateway
-        .parse::<http::Uri>()
-        .ok()
-        .and_then(|uri| uri.host().map(is_loopback_host))
-        .unwrap_or(false);
-    if launch.token.is_some() || !local {
+    if launch.token.is_some() || !on_this_machine(&launch.gateway) {
         return None;
     }
     env.var(OPENAI_KEY_ENV)
