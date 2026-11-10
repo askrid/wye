@@ -248,3 +248,15 @@ fn an_overlong_model_name_is_not_kept() {
         Some(MAX_RECORDED_MODEL_BYTES)
     );
 }
+
+#[test]
+fn escaped_strings_in_usage_events_are_read() {
+    // Read without allocating when plain; an escape makes an owned copy.
+    let start = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":\
+                 {\"model\":\"claude-\\u006fpus\",\"usage\":{\"input_tokens\":1,\
+                 \"output_tokens\":1,\"service_tier\":\"stand\\u0061rd\"}}}\n\n";
+    let s = scan(&[start.as_bytes()]);
+    assert_eq!(s.model(), Some("claude-opus"));
+    assert_eq!(s.status(), UsageStatus::Partial);
+    assert!(!s.usage().unpriced, "an escaped \"standard\" is standard");
+}

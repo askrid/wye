@@ -5,9 +5,9 @@
 //! large; only the small `usage` object is kept.
 
 use super::{
-    ToolCalls, Usage, UsageStatus,
+    Scanned, Usage, UsageStatus,
     chat::ChatUsage,
-    fields::{Items, ResponseFields},
+    fields::{Items, OpenAiUsage, ResponseFields},
     raw::RawUsage,
 };
 use crate::api::Api;
@@ -48,7 +48,9 @@ impl JsonUsageScanner {
             Api::Messages => serde_json::from_slice::<RawUsage<'_>>(bytes)
                 .ok()?
                 .merge_into(&mut usage),
-            Api::Responses => self.fields.openai_usage().ok()??.merge_into(&mut usage),
+            Api::Responses => serde_json::from_slice::<OpenAiUsage>(bytes)
+                .ok()?
+                .merge_into(&mut usage),
             Api::ChatCompletions => serde_json::from_slice::<ChatUsage>(bytes)
                 .ok()?
                 .merge_into(&mut usage),
@@ -77,8 +79,18 @@ impl JsonUsageScanner {
         }
     }
 
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        self.fields.tools.take()
+    /// What the scan saw, once the body has ended. Reads the usage once.
+    pub fn finish(self) -> Scanned {
+        let usage = self.read();
+        Scanned {
+            status: match usage {
+                Some(_) => UsageStatus::Complete,
+                None => UsageStatus::Unknown,
+            },
+            usage: usage.unwrap_or_default(),
+            model: self.fields.model().map(Box::from),
+            tool_calls: self.fields.tools,
+        }
     }
 }
 

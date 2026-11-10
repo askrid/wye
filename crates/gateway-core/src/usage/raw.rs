@@ -1,7 +1,7 @@
 //! The usage-bearing events as Anthropic writes them, deserialized with
 //! borrowed strings: no allocation unless a value has escapes.
 
-use std::{borrow::Cow, fmt};
+use std::{borrow::Cow, fmt, ops::Deref};
 
 use serde::{
     Deserialize, Deserializer,
@@ -9,6 +9,21 @@ use serde::{
 };
 
 use super::Usage;
+
+/// A string borrowed from the event, owned only when it has escapes. serde
+/// borrows a `Cow` field, but not one inside an `Option`, so an optional
+/// string is an `Option<Text>`.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub(super) struct Text<'a>(#[serde(borrow)] Cow<'a, str>);
+
+impl Deref for Text<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Deserialize)]
 pub(super) struct StartData<'a> {
@@ -18,7 +33,8 @@ pub(super) struct StartData<'a> {
 
 #[derive(Deserialize)]
 pub(super) struct StartMessage<'a> {
-    pub(super) model: Option<String>,
+    #[serde(borrow)]
+    pub(super) model: Option<Text<'a>>,
     #[serde(borrow)]
     pub(super) usage: Option<RawUsage<'a>>,
 }
@@ -51,9 +67,9 @@ pub(super) struct RawUsage<'a> {
     cache_creation: Option<RawCacheCreation>,
     server_tool_use: Option<AnyCount>,
     #[serde(borrow)]
-    service_tier: Option<Cow<'a, str>>,
+    service_tier: Option<Text<'a>>,
     #[serde(borrow)]
-    speed: Option<Cow<'a, str>>,
+    speed: Option<Text<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -143,7 +159,7 @@ impl RawUsage<'_> {
                 split.ephemeral_1h_input_tokens,
             );
         }
-        let non_standard = |v: &Option<Cow<'_, str>>| v.as_deref().is_some_and(|v| v != "standard");
+        let non_standard = |v: &Option<Text<'_>>| v.as_deref().is_some_and(|v| v != "standard");
         usage.unpriced |= self.server_tool_use.is_some_and(|tools| tools.0)
             || non_standard(&self.service_tier)
             || non_standard(&self.speed);

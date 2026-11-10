@@ -142,10 +142,11 @@ impl<B> Drop for Observed<B> {
             headers_after: Some(self.headers_after),
             ..Seen::default()
         };
-        if let Some(mut scanner) = self.scanner.take() {
-            seen.model = scanner.model().map(Box::from);
-            seen.usage = Some((scanner.usage(), scanner.status()));
-            seen.tool_calls = scanner.take_tool_calls();
+        if let Some(scanner) = self.scanner.take() {
+            let scanned = scanner.finish();
+            seen.model = scanned.model;
+            seen.usage = Some((scanned.usage, scanned.status));
+            seen.tool_calls = scanned.tool_calls;
         }
         self.log.record(info, self.status, self.outcome, seen);
     }

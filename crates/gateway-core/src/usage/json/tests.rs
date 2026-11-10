@@ -18,7 +18,7 @@ fn scan(api: Api, body: &str) -> JsonUsageScanner {
 
 #[test]
 fn reads_a_messages_body() {
-    let mut s = scan(Api::Messages, MESSAGE);
+    let s = scan(Api::Messages, MESSAGE);
     assert_eq!(s.status(), UsageStatus::Complete);
     assert_eq!(s.model(), Some("claude-opus-5-5"));
     let usage = s.usage();
@@ -26,13 +26,13 @@ fn reads_a_messages_body() {
     assert_eq!(usage.cache_read_input_tokens, Some(5));
     assert_eq!(usage.output_tokens, Some(20));
     assert!(!usage.unpriced);
-    let tools = s.take_tool_calls().unwrap();
+    let tools = s.finish().tool_calls.unwrap();
     assert_eq!(tools.iter().collect::<Vec<_>>(), [("Bash", 1)]);
 }
 
 #[test]
 fn reads_a_responses_body() {
-    let mut s = scan(Api::Responses, RESPONSE);
+    let s = scan(Api::Responses, RESPONSE);
     assert_eq!(s.status(), UsageStatus::Complete);
     assert_eq!(s.model(), Some("gpt-5.5-2026-10-01"));
     let usage = s.usage();
@@ -40,7 +40,7 @@ fn reads_a_responses_body() {
     assert_eq!(usage.cache_read_input_tokens, Some(600));
     assert_eq!(usage.output_tokens, Some(40));
     assert!(usage.unpriced, "a hosted web search");
-    let tools = s.take_tool_calls().unwrap();
+    let tools = s.finish().tool_calls.unwrap();
     assert_eq!(
         tools.iter().collect::<Vec<_>>(),
         [("shell", 1), ("web_search", 1)]

@@ -148,7 +148,7 @@ fn tool_calls_are_summed_by_name() {
             .as_bytes(),
         );
     }
-    let calls = scanner.take_tool_calls().unwrap();
+    let calls = scanner.finish().tool_calls.unwrap();
     let mut metrics = Metrics::new(0);
     for _ in 0..2 {
         metrics.record(&Line {

@@ -18,9 +18,10 @@ use serde::Deserialize;
 use crate::json::Kept;
 
 use super::{
-    ToolCalls, Usage, UsageStatus, count_tool,
+    Scanned, ToolCalls, Usage, UsageStatus, count_tool,
     fields::{Items, ResponseFields, openai_tool},
     raw::ContentBlock,
+    record_model,
 };
 
 /// Longest event name kept; longer names are other events.
@@ -217,9 +218,7 @@ impl ResponsesUsageScanner {
             self.corrupt = true;
             return;
         }
-        if let Some(model) = fields.model() {
-            self.model = Some(model.into());
-        }
+        record_model(&mut self.model, fields.model());
         if self.event != Event::Terminal {
             return;
         }
@@ -256,10 +255,6 @@ impl ResponsesUsageScanner {
         self.model.as_deref()
     }
 
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        self.tools.take()
-    }
-
     /// Complete once a terminal event reported usage; there are no
     /// interim counts, so a stream cut before it is unknown.
     pub fn status(&self) -> UsageStatus {
@@ -267,6 +262,16 @@ impl ResponsesUsageScanner {
             UsageStatus::Unknown
         } else {
             UsageStatus::Complete
+        }
+    }
+
+    /// What the scan saw, once the stream has ended.
+    pub fn finish(self) -> Scanned {
+        Scanned {
+            status: self.status(),
+            usage: self.usage,
+            model: self.model,
+            tool_calls: self.tools,
         }
     }
 }

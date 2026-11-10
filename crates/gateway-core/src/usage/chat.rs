@@ -10,12 +10,15 @@
 //! key; inside argument strings quotes are escaped, so they never match).
 //! Other chunks, the content and argument deltas, are only searched.
 
+use std::sync::LazyLock;
+
 use memchr::memmem;
 use serde::Deserialize;
 
 use super::{
-    Lines, ToolCalls, Usage, UsageStatus, count_tool,
+    Lines, Scanned, ToolCalls, Usage, UsageStatus, count_tool,
     fields::{InputDetails, merge_openai},
+    record_model,
 };
 
 /// Longest data line kept when it continues into the next chunk; longer
@@ -23,13 +26,17 @@ use super::{
 /// unknown.
 const MAX_LINE_BYTES: usize = 8 * 1024;
 
+/// The substring searches, built once per process.
+static USAGE_KEY: LazyLock<memmem::Finder<'static>> =
+    LazyLock::new(|| memmem::Finder::new(br#""usage":{"#));
+static TOOL_CALLS_KEY: LazyLock<memmem::Finder<'static>> =
+    LazyLock::new(|| memmem::Finder::new(br#""tool_calls""#));
+static NAME_KEY: LazyLock<memmem::Finder<'static>> =
+    LazyLock::new(|| memmem::Finder::new(br#""name":""#));
+
 /// Incremental usage scanner for one Chat Completions stream.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ChatUsageScanner {
-    /// Substring searchers, built once per stream rather than per line.
-    usage_key: memmem::Finder<'static>,
-    tool_calls_key: memmem::Finder<'static>,
-    name_key: memmem::Finder<'static>,
     lines: Lines,
     usage: Usage,
     model: Option<Box<str>>,
@@ -40,26 +47,9 @@ pub struct ChatUsageScanner {
     corrupt: bool,
 }
 
-impl Default for ChatUsageScanner {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ChatUsageScanner {
     pub fn new() -> Self {
-        Self {
-            usage_key: memmem::Finder::new(br#""usage":{"#),
-            tool_calls_key: memmem::Finder::new(br#""tool_calls""#),
-            name_key: memmem::Finder::new(br#""name":""#),
-            lines: Lines::default(),
-            usage: Usage::default(),
-            model: None,
-            tools: None,
-            saw_usage: false,
-            saw_data: false,
-            corrupt: false,
-        }
+        Self::default()
     }
 
     pub fn feed(&mut self, chunk: &[u8]) {
@@ -74,7 +64,7 @@ impl ChatUsageScanner {
         };
         let data = data.trim_ascii();
         let first = !std::mem::replace(&mut self.saw_data, true);
-        let has_usage = self.usage_key.find(data).is_some();
+        let has_usage = USAGE_KEY.find(data).is_some();
         if truncated {
             // The usage chunk is small; a cut one cannot be read.
             self.corrupt |= has_usage;
@@ -83,9 +73,7 @@ impl ChatUsageScanner {
         if has_usage {
             match serde_json::from_slice::<UsageChunk<'_>>(data) {
                 Ok(chunk) => {
-                    if let Some(model) = super::kept_model(chunk.model) {
-                        self.model = Some(model.into());
-                    }
+                    record_model(&mut self.model, chunk.model);
                     if super::unpriced_tier(chunk.service_tier) {
                         self.usage.unpriced = true;
                     }
@@ -97,10 +85,10 @@ impl ChatUsageScanner {
                 Err(_) => self.corrupt = true,
             }
         } else if first && let Ok(chunk) = serde_json::from_slice::<ModelChunk<'_>>(data) {
-            self.model = super::kept_model(chunk.model).map(Box::from);
+            record_model(&mut self.model, chunk.model);
         }
-        if self.tool_calls_key.find(data).is_some()
-            && self.name_key.find(data).is_some()
+        if TOOL_CALLS_KEY.find(data).is_some()
+            && NAME_KEY.find(data).is_some()
             && let Ok(chunk) = serde_json::from_slice::<ToolChunk<'_>>(data)
         {
             // A tool call's first delta names its function; later deltas
@@ -124,10 +112,6 @@ impl ChatUsageScanner {
         self.model.as_deref()
     }
 
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        self.tools.take()
-    }
-
     /// Complete once the usage chunk arrived; without `include_usage` there
     /// is none, so the stream is unknown.
     pub fn status(&self) -> UsageStatus {
@@ -135,6 +119,16 @@ impl ChatUsageScanner {
             UsageStatus::Unknown
         } else {
             UsageStatus::Complete
+        }
+    }
+
+    /// What the scan saw, once the stream has ended.
+    pub fn finish(self) -> Scanned {
+        Scanned {
+            status: self.status(),
+            usage: self.usage,
+            model: self.model,
+            tool_calls: self.tools,
         }
     }
 }

@@ -35,9 +35,14 @@ pub const MAX_TOOL_NAME_BYTES: usize = 64;
 /// metric series carries it, so a longer one is dropped.
 pub const MAX_RECORDED_MODEL_BYTES: usize = 128;
 
-/// `model` when it fits [`MAX_RECORDED_MODEL_BYTES`].
-fn kept_model<M: AsRef<str>>(model: Option<M>) -> Option<M> {
-    model.filter(|m| m.as_ref().len() <= MAX_RECORDED_MODEL_BYTES)
+/// Records `model` when it fits [`MAX_RECORDED_MODEL_BYTES`], allocating
+/// only when it differs from the model already recorded: streams repeat it.
+fn record_model(slot: &mut Option<Box<str>>, model: Option<&str>) {
+    if let Some(model) = model.filter(|m| m.len() <= MAX_RECORDED_MODEL_BYTES)
+        && slot.as_deref() != Some(model)
+    {
+        *slot = Some(model.into());
+    }
 }
 
 /// Whether an OpenAI `service_tier` is billed outside the token prices:
@@ -190,42 +195,26 @@ impl UsageScanner {
         }
     }
 
-    pub fn usage(&self) -> Usage {
+    /// What the scan saw, once the body has ended.
+    pub fn finish(self) -> Scanned {
         match self {
-            Self::Messages(s) => s.usage(),
-            Self::Responses(s) => s.usage(),
-            Self::Chat(s) => s.usage(),
-            Self::Json(s) => s.usage(),
+            Self::Messages(s) => s.finish(),
+            Self::Responses(s) => s.finish(),
+            Self::Chat(s) => s.finish(),
+            Self::Json(s) => s.finish(),
         }
     }
+}
 
-    pub fn model(&self) -> Option<&str> {
-        match self {
-            Self::Messages(s) => s.model(),
-            Self::Responses(s) => s.model(),
-            Self::Chat(s) => s.model(),
-            Self::Json(s) => s.model(),
-        }
-    }
-
-    pub fn status(&self) -> UsageStatus {
-        match self {
-            Self::Messages(s) => s.status(),
-            Self::Responses(s) => s.status(),
-            Self::Chat(s) => s.status(),
-            Self::Json(s) => s.status(),
-        }
-    }
-
-    /// Moves the tool calls out, keeping their allocation.
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        match self {
-            Self::Messages(s) => s.take_tool_calls(),
-            Self::Responses(s) => s.take_tool_calls(),
-            Self::Chat(s) => s.take_tool_calls(),
-            Self::Json(s) => s.take_tool_calls(),
-        }
-    }
+/// What a response's usage scan saw, taken when its body ends.
+#[derive(Debug)]
+pub struct Scanned {
+    /// The model the provider reported serving.
+    pub model: Option<Box<str>>,
+    pub usage: Usage,
+    pub status: UsageStatus,
+    /// The tool calls the response started.
+    pub tool_calls: Option<Box<ToolCalls>>,
 }
 
 /// Cuts a stream's chunks into lines, carrying a partial line to the next chunk.

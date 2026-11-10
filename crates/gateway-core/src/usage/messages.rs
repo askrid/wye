@@ -6,9 +6,10 @@
 //! every other event after reading its line prefix.
 
 use super::{
-    CLASSIFY_PREFIX_BYTES, Lines, MAX_BLOCK_START_LINE_BYTES, MAX_USAGE_LINE_BYTES, ToolCalls,
-    Usage, UsageStatus, count_tool, kept_model,
+    CLASSIFY_PREFIX_BYTES, Lines, MAX_BLOCK_START_LINE_BYTES, MAX_USAGE_LINE_BYTES, Scanned,
+    ToolCalls, Usage, UsageStatus, count_tool,
     raw::{BlockStartData, DeltaData, StartData},
+    record_model,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -85,7 +86,7 @@ impl MessagesUsageScanner {
             Event::MessageStart => match serde_json::from_slice::<StartData>(data) {
                 Ok(start) => {
                     self.saw_start = true;
-                    self.model = kept_model(start.message.model).map(String::into_boxed_str);
+                    record_model(&mut self.model, start.message.model.as_deref());
                     if let Some(raw) = start.message.usage {
                         raw.merge_into(&mut self.usage);
                     }
@@ -117,10 +118,6 @@ impl MessagesUsageScanner {
         }
     }
 
-    pub fn take_tool_calls(&mut self) -> Option<Box<ToolCalls>> {
-        self.tools.take()
-    }
-
     pub fn usage(&self) -> Usage {
         self.usage
     }
@@ -135,6 +132,16 @@ impl MessagesUsageScanner {
             (true, _, _) | (false, false, false) => UsageStatus::Unknown,
             (false, _, true) => UsageStatus::Complete,
             (false, true, false) => UsageStatus::Partial,
+        }
+    }
+
+    /// What the scan saw, once the stream has ended.
+    pub fn finish(self) -> Scanned {
+        Scanned {
+            status: self.status(),
+            usage: self.usage,
+            model: self.model,
+            tool_calls: self.tools,
         }
     }
 }

@@ -29,7 +29,7 @@ fn scan(bytes: &[u8]) -> ChatUsageScanner {
 
 #[test]
 fn reads_the_usage_chunk_and_tool_calls() {
-    let mut s = scan(stream(true).as_bytes());
+    let s = scan(stream(true).as_bytes());
     assert_eq!(s.status(), UsageStatus::Complete);
     assert_eq!(s.model(), Some("gpt-5.5-2026-10-01"));
     let usage = s.usage();
@@ -38,7 +38,7 @@ fn reads_the_usage_chunk_and_tool_calls() {
     assert_eq!(usage.output_tokens, Some(20));
     assert!(!usage.unpriced);
     // The argument delta's escaped "name" is not a second call.
-    let tools = s.take_tool_calls().unwrap();
+    let tools = s.finish().tool_calls.unwrap();
     assert_eq!(tools.iter().collect::<Vec<_>>(), [("get_weather", 1)]);
 }
 
