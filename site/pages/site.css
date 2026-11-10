@@ -332,8 +332,8 @@ html, body { overflow-x: clip; }
 /* The claims wrap on a phone rather than scroll out of a keyboard's reach. */
 .claims { white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A request beside what the next model would say to it: the fields it
-   would reject in the accent, each fix beside its line, as wye explain
-   reports them. On a phone each fix goes under its line. */
+   would reject in the accent, each beside its rule and the end of its fix
+   in wye explain's words. On a phone each fix goes under its line. */
 .check figcaption { color: var(--graphite); font-size: var(--caption); }
 .lines {
   display: grid;
