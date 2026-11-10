@@ -16,7 +16,6 @@ impl Sources {
         };
         let crate_manifest = read("crates/wye/Cargo.toml")?;
         let workspace_manifest = read("Cargo.toml")?;
-        let site_manifest = read("site/Cargo.toml")?;
         let mut documents = HashMap::new();
         for name in DOCUMENTS {
             // Windows line ends would hide paragraph and section breaks.
@@ -30,8 +29,8 @@ impl Sources {
                 .ok_or("Cargo.toml: no license")?,
             repo_url: manifest_field(&workspace_manifest, "repository")
                 .ok_or("Cargo.toml: no repository")?,
-            homepage: manifest_field(&site_manifest, "homepage")
-                .ok_or("site/Cargo.toml: no homepage")?,
+            // The site's own manifest, read when the generator is built.
+            homepage: env!("CARGO_PKG_HOMEPAGE").to_owned(),
             stylesheet: minify_css(&read("site/pages/site.css")?),
             documents,
         })

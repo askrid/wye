@@ -13,12 +13,7 @@ mod sources;
 use directive::{Directive, Heading, Part};
 
 /// The documents directives may read, relative to the repository root.
-const DOCUMENTS: [&str; 4] = [
-    "README.md",
-    "CHANGELOG.md",
-    "docs/operations.md",
-    "docs/benchmarks.md",
-];
+const DOCUMENTS: [&str; 3] = ["README.md", "docs/operations.md", "docs/benchmarks.md"];
 
 /// Everything a page may draw from the repository, read once per build.
 pub struct Sources {
