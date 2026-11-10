@@ -239,25 +239,7 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
             reference["metrics"][name].as_f64(),
             current["metrics"][name].as_f64(),
         ) {
-            (Some(b), Some(c)) => (b, c),
-            (None, Some(c)) if scope.allow_new => {
-                // A limit that does not depend on the reference still holds.
-                let limit = if stats::counts_failures(name) {
-                    Some(abs)
-                } else if name.ends_with("_release_max_us") {
-                    Some(RELEASE_CEILING_US)
-                } else {
-                    None
-                };
-                match limit {
-                    Some(limit) if c > limit => {
-                        println!("{name:36} {:>10} {c:>10.2} {limit:>10.2}  REGRESSED", "-");
-                        ok &= !enforced;
-                    }
-                    _ => println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-"),
-                }
-                continue;
-            }
+            (b, Some(c)) if b.is_some() || scope.allow_new => (b, c),
             // `missing` fails the gate; `absent`, outside the gated set, not.
             _ => {
                 println!("{name:36} {}", if enforced { "missing" } else { "absent" });
@@ -265,17 +247,18 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
                 continue;
             }
         };
-        let limit = if stats::counts_failures(name) {
-            // An absolute count: failures the reference had are no allowance.
-            abs
-        } else if name.ends_with("_release_max_us") {
-            // A broken reference (5 s, the scenario's timeout) is no allowance
-            // either: past a second, the upstream request was not released.
-            (b.max(0.0) * (1.0 + rel) + abs).min(RELEASE_CEILING_US)
-        } else {
-            // Added latency can be near zero or negative (noise); the absolute
-            // floor absorbs that.
-            b.max(0.0) * (1.0 + rel) + abs
+        let limit = limit(name, rel, abs, b);
+        // A new metric: only a limit that does not depend on the reference
+        // holds.
+        let (Some(b), Some(limit)) = (b, limit) else {
+            match limit {
+                Some(limit) if c > limit => {
+                    println!("{name:36} {:>10} {c:>10.2} {limit:>10.2}  REGRESSED", "-");
+                    ok &= !enforced;
+                }
+                _ => println!("{name:36} {:>10} {c:>10.2} {:>10}  new", "-", "-"),
+            }
+            continue;
         };
         let pass = c <= limit;
         ok &= pass || !enforced;
@@ -290,6 +273,29 @@ pub fn compare(reference: &str, current: &str, scope: &Scope) -> bool {
         );
     }
     ok
+}
+
+/// The most `name` may read given the reference's value `reference`, or, for
+/// a metric the reference lacks, only a limit that does not depend on it.
+fn limit(name: &str, rel: f64, abs: f64, reference: Option<f64>) -> Option<f64> {
+    // An absolute count: failures the reference had are no allowance.
+    if stats::counts_failures(name) {
+        return Some(abs);
+    }
+    // A broken reference (5 s, the scenario's timeout) is no allowance either:
+    // past a second, the upstream request was not released.
+    let release = name.ends_with("_release_max_us");
+    let Some(b) = reference else {
+        return release.then_some(RELEASE_CEILING_US);
+    };
+    // Added latency can be near zero or negative (noise); the absolute floor
+    // absorbs that.
+    let limit = b.max(0.0) * (1.0 + rel) + abs;
+    Some(if release {
+        limit.min(RELEASE_CEILING_US)
+    } else {
+        limit
+    })
 }
 
 /// Writes to `out` the report of `runs` (results of one `wye-bench run`
