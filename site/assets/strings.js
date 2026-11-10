@@ -271,8 +271,8 @@ const start = ({ canvas, paths, ink, accent }) => {
     gl.useProgram(pulses);
     gl.blendFunc(gl.ONE, gl.ONE);
     gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
-    // Fresh storage each frame, so the GPU never makes the page wait for it
-    // to finish reading last frame's.
+    // Fresh storage each frame, so the GPU never makes the worker wait for
+    // it to finish reading last frame's.
     gl.bufferData(gl.ARRAY_BUFFER, pulseData.subarray(0, n * 4), gl.STREAM_DRAW);
     gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
     gl.uniform3fv(u.pulseColour, ink);
@@ -284,18 +284,17 @@ const start = ({ canvas, paths, ink, accent }) => {
     if (!still) frame = requestAnimationFrame(draw);
     else frame = last = 0;
   };
-  // Motion stopped (out of view, a hidden tab, reduced motion): all still.
-  // A lost context needs no care: its calls do nothing, and the frames stop
-  // once the strings settle.
+  // Motion stopped (out of view, a hidden tab, reduced motion): all still,
+  // and one empty frame drawn as every frame is, so the last glow is not
+  // left on screen.
   const silence = () => {
     cancelAnimationFrame(frame);
-    frame = last = 0;
+    last = 0;
     halo = 0;
     havePrevious = pending = false;
     flight.length = 0;
     for (const line of lines) line.amp = 0;
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    blank = true;
+    frame = blank ? 0 : requestAnimationFrame(draw);
   };
   // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
   // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
@@ -310,8 +309,21 @@ const start = ({ canvas, paths, ink, accent }) => {
     }
   };
 };
+// The first message starts the strings; the rest go to them. A context the
+// GPU lost (a reset, a switch between GPUs) is given back, and the strings
+// start again on it; a start that fails leaves the drawing still.
 let handle = null;
 onmessage = ({ data }) => {
-  if (handle) handle(data);
-  else handle = start(data);
+  if (handle) return handle(data);
+  const begin = () => {
+    try {
+      handle = start(data);
+    } catch (error) {
+      handle = () => {};
+      throw error;
+    }
+  };
+  data.canvas.addEventListener("webglcontextlost", (event) => event.preventDefault());
+  data.canvas.addEventListener("webglcontextrestored", begin);
+  begin();
 };
