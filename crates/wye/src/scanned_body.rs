@@ -1,7 +1,8 @@
 //! A request body that feeds the bytes hyper sends upstream to a scanner,
 //! without changing or delaying them, and stores the scanner's result in a
-//! [`Slot`] when the body ends: prompt hashes ([`crate::diagnostics`]) and
-//! upgrade-check findings ([`crate::upgrade_check`]).
+//! [`Slot`] when the body ends: prompt hashes for cache diagnostics and
+//! upgrade-check findings, which the usage record reads when the response
+//! ends.
 
 use std::{
     pin::Pin,
@@ -9,9 +10,19 @@ use std::{
 };
 
 use bytes::Bytes;
+use gateway_core::{
+    prompt::{PromptHashes, PromptScanner},
+    upgrade::{Findings, UpgradeScanner},
+};
 use hyper::body::{Body, Frame, SizeHint};
 
 use crate::Slot;
+
+/// Prompt hashes of one request body, for cache diagnostics.
+pub(crate) type PromptSlot = Slot<PromptHashes>;
+
+/// Upgrade-check findings of one request body.
+pub(crate) type UpgradeSlot = Slot<Findings>;
 
 /// What [`ScannedBody`] feeds.
 pub(crate) trait BodyScanner: Default {
@@ -21,6 +32,30 @@ pub(crate) trait BodyScanner: Default {
 
     /// `None` when the scanner could not follow the body.
     fn finish(self) -> Option<Self::Output>;
+}
+
+impl BodyScanner for PromptScanner {
+    type Output = PromptHashes;
+
+    fn feed(&mut self, chunk: &[u8]) {
+        PromptScanner::feed(self, chunk);
+    }
+
+    fn finish(self) -> Option<PromptHashes> {
+        PromptScanner::finish(self)
+    }
+}
+
+impl BodyScanner for UpgradeScanner {
+    type Output = Findings;
+
+    fn feed(&mut self, chunk: &[u8]) {
+        UpgradeScanner::feed(self, chunk);
+    }
+
+    fn finish(self) -> Option<Findings> {
+        Some(self.findings())
+    }
 }
 
 /// `inner`, scanned by `S` when a slot is given.

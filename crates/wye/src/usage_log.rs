@@ -15,6 +15,8 @@ mod line;
 mod metrics;
 mod observed;
 mod otlp;
+mod prompt_hashes;
+mod upgrade_issues;
 mod writer;
 
 use std::{
@@ -42,7 +44,9 @@ use tokio::{
 };
 
 use crate::{
-    diagnostics::PromptSlot, gauge::Gauge, upgrade_check::UpgradeSlot, upstream::UpstreamError,
+    gauge::Gauge,
+    scanned_body::{PromptSlot, UpgradeSlot},
+    upstream::UpstreamError,
 };
 
 pub(crate) use agent::AgentHeaders;

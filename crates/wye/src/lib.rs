@@ -5,7 +5,6 @@
 pub mod alloc_stats;
 mod auth;
 pub mod cli;
-mod diagnostics;
 mod discovery;
 mod failover;
 mod gateway;
@@ -19,7 +18,6 @@ mod startup;
 #[cfg(test)]
 mod test_body;
 mod tls;
-mod upgrade_check;
 mod upstream;
 mod usage_log;
 

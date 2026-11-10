@@ -47,12 +47,10 @@ use gateway_core::{prompt::PromptScanner, upgrade::UpgradeScanner};
 
 use crate::{
     StartupError, X_API_KEY,
-    diagnostics::PromptSlot,
     failover::FailoverBody,
     request_body::{ClientBody, RequestBody},
-    scanned_body::ScannedBody,
+    scanned_body::{PromptSlot, ScannedBody, UpgradeSlot},
     startup::UpstreamAuth,
-    upgrade_check::UpgradeSlot,
 };
 
 /// The client's request body, checked for permissions and kept for failover.

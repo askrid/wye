@@ -24,10 +24,9 @@ use super::{
     responses::{forward_error, overloaded, too_large},
 };
 use crate::{
-    diagnostics::PromptSlot,
     failover::{FailoverBody, Handback, Resend},
     request_body::{ClientBody, RequestBody},
-    upgrade_check::UpgradeSlot,
+    scanned_body::{PromptSlot, UpgradeSlot},
     upstream::{ForwardError, Upstream, UpstreamBody, UpstreamError},
     usage_log::{Observed, RejectedAttempt, RequestInfo, Unanswered, UsageLog},
 };

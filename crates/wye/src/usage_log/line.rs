@@ -11,8 +11,10 @@ use gateway_core::{
 use http::HeaderValue;
 use serde::{Serialize, Serializer};
 
-use super::{Outcome, Record, RejectedAttempt, agent::ToolDurations};
-use crate::{diagnostics::PromptRecord, upgrade_check::UpgradeIssues};
+use super::{
+    Outcome, Record, RejectedAttempt, agent::ToolDurations, prompt_hashes::PromptRecord,
+    upgrade_issues::UpgradeIssues,
+};
 
 /// The `usage_status` of a response that carries no usage: an error,
 /// `count_tokens`, a content type that is neither SSE nor JSON.

@@ -1,41 +1,24 @@
-//! Upgrade checks on forwarded request bodies: which fields each target
-//! model would reject, reported in usage records and never acted on.
+//! A usage record's `upgrade_issues`: which fields each upgrade-check target
+//! would reject, reported and never acted on.
 //!
-//! An [`UpgradeScanner`] reads the request bytes as they are sent
-//! ([`crate::scanned_body`]) and leaves its findings in an [`UpgradeSlot`].
-//! The writer task turns them into `upgrade_issues` per target, off the
-//! request path.
+//! The request body's findings, left in an
+//! [`UpgradeSlot`](crate::scanned_body::UpgradeSlot) as it was sent
+//! ([`crate::scanned_body`]), are matched against each target here, by the
+//! writer task, off the request path.
 
-use gateway_core::upgrade::{self, Findings, UpgradeScanner};
+use gateway_core::upgrade::{self, Findings};
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use crate::{Slot, scanned_body::BodyScanner};
-
-/// Upgrade-check findings of one request body ([`Slot`]).
-pub(crate) type UpgradeSlot = Slot<Findings>;
-
-impl BodyScanner for UpgradeScanner {
-    type Output = Findings;
-
-    fn feed(&mut self, chunk: &[u8]) {
-        UpgradeScanner::feed(self, chunk);
-    }
-
-    fn finish(self) -> Option<Findings> {
-        Some(self.findings())
-    }
-}
-
-/// `upgrade_issues` of a usage record: for each target that would reject the
+/// A usage record's `upgrade_issues`: for each target that would reject the
 /// request, the rules it breaks. An empty object: checked, nothing found.
-pub(crate) struct UpgradeIssues<'a> {
-    pub(crate) findings: Findings,
-    pub(crate) targets: &'a [Box<str>],
+pub(super) struct UpgradeIssues<'a> {
+    pub(super) findings: Findings,
+    pub(super) targets: &'a [Box<str>],
 }
 
 impl UpgradeIssues<'_> {
     /// `(target, rule)` for every issue.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, &'static str)> {
+    pub(super) fn iter(&self) -> impl Iterator<Item = (&str, &'static str)> {
         self.targets.iter().flat_map(|target| {
             upgrade::issues(&self.findings, target).map(move |rule| (&**target, rule.name()))
         })

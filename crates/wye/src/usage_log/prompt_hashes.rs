@@ -1,37 +1,18 @@
-//! Cache-miss diagnostics: prompt hashes of forwarded request bodies, keyed
-//! and written into usage records.
+//! A usage record's `prompt_hashes`, for cache diagnostics.
 //!
-//! A [`PromptScanner`] reads the request bytes as they are sent
-//! ([`crate::scanned_body`]) and leaves the hashes in a [`PromptSlot`]. The
-//! usage record reads the slot when the response ends; the writer task turns
-//! each hash into a keyed tag ([`HashKey::tag`]) while serializing, off the
-//! request path.
+//! The request body's hashes, left in a [`PromptSlot`] as it was sent
+//! ([`crate::scanned_body`]), are keyed here: the writer task turns each
+//! hash into a keyed tag ([`HashKey::tag`]) while serializing the record,
+//! off the request path.
 
-use gateway_core::prompt::{
-    HashKey, MAX_BREAKPOINTS, MESSAGE_PREFIXES, PromptHashes, PromptScanner,
-};
+use gateway_core::prompt::{HashKey, MAX_BREAKPOINTS, MESSAGE_PREFIXES};
 use serde::{Serialize, Serializer};
 
-use crate::{Slot, scanned_body::BodyScanner};
+use crate::scanned_body::PromptSlot;
 
-/// Prompt hashes of one request body ([`Slot`]).
-pub(crate) type PromptSlot = Slot<PromptHashes>;
-
-impl BodyScanner for PromptScanner {
-    type Output = PromptHashes;
-
-    fn feed(&mut self, chunk: &[u8]) {
-        PromptScanner::feed(self, chunk);
-    }
-
-    fn finish(self) -> Option<PromptHashes> {
-        PromptScanner::finish(self)
-    }
-}
-
-/// The `prompt` object of a usage record.
+/// A usage record's `prompt_hashes` object.
 #[derive(Serialize, Default)]
-pub(crate) struct PromptRecord {
+pub(super) struct PromptRecord {
     /// `complete`, or `unknown` when the body was incomplete or could not be followed.
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -71,7 +52,7 @@ struct PrefixRecord {
 
 impl PromptRecord {
     /// Keys the hashes in `slot`; `unknown` if the slot is empty.
-    pub(crate) fn new(slot: &PromptSlot, key: &HashKey) -> Self {
+    pub(super) fn new(slot: &PromptSlot, key: &HashKey) -> Self {
         let Some(hashes) = slot.get() else {
             return Self {
                 status: "unknown",
@@ -158,6 +139,8 @@ impl<T: Serialize, const N: usize> Serialize for Seq<T, N> {
 
 #[cfg(test)]
 mod tests {
+    use gateway_core::prompt::PromptScanner;
+
     use super::*;
 
     #[test]
