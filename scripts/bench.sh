@@ -14,7 +14,7 @@
 # commits in alternating rounds, every side with its own wye-bench, compares
 # them under both commits' limits, and reruns once on a regression; it fails
 # only on a metric past its limit in both runs, or on any failed request or
-# stream (crates/wye-bench/src/rounds.rs). Results go to target/bench
+# stream (crates/wye-bench/src/gate.rs). Results go to target/bench
 # (target/ci-bench for ci); compare.txt holds the last comparison.
 #
 # ci: gate limited to heap allocations, failed requests, and failed streams,

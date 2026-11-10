@@ -6,7 +6,7 @@
 //! variants, `--wye-alloc` allocation metrics (`alloc_`), and competitors
 //! (`--agentgateway`, `--bifrost`, `--litellm`, `--krakend`). `alternate` and
 //! `gate` run several builds in alternating rounds, each with its own
-//! `wye-bench` ([`rounds`]). `docs/development.md` lists each scenario and the
+//! `wye-bench` ([`rounds`], [`gate`]). `docs/development.md` lists each scenario and the
 //! `WYE_BENCH_*` knobs.
 //! Without arguments it prints its usage.
 
@@ -21,6 +21,7 @@
 mod allocations;
 mod capacity;
 mod client;
+mod compare;
 mod gate;
 mod gateway_process;
 mod load;
@@ -68,7 +69,7 @@ fn main() -> ExitCode {
             let Some(scope) = compare_scope(flags) else {
                 return usage();
             };
-            if gate::compare(reference, current, &scope) {
+            if compare::compare(reference, current, &scope) {
                 ExitCode::SUCCESS
             } else {
                 eprintln!("benchmark regression: do not commit this change");
@@ -118,7 +119,7 @@ fn main() -> ExitCode {
             if compare_scope(flags).is_none() {
                 return usage();
             }
-            rounds::gate(
+            gate::gate(
                 Path::new(reference),
                 Path::new(current),
                 Path::new(out),
@@ -126,11 +127,11 @@ fn main() -> ExitCode {
             )
         }
         ["median", out, runs @ ..] if !runs.is_empty() => {
-            gate::median(out, runs);
+            compare::median(out, runs);
             ExitCode::SUCCESS
         }
         ["diff", a, b] => {
-            gate::diff(a, b);
+            compare::diff(a, b);
             ExitCode::SUCCESS
         }
         _ => usage(),
@@ -149,8 +150,8 @@ fn block_on(work: impl Future<Output = ()>) -> ExitCode {
 }
 
 /// `[--only <pattern,...>] [--accept <pattern,...>] [--allow-new]` for `compare`.
-fn compare_scope(flags: &[&str]) -> Option<gate::Scope> {
-    let mut scope = gate::Scope::default();
+fn compare_scope(flags: &[&str]) -> Option<compare::Scope> {
+    let mut scope = compare::Scope::default();
     let mut rest = flags;
     loop {
         match rest {
