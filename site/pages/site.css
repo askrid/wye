@@ -206,8 +206,9 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 .steps { display: grid; gap: 2px; width: fit-content; max-width: 100%; min-width: 0; }
 /* As wide as the widest, each copy button beside its commands, not above. */
 .steps .code-wrap, .steps pre.code { width: auto; }
-@media (scripting: enabled) {
-  .steps pre.code[data-lang="bash"] { padding-top: 1.1875rem; padding-right: 6.5rem; }
+.steps pre.code[data-lang="bash"] { padding-top: 1.1875rem; padding-right: 6.5rem; }
+@media (scripting: none) {
+  .steps pre.code[data-lang="bash"] { padding-right: 1.4375rem; }
 }
 .steps .copy { top: 50%; transform: translateY(-50%); }
 /* One line of facts, the changelog last. */
@@ -462,10 +463,12 @@ pre.code code { font: inherit; }
    selectable. The button takes a line of its own above the first line (in
    the hero it sits beside the commands, in room kept for it), so it never
    covers a command, and the room is kept before the script runs, so
-   nothing moves when it arrives. */
+   nothing moves when it arrives. It is given back only where the browser
+   says scripts are off, so one that cannot say keeps it. */
 .code-wrap { position: relative; width: 100%; }
-@media (scripting: enabled) {
-  pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
+pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 2.5rem; }
+@media (scripting: none) {
+  pre.code:is([data-lang="bash"], [data-lang="toml"]) { padding-top: 1.1875rem; }
 }
 .copy {
   position: absolute;
@@ -506,9 +509,12 @@ pre.code code { font: inherit; }
   }
   .numbers tbody th { grid-column: 1 / -1; padding: 0; border: 0; }
   .numbers td, .numbers .n { padding: 0; border: 0; text-align: left; }
-  .numbers td.na { display: none; }
+  /* Not shown, but still read, so each value keeps its column's header. */
+  .numbers td.na { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* The column's name, shown, and not read twice: its header reads it. */
   .numbers td::before {
     content: attr(data-path);
+    content: attr(data-path) / "";
     display: block;
     color: var(--graphite);
     font-size: var(--caption);
@@ -566,4 +572,15 @@ pre.code code { font: inherit; }
 /* On a phone the axis keeps its ends; the caption says the scale is log. */
 @media (max-width: 40rem) {
   .bars .axis .t span:not(:first-child, :last-child) { display: none; }
+}
+
+/* A forced contrast theme (Windows) paints backgrounds in its own colour,
+   which would erase the drawings made of them: the chart bars, the session
+   squares, and the rail's current stop keep the theme's text and highlight
+   colours instead. */
+@media (forced-colors: active) {
+  .bars tbody .t span, .shares i { forced-color-adjust: none; background: CanvasText; }
+  .bars .us .t span, .shares .sent { background: Highlight; }
+  .contents .name { forced-color-adjust: none; color: LinkText; }
+  @keyframes wye-selected { from, to { background: Highlight; color: HighlightText; } }
 }
