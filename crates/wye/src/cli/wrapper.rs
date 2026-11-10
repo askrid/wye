@@ -10,11 +10,13 @@ use std::{ffi::OsString, process::Command};
 
 use gateway_core::config::{is_cleartext_remote, is_loopback_host};
 
-use super::{Env, args::Parsed, files};
+use super::{
+    Env, Error, Exit,
+    args::Parsed,
+    files,
+    probe::{self, gateway_url, health_url, no_gateway},
+};
 
-/// Gateway URL when neither `--url` nor `WYE_URL` is set: a gateway on its
-/// default listen address.
-pub(crate) const DEFAULT_GATEWAY: &str = concat!("http://", gateway_core::default_listen!());
 /// The environment variable Codex reads its bearer token from (the Codex
 /// provider's `env_key`).
 const CODEX_TOKEN_ENV: &str = "WYE_CODEX_TOKEN";
@@ -191,30 +193,22 @@ fn toml_string(value: &str) -> String {
     serde_json::Value::from(value).to_string()
 }
 
-/// The gateway to use: `url` (`--url`), else `$WYE_URL`, else this machine's.
-pub fn gateway_url(url: Option<&str>, env: &impl Env) -> String {
-    url.map(str::to_owned)
-        .or_else(|| env.var("WYE_URL"))
-        .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
-        .trim_end_matches('/')
-        .to_owned()
-}
-
-/// Runs the agent through the gateway, as the module docs describe. On
-/// Unix the process becomes the agent and this returns only if it cannot
-/// start; elsewhere it returns the agent's exit code.
-pub fn run(agent: Agent, parsed: &Parsed<'_>, env: impl Env) -> Result<i32, String> {
+/// `wye claude`, `wye codex`: the agent, run through the gateway as the
+/// module docs describe. On Unix the process becomes the agent, and this
+/// returns only if it cannot start; elsewhere the process exits with the
+/// agent's exit code.
+pub fn run(agent: Agent, parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let mut launch = Launch::resolve(
         parsed.value("url"),
         parsed.value("token-file"),
         &parsed.positional,
-        &env,
+        env,
     )?;
     if agent == Agent::Codex {
-        launch.codex_key = codex_key(&launch, &env);
+        launch.codex_key = codex_key(&launch, env);
     }
-    super::probe_blocking(&super::health_url(&launch.gateway))
-        .map_err(|why| no_gateway(&launch.gateway, &why, "--url", &env))?;
+    probe::blocking(&health_url(&launch.gateway))
+        .map_err(|why| no_gateway(&launch.gateway, &why, "--url", env))?;
     let program = agent.program();
     let name = program.to_string_lossy().into_owned();
     let mut command = launch.command(agent, program);
@@ -222,41 +216,13 @@ pub fn run(agent: Agent, parsed: &Parsed<'_>, env: impl Env) -> Result<i32, Stri
     {
         use std::os::unix::process::CommandExt;
         // Only returns on failure.
-        Err(cannot_run(agent, &name, &command.exec()))
+        Err(cannot_run(agent, &name, &command.exec()).into())
     }
     #[cfg(not(unix))]
     {
         let status = command.status().map_err(|e| cannot_run(agent, &name, &e))?;
-        Ok(status.code().unwrap_or(1))
+        std::process::exit(status.code().unwrap_or(1))
     }
-}
-
-/// Why nothing answered at `gateway`, and what to run: a gateway on this
-/// machine is started, after `wye init` when there is no config to start it
-/// with; another is named with `another`.
-pub fn no_gateway(gateway: &str, why: &str, another: &str, env: &impl Env) -> String {
-    let local = gateway
-        .parse::<http::Uri>()
-        .ok()
-        .and_then(|uri| uri.host().map(is_loopback_host))
-        .unwrap_or(false);
-    // No config at all: not one in the home, nor a ./wye.toml to name.
-    let unconfigured = files::find_config(None, env, std::path::Path::exists).is_err()
-        && !std::path::Path::new(files::CONFIG_FILE).exists();
-    let next = if !local {
-        format!("name another with {another}")
-    } else if unconfigured {
-        format!(
-            "set one up with `wye init`, then `wye service install`; or name another \
-             with {another}"
-        )
-    } else {
-        format!(
-            "start one with `wye service install` or `wye serve`, or name another with \
-             {another}"
-        )
-    };
-    format!("no gateway at {gateway} ({why}); {next}")
 }
 
 fn cannot_run(agent: Agent, name: &str, error: &std::io::Error) -> String {
@@ -275,7 +241,7 @@ fn cannot_run(agent: Agent, name: &str, error: &std::io::Error) -> String {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use super::*;
+    use super::{super::probe::DEFAULT_GATEWAY, *};
 
     #[test]
     fn flags_override_environment_and_the_https_rule_holds() {

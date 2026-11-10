@@ -21,13 +21,19 @@
 //! Tokens would expire in CI, so a case states the token's claims and
 //! only the signature check is skipped; every later check is the server's.
 
-use std::{fmt::Write as _, path::Path};
+use std::{
+    fmt::Write as _,
+    path::{Path, PathBuf},
+};
 
 use gateway_core::{config::Config, policy::ModelPattern, token::Identity};
 use serde::Deserialize;
 
 use super::{
+    Env, Error, Exit,
+    args::Parsed,
     explain::{CallerToken, explain, request_headers},
+    files,
     paint::verdict,
 };
 
@@ -57,6 +63,24 @@ struct Claims {
     subject: String,
     models: Option<Vec<String>>,
     max_output_tokens: Option<u64>,
+}
+
+/// `wye policy-test`: every case in the directory, checked against the
+/// config and printed under it; `Failed` when one fails.
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
+    let (path, config) = files::load_config(parsed, env)?;
+    // Key sets are files the gateway reads at startup, so CI checks them
+    // too; secrets in the environment are `doctor`'s.
+    files::named(
+        &path,
+        crate::startup::verifier(&config, files::config_dir(&path)),
+    )?;
+    let dir = match parsed.positional.first() {
+        Some(dir) => PathBuf::from(dir),
+        None => files::config_dir(&path).join(files::POLICY_TESTS_DIR),
+    };
+    let (report, passed) = policy_test(&config, &dir, super::unix_secs()?)?;
+    Ok(super::checked(&super::about(&path, env, &report), passed))
 }
 
 /// Runs every case in `dir` at Unix time `now`; returns the report and

@@ -12,7 +12,7 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    Env, REPO_AT_RELEASE,
+    Env, Error, Exit, REPO_AT_RELEASE,
     args::Parsed,
     files::{self, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
     plural, token,
@@ -292,8 +292,9 @@ impl InitOptions {
     }
 }
 
-/// `wye init`: what the options ask for, written; returns what to print.
-pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<String, String> {
+/// `wye init`: what the options ask for, written; what it wrote, and what
+/// to run next, are messages: its result is the files.
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     // A shared gateway always holds the provider key, so --provider-key
     // beside --shared changes nothing.
     let setup = match (parsed.flag("provider-key"), parsed.flag("shared")) {
@@ -307,7 +308,7 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<String, String> {
         (None, Some(found)) => found.clone(),
         (None, None) => return Err("no home directory: pass -c <path>".into()),
     };
-    init(
+    super::tell(&init(
         &InitOptions {
             setup,
             openai: parsed.flag("openai"),
@@ -316,7 +317,8 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<String, String> {
             home: files::home(env),
         },
         env,
-    )
+    )?);
+    Ok(Exit::Done)
 }
 
 /// Writes the starter config to `options.config`, never over an existing file

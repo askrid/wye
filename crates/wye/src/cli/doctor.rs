@@ -20,7 +20,12 @@ use http::{Request, Uri};
 use http_body_util::Empty;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 
-use super::paint::verdict;
+use super::{
+    Env, Error, Exit,
+    args::Parsed,
+    files::{self, SIGNING_KEY_FILE},
+    paint::verdict,
+};
 use crate::startup::{
     open_to_others, otlp_headers, prompt_key, upstream_auth, upstream_roots, verifier,
 };
@@ -30,6 +35,25 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One finding: a line of the report, for a check that passed or failed.
 type Check = Result<String, String>;
+
+/// `wye doctor`: every check of the config, printed under it; `Failed`
+/// when one fails.
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
+    let (path, config) = files::load_config(parsed, env)?;
+    // The key `wye token issue` signs with by default, if this machine has
+    // one.
+    let signing_key = files::home(env)
+        .map(|home| home.join(SIGNING_KEY_FILE))
+        .filter(|key| key.exists());
+    let (report, ok) = super::current_thread()
+        .map_err(|e| e.to_string())?
+        .block_on(doctor(
+            &config,
+            files::config_dir(&path),
+            signing_key.as_deref(),
+        ));
+    Ok(super::checked(&super::about(&path, env, &report), ok))
+}
 
 /// Runs every check of `config` (read from `config_dir`), and of the
 /// `signing_key` file this machine holds, if any; the report and whether

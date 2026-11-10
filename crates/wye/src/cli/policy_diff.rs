@@ -16,7 +16,9 @@ use gateway_core::{
 };
 
 use super::{
-    model_list,
+    Error, Exit,
+    args::Parsed,
+    files, model_list,
     paint::{NARROWS, NOT_WIDENED, WIDENED, WIDENS},
 };
 use crate::{StartupError, startup::key_set};
@@ -90,6 +92,25 @@ impl PolicyDiff {
         }
         Ok(())
     }
+}
+
+/// `wye policy-diff`: the comparison of two configs, key sets included,
+/// printed; `ActOn` when a change widens access.
+pub fn run(parsed: &Parsed<'_>) -> Result<Exit, Error> {
+    let [old, new] = parsed.positional.as_slice() else {
+        return Err(Error::Usage("policy-diff takes two configs".into()));
+    };
+    let (old, new) = (Path::new(old), Path::new(new));
+    let (before, after) = (files::load(old)?, files::load(new)?);
+    let mut diff = policy_diff(&before, &after);
+    diff.key_sets(
+        &before,
+        files::config_dir(old),
+        &after,
+        files::config_dir(new),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(super::act_on(&diff.report(), diff.widens()))
 }
 
 /// Compares `old` with `new`; [`PolicyDiff::key_sets`] adds the key sets.

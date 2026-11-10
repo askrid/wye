@@ -3,15 +3,72 @@
 //! check `wye claude` and `wye codex` make before launching their agent
 //! against a local or remote gateway.
 
-use std::time::Duration;
+use std::{path::Path, time::Duration};
 
 use bytes::Bytes;
+use gateway_core::config::is_loopback_host;
 use http::{Request, Uri};
 use http_body_util::{BodyExt, Empty};
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 
+use super::{Env, Error, Exit, args::Parsed, emit, files, paint::Paint};
+
 /// The whole probe, including the connection, must finish within this.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Gateway URL when neither `--url` nor `WYE_URL` is set: a gateway on its
+/// default listen address.
+pub(crate) const DEFAULT_GATEWAY: &str = concat!("http://", gateway_core::default_listen!());
+
+/// `wye probe`: the URL that answered 2xx, printed; else why none did, with
+/// what to run when the default gateway did not answer.
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
+    let given = parsed.positional.first().copied();
+    let url = gateway_url(given, env);
+    let checked = blocking(&url).map_err(|why| match given {
+        Some(_) => why,
+        None => no_gateway(&url, &why, "`wye probe <url>`", env),
+    })?;
+    emit(&format!("{checked}: {}\n", Paint::stdout().green("ok")));
+    Ok(Exit::Done)
+}
+
+/// The gateway to use: `url` (`--url`), else `$WYE_URL`, else this machine's.
+pub fn gateway_url(url: Option<&str>, env: &impl Env) -> String {
+    url.map(str::to_owned)
+        .or_else(|| env.var("WYE_URL"))
+        .unwrap_or_else(|| DEFAULT_GATEWAY.to_owned())
+        .trim_end_matches('/')
+        .to_owned()
+}
+
+/// Why nothing answered at `gateway`, and what to run: a gateway on this
+/// machine is started, after `wye init` when there is no config to start it
+/// with; another is named with `another`.
+pub fn no_gateway(gateway: &str, why: &str, another: &str, env: &impl Env) -> String {
+    let local = gateway
+        .parse::<http::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(is_loopback_host))
+        .unwrap_or(false);
+    // No config at all: not one in the home, nor a ./wye.toml to name.
+    let unconfigured = files::find_config(None, env, Path::exists).is_err()
+        && !Path::new(files::CONFIG_FILE).exists();
+    let next = if !local {
+        format!("name another with {another}")
+    } else if unconfigured {
+        format!(
+            "set one up with `wye init`, then `wye service install`; or name another \
+             with {another}"
+        )
+    } else {
+        format!(
+            "start one with `wye service install` or `wye serve`, or name another with \
+             {another}"
+        )
+    };
+    format!("no gateway at {gateway} ({why}); {next}")
+}
 
 /// [`probe`], for a command with no runtime of its own.
 pub fn blocking(url: &str) -> Result<String, String> {

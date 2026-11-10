@@ -19,10 +19,12 @@ use std::{
 use gateway_core::config::Config;
 
 use super::{
-    Env, Error,
+    Env, Error, Exit,
+    args::Parsed,
     files::{self, MESSAGE_LOG_FILE, USAGE_LOG_FILE},
     paint::Paint,
-    probe_blocking as probe, say,
+    probe::blocking as probe,
+    say,
 };
 use crate::startup::env_secrets;
 
@@ -89,18 +91,18 @@ enum Installed {
 }
 
 /// The paths and identity a step needs.
-pub struct Context {
-    pub manager: Manager,
+struct Context {
+    manager: Manager,
     /// The user's home directory (`$HOME`).
-    pub user_home: PathBuf,
+    user_home: PathBuf,
     /// Wye's home directory, where the log goes.
-    pub wye_home: PathBuf,
-    pub show: Box<dyn Fn(&Path) -> String>,
+    wye_home: PathBuf,
+    show: Box<dyn Fn(&Path) -> String>,
 }
 
 impl Context {
     /// The context of whoever runs this command.
-    pub fn new(env: impl Env + 'static) -> Result<Self, String> {
+    fn new(env: impl Env + 'static) -> Result<Self, String> {
         let user_home = env.var("HOME").ok_or("no home directory ($HOME)")?;
         Ok(Self {
             manager: Manager::here()?,
@@ -140,13 +142,12 @@ impl Context {
     }
 }
 
-/// `wye service install`.
-pub fn install(
-    context: &Context,
-    config_path: &Path,
-    yes: bool,
-    dry_run: bool,
-) -> Result<(), Error> {
+/// `wye service install`: the plan, shown; once approved, the service
+/// installed and started.
+pub fn install(parsed: &Parsed<'_>, env: &(impl Env + Clone + 'static)) -> Result<Exit, Error> {
+    let context = &Context::new(env.clone())?;
+    let config_path = files::config_path(parsed, env)?;
+    let (yes, dry_run) = (parsed.flag("yes"), parsed.flag("dry-run"));
     let show = &context.show;
     let config_path = std::path::absolute(config_path).map_err(|e| e.to_string())?;
     let config = check(&config_path, show)?;
@@ -191,11 +192,11 @@ pub fn install(
     }
     if dry_run {
         say!("\n{}:\n\n{definition}", show(&file));
-        return Ok(());
+        return Ok(Exit::Done);
     }
     if !yes && !confirm("Install", Some((&file, &definition)), show)? {
         eprintln!("Nothing changed.");
-        return Ok(());
+        return Ok(Exit::Done);
     }
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", show(dir)))?;
@@ -211,7 +212,8 @@ pub fn install(
         );
     }
     run_all(&commands, show, stopping(&service))?;
-    Ok(wait_for(&url, &service.messages, show, START_WAIT)?)
+    wait_for(&url, &service.messages, show, START_WAIT)?;
+    Ok(Exit::Done)
 }
 
 /// Asks whether to `verb` (`Install`, `Uninstall`), on stderr; with `file`,
@@ -250,26 +252,17 @@ fn confirm(
     }
 }
 
-/// What `wye service status` found; the exit status follows it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Status {
-    /// Installed, and the gateway answers.
-    Answering,
-    /// Nothing `install` wrote, nor a definition of another's.
-    NotInstalled,
-    /// Installed but not answering, its config broken, or a definition
-    /// `install` did not write.
-    Failing,
-}
-
-/// `wye service status`: whether it is installed and answering.
-pub fn status(context: &Context) -> Result<Status, String> {
+/// `wye service status`: whether it is installed and answering; `ActOn`
+/// when nothing is installed, `Failed` when it is not answering, its config
+/// is broken, or the definition is not one `install` wrote.
+pub fn status(env: &(impl Env + Clone + 'static)) -> Result<Exit, Error> {
+    let context = &Context::new(env.clone())?;
     let show = &context.show;
     let service = match context.installed()? {
         Installed::Ours(service) => service,
         Installed::None => {
             say!("Not installed. `wye service install` sets it up.");
-            return Ok(Status::NotInstalled);
+            return Ok(Exit::ActOn);
         }
         Installed::Foreign => {
             say!(
@@ -277,7 +270,7 @@ pub fn status(context: &Context) -> Result<Status, String> {
                  `wye service install` offers to replace it.",
                 show(&context.file())
             );
-            return Ok(Status::Failing);
+            return Ok(Exit::Failed);
         }
     };
     let log_size = std::fs::metadata(&service.usage_log)
@@ -307,7 +300,7 @@ pub fn status(context: &Context) -> Result<Status, String> {
                 "State",
                 Paint::stdout().green("answering")
             );
-            Ok(Status::Answering)
+            Ok(Exit::Done)
         }
         Some((false, url)) => {
             say!(
@@ -315,7 +308,7 @@ pub fn status(context: &Context) -> Result<Status, String> {
                 "State",
                 Paint::stdout().red("not answering"),
             );
-            Ok(Status::Failing)
+            Ok(Exit::Failed)
         }
         None => {
             say!(
@@ -323,13 +316,15 @@ pub fn status(context: &Context) -> Result<Status, String> {
                 "State",
                 show(&service.config)
             );
-            Ok(Status::Failing)
+            Ok(Exit::Failed)
         }
     }
 }
 
-/// `wye service restart`: checks the installed config, then restarts.
-pub fn restart(context: &Context) -> Result<(), String> {
+/// `wye service restart`: the installed config, checked; then the service,
+/// restarted.
+pub fn restart(env: &(impl Env + Clone + 'static)) -> Result<Exit, Error> {
+    let context = &Context::new(env.clone())?;
     let show = &context.show;
     let installed = context.ours()?;
     let config = check(&installed.config, show)
@@ -360,7 +355,8 @@ pub fn restart(context: &Context) -> Result<(), String> {
         &service.messages,
         show,
         wait + START_WAIT,
-    )
+    )?;
+    Ok(Exit::Done)
 }
 
 /// The service this wye would install for `installed`'s program and
@@ -380,13 +376,15 @@ fn stop_secs(config: &Config) -> u64 {
 
 /// `wye service uninstall`: shows what it stops, removes, and keeps, asks,
 /// then stops the service and removes its definition.
-pub fn uninstall(context: &Context, yes: bool, dry_run: bool) -> Result<(), Error> {
+pub fn uninstall(parsed: &Parsed<'_>, env: &(impl Env + Clone + 'static)) -> Result<Exit, Error> {
+    let context = &Context::new(env.clone())?;
+    let (yes, dry_run) = (parsed.flag("yes"), parsed.flag("dry-run"));
     let show = &context.show;
     let file = context.file();
     let service = match context.installed()? {
         Installed::None => {
             eprintln!("Not installed; nothing changed.");
-            return Ok(());
+            return Ok(Exit::Done);
         }
         _ => context.ours()?,
     };
@@ -397,17 +395,17 @@ pub fn uninstall(context: &Context, yes: bool, dry_run: bool) -> Result<(), Erro
     };
     super::emit(&uninstall_plan(&service, &file, &stop, &reload, show));
     if dry_run {
-        return Ok(());
+        return Ok(Exit::Done);
     }
     if !yes && !confirm("Uninstall", None, show)? {
         eprintln!("Nothing changed.");
-        return Ok(());
+        return Ok(Exit::Done);
     }
     run_all(&stop, show, stopping(&service))?;
     std::fs::remove_file(&file).map_err(|e| format!("cannot remove {}: {e}", show(&file)))?;
     eprintln!("Removed {}", show(&file));
     run_all(&reload, show, stopping(&service))?;
-    Ok(())
+    Ok(Exit::Done)
 }
 
 /// How long the running gateway may take to stop.

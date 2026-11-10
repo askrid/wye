@@ -2,26 +2,18 @@
 #[global_allocator]
 static ALLOCATOR: wye::alloc_stats::Counting = wye::alloc_stats::Counting;
 
-use std::{
-    error::Error,
-    ffi::OsString,
-    path::{Path, PathBuf},
-    process::ExitCode,
-    sync::Arc,
-    time::Duration,
-};
+use std::{error::Error, ffi::OsString, path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 use gateway_core::config::Config;
 use wye::{
     Gateway, Resources, UsageFile, UsageOut,
     cli::{
-        self, Agent,
+        self, Exit,
         args::{self, ArgsError, Command, Id},
-        current_thread, emit, files, gateway_url, no_gateway,
+        emit, files,
         paint::Paint,
-        probe_blocking, run_agent, run_explain, run_init, run_report,
-        service::{self, Context},
-        token, unix_secs,
+        service, token,
+        wrapper::Agent,
     },
 };
 
@@ -29,25 +21,21 @@ use wye::{
 /// as a usage-log write to finish before the process exits anyway.
 const STOP_WAIT: Duration = Duration::from_secs(1);
 
+/// Exit status: wrong usage.
+const USAGE: u8 = 2;
+
 fn main() -> ExitCode {
     match run(std::env::args_os().skip(1).collect()) {
-        Ok(code) => ExitCode::from(code),
+        Ok(exit) => ExitCode::from(exit as u8),
         Err(e) => {
             eprintln!("{} {e}", Paint::stderr().red("wye:"));
             let usage = matches!(e.downcast_ref(), Some(cli::Error::Usage(_)));
-            ExitCode::from(if usage { USAGE } else { FAILED })
+            ExitCode::from(if usage { USAGE } else { Exit::Failed as u8 })
         }
     }
 }
 
-/// Exit status: the command failed, or a check found problems.
-const FAILED: u8 = 1;
-/// Exit status: wrong usage.
-const USAGE: u8 = 2;
-/// Exit status: done, with something a script should act on.
-const ACT_ON: u8 = 3;
-
-fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
+fn run(args: Vec<OsString>) -> Result<Exit, Box<dyn Error>> {
     let usage = |why: String| cli::Error::Usage(why);
     let args: Vec<&str> = args
         .iter()
@@ -66,7 +54,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
     };
     if let Some(text) = help {
         emit(&Paint::stdout().style(&text));
-        return Ok(0);
+        return Ok(Exit::Done);
     }
     let Some((command, rest)) = Command::find(&args) else {
         return Err(usage(unknown(&args)).into());
@@ -75,7 +63,7 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         Ok(parsed) => parsed,
         Err(ArgsError::Help) => {
             emit(&Paint::stdout().style(&command.help()));
-            return Ok(0);
+            return Ok(Exit::Done);
         }
         Err(ArgsError::Missing(why)) => return Err(usage(why).into()),
         Err(ArgsError::Usage(why)) => {
@@ -88,131 +76,29 @@ fn run(args: Vec<OsString>) -> Result<u8, Box<dyn Error>> {
         }
     };
     let env = |name: &str| std::env::var(name).ok();
-    match command.id {
+    let exit = match command.id {
         Id::Serve => {
             let (path, config) = files::load_config(&parsed, &env)?;
             serve(config, &path, parsed.value("usage-log").map(Path::new))?;
-            Ok(0)
+            Exit::Done
         }
-        Id::ServiceInstall => {
-            service::install(
-                &Context::new(env)?,
-                &files::config_path(&parsed, &env)?,
-                parsed.flag("yes"),
-                parsed.flag("dry-run"),
-            )?;
-            Ok(0)
-        }
-        Id::ServiceStatus => Ok(match service::status(&Context::new(env)?)? {
-            service::Status::Answering => 0,
-            service::Status::NotInstalled => ACT_ON,
-            service::Status::Failing => FAILED,
-        }),
-        Id::ServiceRestart => {
-            service::restart(&Context::new(env)?)?;
-            Ok(0)
-        }
-        Id::ServiceUninstall => {
-            service::uninstall(
-                &Context::new(env)?,
-                parsed.flag("yes"),
-                parsed.flag("dry-run"),
-            )?;
-            Ok(0)
-        }
-        Id::Doctor => {
-            let (path, config) = files::load_config(&parsed, &env)?;
-            // The key `wye token issue` signs with by default, if this
-            // machine has one.
-            let signing_key = files::home(&env)
-                .map(|home| home.join(files::SIGNING_KEY_FILE))
-                .filter(|key| key.exists());
-            let (report, ok) = current_thread()?.block_on(wye::doctor(
-                &config,
-                files::config_dir(&path),
-                signing_key.as_deref(),
-            ));
-            let shown = files::tilde(&path, &env);
-            Ok(check(&format!("config: {shown}\n{report}"), ok))
-        }
-        Id::Claude => std::process::exit(run_agent(Agent::Claude, &parsed, env)?),
-        Id::Codex => std::process::exit(run_agent(Agent::Codex, &parsed, env)?),
-        Id::Report => {
-            emit(&run_report(&parsed, &env, Paint::stdout())?);
-            Ok(0)
-        }
-        Id::Init => {
-            // What it wrote, and what to run next: messages; its result is
-            // the files.
-            eprint!("{}", Paint::stderr().style(&run_init(&parsed, &env)?));
-            Ok(0)
-        }
-        Id::TokenKeygen => {
-            let (told, entry) = token::run_keygen(&parsed, &env)?;
-            eprint!("{}", Paint::stderr().style(&told));
-            emit(&entry);
-            Ok(0)
-        }
-        Id::TokenIssue => {
-            token::run_issue(&parsed, &env)?;
-            Ok(0)
-        }
-        Id::Explain => {
-            let (report, forwarded) = run_explain(&parsed, &env)?;
-            Ok(act_on(&report, !forwarded))
-        }
-        Id::PolicyTest => {
-            let (path, config) = files::load_config(&parsed, &env)?;
-            // Key sets are files the gateway reads at startup, so CI checks
-            // them too; secrets in the environment are `doctor`'s.
-            files::named(&path, wye::verifier(&config, files::config_dir(&path)))?;
-            let dir = match parsed.positional.first() {
-                Some(dir) => PathBuf::from(dir),
-                None => files::config_dir(&path).join(files::POLICY_TESTS_DIR),
-            };
-            let (report, passed) = wye::policy_test(&config, &dir, unix_secs()?)?;
-            let shown = files::tilde(&path, &env);
-            Ok(check(&format!("config: {shown}\n{report}"), passed))
-        }
-        Id::PolicyDiff => {
-            let [old, new] = parsed.positional.as_slice() else {
-                return Err(usage("policy-diff takes two configs".into()).into());
-            };
-            let (old, new) = (Path::new(old), Path::new(new));
-            let (before, after) = (files::load(old)?, files::load(new)?);
-            let mut diff = wye::policy_diff(&before, &after);
-            diff.key_sets(
-                &before,
-                files::config_dir(old),
-                &after,
-                files::config_dir(new),
-            )?;
-            Ok(act_on(&diff.report(), diff.widens()))
-        }
-        Id::Probe => {
-            let given = parsed.positional.first().copied();
-            let url = gateway_url(given, &env);
-            let checked = probe_blocking(&url).map_err(|why| match given {
-                Some(_) => why,
-                None => no_gateway(&url, &why, "`wye probe <url>`", &env),
-            })?;
-            emit(&format!("{checked}: {}\n", Paint::stdout().green("ok")));
-            Ok(0)
-        }
-    }
-}
-
-/// Prints a check's report; the exit status: whether it found problems.
-fn check(report: &str, ok: bool) -> u8 {
-    emit(&Paint::stdout().style(report));
-    if ok { 0 } else { FAILED }
-}
-
-/// Prints a report; the exit status: whether it found something a script
-/// should act on (a refusal, widened access).
-fn act_on(report: &str, found: bool) -> u8 {
-    emit(&Paint::stdout().style(report));
-    if found { ACT_ON } else { 0 }
+        Id::ServiceInstall => service::install(&parsed, &env)?,
+        Id::ServiceStatus => service::status(&env)?,
+        Id::ServiceRestart => service::restart(&env)?,
+        Id::ServiceUninstall => service::uninstall(&parsed, &env)?,
+        Id::Doctor => cli::doctor::run(&parsed, &env)?,
+        Id::Claude => cli::wrapper::run(Agent::Claude, &parsed, &env)?,
+        Id::Codex => cli::wrapper::run(Agent::Codex, &parsed, &env)?,
+        Id::Report => cli::report::run(&parsed, &env)?,
+        Id::Init => cli::init::run(&parsed, &env)?,
+        Id::TokenKeygen => token::run_keygen(&parsed, &env)?,
+        Id::TokenIssue => token::run_issue(&parsed, &env)?,
+        Id::Explain => cli::explain::run(&parsed, &env)?,
+        Id::PolicyTest => cli::policy_test::run(&parsed, &env)?,
+        Id::PolicyDiff => cli::policy_diff::run(&parsed)?,
+        Id::Probe => cli::probe::run(&parsed, &env)?,
+    };
+    Ok(exit)
 }
 
 /// `wye help <command>`: that command's help.

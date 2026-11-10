@@ -10,7 +10,7 @@ use std::{borrow::Cow, net::SocketAddr, path::Path};
 
 use http::{HeaderMap, HeaderName, HeaderValue, header::HOST};
 
-use super::{Env, Error, args::Parsed, files};
+use super::{Env, Error, Exit, args::Parsed, files};
 use gateway_core::{
     admission::{self, BodyChecks, Refusal},
     api::{self, Api, Endpoint},
@@ -37,9 +37,9 @@ pub enum CallerToken<'a> {
     Trusted(Identity),
 }
 
-/// `wye explain`, from its options: the report, with the config it read, and
-/// whether the request would be forwarded.
-pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, bool), Error> {
+/// `wye explain`: the steps for one request, printed under the config it
+/// read; `ActOn` when the request would be refused.
+pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let (path, config) = files::load_config(parsed, env)?;
     let verifier = files::named(
         &path,
@@ -78,14 +78,9 @@ pub fn run(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, bool), Error>
         super::unix_secs()?,
         &parsed.values("target-model"),
     );
-    let forwarded = explanation.refused.is_none();
-    Ok((
-        format!(
-            "config: {}\n{}",
-            files::tilde(&path, env),
-            explanation.report()
-        ),
-        forwarded,
+    Ok(super::act_on(
+        &super::about(&path, env, &explanation.report()),
+        explanation.refused.is_some(),
     ))
 }
 

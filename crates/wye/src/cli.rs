@@ -1,30 +1,30 @@
 //! The commands besides `wye serve`. Each runs once and exits; none runs
 //! inside the server.
 
+use std::path::Path;
+
+use paint::Paint;
+
 pub mod args;
-mod doctor;
-mod explain;
+pub mod doctor;
+pub mod explain;
 pub mod files;
-mod init;
+pub mod init;
 pub mod paint;
-mod policy_diff;
-mod policy_test;
-mod probe;
-mod report;
+pub mod policy_diff;
+pub mod policy_test;
+pub mod probe;
+pub mod report;
 pub mod service;
 mod text;
 pub mod token;
-mod wrapper;
+pub mod wrapper;
 
 pub use doctor::doctor;
-pub use explain::{CallerToken, Explanation, explain, request_headers, run as run_explain};
-pub use init::run as run_init;
+pub use explain::{CallerToken, Explanation, explain, request_headers};
 pub use policy_diff::{PolicyDiff, policy_diff};
 pub use policy_test::policy_test;
-pub(crate) use probe::health_url;
-pub use probe::{blocking as probe_blocking, probe};
-pub use report::run as run_report;
-pub use wrapper::{Agent, gateway_url, no_gateway, run as run_agent};
+pub use probe::probe;
 
 /// The repository's files at this build's release tag, for every link the
 /// CLI prints or writes: a link to `main` would describe another version's
@@ -45,15 +45,51 @@ pub trait Env: Fn(&str) -> Option<String> {
 
 impl<F: Fn(&str) -> Option<String>> Env for F {}
 
+/// How a command ended; the process exits with its code. Wrong usage
+/// (exit 2) is an [`Error::Usage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    /// Done.
+    Done = 0,
+    /// Failed: a check found problems.
+    Failed = 1,
+    /// Done, with something a script should act on.
+    ActOn = 3,
+}
+
+/// `report`, headed by the config it is about.
+fn about(config: &Path, env: &impl Env, report: &str) -> String {
+    format!("config: {}\n{report}", files::tilde(config, env))
+}
+
+/// Prints a check's report; [`Exit::Failed`] when it found problems.
+fn checked(report: &str, ok: bool) -> Exit {
+    emit(&Paint::stdout().style(report));
+    if ok { Exit::Done } else { Exit::Failed }
+}
+
+/// Prints a report; [`Exit::ActOn`] when it found something a script
+/// should act on (a refusal, widened access).
+fn act_on(report: &str, found: bool) -> Exit {
+    emit(&Paint::stdout().style(report));
+    if found { Exit::ActOn } else { Exit::Done }
+}
+
+/// Writes messages about running a command to standard error, styled as
+/// [`Paint::style`] styles them.
+fn tell(text: &str) {
+    eprint!("{}", Paint::stderr().style(text));
+}
+
 /// A runtime for a command that makes a request or two.
-pub fn current_thread() -> std::io::Result<tokio::runtime::Runtime> {
+fn current_thread() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
 }
 
 /// The time offline checks verify credentials at.
-pub fn unix_secs() -> Result<u64, String> {
+fn unix_secs() -> Result<u64, String> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())

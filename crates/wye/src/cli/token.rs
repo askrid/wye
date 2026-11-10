@@ -19,7 +19,7 @@ use ring::{
 };
 
 use super::{
-    Env, Error,
+    Env, Error, Exit,
     args::Parsed,
     emit,
     files::{self, SIGNING_KEY_FILE},
@@ -60,9 +60,9 @@ pub fn public_key(key: &Ed25519KeyPair) -> String {
     token::encode_public_key(key.public_key().as_ref())
 }
 
-/// `wye token keygen`: a new key. Returns what to tell the user, and the
-/// result: the `signing_keys` line to put under `[auth]`.
-pub fn run_keygen(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, String), String> {
+/// `wye token keygen`: a new key, written; the result is the `signing_keys`
+/// line to put under `[auth]`.
+pub fn run_keygen(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let out = match parsed.value("out") {
         Some(out) => out.into(),
         None => {
@@ -72,25 +72,25 @@ pub fn run_keygen(parsed: &Parsed<'_>, env: &impl Env) -> Result<(String, String
                     "{} exists, and `wye token issue` signs with it; for another key, \
                      as when rotating, pass --out <path>",
                     files::tilde(&out, env)
-                ));
+                )
+                .into());
             }
             out
         }
     };
     let key = new_key(&out)?;
-    Ok((
-        format!(
-            "wrote {} (keep it secret, outside the gateway); add its public half to \
-             wye.toml, under [auth] (when rotating, after the keys already in \
-             signing_keys, until their tokens expire):\n",
-            files::tilde(&out, env),
-        ),
-        format!("signing_keys = [\"{}\"]\n", public_key(&key)),
-    ))
+    super::tell(&format!(
+        "wrote {} (keep it secret, outside the gateway); add its public half to \
+         wye.toml, under [auth] (when rotating, after the keys already in \
+         signing_keys, until their tokens expire):\n",
+        files::tilde(&out, env),
+    ));
+    emit(&format!("signing_keys = [\"{}\"]\n", public_key(&key)));
+    Ok(Exit::Done)
 }
 
-/// `wye token issue`, from its options.
-pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<(), Error> {
+/// `wye token issue`: a token, printed or written to `--out`.
+pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let ttl_secs = parsed
         .value("ttl")
         .map(|ttl| {
@@ -145,7 +145,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<(), Error> {
         }
         None => emit(&format!("{issued}\n")),
     }
-    Ok(())
+    Ok(Exit::Done)
 }
 
 /// `--models`: comma-separated model names or prefixes ending in `*`.
