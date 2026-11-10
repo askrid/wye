@@ -18,3 +18,12 @@ python3 -m http.server --directory site/out 8000   # then open http://localhost:
 A page holds no second copy of text the repository already says: benchmark numbers come from the tables in `README.md` and `docs/benchmarks.md`, the version and license from the manifests, and commands, output, and status from `README.md` and `docs/operations.md`. The figures that are drawings (the client APIs, the token, the upgrade check, the upstream sessions) are written by hand from real output and checked against the code when it changes. The build fails when a source is missing, when a local link, anchor, or fragment does not resolve, when a link into the repository names a file it does not have, or when a page or a script would load anything from another origin.
 
 The site is its own Cargo workspace, so its dependencies stay out of the gateway's lockfile and a site change never runs the gateway's commit gate. The pre-commit hook runs `site/check.sh` instead for a commit that touches the site, and also for one that changes a file the site reads. `.github/workflows/site.yml` runs the same check on pull requests and deploys `site/out` to GitHub Pages from `main` ([development.md](../docs/development.md#continuous-integration)).
+
+## Open findings
+
+Found in the review round of 2026-11-10 and not fixed, with why, so the next round starts here:
+
+- `src/check.rs` reads only double-quoted `href` and `src`, and `url(…)` in CSS: a single-quoted or unquoted attribute, `srcset`, `ping`, or `@import` would pass. The page has none; raw HTML in a rendered README section could.
+- Code blocks that only wrap (the hero's, `.long-lines`) are still focusable, and the ones that scroll have no accessible name. Fixing it needs `{{fence}}` to know where its block is placed.
+- The worker's messages are told apart by which field they carry, not a `type`; the anchors map is keyed by a `FILE#slug` string; the page builds `{{repo}}/blob/{{commit}}/…` URLs itself, which `Sources::files_url` already knows. Small, and nothing has gone wrong yet.
+- Not checked in a browser: whether Safari fires `pointerleave` on the root when the mouse leaves the window, and whether a Windows tap moves the hidden mouse position (both would make one stray sweep of plucks).
