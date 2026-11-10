@@ -127,6 +127,16 @@ impl Harness {
         Self::keyed_with(handler, "", upstream_extra, keyed_resources()).await
     }
 
+    /// [`Self::keyed`] in front of an upstream that answers `200 {}` and
+    /// passes `pick` of each request it receives to the returned channel.
+    pub(crate) async fn recorded<T: Send + 'static>(
+        pick: fn(Seen) -> T,
+        upstream_extra: &str,
+    ) -> (Self, mpsc::Receiver<T>) {
+        let (handler, rx) = recording(pick);
+        (Self::keyed(handler, upstream_extra).await, rx)
+    }
+
     /// [`Self::provider_key`], with extra `[server]` lines.
     pub(crate) async fn with_server_config(handler: Handler, server_extra: &str) -> Self {
         Self::keyed_with(handler, server_extra, "", keyed_resources()).await
@@ -431,9 +441,34 @@ pub(crate) fn sse(mut res: Response<UpBody>) -> Response<UpBody> {
     res
 }
 
-/// An event stream whose chunks the test sends on `rx`'s channel.
-pub(crate) fn streaming(rx: mpsc::Receiver<Bytes>) -> Response<UpBody> {
-    sse(Response::new(Either::Right(ChannelBody(rx))))
+/// A response whose body is the chunks the test sends on `rx`'s channel.
+pub(crate) fn channel(rx: mpsc::Receiver<Bytes>) -> Response<UpBody> {
+    Response::new(Either::Right(ChannelBody(rx)))
+}
+
+/// A response that sends `first`, then nothing more until the gateway drops
+/// it.
+pub(crate) fn stalls_after(first: &'static [u8]) -> Response<UpBody> {
+    let (tx, rx) = mpsc::channel(1);
+    tx.try_send(Bytes::from_static(first)).unwrap();
+    tokio::spawn(async move { tx.closed().await });
+    channel(rx)
+}
+
+/// The senders of the responses a [`held_open`] upstream keeps open.
+pub(crate) type Held = Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>>;
+
+/// An upstream whose responses are event streams that stay open, silent,
+/// until their senders, kept in the returned list, drop.
+pub(crate) fn held_open() -> (Handler, Held) {
+    let held = Held::default();
+    let open = Arc::clone(&held);
+    let handler: Handler = Arc::new(move |_| {
+        let (tx, rx) = mpsc::channel(1);
+        open.lock().unwrap().push(tx);
+        Box::pin(async move { sse(channel(rx)) })
+    });
+    (handler, held)
 }
 
 /// `res` as JSON.

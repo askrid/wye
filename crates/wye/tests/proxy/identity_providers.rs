@@ -17,7 +17,6 @@ async fn harness(key: &IdpKey) -> (Harness, mpsc::Receiver<HeaderMap>) {
     let dir = TempDir::new("idp");
     let jwks_file = dir.join(format!("{}.jwks", key.alg()));
     std::fs::write(&jwks_file, jwks(&[(key, "gh-1")])).unwrap();
-    let (handler, rx) = recording(|seen| seen.headers);
     let auth = format!(
         "\n[auth]\n\
          [[auth.identity_providers]]\nissuer = \"{ISS}\"\naudience = \"wye-prod\"\nalgorithm = \"{}\"\n\
@@ -27,7 +26,7 @@ async fn harness(key: &IdpKey) -> (Harness, mpsc::Receiver<HeaderMap>) {
         key.alg(),
         jwks_file.display()
     );
-    (Harness::keyed(handler, &auth).await, rx)
+    Harness::recorded(|seen| seen.headers, &auth).await
 }
 
 fn claims(owner: &str) -> String {

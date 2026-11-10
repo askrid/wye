@@ -236,9 +236,7 @@ async fn a_body_past_the_limit_gets_openais_error_shape() {
 async fn beyond_the_concurrency_limit_responses_get_a_retryable_503() {
     // An upstream that keeps its stream open, holding the one permit.
     let (_keep, rx) = mpsc::channel::<Bytes>(1);
-    let handler = once(rx, |rx| async {
-        Response::new(Either::Right(ChannelBody(rx)))
-    });
+    let handler = once(rx, |rx| async { channel(rx) });
     let h = gateway(handler, "max_concurrent_requests = 1").await;
     let _held = h
         .send(responses(), r#"{"model":"gpt-5","input":"a"}"#)

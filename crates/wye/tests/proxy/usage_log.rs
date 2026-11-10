@@ -116,7 +116,7 @@ async fn usage_records_carry_claude_code_agent_headers() {
 #[tokio::test]
 async fn cancelled_stream_logs_partial_usage() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
-    let h = Harness::provider_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
+    let h = Harness::provider_key(once(chunks_rx, |rx| async { sse(channel(rx)) })).await;
     let start_event = &USAGE_STREAM[..USAGE_STREAM.find("event: content_block_delta").unwrap()];
     chunks_tx
         .send(Bytes::from_static(start_event.as_bytes()))
@@ -269,9 +269,7 @@ async fn a_body_delivered_to_its_length_is_completed_before_its_stream_ends() {
             let (tx, rx) = mpsc::channel(1);
             tx.send(Bytes::from_static(COUNT.as_bytes())).await.unwrap();
             kept.lock().unwrap().push(tx);
-            let mut res = Response::new(Either::Right(ChannelBody(rx)));
-            res.headers_mut()
-                .insert("content-type", "application/json".parse().unwrap());
+            let mut res = json(channel(rx));
             res.headers_mut()
                 .insert("content-length", COUNT.len().into());
             res

@@ -5,7 +5,7 @@ use super::harness::*;
 #[tokio::test]
 async fn streams_events_before_upstream_completes() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(4);
-    let h = Harness::provider_key(once(chunks_rx, |rx| async { streaming(rx) })).await;
+    let h = Harness::provider_key(once(chunks_rx, |rx| async { sse(channel(rx)) })).await;
 
     chunks_tx
         .send(Bytes::from_static(b"event: ping\ndata: {}\n\n"))
@@ -34,9 +34,7 @@ async fn streams_events_before_upstream_completes() {
 #[tokio::test]
 async fn client_disconnect_releases_upstream_stream() {
     let (chunks_tx, chunks_rx) = mpsc::channel::<Bytes>(1);
-    let handler = once(chunks_rx, |rx| async {
-        Response::new(Either::Right(ChannelBody(rx)))
-    });
+    let handler = once(chunks_rx, |rx| async { channel(rx) });
     let h = Harness::provider_key(handler).await;
 
     chunks_tx
@@ -61,20 +59,12 @@ async fn client_disconnect_releases_upstream_stream() {
 #[tokio::test]
 async fn stalled_event_stream_ends_with_an_error_event() {
     let handler: Handler = Arc::new(|seen: Seen| {
-        Box::pin(async move {
-            let (tx, rx) = mpsc::channel::<Bytes>(1);
-            let first: &'static [u8] = if seen.uri.query() == Some("mid=1") {
-                b"event: content_block_delta\ndata: {\"partial"
-            } else {
-                b"event: ping\ndata: {\"type\":\"ping\"}\n\n"
-            };
-            tx.send(Bytes::from_static(first)).await.unwrap();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                drop(tx);
-            });
-            streaming(rx)
-        })
+        let first: &'static [u8] = if seen.uri.query() == Some("mid=1") {
+            b"event: content_block_delta\ndata: {\"partial"
+        } else {
+            b"event: ping\ndata: {\"type\":\"ping\"}\n\n"
+        };
+        Box::pin(async move { sse(stalls_after(first)) })
     });
     let h = Harness::keyed(handler, "stream_idle_timeout = \"1s\"").await;
     let res = h.send(messages(), "{}").await;
@@ -108,18 +98,8 @@ async fn stalled_event_stream_ends_with_an_error_event() {
 
 #[tokio::test]
 async fn idle_upstream_stream_is_terminated() {
-    let handler: Handler = Arc::new(|_| {
-        Box::pin(async {
-            let (tx, rx) = mpsc::channel::<Bytes>(1);
-            tx.send(Bytes::from_static(b"data: 1\n\n")).await.unwrap();
-            // Keep the sender alive without sending, so the stream goes idle.
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                drop(tx);
-            });
-            Response::new(Either::Right(ChannelBody(rx)))
-        })
-    });
+    // Not an event stream: one idle at an event boundary ends cleanly.
+    let handler = answering(|| stalls_after(b"data: 1\n\n"));
     let h = Harness::keyed(handler, "stream_idle_timeout = \"1s\"").await;
     let res = h.send(messages(), "{}").await;
     let mut body = res.into_body();
@@ -170,7 +150,7 @@ async fn slow_reader_backpressures_the_upstream() {
                     counter.fetch_add(1, Ordering::Relaxed);
                 }
             });
-            Response::new(Either::Right(ChannelBody(rx)))
+            channel(rx)
         })
     });
     let h = Harness::provider_key(handler).await;
@@ -205,7 +185,7 @@ async fn client_that_stops_reading_is_disconnected() {
             while tx.send(chunk.clone()).await.is_ok() {}
             let _ = released_tx.send(());
         });
-        Response::new(Either::Right(ChannelBody(rx)))
+        channel(rx)
     });
     let (addr, hits) = spawn_counted(handler).await;
     let config = config("", &upstream(addr, ""));

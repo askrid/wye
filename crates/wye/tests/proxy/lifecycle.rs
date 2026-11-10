@@ -2,20 +2,10 @@
 
 use super::harness::*;
 
-/// Upstream response that stays open, silent, until the returned senders drop.
-fn held_open(open: &Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>>) -> Handler {
-    let open = Arc::clone(open);
-    Arc::new(move |_| {
-        let (tx, rx) = mpsc::channel(1);
-        open.lock().unwrap().push(tx);
-        Box::pin(async move { streaming(rx) })
-    })
-}
-
 #[tokio::test]
 async fn requests_beyond_the_concurrency_limit_get_an_overload_error() {
-    let open = Arc::default();
-    let h = Harness::with_server_config(held_open(&open), "max_concurrent_requests = 2").await;
+    let (handler, _open) = held_open();
+    let h = Harness::with_server_config(handler, "max_concurrent_requests = 2").await;
     let first = h.send(messages(), "{}").await;
     let _second = h.send(messages(), "{}").await;
 
@@ -120,12 +110,9 @@ async fn requests_beyond_the_hold_budget_get_an_overload_error() {
 
 #[tokio::test]
 async fn shutdown_drains_then_stops_within_the_deadline() {
-    let open = Arc::default();
-    let mut h = Harness::with_server_config(
-        held_open(&open),
-        "drain_delay = \"1s\"\nshutdown_grace = \"1s\"",
-    )
-    .await;
+    let (handler, open) = held_open();
+    let mut h =
+        Harness::with_server_config(handler, "drain_delay = \"1s\"\nshutdown_grace = \"1s\"").await;
     let stream = h.send(messages(), "{}").await;
     assert_eq!(stream.status(), StatusCode::OK);
 
@@ -202,7 +189,7 @@ async fn a_stream_that_ends_within_the_grace_is_delivered_whole() {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 let _ = tx.send(Bytes::from_static(LAST)).await;
             });
-            streaming(rx)
+            sse(channel(rx))
         })
     });
     let mut h = Harness::with_server_config(handler, "shutdown_grace = \"2s\"").await;

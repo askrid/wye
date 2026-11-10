@@ -6,15 +6,14 @@ const ALIASES: &str = "\n[[aliases]]\nname = \"coding\"\nmodel = \"claude-opus-5
      when = [{ subjects = [\"alice\"], model = \"claude-haiku-5-5\" }]\n\
      [[aliases]]\nname = \"big\"\nmodel = \"claude-opus-5-5\"\n";
 
-/// Gateway whose upstream reports each request's headers and body.
-async fn harness(upstream_extra: &str) -> (Harness, mpsc::Receiver<(HeaderMap, Bytes)>) {
-    let (handler, rx) = recording(|seen| (seen.headers, seen.body));
-    (Harness::keyed(handler, upstream_extra).await, rx)
+/// What the upstream reports of each request.
+fn headers_and_body(seen: Seen) -> (HeaderMap, Bytes) {
+    (seen.headers, seen.body)
 }
 
 #[tokio::test]
 async fn an_alias_is_replaced_in_place_and_recorded() {
-    let (h, mut seen) = harness(ALIASES).await;
+    let (h, mut seen) = Harness::recorded(headers_and_body, ALIASES).await;
     let body = r#"{"model":"coding","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}"#;
     let res = h.send(messages(), body).await;
     assert_eq!(res.status(), StatusCode::OK);
@@ -48,7 +47,7 @@ async fn rollout_follows_the_subject_and_permissions_apply_to_the_resolved_model
         "{}\n{ALIASES}",
         auth_section(&key, "models = [\"claude-haiku-*\"]")
     );
-    let (h, mut seen) = harness(&auth).await;
+    let (h, mut seen) = Harness::recorded(headers_and_body, &auth).await;
     let send = |sub: &'static str, model: &'static str| {
         let req = bearer(&token(&key, sub, None, None));
         let body = format!(r#"{{"model":"{model}"}}"#);

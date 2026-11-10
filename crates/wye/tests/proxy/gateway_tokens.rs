@@ -9,8 +9,7 @@ fn alice(key: &Ed25519KeyPair) -> String {
 
 /// Gateway with `[auth]` trusting `key`, recording what the upstream receives.
 async fn harness(key: &Ed25519KeyPair) -> (Harness, mpsc::Receiver<HeaderMap>) {
-    let (handler, rx) = recording(|seen| seen.headers);
-    (Harness::keyed(handler, &auth_section(key, "")).await, rx)
+    Harness::recorded(|seen| seen.headers, &auth_section(key, "")).await
 }
 
 #[tokio::test]
@@ -84,9 +83,7 @@ fn token_with_models(key: &Ed25519KeyPair, models: &[&str]) -> String {
 /// Gateway with `[auth]` trusting `key` and `auth_extra` lines, recording
 /// the request bodies the upstream receives.
 async fn body_harness(key: &Ed25519KeyPair, auth_extra: &str) -> (Harness, mpsc::Receiver<Bytes>) {
-    let (handler, rx) = recording(|seen| seen.body);
-    let h = Harness::keyed(handler, &auth_section(key, auth_extra)).await;
-    (h, rx)
+    Harness::recorded(|seen| seen.body, &auth_section(key, auth_extra)).await
 }
 
 const HAIKU: &str =

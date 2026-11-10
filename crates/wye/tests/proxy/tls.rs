@@ -62,13 +62,7 @@ async fn concurrent_streams_beyond_one_connection_limit_are_not_queued() {
     const STREAMS: usize = 10;
     let ca = TestCa::generate();
     // Streams stay open until the test ends, holding their HTTP/2 stream slots.
-    let open: Arc<std::sync::Mutex<Vec<mpsc::Sender<Bytes>>>> = Arc::default();
-    let held = Arc::clone(&open);
-    let handler: Handler = Arc::new(move |_| {
-        let (tx, rx) = mpsc::channel(1);
-        held.lock().unwrap().push(tx);
-        Box::pin(async move { Response::new(Either::Right(ChannelBody(rx))) })
-    });
+    let (handler, open) = held_open();
     let h = Harness::start_tls_with(handler, &ca, true, Some(PEER_LIMIT), "").await;
 
     // Each response keeps its stream open, so stream n needs a free slot while n-1 are held.
