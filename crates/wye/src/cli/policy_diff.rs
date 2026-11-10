@@ -23,32 +23,65 @@ use super::{
 };
 use crate::{StartupError, startup::key_set};
 
+use Effect::{Changes, Narrows, Widens};
+
+/// What a change does to access; the report lists its lines in this
+/// order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Effect {
+    Widens,
+    Narrows,
+    /// Changes where requests go, not who may send them.
+    Changes,
+}
+
 /// The comparison, line by line.
 #[derive(Debug, Default)]
 pub struct PolicyDiff {
-    widens: Vec<String>,
-    narrows: Vec<String>,
-    changes: Vec<String>,
+    lines: Vec<(Effect, String)>,
 }
 
 impl PolicyDiff {
-    /// Whether any change widens access.
-    pub fn widens(&self) -> bool {
-        !self.widens.is_empty()
+    /// Adds a change that widens access.
+    fn widen(&mut self, line: impl Into<String>) {
+        self.lines.push((Widens, line.into()));
     }
 
+    /// Adds a change that narrows access.
+    fn narrow(&mut self, line: impl Into<String>) {
+        self.lines.push((Narrows, line.into()));
+    }
+
+    /// Adds a change to where requests go.
+    fn change(&mut self, line: impl Into<String>) {
+        self.lines.push((Changes, line.into()));
+    }
+
+    /// How many changes widen access.
+    fn widened(&self) -> usize {
+        self.lines.iter().filter(|(e, _)| *e == Widens).count()
+    }
+
+    /// Whether any change widens access.
+    pub fn widens(&self) -> bool {
+        self.widened() > 0
+    }
+
+    /// The comparison as text: what widens access, what narrows it, and
+    /// what only changes, each in the order found, then the verdict.
     pub fn report(&self) -> String {
+        let mut lines: Vec<_> = self.lines.iter().collect();
+        lines.sort_by_key(|(effect, _)| *effect);
         let mut out = String::new();
-        for (kind, lines) in [
-            (WIDENS, &self.widens),
-            (NARROWS, &self.narrows),
-            ("changes:", &self.changes),
-        ] {
-            for line in lines {
-                out.push_str(&format!("{kind} {line}\n"));
-            }
+        for (effect, line) in lines {
+            let label = match effect {
+                Widens => WIDENS,
+                Narrows => NARROWS,
+                Changes => "changes:",
+            };
+            out.push_str(&format!("{label} {line}\n"));
         }
-        out.push_str(&match self.widens.len() {
+        out.push_str(&match self.widened() {
             0 => format!("{NOT_WIDENED}\n"),
             n => format!("{WIDENED} ({n})\n"),
         });
@@ -70,22 +103,18 @@ impl PolicyDiff {
         };
         for issuer in &new.identity_providers {
             // A new identity provider is reported with its config.
-            let Some(before) = old
-                .identity_providers
-                .iter()
-                .find(|i| i.issuer == issuer.issuer)
-            else {
+            let Some(before) = same(&old.identity_providers, issuer) else {
                 continue;
             };
             let (was, now) = (key_set(before, old_dir)?, key_set(issuer, new_dir)?);
             let name = &issuer.issuer;
             for kid in now.added_since(&was) {
-                self.widens.push(format!(
+                self.widen(format!(
                     "[[auth.identity_providers]] {name}: key {kid} newly trusted"
                 ));
             }
             for kid in was.added_since(&now) {
-                self.narrows.push(format!(
+                self.narrow(format!(
                     "[[auth.identity_providers]] {name}: key {kid} no longer trusted"
                 ));
             }
@@ -118,32 +147,27 @@ pub fn policy_diff(old: &Config, new: &Config) -> PolicyDiff {
     let mut diff = PolicyDiff::default();
     let (from, to) = (old.server.listen, new.server.listen);
     if from.ip().is_loopback() && !to.ip().is_loopback() {
-        diff.widens.push(format!(
+        diff.widen(format!(
             "server.listen: {from} -> {to}, reachable beyond this machine"
         ));
     } else if to.ip().is_unspecified() && !from.ip().is_unspecified() {
-        diff.widens
-            .push(format!("server.listen: {from} -> {to}, on every interface"));
+        diff.widen(format!("server.listen: {from} -> {to}, on every interface"));
     } else if from != to {
-        diff.changes.push(format!("server.listen: {from} -> {to}"));
+        diff.change(format!("server.listen: {from} -> {to}"));
     }
     match (&old.auth, &new.auth) {
-        (Some(_), None) => diff
-            .widens
-            .push("[auth] removed: no gateway token is required".into()),
-        (None, Some(_)) => diff
-            .narrows
-            .push("[auth] added: a gateway token is required".into()),
+        (Some(_), None) => diff.widen("[auth] removed: no gateway token is required"),
+        (None, Some(_)) => diff.narrow("[auth] added: a gateway token is required"),
         (Some(old), Some(new)) => auth(&mut diff, old, new),
         (None, None) => {}
     }
     for id in RouteId::ALL {
         match (old.routes.route(id), new.routes.route(id)) {
-            (None, Some(_)) => diff.widens.push(format!(
+            (None, Some(_)) => diff.widen(format!(
                 "the {} route added: its requests now reach a provider",
                 id.label()
             )),
-            (Some(_), None) => diff.narrows.push(format!(
+            (Some(_), None) => diff.narrow(format!(
                 "the {} route removed: its requests are no longer served",
                 id.label()
             )),
@@ -162,35 +186,25 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
         new.models.as_deref(),
     );
     match (old.max_output_tokens, new.max_output_tokens) {
-        (Some(a), None) => diff
-            .widens
-            .push(format!("[auth] max_output_tokens: {a} -> no ceiling")),
-        (Some(a), Some(b)) if b > a => diff
-            .widens
-            .push(format!("[auth] max_output_tokens: {a} -> {b}")),
-        (Some(a), Some(b)) if b < a => diff
-            .narrows
-            .push(format!("[auth] max_output_tokens: {a} -> {b}")),
-        (None, Some(b)) => diff
-            .narrows
-            .push(format!("[auth] max_output_tokens: no ceiling -> {b}")),
+        (Some(a), None) => diff.widen(format!("[auth] max_output_tokens: {a} -> no ceiling")),
+        (Some(a), Some(b)) if b > a => diff.widen(format!("[auth] max_output_tokens: {a} -> {b}")),
+        (Some(a), Some(b)) if b < a => diff.narrow(format!("[auth] max_output_tokens: {a} -> {b}")),
+        (None, Some(b)) => diff.narrow(format!("[auth] max_output_tokens: no ceiling -> {b}")),
         _ => {}
     }
     let (a, b) = (old.max_gateway_token_ttl, new.max_gateway_token_ttl);
     let ttl = || format!("[auth] max_gateway_token_ttl: {} -> {}", show(a), show(b));
     if b > a {
-        diff.widens.push(ttl());
+        diff.widen(ttl());
     } else if b < a {
-        diff.narrows.push(ttl());
+        diff.narrow(ttl());
     }
     match (&old.own, &new.own) {
-        (None, Some(_)) => diff.widens.push("[auth] Wye tokens accepted".into()),
-        (Some(_), None) => diff
-            .narrows
-            .push("[auth] Wye tokens no longer accepted".into()),
+        (None, Some(_)) => diff.widen("[auth] Wye tokens accepted"),
+        (Some(_), None) => diff.narrow("[auth] Wye tokens no longer accepted"),
         (Some(old), Some(new)) => {
             if old.audience != new.audience {
-                diff.widens.push(format!(
+                diff.widen(format!(
                     "[auth] audience: {} -> {}",
                     old.audience, new.audience
                 ));
@@ -202,7 +216,7 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             };
             for key in &new.keys {
                 if !trusts(old, &key.thumbprint) {
-                    diff.widens.push(format!(
+                    diff.widen(format!(
                         "[auth] signing_keys {}: a new signing key is trusted",
                         key.thumbprint
                     ));
@@ -210,7 +224,7 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
             }
             for key in &old.keys {
                 if !trusts(new, &key.thumbprint) {
-                    diff.narrows.push(format!(
+                    diff.narrow(format!(
                         "[auth] signing_keys {}: no longer trusted",
                         key.thumbprint
                     ));
@@ -220,12 +234,8 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
         (None, None) => {}
     }
     for issuer in &new.identity_providers {
-        match old
-            .identity_providers
-            .iter()
-            .find(|i| i.issuer == issuer.issuer)
-        {
-            None => diff.widens.push(format!(
+        match same(&old.identity_providers, issuer) {
+            None => diff.widen(format!(
                 "[[auth.identity_providers]] {}: tokens from this identity provider accepted",
                 issuer.issuer
             )),
@@ -233,17 +243,18 @@ fn auth(diff: &mut PolicyDiff, old: &Auth, new: &Auth) {
         }
     }
     for issuer in &old.identity_providers {
-        if !new
-            .identity_providers
-            .iter()
-            .any(|i| i.issuer == issuer.issuer)
-        {
-            diff.narrows.push(format!(
+        if same(&new.identity_providers, issuer).is_none() {
+            diff.narrow(format!(
                 "[[auth.identity_providers]] {}: no longer accepted",
                 issuer.issuer
             ));
         }
     }
+}
+
+/// The identity provider in `list` with `idp`'s issuer.
+fn same<'a>(list: &'a [IdentityProvider], idp: &IdentityProvider) -> Option<&'a IdentityProvider> {
+    list.iter().find(|i| i.issuer == idp.issuer)
 }
 
 /// The same identity provider in both configs.
@@ -255,17 +266,17 @@ fn issuer_change(diff: &mut PolicyDiff, old: &IdentityProvider, new: &IdentityPr
         || old.algorithm != new.algorithm
         || old.subject_claim != new.subject_claim
     {
-        diff.widens.push(format!(
+        diff.widen(format!(
             "[[auth.identity_providers]] {name}: audience, algorithm, or subject claim changed"
         ));
     }
     match (old.grants.is_empty(), new.grants.is_empty()) {
         // No grants: every token gets `[auth] models`.
-        (false, true) => diff.widens.push(format!(
+        (false, true) => diff.widen(format!(
             "[[auth.identity_providers]] {name}: grants removed, every gateway token may \
              use the models in [auth] models"
         )),
-        (true, false) => diff.narrows.push(format!(
+        (true, false) => diff.narrow(format!(
             "[[auth.identity_providers]] {name}: grants added, a token matching none \
              may use no model"
         )),
@@ -308,20 +319,17 @@ fn models(
     new: Option<&[ModelPattern]>,
 ) {
     match (old, new) {
-        (Some(_), None) => diff.widens.push(format!("{what}: every model allowed")),
-        (None, Some(new)) => diff
-            .narrows
-            .push(format!("{what}: limited to {}", model_list(new))),
+        (Some(_), None) => diff.widen(format!("{what}: every model allowed")),
+        (None, Some(new)) => diff.narrow(format!("{what}: limited to {}", model_list(new))),
         (Some(old), Some(new)) => {
             for pattern in new {
                 if !old.iter().any(|o| o.covers(pattern)) {
-                    diff.widens.push(format!("{what}: {pattern} newly allowed"));
+                    diff.widen(format!("{what}: {pattern} newly allowed"));
                 }
             }
             for pattern in old {
                 if !new.iter().any(|n| n.covers(pattern)) {
-                    diff.narrows
-                        .push(format!("{what}: {pattern} no longer allowed"));
+                    diff.narrow(format!("{what}: {pattern} no longer allowed"));
                 }
             }
         }
@@ -341,7 +349,7 @@ fn upstreams(diff: &mut PolicyDiff, old: &Config, new: &Config) {
         let at = format!("upstreams {:?}", u.id);
         let (url, credential) = (u.base_url(), &u.provider_key);
         let Some(was) = before.iter().find(|w| w.id == u.id) else {
-            diff.changes.push(format!("{at} added ({url})"));
+            diff.change(format!("{at} added ({url})"));
             continue;
         };
         if was.provider != u.provider {
@@ -355,36 +363,35 @@ fn upstreams(diff: &mut PolicyDiff, old: &Config, new: &Config) {
                     to.label()
                 )
             };
-            diff.changes.push(format!(
+            diff.change(format!(
                 "{at}: provider {} -> {}{moved}",
                 was.provider.as_str(),
                 u.provider.as_str()
             ));
         }
         if was.base_url() != url {
-            diff.changes
-                .push(format!("{at}: {} -> {url}", was.base_url()));
+            diff.change(format!("{at}: {} -> {url}", was.base_url()));
         }
         match (was.standby, u.standby) {
-            (false, true) => diff.changes.push(format!("{at}: now standby")),
-            (true, false) => diff.changes.push(format!("{at}: no longer standby")),
+            (false, true) => diff.change(format!("{at}: now standby")),
+            (true, false) => diff.change(format!("{at}: no longer standby")),
             _ => {}
         }
         match (&was.provider_key, credential) {
             (ProviderKey::ForwardCaller, ProviderKey::ForwardCaller) => {}
-            (ProviderKey::ForwardCaller, _) => diff.widens.push(format!(
+            (ProviderKey::ForwardCaller, _) => diff.widen(format!(
                 "{at} sends a provider key, where callers brought their own"
             )),
-            (_, ProviderKey::ForwardCaller) => diff
-                .narrows
-                .push(format!("{at} forwards each caller's own credential")),
-            (a, b) if a != b => diff.changes.push(format!("{at} provider key: {a} -> {b}")),
+            (_, ProviderKey::ForwardCaller) => {
+                diff.narrow(format!("{at} forwards each caller's own credential"))
+            }
+            (a, b) if a != b => diff.change(format!("{at} provider key: {a} -> {b}")),
             _ => {}
         }
     }
     for was in before {
         if !new.routes.upstreams().any(|u| u.id == was.id) {
-            diff.changes.push(format!("upstreams {:?} removed", was.id));
+            diff.change(format!("upstreams {:?} removed", was.id));
         }
     }
 }
