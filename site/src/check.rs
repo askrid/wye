@@ -1,7 +1,7 @@
 //! Checks on the built site: everything a page or a script loads comes from
 //! the site itself (no request to another origin, so nothing tracks a
-//! reader), every local link and anchor resolves, and no directive is left
-//! unexpanded.
+//! reader), every local link and anchor resolves, every link into the
+//! repository names a file it has, and no directive is left unexpanded.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -11,11 +11,18 @@ use std::path::Path;
 /// and scripts.
 type Files = BTreeMap<String, Option<String>>;
 
+/// The repository the pages link into: where its files are on GitHub at the
+/// page's commit, and whether a path names one of them.
+pub struct Repo<'a> {
+    pub files_url: &'a str,
+    pub exists: &'a dyn Fn(&str) -> bool,
+}
+
 /// Every problem in the built site under `out`, all reported at once.
-pub fn check(out: &Path) -> Result<(), String> {
+pub fn check(out: &Path, repo: &Repo) -> Result<(), String> {
     let mut files = Files::new();
     collect(out, "", &mut files)?;
-    let problems = problems(&files);
+    let problems = problems(&files, repo);
     if problems.is_empty() {
         return Ok(());
     }
@@ -54,7 +61,7 @@ fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
     Ok(())
 }
 
-fn problems(files: &Files) -> Vec<String> {
+fn problems(files: &Files, repo: &Repo) -> Vec<String> {
     let mut found = Vec::new();
     for (path, text) in files {
         let Some(text) = text else { continue };
@@ -85,7 +92,7 @@ fn problems(files: &Files) -> Vec<String> {
         }
         for (reference, target) in references(text) {
             match reference {
-                Reference::Link => check_link(files, path, target, &mut found),
+                Reference::Link => check_link(files, repo, path, target, &mut found),
                 Reference::Resource => check_resource(files, path, target, &mut found),
             }
         }
@@ -119,8 +126,21 @@ fn check_resource_from(
     }
 }
 
-/// A link the reader follows: other sites are fine, local ones must resolve.
-fn check_link(files: &Files, from: &str, target: &str, found: &mut Vec<String>) {
+/// A link the reader follows: other sites are fine, one into the
+/// repository must name a file it has, and local ones must resolve.
+fn check_link(files: &Files, repo: &Repo, from: &str, target: &str, found: &mut Vec<String>) {
+    if let Some(file) = target
+        .strip_prefix(repo.files_url)
+        .and_then(|rest| rest.strip_prefix('/'))
+    {
+        let file = file.split(['#', '?']).next().unwrap_or(file);
+        if !(repo.exists)(file) {
+            found.push(format!(
+                "{from}: the link {target} names no file in the repository"
+            ));
+        }
+        return;
+    }
     if target.contains("://") || target.starts_with("mailto:") {
         return;
     }
@@ -289,6 +309,18 @@ fn css_urls(css: &str) -> Vec<&str> {
 mod tests {
     use super::*;
 
+    const FILES_URL: &str = "https://github.com/askrid/wye/blob/abc";
+
+    fn problems(files: &Files) -> Vec<String> {
+        super::problems(
+            files,
+            &Repo {
+                files_url: FILES_URL,
+                exists: &|file| file != "docs/gone.md",
+            },
+        )
+    }
+
     fn site(pages: &[(&str, &str)], others: &[&str]) -> Files {
         let mut files: Files = pages
             .iter()
@@ -371,6 +403,19 @@ mod tests {
                 "assets/site.js: loads https://t.example/p from another origin",
                 "assets/site.js: loads a URL the check cannot read",
             ]
+        );
+    }
+
+    #[test]
+    fn links_into_the_repository_name_its_files() {
+        let page = format!(
+            "<a href=\"{FILES_URL}/docs/guide.md#aliases\">g</a> <a href=\"{FILES_URL}/docs/gone.md\">x</a>"
+        );
+        assert_eq!(
+            problems(&site(&[("index.html", &page)], &[])),
+            [format!(
+                "index.html: the link {FILES_URL}/docs/gone.md names no file in the repository"
+            )]
         );
     }
 

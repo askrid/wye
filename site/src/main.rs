@@ -54,7 +54,13 @@ fn build() -> Result<usize, String> {
         pages += 1;
     }
 
-    check::check(&out)?;
+    check::check(
+        &out,
+        &check::Repo {
+            files_url: &sources.files_url(),
+            exists: &|file| repo.join(file).is_file(),
+        },
+    )?;
     Ok(pages)
 }
 

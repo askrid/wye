@@ -184,7 +184,7 @@ impl Sources {
     }
 
     /// Where the repository's files are at the page's commit.
-    fn files_url(&self) -> String {
+    pub fn files_url(&self) -> String {
         format!("{}/blob/{}", self.repo_url, self.commit)
     }
 
