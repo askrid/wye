@@ -54,6 +54,9 @@ fn build() -> Result<usize, String> {
         pages += 1;
     }
 
+    if pages == 0 {
+        return Err("site/pages has no .html page".to_owned());
+    }
     check::check(
         &out,
         &check::Repo {

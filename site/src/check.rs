@@ -63,6 +63,9 @@ fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
 
 fn problems(files: &Files, repo: &Repo) -> Vec<String> {
     let mut found = Vec::new();
+    if !files.contains_key("index.html") {
+        found.push("no index.html".to_owned());
+    }
     for (path, text) in files {
         let Some(text) = text else { continue };
         if path.ends_with(".css") {
@@ -86,6 +89,15 @@ fn problems(files: &Files, repo: &Repo) -> Vec<String> {
         }
         if text.contains("{{") {
             found.push(format!("{path}: an unexpanded directive"));
+        }
+        // A share card's image is a full URL under the page's own address,
+        // which no tag loads; it must still name a file of the site.
+        if let Some(home) = canonical(text).filter(|home| home.contains("://")) {
+            for value in attribute_values(text, "content") {
+                if let Some(file) = value.strip_prefix(home).filter(|file| !file.is_empty()) {
+                    check_resource(files, path, file, &mut found);
+                }
+            }
         }
         for target in styles(text).flat_map(css_urls) {
             check_resource(files, path, target, &mut found);
@@ -120,9 +132,19 @@ fn check_resource_from(
         found.push(format!("{from}: loads {target} from another origin"));
         return;
     }
-    let path = target.split(['#', '?']).next().unwrap_or(target);
-    if resolve(base, path).is_none_or(|path| !files.contains_key(&path)) {
+    let (path, anchor) = target.split_once('#').unwrap_or((target, ""));
+    let path = path.split('?').next().unwrap_or(path);
+    let Some(page) = resolve(base, path).filter(|page| files.contains_key(page)) else {
         found.push(format!("{from}: {target} is not in the site"));
+        return;
+    };
+    // A fragment names an element the page must have: a gradient in
+    // url(#…), a symbol in href="#…".
+    let text = files.get(&page).and_then(Option::as_deref);
+    if let (false, Some(text)) = (anchor.is_empty(), text)
+        && !attribute_values(text, "id").contains(&anchor)
+    {
+        found.push(format!("{from}: {target} names a missing id"));
     }
 }
 
@@ -245,6 +267,16 @@ fn attribute_values<'a>(text: &'a str, name: &str) -> Vec<&'a str> {
                 .map(|(value, _)| value)
         })
         .collect()
+}
+
+/// The address a page names as its own, its canonical link's `href`.
+fn canonical(html: &str) -> Option<&str> {
+    let at = html.find("rel=\"canonical\"")?;
+    let start = html.get(..at)?.rfind('<')?;
+    let end = at + html.get(at..)?.find('>')?;
+    attribute_values(html.get(start..end)?, "href")
+        .first()
+        .copied()
 }
 
 /// The text of each `<style>` element in a page.
@@ -417,6 +449,23 @@ mod tests {
                 "index.html: the link {FILES_URL}/docs/gone.md names no file in the repository"
             )]
         );
+    }
+
+    #[test]
+    fn fragments_share_images_and_the_home_page_are_checked() {
+        let page = "<link rel=\"canonical\" href=\"https://x.example/\">\
+                    <meta property=\"og:image\" content=\"https://x.example/assets/gone.png\">\
+                    <svg><linearGradient id=\"fade\"></linearGradient><use href=\"#gone\"/></svg>\
+                    <style>.a{stroke:url(#fade)}.b{stroke:url(#missing)}</style>";
+        assert_eq!(
+            problems(&site(&[("index.html", page)], &[])),
+            [
+                "index.html: assets/gone.png is not in the site",
+                "index.html: #missing names a missing id",
+                "index.html: #gone names a missing id",
+            ]
+        );
+        assert_eq!(problems(&site(&[], &["assets/x.js"])), ["no index.html"]);
     }
 
     #[test]
