@@ -44,6 +44,51 @@ impl Running {
     fn stdout_line(&mut self) -> String {
         first_line(self.0.stdout.take().unwrap())
     }
+
+    /// The first line `wye serve` writes on stderr, and the address it says
+    /// it listens on.
+    fn listening(&mut self) -> (String, SocketAddr) {
+        let message = self.stderr_line();
+        let addr = message
+            .strip_prefix("wye: listening on http://")
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap_or_else(|| panic!("{message}"))
+            .parse()
+            .unwrap();
+        (message, addr)
+    }
+}
+
+/// `wye serve` with `args`, from a passthrough config in `dir` for the
+/// upstream at `upstream`.
+fn serve(dir: &Path, upstream: SocketAddr, args: &[&str]) -> Running {
+    let config = dir.join("wye.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "[server]\nlisten = \"127.0.0.1:0\"\n\
+             [[upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
+        ),
+    )
+    .unwrap();
+    let mut command = wye();
+    command
+        .args(["serve", "-c", config.to_str().unwrap()])
+        .args(args);
+    Running::spawn(command)
+}
+
+/// A connection to the gateway at `addr` that has sent a small Messages
+/// request and asked to close after the answer.
+fn post(addr: SocketAddr) -> std::net::TcpStream {
+    let mut request = std::net::TcpStream::connect(addr).unwrap();
+    std::io::Write::write_all(
+        &mut request,
+        b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\nx-api-key: k\r\n\
+          content-length: 2\r\nconnection: close\r\n\r\n{}",
+    )
+    .unwrap();
+    request
 }
 
 impl Drop for Running {
@@ -248,34 +293,11 @@ async fn wye_claude_runs_claude_against_the_gateway() {
 async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
     let (upstream, _) = spawn_counted(ok()).await;
     let dir = TempDir::new("streams");
-    let config = dir.join("wye.toml");
-    std::fs::write(
-        &config,
-        format!(
-            "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
-        ),
-    )
-    .unwrap();
-    let mut command = wye();
-    command.args(["serve", "-c", config.to_str().unwrap()]);
-    let mut running = Running::spawn(command);
+    let mut running = serve(&dir, upstream, &[]);
     // Off the runtime, which also serves the upstream.
     let record = tokio::task::spawn_blocking(move || {
-        let message = running.stderr_line();
-        let addr: SocketAddr = message
-            .strip_prefix("wye: listening on http://")
-            .and_then(|rest| rest.split(' ').next())
-            .unwrap_or_else(|| panic!("{message}"))
-            .parse()
-            .unwrap();
-        let mut request = std::net::TcpStream::connect(addr).unwrap();
-        std::io::Write::write_all(
-            &mut request,
-            b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\nx-api-key: k\r\n\
-              content-length: 2\r\nconnection: close\r\n\r\n{}",
-        )
-        .unwrap();
+        let (_, addr) = running.listening();
+        let _request = post(addr);
         running.stdout_line()
     })
     .await
@@ -291,41 +313,12 @@ async fn serve_writes_records_to_stdout_and_messages_to_stderr() {
 async fn serve_writes_records_to_the_usage_log_it_is_given() {
     let (upstream, _) = spawn_counted(ok()).await;
     let dir = TempDir::new("usage-log");
-    let config = dir.join("wye.toml");
     let log = dir.join("usage.jsonl");
-    std::fs::write(
-        &config,
-        format!(
-            "[server]\nlisten = \"127.0.0.1:0\"\n\
-             [[upstreams]]\nbase_url = \"http://{upstream}\"\nforward_caller_credential = true\n"
-        ),
-    )
-    .unwrap();
-    let mut command = wye();
-    command.args([
-        "serve",
-        "-c",
-        config.to_str().unwrap(),
-        "--usage-log",
-        log.to_str().unwrap(),
-    ]);
-    let mut running = Running::spawn(command);
+    let mut running = serve(&dir, upstream, &["--usage-log", log.to_str().unwrap()]);
     let file = log.clone();
     let (message, record, stdout) = tokio::task::spawn_blocking(move || {
-        let message = running.stderr_line();
-        let addr: SocketAddr = message
-            .strip_prefix("wye: listening on http://")
-            .and_then(|rest| rest.split(' ').next())
-            .unwrap_or_else(|| panic!("{message}"))
-            .parse()
-            .unwrap();
-        let mut request = std::net::TcpStream::connect(addr).unwrap();
-        std::io::Write::write_all(
-            &mut request,
-            b"POST /v1/messages HTTP/1.1\r\nhost: localhost\r\nx-api-key: k\r\n\
-              content-length: 2\r\nconnection: close\r\n\r\n{}",
-        )
-        .unwrap();
+        let (message, addr) = running.listening();
+        let mut request = post(addr);
         let _ = std::io::copy(&mut request, &mut std::io::sink());
         // The writer task writes the record shortly after the response.
         let deadline = std::time::Instant::now() + OUTPUT_WAIT;
