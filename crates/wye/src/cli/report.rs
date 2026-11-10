@@ -23,10 +23,9 @@ use serde::Deserialize;
 use super::{
     Env, Error, Exit,
     args::Parsed,
-    emit,
+    duration_secs, emit,
     files::{self, USAGE_LOG_FILE},
     paint::Paint,
-    token::duration_secs,
 };
 use crate::log_files;
 

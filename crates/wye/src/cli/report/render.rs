@@ -8,7 +8,10 @@ use std::{cmp::Reverse, collections::HashMap, fmt::Write as _};
 use gateway_core::agent::CacheMiss;
 
 use super::{Group, Summary, TOP};
-use crate::cli::{paint::Paint, plural, text::wrap};
+use crate::cli::{
+    paint::Paint,
+    text::{plural, wrap},
+};
 
 /// Width of a table's first column.
 const NAME: usize = 14;

@@ -15,7 +15,8 @@ use super::{
     Env, Error, Exit, REPO_AT_RELEASE,
     args::Parsed,
     files::{self, POLICY_TESTS_DIR, SIGNING_KEY_FILE},
-    plural, token,
+    text::plural,
+    token,
 };
 
 /// The setup `wye init` writes (the glossary's term), from two choices: who

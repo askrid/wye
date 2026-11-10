@@ -24,9 +24,9 @@ use gateway_core::{
 use super::{
     Env, Error, Exit,
     args::Parsed,
-    files, model_list,
+    files,
     paint::{FORWARD, REFUSE},
-    size,
+    text::{model_list, plural, size},
 };
 
 /// The gateway token a request carries.
@@ -609,7 +609,7 @@ fn prices(entry: &PriceEntry) -> String {
     if let Some(first) = entry.tiers.first() {
         text.push_str(&format!(
             "; {}, the first above {} prompt tokens",
-            super::plural(entry.tiers.len() as u64, "tier", "tiers"),
+            plural(entry.tiers.len() as u64, "tier", "tiers"),
             first.above_prompt_tokens
         ));
     }

@@ -25,6 +25,7 @@ use super::{
     paint::Paint,
     probe::blocking as probe,
     say,
+    text::file_size,
 };
 use crate::startup::env_secrets;
 
@@ -407,16 +408,6 @@ pub fn uninstall(parsed: &Parsed<'_>, env: &(impl Env + Clone + 'static)) -> Res
 /// How long the running gateway may take to stop.
 fn stopping(service: &Service) -> Duration {
     Duration::from_secs(service.stop_secs)
-}
-
-/// A file's size as people read it: `913 KB`, `4.2 MB`.
-fn file_size(bytes: u64) -> String {
-    match bytes {
-        b if b >= 1 << 30 => format!("{:.1} GB", b as f64 / f64::from(1u32 << 30)),
-        b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / f64::from(1u32 << 20)),
-        b if b >= 1 << 10 => format!("{} KB", b >> 10),
-        b => format!("{b} bytes"),
-    }
 }
 
 #[cfg(test)]

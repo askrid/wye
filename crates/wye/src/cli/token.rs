@@ -8,7 +8,7 @@ use std::path::Path;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use gateway_core::{
     config::{Auth, Config, OwnIssuer},
-    duration::{self, show},
+    duration::show,
     duration_syntax,
     policy::ModelPattern,
     token::{self, NewToken},
@@ -94,7 +94,7 @@ pub fn run_issue(parsed: &Parsed<'_>, env: &impl Env) -> Result<Exit, Error> {
     let ttl_secs = parsed
         .value("ttl")
         .map(|ttl| {
-            duration_secs(ttl).ok_or_else(|| {
+            super::duration_secs(ttl).ok_or_else(|| {
                 Error::Usage(format!(
                     concat!("--ttl {}: write it as ", duration_syntax!()),
                     ttl
@@ -235,13 +235,6 @@ fn issuer(config: &Config) -> Result<(&Auth, &OwnIssuer), &'static str> {
     Ok((auth, own))
 }
 
-/// A duration that runs, as [`duration::parse`] reads it, in seconds.
-pub(super) fn duration_secs(text: &str) -> Option<u64> {
-    duration::parse(text)
-        .map(|d| d.as_secs())
-        .filter(|&secs| secs > 0)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -316,15 +309,5 @@ mod tests {
                 .unwrap_err()
                 .contains("no [auth]")
         );
-    }
-
-    #[test]
-    fn durations_read_as_written_and_run() {
-        for (text, secs) in [("45s", 45), ("30m", 1800), ("8h", 28_800), ("7d", 604_800)] {
-            assert_eq!(duration_secs(text), Some(secs), "{text}");
-        }
-        for bad in ["", "d", "7w", "-1d", "0s", "90", "1.5h"] {
-            assert_eq!(duration_secs(bad), None, "{bad}");
-        }
     }
 }

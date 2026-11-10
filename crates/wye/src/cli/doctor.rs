@@ -116,7 +116,7 @@ pub async fn doctor(
     }
     report.push_str(&match problems {
         0 => "no problems found\n".to_owned(),
-        n => format!("{}\n", super::plural(n as u64, "problem", "problems")),
+        n => format!("{}\n", super::text::plural(n as u64, "problem", "problems")),
     });
     (report, problems == 0)
 }

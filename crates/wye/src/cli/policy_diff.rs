@@ -18,8 +18,9 @@ use gateway_core::{
 use super::{
     Error, Exit,
     args::Parsed,
-    files, model_list,
+    files,
     paint::{NARROWS, NOT_WIDENED, WIDENED, WIDENS},
+    text::model_list,
 };
 use crate::{StartupError, startup::key_set};
 

@@ -96,6 +96,14 @@ fn unix_secs() -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
+/// A duration that runs, as [`gateway_core::duration::parse`] reads it, in
+/// seconds.
+fn duration_secs(text: &str) -> Option<u64> {
+    gateway_core::duration::parse(text)
+        .map(|d| d.as_secs())
+        .filter(|&secs| secs > 0)
+}
+
 /// Writes to standard output. A reader that went away (`wye report | head`)
 /// is the normal end of a command, not a failure.
 pub fn emit(text: &str) {
@@ -196,28 +204,17 @@ fn error_chain(error: &dyn std::error::Error) -> String {
     text
 }
 
-/// `n` and the noun in the number it takes: "1 session", "2 sessions".
-fn plural(n: u64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Model patterns as a config lists them.
-fn model_list(patterns: &[gateway_core::policy::ModelPattern]) -> String {
-    patterns
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// A configured size as people write it: "32 MiB", "64 KiB", or "1000 bytes".
-fn size(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = 1024 * KIB;
-    match bytes {
-        0 => "0 bytes".to_owned(),
-        b if b % MIB == 0 => format!("{} MiB", b / MIB),
-        b if b % KIB == 0 => format!("{} KiB", b / KIB),
-        b => plural(b, "byte", "bytes"),
+    #[test]
+    fn durations_read_as_written_and_run() {
+        for (text, secs) in [("45s", 45), ("30m", 1800), ("8h", 28_800), ("7d", 604_800)] {
+            assert_eq!(duration_secs(text), Some(secs), "{text}");
+        }
+        for bad in ["", "d", "7w", "-1d", "0s", "90", "1.5h"] {
+            assert_eq!(duration_secs(bad), None, "{bad}");
+        }
     }
 }
