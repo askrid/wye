@@ -68,22 +68,8 @@ async fn explain_and_the_server_answer_alike() {
             now(),
             &[],
         );
-        let body = body.to_owned();
-        let res = h.send(bearer(token), body).await;
-        let status = res.status().as_u16();
-        let answer = read_body(res).await;
-        let served = (status != 200).then(|| {
-            let error: serde_json::Value = serde_json::from_slice(&answer).unwrap();
-            (
-                status,
-                error["error"]["type"].as_str().unwrap().to_owned(),
-                error["error"]["message"].as_str().unwrap().to_owned(),
-            )
-        });
-        let explained = explained
-            .refused
-            .map(|(status, kind, message)| (status, kind.to_owned(), message));
-        assert_eq!(served, explained, "{name}");
+        let served = refusal(h.send(bearer(token), body.to_owned()).await).await;
+        assert_eq!(served, owned(explained.refused), "{name}");
         h.usage_record().await;
     }
 }
@@ -146,24 +132,8 @@ async fn explain_and_the_server_answer_alike_on_responses() {
         let req = Request::post(path)
             .header("content-type", "application/json")
             .header("authorization", format!("Bearer {open}"));
-        let res = h.send(req, body.to_owned()).await;
-        let status = res.status().as_u16();
-        let answer = read_body(res).await;
-        let served = (status != 200).then(|| {
-            let error: serde_json::Value = serde_json::from_slice(&answer).unwrap();
-            let error = &error["error"];
-            // Anthropic's shape names the kind `type`; OpenAI's, `code`.
-            let kind = error["code"].as_str().or(error["type"].as_str()).unwrap();
-            (
-                status,
-                kind.to_owned(),
-                error["message"].as_str().unwrap().to_owned(),
-            )
-        });
-        let explained = explained
-            .refused
-            .map(|(status, kind, message)| (status, kind.to_owned(), message));
-        assert_eq!(served, explained, "{name}");
+        let served = refusal(h.send(req, body.to_owned()).await).await;
+        assert_eq!(served, owned(explained.refused), "{name}");
         // A request no route serves is refused before it is recorded.
         if name != "no route" {
             h.usage_record().await;

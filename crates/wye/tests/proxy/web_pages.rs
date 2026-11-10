@@ -114,21 +114,9 @@ async fn explain_and_the_server_answer_alike_for_web_pages() {
             body.as_bytes(),
             now(),
             &[],
-        )
-        .refused
-        .map(|(status, kind, message)| (status, kind.to_owned(), message));
-        let res = h.send(messages().header(name, value.as_str()), body).await;
-        let status = res.status().as_u16();
-        let answer = read_body(res).await;
-        let served = (status != 200).then(|| {
-            let error: serde_json::Value = serde_json::from_slice(&answer).unwrap();
-            (
-                status,
-                error["error"]["type"].as_str().unwrap().to_owned(),
-                error["error"]["message"].as_str().unwrap().to_owned(),
-            )
-        });
-        assert_eq!(served, explained, "{line}");
+        );
+        let served = refusal(h.send(messages().header(name, value.as_str()), body).await).await;
+        assert_eq!(served, owned(explained.refused), "{line}");
         h.usage_record().await;
     }
     let local = explain(

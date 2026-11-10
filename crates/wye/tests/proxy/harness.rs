@@ -569,6 +569,25 @@ pub(crate) async fn read_body(res: Response<Incoming>) -> Bytes {
         .to_bytes()
 }
 
+/// A refusal as (status, kind, message), `None` for a `200`; the kind is
+/// OpenAI's `code`, else Anthropic's `type`.
+pub(crate) async fn refusal(res: Response<Incoming>) -> Option<(u16, String, String)> {
+    let status = res.status().as_u16();
+    let body = read_body(res).await;
+    (status != 200).then(|| {
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let error = &error["error"];
+        let kind = error["code"].as_str().or(error["type"].as_str()).unwrap();
+        let message = error["message"].as_str().unwrap();
+        (status, kind.to_owned(), message.to_owned())
+    })
+}
+
+/// `explain`'s refusal with its kind owned, to compare with [`refusal`]'s.
+pub(crate) fn owned(refused: Option<(u16, &str, String)>) -> Option<(u16, String, String)> {
+    refused.map(|(status, kind, message)| (status, kind.to_owned(), message))
+}
+
 /// Unix time in seconds, for gateway-token claims.
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now()
