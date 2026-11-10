@@ -47,12 +47,22 @@ impl ClientPool {
     ///
     /// Two requests may pick the same lane concurrently; that only shifts load.
     /// The returned guard holds the lane until the response body is dropped.
+    /// An idle lane ends the search, since none is less loaded: `k` requests
+    /// in flight read `k + 1` gauges, not all `LANES`.
     pub(crate) fn acquire(&self) -> (&UpstreamClient, Reserved) {
-        let lane = self
-            .lanes
-            .iter()
-            .min_by_key(|lane| lane.in_flight.current())
-            .unwrap_or_else(|| unreachable!("LANES > 0"));
+        let mut least: Option<(&Lane, usize)> = None;
+        for lane in &self.lanes {
+            let load = lane.in_flight.current();
+            if least.is_none_or(|(_, least)| load < least) {
+                least = Some((lane, load));
+                if load == 0 {
+                    break;
+                }
+            }
+        }
+        let Some((lane, _)) = least else {
+            unreachable!("LANES > 0")
+        };
         (&lane.client, lane.in_flight.hold())
     }
 }
