@@ -7,7 +7,7 @@ use crate::{
     client::Target,
     gateway_process::GatewayProcess,
     scenarios,
-    stats::{Out, added, event_delays, phase, sorted},
+    stats::{Out, added, event_delays, phase},
 };
 
 /// Token-paced streams at scale: 50 events/s of ~100 bytes, like model output.
@@ -63,7 +63,7 @@ impl Paced {
         let streams = streams.await.unwrap();
         let failed_streams = scenarios::count_failed(&streams);
         Self {
-            ttfb: sorted(streams.iter().map(|s| s.ttfb_us).collect()),
+            ttfb: scenarios::ttfbs(&streams),
             event_delay: event_delays(streams),
             failed_streams,
         }

@@ -51,6 +51,13 @@ pub fn count_failed(streams: &[Stream]) -> usize {
     streams.iter().filter(|s| s.failed).count()
 }
 
+/// The time to first byte of each stream that did not fail, sorted: a
+/// failed stream's 0 would pull the percentiles down.
+pub fn ttfbs(streams: &[Stream]) -> Vec<u64> {
+    let ttfbs = streams.iter().filter(|s| !s.failed).map(|s| s.ttfb_us);
+    crate::stats::sorted(ttfbs.collect())
+}
+
 /// How many events `streams` delivered.
 pub fn count_events(streams: &[Stream]) -> usize {
     streams.iter().map(|s| s.event_delays_us.len()).sum()
@@ -355,4 +362,26 @@ pub async fn stalled_streams(target: &Target, count: usize) -> Vec<Incoming> {
     })
     .await;
     bodies.into_iter().flatten().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_streams_ttfb_is_left_out() {
+        let stream = |ttfb_us, failed| Stream {
+            ttfb_us,
+            event_delays_us: Vec::new(),
+            bytes: 0,
+            failed,
+        };
+        let streams = [
+            stream(500, false),
+            Stream::failed(),
+            stream(300, true),
+            stream(200, false),
+        ];
+        assert_eq!(ttfbs(&streams), [200, 500]);
+    }
 }

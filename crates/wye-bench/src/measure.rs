@@ -314,14 +314,7 @@ impl Latency {
         Self {
             unary,
             unary_failed,
-            // A failed stream's TTFB of 0 would pull the percentiles down.
-            ttfb: sorted(
-                streams
-                    .iter()
-                    .filter(|s| !s.failed)
-                    .map(|s| s.ttfb_us)
-                    .collect(),
-            ),
+            ttfb: scenarios::ttfbs(&streams),
             sse_failed: scenarios::count_failed(&streams),
             event_delay: event_delays(streams),
         }
