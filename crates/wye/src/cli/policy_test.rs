@@ -183,19 +183,15 @@ fn run_case(config: &Config, request: &Path, now: u64) -> Result<(), String> {
         ));
     }
     if let Some((status, kind, _)) = &result.refused {
-        if expect.status.is_some_and(|s| s != *status) {
-            return Err(format!(
-                "expected status {:?}, got {}",
-                expect.status,
-                explain_tail()
-            ));
+        if let Some(want) = expect.status
+            && want != *status
+        {
+            return Err(format!("expected status {want}, got {}", explain_tail()));
         }
-        if expect.error.as_deref().is_some_and(|e| e != *kind) {
-            return Err(format!(
-                "expected error {:?}, got {}",
-                expect.error,
-                explain_tail()
-            ));
+        if let Some(want) = expect.error.as_deref()
+            && want != *kind
+        {
+            return Err(format!("expected error {want}, got {}", explain_tail()));
         }
     }
     Ok(())
@@ -297,5 +293,37 @@ mod tests {
             )),
             "{report}"
         );
+    }
+
+    /// A refusal with another status or error than expected names both as
+    /// written, not as Rust debug output.
+    #[test]
+    fn a_wrong_refusal_names_the_status_and_error_expected() {
+        let dir = wye_testkit::TempDir::new("policy-refusal");
+        let config = Config::from_toml_str(
+            "[server]\nlisten = \"127.0.0.1:8080\"\n[[upstreams]]\nbase_url = \"https://api.anthropic.com\"\n\
+             provider_key = { env = \"K\" }\n[auth]\naudience = \"wye\"\n\
+             signing_keys = [\"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo\"]",
+        )
+        .unwrap();
+        // Without a gateway token, the request is refused with 401.
+        for (name, expect) in [
+            ("a-status", "status = 403"),
+            ("b-error", "error = \"permission_error\""),
+        ] {
+            std::fs::write(dir.join(format!("{name}.json")), r#"{"model":"m"}"#).unwrap();
+            std::fs::write(
+                dir.join(format!("{name}.expect.toml")),
+                format!("decision = \"refuse\"\n{expect}\n"),
+            )
+            .unwrap();
+        }
+        let (report, _) = policy_test(&config, &dir, 0).unwrap();
+        for line in [
+            "FAIL  a-status: expected status 403, got decision: refuse 401 ",
+            "FAIL  b-error: expected error permission_error, got decision: refuse 401 ",
+        ] {
+            assert!(report.contains(line), "{line}\n---\n{report}");
+        }
     }
 }
