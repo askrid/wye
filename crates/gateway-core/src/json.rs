@@ -5,10 +5,12 @@
 /// values end before a vector search would pay off.
 const SHORT_STRING: usize = 16;
 
-/// Finds the closing quote of a string whose bytes may arrive in several chunks.
+/// Finds the closing quote of a string whose bytes may arrive in several
+/// chunks.
 #[derive(Debug, Default)]
 pub(crate) struct StringEnd {
-    /// The bytes of the current string seen so far end in an unpaired backslash.
+    /// The bytes of the current string seen so far end in an unpaired
+    /// backslash.
     backslash_odd: bool,
 }
 

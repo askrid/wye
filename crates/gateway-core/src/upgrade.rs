@@ -40,23 +40,33 @@ pub struct Findings {
     pub sampling: bool,
 }
 
+/// A request's `thinking.type`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Thinking {
+    /// `disabled`.
     Disabled,
     /// Manual extended thinking with `budget_tokens`.
     Enabled,
+    /// Any other type, such as `adaptive`.
     Other,
 }
 
 /// A request change a newer model requires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
+    /// `thinking.type` is `disabled`.
     ThinkingDisabled,
+    /// Manual thinking with `budget_tokens`.
     BudgetTokens,
+    /// `tool_choice.type` is `any` or `tool`.
     ForcedToolChoice,
+    /// An earlier computer-use tool type.
     ComputerTool,
+    /// The last message is an assistant turn.
     Prefill,
+    /// `temperature`, `top_p`, or `top_k` is set.
     Sampling,
+    /// A message with role `system`.
     SystemRole,
 }
 

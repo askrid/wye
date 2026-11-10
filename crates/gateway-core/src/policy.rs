@@ -66,6 +66,7 @@ impl ModelPattern {
         }
     }
 
+    /// Whether `model` is this name, or starts with this prefix.
     pub fn matches(&self, model: &str) -> bool {
         if self.prefix {
             model.starts_with(&*self.text)

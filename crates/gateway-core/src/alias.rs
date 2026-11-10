@@ -13,6 +13,8 @@ pub const MAX_ALIASES: usize = 256;
 /// Most `when` rules per alias.
 pub(crate) const MAX_ALIAS_RULES: usize = 32;
 
+/// One `[[aliases]]` entry: a name clients send, and the model it runs
+/// for each caller.
 #[derive(Debug, Clone)]
 pub struct Alias {
     name: Arc<str>,
@@ -83,6 +85,7 @@ impl Alias {
         })
     }
 
+    /// The name clients send.
     pub fn name(&self) -> &Arc<str> {
         &self.name
     }
@@ -137,6 +140,7 @@ impl Aliases {
         self.0.iter().find(|a| &*a.name == model)
     }
 
+    /// Every alias, in config order.
     pub fn iter(&self) -> impl Iterator<Item = &Alias> {
         self.0.iter()
     }

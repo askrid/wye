@@ -5,7 +5,8 @@ use proptest::prelude::*;
 /// [`arbitrary_chunks`](crate::test_support::arbitrary_chunks).
 pub(in crate::usage) const VOCABULARY: &[u8] = b"{}[],:\"\\ \n0datevnmolusgyp_";
 
-/// Shape of a real Messages stream, including a `ping` and a multi-byte character.
+/// Shape of a real Messages stream, including a `ping` and a multi-byte
+/// character.
 const STREAM: &str = concat!(
     "event: message_start\n",
     "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-5-5\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":1200,\"cache_creation_input_tokens\":300,\"cache_read_input_tokens\":4000,\"output_tokens\":1}}}\n\n",

@@ -63,13 +63,15 @@ pub struct PromptScanner {
     in_content: bool,
     /// Index of the current content block.
     block: u32,
-    /// Depth of the object whose `cache_control` member is being skipped; 0 when none.
+    /// Depth of the object whose `cache_control` member is being skipped; 0
+    /// when none.
     skip_depth: u32,
     /// Depth around the open value whose structure does not matter (tool
     /// schemas, tool inputs, marker values); 0 when none. Such values are
     /// lexed only for nesting and strings.
     raw_floor: u32,
-    /// A member of the open block object was hashed, so the next one needs a comma.
+    /// A member of the open block object was hashed, so the next one needs a
+    /// comma.
     member_hashed: bool,
     /// That comma was held back until the next key is known.
     comma_held: bool,
@@ -78,10 +80,12 @@ pub struct PromptScanner {
 }
 
 impl PromptScanner {
+    /// For a body that has not started.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Reads the next chunk of the body, split anywhere.
     pub fn feed(&mut self, chunk: &[u8]) {
         // Start of the bytes not yet hashed or dropped.
         let mut run = 0;
@@ -118,12 +122,14 @@ impl PromptScanner {
         }
     }
 
-    /// The hashes, or `None` when the body was incomplete or could not be followed.
+    /// The hashes, or `None` when the body was incomplete or could not be
+    /// followed.
     pub fn finish(self) -> Option<PromptHashes> {
         (!self.failed && self.ended).then(|| self.out.finished())
     }
 
-    /// Lexes inside a raw value from `i`; returns where normal scanning resumes.
+    /// Lexes inside a raw value from `i`; returns where normal scanning
+    /// resumes.
     fn feed_raw(&mut self, chunk: &[u8], mut i: usize, run: &mut usize) -> usize {
         while let Some(&byte) = chunk.get(i) {
             match byte {
@@ -246,7 +252,8 @@ impl PromptScanner {
         self.hasher.update(self.key.bytes());
     }
 
-    /// Handles a byte outside strings; returns the index after the bytes consumed.
+    /// Handles a byte outside strings; returns the index after the bytes
+    /// consumed.
     #[inline(always)]
     fn structural(&mut self, chunk: &[u8], i: usize, byte: u8, run: &mut usize) -> usize {
         if is_space(byte) {
@@ -273,7 +280,8 @@ impl PromptScanner {
         i + 1
     }
 
-    /// Called at the first byte of every value, and at each byte of a bare scalar.
+    /// Called at the first byte of every value, and at each byte of a bare
+    /// scalar.
     #[inline(always)]
     fn value_start(&mut self, chunk: &[u8], i: usize, run: &mut usize) {
         if self.awaiting_value && self.nest.depth() == 1 {

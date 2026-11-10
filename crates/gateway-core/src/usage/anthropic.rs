@@ -136,7 +136,8 @@ impl<'de> Visitor<'de> for AnyCountVisitor {
 }
 
 impl RawUsage<'_> {
-    /// Later events replace earlier counts; `message_delta` output tokens are cumulative.
+    /// Later events replace earlier counts; `message_delta` output tokens are
+    /// cumulative.
     pub(super) fn merge_into(self, usage: &mut Usage) {
         let take = |field: &mut Option<u64>, value: Option<u64>| *field = value.or(*field);
         take(&mut usage.input_tokens, self.input_tokens);

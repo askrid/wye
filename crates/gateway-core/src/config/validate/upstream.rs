@@ -129,7 +129,8 @@ pub(super) fn validate_routes(raw: Vec<RawUpstream>) -> Result<Routes, ConfigErr
     })
 }
 
-/// A Claude Platform on AWS workspace id (`wrkspc_01AbCd...`): sent as a header.
+/// A Claude Platform on AWS workspace id (`wrkspc_01AbCd...`): sent as a
+/// header.
 fn is_workspace_id(id: &str) -> bool {
     id.strip_prefix("wrkspc_").is_some_and(|rest| {
         (1..=64).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_alphanumeric())

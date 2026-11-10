@@ -20,6 +20,7 @@ pub struct JsonUsageScanner {
 }
 
 impl JsonUsageScanner {
+    /// For a JSON response body of `api`.
     pub fn new(api: Api) -> Self {
         let items = match api {
             Api::Messages => Items::Content,
@@ -32,6 +33,7 @@ impl JsonUsageScanner {
         }
     }
 
+    /// Reads the next chunk of the body, split anywhere.
     pub fn feed(&mut self, chunk: &[u8]) {
         self.fields.feed(chunk);
     }
@@ -62,10 +64,12 @@ impl JsonUsageScanner {
         Some(usage)
     }
 
+    /// The body's usage; zero counts when it has none.
     pub fn usage(&self) -> Usage {
         self.read().unwrap_or_default()
     }
 
+    /// The top-level `model`.
     pub fn model(&self) -> Option<&str> {
         self.fields.model()
     }

@@ -46,10 +46,12 @@ pub struct ChatUsageScanner {
 }
 
 impl ChatUsageScanner {
+    /// For a stream that has not started.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Reads the next chunk of the stream, split anywhere.
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut lines = std::mem::take(&mut self.lines);
         lines.feed(chunk, self, |_| MAX_LINE_BYTES, Self::process_line);
@@ -102,10 +104,12 @@ impl ChatUsageScanner {
         }
     }
 
+    /// The counts reported so far.
     pub fn usage(&self) -> Usage {
         self.usage
     }
 
+    /// The model the provider reported serving.
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
     }

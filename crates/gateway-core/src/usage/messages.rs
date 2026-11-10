@@ -38,10 +38,12 @@ pub struct MessagesUsageScanner {
 }
 
 impl MessagesUsageScanner {
+    /// For a stream that has not started.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Reads the next chunk of the stream, split anywhere.
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut lines = std::mem::take(&mut self.lines);
         lines.feed(chunk, self, Self::line_limit, Self::process_line);
@@ -118,6 +120,7 @@ impl MessagesUsageScanner {
         }
     }
 
+    /// The counts reported so far.
     pub fn usage(&self) -> Usage {
         self.usage
     }
@@ -127,6 +130,7 @@ impl MessagesUsageScanner {
         self.model.as_deref()
     }
 
+    /// How much of the usage the stream has reported.
     pub fn status(&self) -> UsageStatus {
         match (self.corrupt, self.saw_start, self.saw_delta) {
             (true, _, _) | (false, false, false) => UsageStatus::Unknown,

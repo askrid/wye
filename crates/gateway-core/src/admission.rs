@@ -72,8 +72,9 @@ fn is_loopback_authority(authority: &str) -> bool {
     port.bytes().all(|b| b.is_ascii_digit()) && is_loopback_host(host)
 }
 
-/// The scanner for a request body under `output_ceiling`: the field is read only
-/// when a ceiling applies, so a value only a ceiling would mind is not refused.
+/// The scanner for a request body under `output_ceiling`: the field is read
+/// only when a ceiling applies, so a value only a ceiling would mind is not
+/// refused.
 pub fn scanner(api: Api, output_ceiling: Option<u64>) -> PolicyScanner {
     let scanner = PolicyScanner::for_api(api);
     if output_ceiling.is_some() {
@@ -93,6 +94,7 @@ pub struct BodyChecks<'a> {
     /// The output-token ceiling, the stricter of config's and the
     /// token's; `None` for an endpoint that generates nothing.
     pub output_ceiling: Option<u64>,
+    /// `[[aliases]]`, applied before the model is checked.
     pub aliases: Option<&'a Aliases>,
     /// An upstream of the route has its own model ids (Bedrock), so the
     /// model's place in the body is needed.
@@ -184,7 +186,9 @@ impl<'a> BodyChecks<'a> {
 /// One request's output-token ceiling, on its API.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutputCeiling {
+    /// The request's API, which names its output-token field.
     pub api: Api,
+    /// The most output tokens the request may ask for.
     pub limit: u64,
 }
 
@@ -217,7 +221,12 @@ pub enum Refusal {
     /// ceiling requires it.
     OutputCeiling(OutputCeilingError),
     /// A known endpoint whose API no route serves.
-    NoRoute { api: Api, path: Box<str> },
+    NoRoute {
+        /// The endpoint's API.
+        api: Api,
+        /// The request path.
+        path: Box<str>,
+    },
     /// A path or method the gateway does not proxy.
     NotProxied,
     /// A missing or invalid gateway token.
@@ -230,6 +239,7 @@ pub enum Refusal {
 }
 
 impl Refusal {
+    /// The HTTP status the refusal is answered with.
     pub fn status(&self) -> u16 {
         match self {
             Self::Invalid(_) => 400,
@@ -294,6 +304,7 @@ pub struct OutputCeilingError {
     pub field: &'static str,
     /// `None`: the request did not set the field.
     pub requested: Option<u64>,
+    /// The ceiling.
     pub limit: u64,
 }
 

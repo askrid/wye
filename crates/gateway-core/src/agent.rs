@@ -58,6 +58,7 @@ impl RequestClass {
         }
     }
 
+    /// Its name in usage records and telemetry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Main => "main",
@@ -96,6 +97,7 @@ impl Compaction {
         })
     }
 
+    /// Its name in usage records and telemetry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
@@ -199,6 +201,7 @@ impl CacheMiss {
     /// Every reason, in the order metrics list them.
     pub const ALL: [Self; 3] = [Self::Compaction, Self::AfterCompaction, Self::Unexplained];
 
+    /// Its name in usage records and telemetry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Compaction => "compaction",

@@ -19,6 +19,7 @@ pub enum Api {
 /// A proxied endpoint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Endpoint {
+    /// The native API it belongs to.
     pub api: Api,
     /// The request path, as a static string for records.
     pub path: &'static str,

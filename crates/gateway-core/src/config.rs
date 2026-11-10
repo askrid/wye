@@ -1,8 +1,9 @@
 //! `wye.toml` parsing and validation.
 //!
 //! Raw TOML is parsed into private `Raw*` types and validated once into public
-//! types whose invariants later code relies on. Secrets and files are referenced
-//! by environment variable name or path ([`Secret`]) and never read here.
+//! types whose invariants later code relies on. Secrets and files are
+//! referenced by environment variable name or path ([`Secret`]) and never read
+//! here.
 
 use std::{fmt, net::SocketAddr, path::PathBuf, time::Duration};
 
@@ -72,6 +73,7 @@ pub const DEFAULT_SAMPLE_PERCENT: u8 = 100;
 /// Validated gateway configuration.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The listener and its limits, from `[server]`.
     pub server: Server,
     /// Where each API's requests go, from `[[upstreams]]`; at least one
     /// route.
@@ -170,12 +172,15 @@ pub struct Discovery {
     pub models: Vec<DiscoveredModel>,
 }
 
+/// One `[discovery] models` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredModel {
     /// The model name clients send; Claude Code keeps only ids containing
     /// `claude` or `anthropic`.
     pub id: String,
+    /// The name clients show, at most 1,024 bytes.
     pub display_name: Option<String>,
+    /// A line clients show beside it, at most 1,024 bytes.
     pub description: Option<String>,
 }
 
@@ -208,10 +213,12 @@ pub struct CacheDiagnostics {
     pub sample_percent: u8,
 }
 
+/// The listener and its limits (`[server]`).
 #[derive(Debug, Clone)]
 pub struct Server {
     /// A loopback address unless `[auth]` is set.
     pub listen: SocketAddr,
+    /// Largest request body; a larger one is refused with `413`.
     pub max_request_body_bytes: u64,
     /// Requests in flight (until their response body ends) before new
     /// ones are answered with an overload error instead of queueing.
@@ -245,43 +252,66 @@ impl Server {
     }
 }
 
+/// Why a config is refused. A `&'static str` names the config key, as in
+/// `server.drain_delay`; [`fmt::Display`] writes the message the CLI shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
+    /// Not TOML, or not the config's shape: the TOML parser's message.
     Parse(String),
+    /// `server.listen` is not a socket address.
     InvalidListen(String),
+    /// `server.listen` is not loopback, and there is no `[auth]`.
     NonLoopbackListen(SocketAddr),
+    /// A problem in `[auth]`.
     Auth(String),
+    /// A URL that is invalid, or not allowed where it is.
     InvalidUrl {
+        /// The config key.
         field: &'static str,
+        /// The URL as written.
         url: String,
+        /// What is wrong with it.
         reason: &'static str,
     },
+    /// A secret's `env` that is not an environment variable name.
     InvalidEnvName {
+        /// The config key.
         field: &'static str,
+        /// The name as written.
         name: String,
     },
     /// A secret naming no source, or both.
     Secret(&'static str),
+    /// An empty string or path.
     Empty(&'static str),
+    /// Zero where the value must be positive.
     Zero(&'static str),
     /// Not a duration as [`crate::duration::parse`] reads one.
     Duration(&'static str),
     /// A duration longer than `max`.
     TooLong {
+        /// The config key.
         field: &'static str,
+        /// The longest allowed.
         max: Duration,
     },
+    /// A sampling share outside 1-100.
     Percent(&'static str),
+    /// Any other problem, as a whole message.
     Invalid(&'static str),
     /// A problem with the upstreams that serve one route.
     Route {
+        /// The route.
         route: RouteId,
+        /// What is wrong, as a predicate: "takes at most 16 upstreams".
         problem: &'static str,
     },
     /// A problem in one `[[upstreams]]` entry, named by its id, written or
     /// by default.
     Upstream {
+        /// The entry's id.
         id: String,
+        /// The problem.
         error: Box<ConfigError>,
     },
 }

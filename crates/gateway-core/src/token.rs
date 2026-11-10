@@ -41,8 +41,11 @@ const CLOCK_SKEW_SECS: u64 = 60;
 /// Who a verified token belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Identity {
+    /// The `sub` claim, or the identity provider's subject claim.
     pub subject: Box<str>,
+    /// The `kid` of the key that signed it.
     pub key_id: Box<str>,
+    /// The `exp` claim, in Unix seconds.
     pub expires_at: u64,
     /// Models this token may use (the `models` claim, or an identity
     /// provider's matching grants); `None` leaves the configured list in
@@ -69,16 +72,28 @@ fn is_expired(exp: u64, now: u64) -> bool {
 /// the variants exist for logs and tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenError {
+    /// Longer than 8 KiB.
     TooLarge,
+    /// Not three base64url parts of JSON in the shapes a token takes.
     Malformed,
+    /// A header `alg` other than the key's issuer's one algorithm.
     UnsupportedAlgorithm,
+    /// No `kid`, or one that names no configured key.
     UnknownKey,
+    /// The signature does not verify.
     BadSignature,
+    /// `iss` is not the key's issuer.
     WrongIssuer,
+    /// `aud` does not name the issuer's audience.
     WrongAudience,
+    /// Past `exp`.
     Expired,
+    /// `iat` or `nbf` is in the future, beyond the clock skew allowed.
     NotYetValid,
+    /// `exp - iat` exceeds `max_gateway_token_ttl`.
     LifetimeTooLong,
+    /// An identity-provider token whose subject claim is absent, empty, or
+    /// not a string.
     MissingSubject,
 }
 
@@ -180,7 +195,8 @@ enum SourceKind {
 /// Checks tokens against the configured issuers and keys.
 pub struct Verifier {
     max_ttl_secs: u64,
-    /// Every key, Wye's own and the identity providers', with the index of its source.
+    /// Every key, Wye's own and the identity providers', with the index of its
+    /// source.
     keys: HashMap<Box<str>, (VerifyKey, usize)>,
     sources: Vec<Source>,
 }
@@ -198,9 +214,9 @@ impl fmt::Debug for Verifier {
 }
 
 impl Verifier {
-    /// `issuer_keys` holds each `auth.identity_providers` entry's parsed key set, in
-    /// order; an issuer without one accepts no token. A key id used twice,
-    /// in any two sets, is an error: a token's `kid` must name one key.
+    /// `issuer_keys` holds each `auth.identity_providers` entry's parsed key
+    /// set, in order; an issuer without one accepts no token. A key id used
+    /// twice, in any two sets, is an error: a token's `kid` must name one key.
     pub fn new(auth: &Auth, issuer_keys: Vec<IssuerKeys>) -> Result<Self, KeySetError> {
         let mut verifier = Self {
             max_ttl_secs: auth.max_gateway_token_ttl.as_secs(),

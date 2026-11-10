@@ -75,6 +75,7 @@ impl Default for ResponsesUsageScanner {
 }
 
 impl ResponsesUsageScanner {
+    /// For a stream that has not started.
     pub fn new() -> Self {
         Self {
             line: Line::Prefix,
@@ -93,6 +94,7 @@ impl ResponsesUsageScanner {
         }
     }
 
+    /// Reads the next chunk of the stream, split anywhere.
     pub fn feed(&mut self, mut chunk: &[u8]) {
         while !chunk.is_empty() {
             let newline = memchr::memchr(b'\n', chunk);
@@ -247,10 +249,12 @@ impl ResponsesUsageScanner {
         count_tool(&mut self.tools, name);
     }
 
+    /// The counts reported so far.
     pub fn usage(&self) -> Usage {
         self.usage
     }
 
+    /// The model the provider reported serving.
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
     }

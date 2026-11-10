@@ -1,9 +1,10 @@
 //! Verification keys: Wye's own Ed25519 keys and identity providers' keys
 //! from a JSON Web Key Set (RFC 7517), parsed once at startup.
 //!
-//! An identity provider's key set is read for the one algorithm its issuer is pinned
-//! to. Keys of another type, curve, or `alg`, and keys marked for encryption,
-//! are skipped, so an identity provider's full published set can be committed as is.
+//! An identity provider's key set is read for the one algorithm its issuer is
+//! pinned to. Keys of another type, curve, or `alg`, and keys marked for
+//! encryption, are skipped, so an identity provider's full published set can be
+//! committed as is.
 
 use std::fmt;
 
@@ -72,6 +73,7 @@ impl fmt::Debug for IssuerKeys {
 /// Why a key set cannot be used. Startup fails on any of these.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeySetError {
+    /// Larger than 1 MiB.
     TooLarge,
     /// Not a JSON Web Key Set.
     Json(String),
@@ -79,8 +81,11 @@ pub enum KeySetError {
     MissingKid,
     /// The same `kid` twice, within one set or across issuers.
     DuplicateKid(String),
+    /// A key that cannot be used as it is written.
     InvalidKey {
+        /// The key's `kid`.
         kid: String,
+        /// What is wrong with it.
         reason: &'static str,
     },
     /// No key in the set fits the issuer's algorithm.

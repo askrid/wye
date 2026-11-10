@@ -39,6 +39,7 @@ pub struct OwnIssuer {
 /// One of Wye's own signing keys, by its public half.
 #[derive(Debug, Clone)]
 pub struct PublicKey {
+    /// The raw Ed25519 public key.
     pub ed25519_public_key: [u8; 32],
     /// The key's RFC 7638 JWK thumbprint: the `kid` of the tokens it signs.
     pub thumbprint: String,
@@ -51,6 +52,7 @@ impl PublicKey {
         Some(Self::new(ed25519_public_key))
     }
 
+    /// The key with its thumbprint.
     pub fn new(ed25519_public_key: [u8; 32]) -> Self {
         Self {
             thumbprint: crate::token::thumbprint(&ed25519_public_key),
@@ -69,7 +71,8 @@ pub struct IdentityProvider {
     pub audience: String,
     /// The one algorithm accepted from this issuer, never read from the token.
     pub algorithm: Algorithm,
-    /// The issuer's JSON Web Key Set, relative to the config file; read at startup.
+    /// The issuer's JSON Web Key Set, relative to the config file; read at
+    /// startup.
     pub jwks_file: PathBuf,
     /// The claim that names the token's subject (default `sub`).
     pub subject_claim: String,
@@ -102,6 +105,7 @@ impl Algorithm {
         }
     }
 
+    /// The algorithm a JOSE `alg` names, if accepted.
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|a| a.as_str() == name)
     }
@@ -111,7 +115,10 @@ impl Algorithm {
 /// containing it (for example `groups`).
 #[derive(Debug, Clone)]
 pub struct Grant {
+    /// The token claim read.
     pub claim: String,
+    /// The value that grants the models.
     pub value: String,
+    /// The models granted.
     pub models: Vec<ModelPattern>,
 }

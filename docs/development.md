@@ -176,6 +176,7 @@ The rules the design principles do not already state.
 - Stable Rust, edition 2024, pinned in `rust-toolchain.toml`; lints and dependency versions are set once in the workspace's `Cargo.toml`.
 - Names follow the Rust API Guidelines; a module with children is `foo.rs` plus `foo/`, never `mod.rs`.
 - Every module has a `//!` doc and every public item a `///` doc (rustdoc runs with `-D warnings`); comments say why, not what.
+- A doc's first line is one sentence saying what the item is or holds, not how: a noun phrase for a type, `Whether ...` for a `bool`, and the `None` or `Err` case by the second sentence. A module doc names what the module decides, then its invariants and their reasons. A doc never restates the signature; config keys and wire names go in backticks, terms are the [glossary](glossary.md)'s, and comment lines wrap at 80 columns.
 - One way to do each thing: extend the existing pattern (one HTTPS client setup, one config snapshot) before adding a second.
 
 #### Types and errors

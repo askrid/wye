@@ -127,6 +127,7 @@ impl PolicyScanner {
         })
     }
 
+    /// Reads the next chunk of the body, split anywhere.
     pub fn feed(&mut self, chunk: &[u8]) {
         let mut i = 0;
         while i < chunk.len() && self.error.is_none() {

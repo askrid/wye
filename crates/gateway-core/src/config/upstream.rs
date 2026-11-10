@@ -3,6 +3,8 @@
 
 use super::*;
 
+/// One `[[upstreams]]` entry: where a route's requests go and how they
+/// authenticate there.
 #[derive(Debug, Clone)]
 pub struct Upstream {
     /// Names the upstream in usage records, telemetry, prices, and `wye
@@ -14,20 +16,30 @@ pub struct Upstream {
     /// Takes requests only when failover has moved past every upstream of
     /// the route that is not standby, in config order.
     pub standby: bool,
+    /// Who operates the endpoint, which decides its authentication and route.
     pub provider: Provider,
     /// The `anthropic-workspace-id` sent with every request; set exactly
     /// for [`Provider::ClaudePlatformAws`].
     pub workspace_id: Option<Box<str>>,
+    /// `https`, or `http` to a loopback host.
     pub scheme: Scheme,
+    /// The base URL's host and port.
     pub authority: Authority,
     /// Base path without a trailing slash; empty for a bare origin.
     pub path_prefix: String,
+    /// What authenticates requests to the provider.
     pub provider_key: ProviderKey,
-    /// PEM file of extra root certificates trusted for the upstream, in addition
-    /// to the built-in roots. Relative paths are relative to the config file.
+    /// PEM file of extra root certificates trusted for the upstream, in
+    /// addition to the built-in roots. Relative paths are relative to the
+    /// config file.
     pub ca_file: Option<PathBuf>,
+    /// For TCP and the TLS handshake together.
     pub connect_timeout: Duration,
+    /// From the request sent to the response headers: a non-streaming
+    /// generation sends none until it finishes.
     pub response_header_timeout: Duration,
+    /// The longest wait for the next bytes of a response body; longer than
+    /// the provider's SSE ping interval.
     pub stream_idle_timeout: Duration,
     /// Protocols offered to a TLS upstream.
     pub http_version: UpstreamHttpVersion,

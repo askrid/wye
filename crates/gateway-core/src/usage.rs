@@ -52,15 +52,23 @@ fn unpriced_tier(tier: Option<&str>) -> bool {
     tier.is_some_and(|tier| tier != "default")
 }
 
-/// Token counts reported by the provider. `None` when the response did not report the field.
+/// Token counts reported by the provider, in Anthropic's meaning: input
+/// tokens exclude cache reads and writes. `None` when the response did not
+/// report the field.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Usage {
+    /// Uncached input tokens.
     pub input_tokens: Option<u64>,
+    /// Output tokens, reasoning included.
     pub output_tokens: Option<u64>,
+    /// Input tokens written to the prompt cache.
     pub cache_creation_input_tokens: Option<u64>,
+    /// Input tokens read from the prompt cache.
     pub cache_read_input_tokens: Option<u64>,
-    /// Cache writes by TTL (`usage.cache_creation`), when reported.
+    /// Cache writes with the 5-minute TTL (`usage.cache_creation`), when
+    /// reported.
     pub cache_creation_5m_tokens: Option<u64>,
+    /// Cache writes with the 1-hour TTL, when reported.
     pub cache_creation_1h_tokens: Option<u64>,
     /// The response used something billed outside token prices: per-use
     /// server tools (`server_tool_use`) or OpenAI's hosted tools, or a
@@ -74,13 +82,15 @@ pub enum UsageStatus {
     /// The provider's final usage report arrived (Messages `message_delta`,
     /// a Responses terminal event, a Chat usage chunk, a JSON body's `usage`).
     Complete,
-    /// A Messages stream ended after `message_start`: output tokens are a lower bound.
+    /// A Messages stream ended after `message_start`: output tokens are a lower
+    /// bound.
     Partial,
     /// No usable usage event, or a usage event was malformed or oversized.
     Unknown,
 }
 
 impl UsageStatus {
+    /// Its name in usage records and telemetry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Complete => "complete",
@@ -165,9 +175,13 @@ fn count_tool(tools: &mut Option<Box<ToolCalls>>, name: &str) {
 /// keep their size.
 #[derive(Debug)]
 pub enum UsageScanner {
+    /// An Anthropic Messages stream.
     Messages(MessagesUsageScanner),
+    /// An OpenAI Responses stream.
     Responses(Box<ResponsesUsageScanner>),
+    /// An OpenAI Chat Completions stream.
     Chat(Box<ChatUsageScanner>),
+    /// A non-streaming JSON body of any of the APIs.
     Json(Box<JsonUsageScanner>),
 }
 
@@ -212,13 +226,16 @@ impl UsageScanner {
 pub struct Scanned {
     /// The model the provider reported serving.
     pub model: Option<Box<str>>,
+    /// The counts the response reported.
     pub usage: Usage,
+    /// How much of the usage the scan saw.
     pub status: UsageStatus,
     /// The tool calls the response started.
     pub tool_calls: Option<Box<ToolCalls>>,
 }
 
-/// Cuts a stream's chunks into lines, carrying a partial line to the next chunk.
+/// Cuts a stream's chunks into lines, carrying a partial line to the next
+/// chunk.
 #[derive(Debug, Default)]
 struct Lines {
     /// Partial line carried over from the previous chunk.

@@ -13,11 +13,16 @@ use crate::config::{Algorithm, OWN_ISSUER};
 
 /// Claims of a token to issue; `iss` is always [`OWN_ISSUER`].
 pub struct NewToken<'a> {
+    /// The subject: who the token is for.
     pub sub: &'a str,
+    /// The audience: the gateway's `[auth] audience`.
     pub aud: &'a str,
+    /// Issued at, in Unix seconds.
     pub iat: u64,
+    /// Expires at, in Unix seconds.
     pub exp: u64,
-    /// Allowed models (names or prefixes ending in `*`); `None` omits the claim.
+    /// Allowed models (names or prefixes ending in `*`); `None` omits the
+    /// claim.
     pub models: Option<&'a [&'a str]>,
     /// Largest output-token maximum; `None` omits the claim.
     pub max_output_tokens: Option<u64>,

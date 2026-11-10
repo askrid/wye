@@ -20,10 +20,16 @@ pub(crate) const MAX_TIERS: usize = 8;
 /// Prices for one set of models, per token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Prices {
+    /// Per uncached input token.
     pub input: Pico,
+    /// Per output token, reasoning tokens included.
     pub output: Pico,
+    /// Per input token read from the prompt cache; `None` leaves cache
+    /// reads unpriced, and the cost partial.
     pub cache_read: Option<Pico>,
+    /// Per token written to the cache for 5 minutes; `None` as for reads.
     pub cache_write_5m: Option<Pico>,
+    /// Per token written to the cache for an hour; `None` as for reads.
     pub cache_write_1h: Option<Pico>,
 }
 
@@ -32,20 +38,27 @@ pub struct Prices {
 pub struct Tier {
     /// Applies when the prompt (input plus cache reads and writes) is longer.
     pub above_prompt_tokens: u64,
+    /// [`Prices::input`] above the threshold.
     pub input: Option<Pico>,
+    /// [`Prices::output`] above the threshold.
     pub output: Option<Pico>,
+    /// [`Prices::cache_read`] above the threshold.
     pub cache_read: Option<Pico>,
+    /// [`Prices::cache_write_5m`] above the threshold.
     pub cache_write_5m: Option<Pico>,
+    /// [`Prices::cache_write_1h`] above the threshold.
     pub cache_write_1h: Option<Pico>,
 }
 
 /// One `[[pricing.prices]]` entry.
 #[derive(Debug, Clone)]
 pub struct PriceEntry {
+    /// The models it prices, as patterns.
     pub models: Box<[ModelPattern]>,
     /// Upstream ids the entry is limited to; empty: every upstream.
     /// Providers and regions can price the same model differently.
     pub upstreams: Box<[Box<str>]>,
+    /// Prices up to the first tier.
     pub prices: Prices,
     /// Sorted by threshold, ascending.
     pub tiers: Box<[Tier]>,
@@ -56,6 +69,7 @@ pub struct PriceEntry {
 pub struct Pricing {
     /// `pricing.version`, else a hash of the entries (`content_version`).
     pub version: Box<str>,
+    /// In config order; [`Pricing::entry`] picks one.
     pub entries: Box<[PriceEntry]>,
 }
 
@@ -72,6 +86,7 @@ pub enum CostStatus {
 }
 
 impl CostStatus {
+    /// Its name in usage records and telemetry.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Complete => "complete",
@@ -81,10 +96,12 @@ impl CostStatus {
     }
 }
 
+/// A request's cost and how much of it the table covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cost {
     /// `None` when unknown.
     pub pico: Option<Pico>,
+    /// How much of the cost `pico` covers.
     pub status: CostStatus,
 }
 

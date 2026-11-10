@@ -38,6 +38,7 @@ pub enum FailoverReason {
 }
 
 impl FailoverReason {
+    /// Every reason.
     pub const ALL: [Self; 3] = [Self::RateLimited, Self::Overloaded, Self::Connect];
 
     /// Its name in usage records and metrics.
@@ -72,6 +73,7 @@ pub struct Ranking {
 }
 
 impl Ranking {
+    /// The upstreams' indices, the pick first.
     pub fn iter(&self) -> impl Iterator<Item = usize> + '_ {
         self.order
             .get(..self.len)
@@ -80,6 +82,7 @@ impl Ranking {
             .map(|&i| usize::from(i))
     }
 
+    /// The pick's index.
     pub fn first(&self) -> usize {
         self.order.first().map_or(0, |&i| usize::from(i))
     }
@@ -121,6 +124,7 @@ pub enum RouteId {
 }
 
 impl RouteId {
+    /// Every route, Claude's first.
     pub const ALL: [Self; 2] = [Self::Claude, Self::OpenAi];
 
     /// Its name in messages: `the Claude route`.
@@ -207,9 +211,16 @@ impl Route {
         self.upstreams.len() > 1
     }
 
-    /// Every upstream in the order a request with affinity `key` tries
-    /// them: [`Self::pick`] first, then (for failover) the others that are
-    /// not standby by falling score, then the standbys in config order.
+    /// Every upstream in the order a request with affinity `key` (the
+    /// session id, else the gateway token's subject, else empty) tries them:
+    /// those that are not standby by falling score, then the standbys in
+    /// config order.
+    ///
+    /// Each upstream that is not standby scores `weight / -ln(u)`, with `u`
+    /// uniform in (0, 1) from a hash of the key seeded by the upstream's id,
+    /// so a key's first upstream is each one with probability proportional to
+    /// its weight. Floating point only ranks; an exact tie, which needs equal
+    /// 53-bit hashes, goes to the earlier upstream.
     pub fn rank(&self, key: &[u8]) -> Ranking {
         let len = self.upstreams.len().min(MAX_UPSTREAMS);
         let mut order = self.order;
@@ -233,14 +244,7 @@ impl Route {
         Ranking { order, len }
     }
 
-    /// The index of the upstream for a request with affinity `key` (the
-    /// session id, else the gateway token's subject, else empty).
-    ///
-    /// Each upstream that is not standby scores `weight / -ln(u)`, with `u`
-    /// uniform in (0, 1) from a hash of the key seeded by the upstream's id;
-    /// the highest score wins. A key then lands on an upstream with
-    /// probability proportional to its weight. Floating point only ranks; an exact tie, which needs
-    /// equal 53-bit hashes, goes to the earlier upstream.
+    /// The index of [`Self::rank`]'s first upstream for affinity `key`.
     pub fn pick(&self, key: &[u8]) -> usize {
         self.rank(key).first()
     }

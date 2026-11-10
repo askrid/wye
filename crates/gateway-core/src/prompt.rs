@@ -40,13 +40,17 @@ pub const MESSAGE_PREFIXES: usize = 8;
 /// A top-level request field that takes part in the prompt cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Section {
+    /// `tools`, hashed first by the provider.
     #[default]
     Tools,
+    /// `system`.
     System,
+    /// `messages`.
     Messages,
 }
 
 impl Section {
+    /// The field's name, as records write it.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Tools => "tools",
@@ -61,6 +65,7 @@ impl Section {
 pub struct SectionHash {
     /// Array elements; 1 for a string `system`.
     pub count: u32,
+    /// The unkeyed xxh3 of the section's canonical bytes.
     pub hash: u64,
 }
 
@@ -68,29 +73,36 @@ pub struct SectionHash {
 /// marked block.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Breakpoint {
+    /// The section the marker is in.
     pub section: Section,
     /// Element of the section array (`tools[index]`, `messages[index]`).
     pub index: u32,
     /// Content block within the message, for `messages` breakpoints.
     pub block: Option<u32>,
+    /// The unkeyed xxh3 of the section's bytes up to the marked block's end.
     pub hash: u64,
 }
 
 /// Hash of `messages[0..=index]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MessagePrefix {
+    /// The last message hashed.
     pub index: u32,
+    /// The unkeyed xxh3 of `messages[0..=index]`.
     pub hash: u64,
 }
 
 /// Unkeyed hashes of one request body.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptHashes {
+    /// The whole `tools` array, when the body has one.
     pub tools: Option<SectionHash>,
+    /// The whole `system` field, when the body has one.
     pub system: Option<SectionHash>,
     /// Number of messages.
     pub messages: Option<u32>,
-    /// `cache_control` markers seen in tools, system blocks, and message content blocks.
+    /// `cache_control` markers seen in tools, system blocks, and message
+    /// content blocks.
     pub breakpoint_count: u32,
     breakpoints: [Breakpoint; MAX_BREAKPOINTS],
     breakpoints_len: usize,
