@@ -6,17 +6,28 @@
 # Inside a container Wye must listen on 0.0.0.0, which requires an [auth]
 # section (docs/policy.md). scripts/image-smoke.sh builds and checks the image.
 #
+# Needs BuildKit (Docker's default builder since 23.0) for the cache mounts,
+# which keep Cargo's downloads and target/ between builds, so a rebuild after a
+# source change compiles only Wye.
+#
 # Base images are pinned by digest; the tag is for reading. Dependabot bumps
 # both together.
 
 FROM rust:1.99.1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639dce7d5542eb7bcd797e32aa AS build
 WORKDIR /src
 COPY . .
-RUN cargo build --release --locked -p wye \
-    && strip target/release/wye
+# target/ is a cache mount, gone after this RUN, so the binary is copied out
+# within it. The image strips the binary, so line tables (the release profile's
+# debug setting) would be built only to be thrown away.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --locked -p wye \
+    && cp target/release/wye /wye \
+    && strip /wye
 
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
-COPY --from=build /src/target/release/wye /usr/local/bin/wye
+COPY --from=build /wye /usr/local/bin/wye
 EXPOSE 8080
 # No curl in the image: wye probes itself.
 HEALTHCHECK --interval=10s --timeout=6s --start-period=5s \
