@@ -5,11 +5,11 @@
 #   docker build -t wye .
 #   docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 #
-# The release builds the published image from the binaries it has already
-# published and attested instead, unchanged (so not stripped), for both
-# platforms at once with no compiler and no emulation: the runtime stage only
-# copies files. The context is a directory holding linux-amd64/wye and
-# linux-arm64/wye:
+# The release (.github/workflows/image.yml) builds the published image from
+# the binaries it has already published and attested instead, unchanged (so
+# not stripped), for both platforms at once with no compiler and no
+# emulation: the runtime stage only copies files. The context is a directory
+# holding linux-amd64/wye and linux-arm64/wye:
 #
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #       --build-arg BINARY=prebuilt -f Dockerfile <dir>

@@ -32,6 +32,15 @@ Linux and macOS archives are on the [releases page](https://github.com/askrid/wy
 
 Keep one `wye` on `PATH`. When you move from `cargo install` to the installer, run `cargo uninstall wye`, then `wye service install` again if you use the service, so it runs the new path ([running as a service](operations.md#running-as-a-service)).
 
+The container image `ghcr.io/askrid/wye` runs the gateway on linux/amd64 and linux/arm64. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`, so mount a config that has it ([for a team](#using-it-for-a-team)) at `/etc/wye/wye.toml`:
+
+```bash
+docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY \
+    ghcr.io/askrid/wye:0.1
+```
+
+Its tags are `0.1.0` for one release, `0.1` for the newest 0.1 release, and `latest` for the newest release; a prerelease gets only its own tag. `gh attestation verify oci://ghcr.io/askrid/wye:<version> --repo askrid/wye` shows the tag and commit an image was built from.
+
 ## Choosing a setup
 
 `wye init` writes a config, and next to it `policy-tests/` with sample requests that `wye policy-test` checks against it ([what they cover](operations.md#commands)). It never writes over an existing file, and prints the next steps. It writes one of three [setups](glossary.md#the-product):
@@ -84,13 +93,13 @@ Input lines that are not usage records are skipped and counted. Logs of every re
 
 ## Using it for a team
 
-No image is published yet, so build one from a clone of Wye. Then, in your config repository:
+In your config repository, with the [container image](#installing):
 
 ```bash
-docker build -t wye .                               # in the clone
 wye init --shared -c wye.toml                       # and ~/.wye/signing.key
 wye token issue alice -c wye.toml --out alice.token # valid for a week
-docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
+docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY \
+    ghcr.io/askrid/wye:0.1
 ```
 
 Put it behind HTTPS, which `wye claude` and `wye codex` require of a remote gateway, using a load balancer, an ingress, or Caddy, which gets and renews a certificate by itself ([example](operations.md#deployment)). Each developer then runs:

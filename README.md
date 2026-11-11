@@ -167,7 +167,7 @@ Everything under [What it does](#what-it-does) is built and covered by tests. I'
 
 Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS are tested only against mocks so far. `wye service` hasn't run under systemd on a real Linux machine.
 
-Next comes a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests, then provider-held budgets per team. A published container image, Vertex AI, and AWS SigV4 are not built. Details in [docs/roadmap.md](docs/roadmap.md#status).
+Next comes a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests, then provider-held budgets per team. Vertex AI and AWS SigV4 are not built. Details in [docs/roadmap.md](docs/roadmap.md#status).
 
 ## What Wye will not do
 

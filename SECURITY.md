@@ -20,7 +20,8 @@ Whoever takes over the gateway's host gets the provider keys and requests in fli
 - A release publishes only a commit whose `ci` run on `main` passed; the release workflow checks before it creates the release.
 - Release tags (`v*`) are protected by a ruleset. Only a repository admin can create, move, or delete one.
 - Every workflow pins its actions to a commit, and the `Dockerfile` pins its base images by digest.
-- No publishing credential is stored anywhere. Releases use the run's own token, and nothing is published to crates.io, PyPI, or a container registry.
+- The container image, `ghcr.io/askrid/wye`, is built in the release run from the Linux archives after `gh attestation verify` passes on them, so it runs the attested binary. `gh attestation verify oci://ghcr.io/askrid/wye:<version> --repo askrid/wye` checks the image's own build-provenance attestation, stored in the registry beside it.
+- No publishing credential is stored anywhere. Releases and the image use the run's own token, and nothing is published to crates.io or PyPI.
 - Dependencies come only from crates.io, locked by checksum in `Cargo.lock` and checked by cargo-deny on every change and weekly for new advisories. The binary runs no code but its own at startup.
 
 Still missing are immutable releases (an admin token can still replace a release's files, which attestation verification would then reject), a checksum on the `dist` installer the release jobs download, reproducible builds, two-person review (one maintainer), and secrets cleared from memory.

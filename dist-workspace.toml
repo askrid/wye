@@ -31,4 +31,7 @@ github-action-commits = { "actions/checkout" = "d23441a48e516b6c34aea4fa41551a30
 # jobs but not plan jobs, so a failed plan job would skip the builds and still
 # create the release.
 local-artifacts-jobs = ["./release-checks"]
-github-custom-job-permissions = { "release-checks" = { contents = "read", actions = "read" } }
+# Publish the container image from the published release's Linux binaries
+# (.github/workflows/image.yml), after everything else.
+post-announce-jobs = ["./image"]
+github-custom-job-permissions = { "release-checks" = { contents = "read", actions = "read" }, "image" = { contents = "read", packages = "write", id-token = "write", attestations = "write" } }

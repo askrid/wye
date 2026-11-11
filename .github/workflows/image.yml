@@ -1,0 +1,140 @@
+# Publishes the release's container image, ghcr.io/askrid/wye, for
+# linux/amd64 and linux/arm64. Called by release.yml (dist's
+# `post-announce-jobs`) after the GitHub Release is published. It builds from
+# that release's own Linux binaries, checked with `gh attestation verify`
+# first, so the image runs the attested bytes and the build needs no compiler
+# and no emulation (Dockerfile, BINARY=prebuilt).
+#
+# Before pushing, it smoke-tests the amd64 image (scripts/image-smoke.sh).
+# Tags: <version>, and for a release that is not a prerelease also
+# <major>.<minor> and latest. BuildKit adds provenance and an SBOM to the
+# image, and the index gets a build provenance attestation in the registry:
+# `gh attestation verify oci://ghcr.io/askrid/wye:<version> --repo askrid/wye`.
+#
+# A new GHCR package is private: its owner makes it public once, in the
+# package's settings.
+
+name: image
+
+on:
+  workflow_call:
+    inputs:
+      # dist passes its plan to every custom job; unused here.
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      REVISION: ${{ github.sha }}
+      OWNER: ${{ github.repository_owner }}
+    steps:
+      # The tagged commit's Dockerfile and smoke test.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Download and verify the release's Linux binaries
+        run: |
+          set -euo pipefail
+          dl=$RUNNER_TEMP/release ctx=$RUNNER_TEMP/ctx
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$dl" \
+            --pattern 'wye-*-unknown-linux-gnu.tar.xz'
+          for pair in x86_64:amd64 aarch64:arm64; do
+            target=${pair%%:*}-unknown-linux-gnu arch=${pair#*:}
+            gh attestation verify "$dl/wye-$target.tar.xz" --repo "$GITHUB_REPOSITORY"
+            mkdir -p "$ctx/linux-$arch"
+            tar -xJf "$dl/wye-$target.tar.xz" -C "$ctx/linux-$arch" \
+              --strip-components=1 "wye-$target/wye"
+          done
+          ls -l "$ctx"/linux-*/wye
+
+      - name: Name the image and its tags
+        id: name
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+          image=ghcr.io/${OWNER,,}/wye
+          tags=("$image:$version")
+          # A prerelease (0.2.0-rc.1) moves neither the minor tag nor latest.
+          if [[ $version != *-* ]]; then
+            IFS=. read -r major minor _ <<<"$version"
+            tags+=("$image:$major.$minor" "$image:latest")
+          fi
+          {
+            echo "version=$version"
+            echo "image=$image"
+            echo "tags=${tags[*]}"
+          } >> "$GITHUB_OUTPUT"
+          echo "will push: ${tags[*]}"
+
+      - name: Set up a multi-platform builder and log in to GHCR
+        run: |
+          set -euo pipefail
+          docker buildx create --use
+          docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin <<<"$GH_TOKEN"
+
+      - name: Smoke-test the amd64 image
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+        run: |
+          set -euo pipefail
+          # --load cannot carry attestations, and this image is not pushed.
+          docker buildx build --platform linux/amd64 --build-arg BINARY=prebuilt \
+            -f Dockerfile --provenance=false --sbom=false --load \
+            -t "$IMAGE:smoke-check" "$RUNNER_TEMP/ctx"
+          WYE_IMAGE=$IMAGE:smoke-check scripts/image-smoke.sh
+
+      - name: Build and push both platforms
+        id: push
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          VERSION: ${{ steps.name.outputs.version }}
+          TAGS: ${{ steps.name.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # The Dockerfile's labels, from the image just tested, are copied to
+          # the index, where GHCR reads a multi-platform image's description.
+          labels=$(docker image inspect --format '{{json .Config.Labels}}' "$IMAGE:smoke-check")
+          label() { jq -er --arg k "org.opencontainers.image.$1" '.[$k]' <<<"$labels"; }
+          args=(
+            --label "org.opencontainers.image.version=$VERSION"
+            --label "org.opencontainers.image.revision=$REVISION"
+            --annotation "index:org.opencontainers.image.version=$VERSION"
+            --annotation "index:org.opencontainers.image.revision=$REVISION"
+          )
+          for key in title description source licenses; do
+            value=$(label "$key")
+            args+=(--annotation "index:org.opencontainers.image.$key=$value")
+          done
+          for tag in $TAGS; do
+            args+=(-t "$tag")
+          done
+          docker buildx build --platform linux/amd64,linux/arm64 --build-arg BINARY=prebuilt \
+            -f Dockerfile "${args[@]}" --provenance=mode=max --sbom=true --push \
+            --metadata-file "$RUNNER_TEMP/metadata.json" "$RUNNER_TEMP/ctx"
+          digest=$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "pushed $IMAGE@$digest"
+
+      - name: Attest the pushed image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # Storage records exist only for organization-owned repositories.
+          create-storage-record: false

@@ -1,7 +1,7 @@
 # Builds the container image and checks that it starts, becomes healthy, and
 # refuses an unauthenticated request (scripts/image-smoke.sh). No provider is
-# contacted and nothing is pushed. Runs only when the image's inputs change,
-# on pushes to main as on pull requests.
+# contacted and nothing is pushed. Runs only when the image's inputs or its
+# release workflow (image.yml) change, on pushes to main as on pull requests.
 
 name: docker
 
@@ -17,6 +17,7 @@ on:
       - Cargo.lock
       - scripts/image-smoke.sh
       - .github/workflows/docker.yml
+      - .github/workflows/image.yml
   pull_request:
     paths:
       - Dockerfile
@@ -27,6 +28,7 @@ on:
       - Cargo.lock
       - scripts/image-smoke.sh
       - .github/workflows/docker.yml
+      - .github/workflows/image.yml
 
 permissions:
   contents: read
