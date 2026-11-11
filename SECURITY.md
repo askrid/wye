@@ -16,6 +16,7 @@ Whoever takes over the gateway's host gets the provider keys and requests in fli
 ## Releases
 
 - Release archives are built by GitHub Actions from a version tag, with checksums and a build-provenance attestation. `gh attestation verify <archive> --repo askrid/wye` checks the repository, workflow, and commit that built it.
+- The shell installer, `wye-installer.sh`, is built by the same release run and published with it. It checks the archive it downloads against the SHA-256 written into it; the installer itself has no attestation.
 - A release publishes only a commit whose `ci` run on `main` passed; the release workflow checks before it creates the release.
 - Release tags (`v*`) are protected by a ruleset. Only a repository admin can create, move, or delete one.
 - Every workflow pins its actions to a commit, and the `Dockerfile` pins its base images by digest.

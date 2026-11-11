@@ -15,13 +15,22 @@ How to use Wye, by task, then an [FAQ](#faq). Reference lives in [operations.md]
 
 ## Installing
 
-`cargo install` builds the latest release (Rust 1.99 or later); without `--tag`, the unreleased `main`:
+The installer needs no Rust. It downloads the latest release's archive for your machine (macOS or Linux, x86_64 or arm64), checks it against the SHA-256 written into the installer, and puts `wye` in the first of `$XDG_BIN_HOME`, `$XDG_DATA_HOME/../bin`, and `~/.local/bin`. It adds that directory to `PATH` in your shell's profile; `WYE_NO_MODIFY_PATH=1` skips that, and `WYE_INSTALL_DIR` picks another directory:
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+    https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
+```
+
+`cargo install` builds the latest release from source into `~/.cargo/bin` (Rust 1.99 or later); without `--tag`, the unreleased `main`:
 
 ```bash
 cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
 ```
 
 Linux and macOS archives are on the [releases page](https://github.com/askrid/wye/releases); `gh attestation verify <archive> --repo askrid/wye` shows the tag and commit one was built from ([SECURITY.md](../SECURITY.md#releases)).
+
+Keep one `wye` on `PATH`. When you move from `cargo install` to the installer, run `cargo uninstall wye`, then `wye service install` again if you use the service, so it runs the new path ([running as a service](operations.md#running-as-a-service)).
 
 ## Choosing a setup
 
