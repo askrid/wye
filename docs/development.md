@@ -150,7 +150,7 @@ CPU time comes from `ps` on macOS and from `/proc/<pid>/stat` on Linux (whose `p
 | `WYE_BENCH_UPSTREAM` | `wye-bench` | Extra lines in the upstream entry, for tuning experiments |
 | `WYE_BENCH_BIFROST_POOLS` | `wye-bench` | `default` keeps Bifrost's default pools |
 | `WYE_BENCH_PROVIDER_KEY`, `WYE_BENCH_HASH_KEY` | `wye-bench` | Set for the gateway it starts; not for you to set |
-| `WYE_IMAGE`, `WYE_SMOKE_PORT` | `scripts/image-smoke.sh` | The image tag and port |
+| `WYE_IMAGE`, `WYE_SMOKE_PORT` | `scripts/image-smoke.sh` | An image to check instead of building `wye:smoke`, and the host port |
 | `WYE_URL` | `scripts/upload-latency.sh` | Also time the same uploads through this gateway |
 
 The variables `wye` itself reads are in [operations.md](operations.md#environment-variables).

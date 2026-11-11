@@ -5,7 +5,7 @@ Wye is an ordinary process. IaC, DNS, certificates, infrastructure secrets, sche
 ## Distribution
 
 - Release archives: a `v*` tag on a commit that passed `ci` on `main` publishes a GitHub Release with `.tar.xz` archives for x86_64 and arm64 Linux (glibc 2.35 or newer) and macOS, SHA-256 checksums, build provenance attestations (`gh attestation verify <archive> --repo askrid/wye`), and a shell installer. No Windows build. [development.md](development.md#releases) says how the release is built.
-- An OCI image, built locally only. The `Dockerfile` builds a release binary into distroless `cc` (glibc, no shell, non-root), with a `HEALTHCHECK` that runs `wye probe` against `/readyz`. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`. `scripts/image-smoke.sh` checks that the image becomes healthy, answers `/readyz`, and refuses an unauthenticated request.
+- An OCI image, built locally only. The `Dockerfile` builds a release binary into distroless `cc` (glibc, no shell, non-root), with a `HEALTHCHECK` that runs `wye probe` against `/readyz`. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`. `scripts/image-smoke.sh` builds the image, or with `WYE_IMAGE` takes a given one without building it, and checks that it becomes healthy, answers `/readyz`, and refuses an unauthenticated request.
 - A published image, a Docker Compose example, and a Helm chart are planned ([roadmap](roadmap.md#m1-team-ready-claude-code)).
 
 ## CLI
