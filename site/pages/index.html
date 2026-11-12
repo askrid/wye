@@ -50,7 +50,7 @@
 
     <div class="hero-install">
       <div class="steps">
-        {{fence README.md|cargo install}}
+        {{fence README.md|curl -LsSf}}
         {{fence README.md|wye init}}
         {{fence README.md|wye claude}}
       </div>
