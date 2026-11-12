@@ -45,13 +45,33 @@ COPY linux-${TARGETARCH}/wye /wye
 
 FROM ${BINARY} AS binary
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
+# The runtime base is distroless `cc` without five of its packages: its
+# layers are base-nossl's plus libssl3, libgomp1, libstdc++6, libgcc-s1, and
+# gcc-12-base. Wye needs only libc, libm, and libgcc_s (for unwinding), so
+# libgcc_s.so.1 comes from `cc` itself, with the dpkg records that let SBOM
+# and vulnerability scanners see it and its copyright.
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f AS cc
+
+FROM scratch AS libgcc-amd64
+COPY --from=cc /lib/x86_64-linux-gnu/libgcc_s.so.1 /lib/x86_64-linux-gnu/
+FROM scratch AS libgcc-arm64
+COPY --from=cc /lib/aarch64-linux-gnu/libgcc_s.so.1 /lib/aarch64-linux-gnu/
+
+FROM libgcc-${TARGETARCH} AS libgcc
+COPY --from=cc /var/lib/dpkg/status.d/libgcc-s1 \
+    /var/lib/dpkg/status.d/libgcc-s1.md5sums \
+    /var/lib/dpkg/status.d/gcc-12-base \
+    /var/lib/dpkg/status.d/gcc-12-base.md5sums /var/lib/dpkg/status.d/
+COPY --from=cc /usr/share/doc/gcc-12-base/ /usr/share/doc/gcc-12-base/
+
+FROM gcr.io/distroless/base-nossl-debian12:nonroot@sha256:be40c00dfabd86576d92666e87e406714d5618342de1a0c213ad232de255172e
 # The release adds version and revision, and copies these to the index of the
 # two-platform image, where GHCR reads them.
 LABEL org.opencontainers.image.title=wye \
       org.opencontainers.image.description="A small, stateless LLM gateway, configured by one TOML file" \
       org.opencontainers.image.source=https://github.com/askrid/wye \
       org.opencontainers.image.licenses=MIT
+COPY --from=libgcc / /
 COPY --from=binary /wye /usr/local/bin/wye
 EXPOSE 8080
 # No curl in the image: wye probes itself.
