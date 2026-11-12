@@ -171,13 +171,14 @@ code { font-family: var(--mono); font-size: 0.94em; color: var(--ink); }
   font-weight: 600;
   text-decoration: none;
 }
-/* The mark: one line forking in two, on a tile. assets/icon-fork.svg, the
-   favicon, is the same drawing; browsers keep a favicon long after it
-   changes, so a new mark takes a new file name. */
+/* The mark: a pixel Y, its right arm in the accent, on a tile.
+   assets/icon-dither.svg, the favicon, is the same drawing; browsers keep
+   a favicon long after it changes, so a new mark takes a new file name. */
 .mark svg { width: 1.75rem; height: 1.75rem; align-self: center; }
 .mark .version { color: var(--graphite); font-size: var(--caption); font-weight: 400; }
-.mark .tile { fill: var(--ground); stroke: var(--edge); }
-.mark .fork { fill: none; stroke: var(--ink); stroke-width: 3.5; stroke-linejoin: round; }
+.mark .tile { fill: var(--ground); stroke: var(--edge); stroke-width: 2; }
+.mark .ink { fill: var(--ink); }
+.mark .accent { fill: var(--accent); }
 :is(.bar, .foot) nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; font-family: var(--mono); }
 :is(.bar, .foot) nav a { color: var(--graphite); text-decoration: none; }
 :is(.bar, .foot) nav a:hover { color: var(--ink); text-decoration: underline; }

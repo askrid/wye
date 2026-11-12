@@ -23,8 +23,9 @@ body {
   background: #070707;
 }
 svg { width: 196px; height: 196px; flex: none; }
-.tile { fill: #151515; stroke: #3a3a3a; }
-.fork { fill: none; stroke: #ededed; stroke-width: 3.5; stroke-linejoin: round; }
+.tile { fill: #151515; stroke: #3a3a3a; stroke-width: 2; }
+.ink { fill: #ededed; }
+.accent { fill: #f2b544; }
 span {
   color: #ededed;
   font: 600 208px/1 "Wye Mono", monospace;
@@ -36,7 +37,7 @@ span {
 </style>
 </head>
 <body>
-<svg viewBox="0 0 32 32" aria-hidden="true"><rect class="tile" x="0.5" y="0.5" width="31" height="31" rx="7"/><path class="fork" d="M4.5 16 H11 L16 9 H27.5 M11 16 L16 23 H27.5"/></svg>
+<svg viewBox="0 0 64 64" aria-hidden="true"><rect class="tile" x="1" y="1" width="62" height="62" rx="14"/><path class="ink" d="M7 7h7.2v7.2H7zM14.15 14.15h7.2v7.2h-7.2zM21.3 21.3h7.2v7.2h-7.2zM28.45 28.45h7.2v28.65h-7.2z"/><path class="accent" d="M49.9 7h7.2v7.2h-7.2zM42.75 14.15h7.2v7.2h-7.2zM35.6 21.3h7.2v7.2h-7.2z"/></svg>
 <span>wye</span>
 </body>
 </html>

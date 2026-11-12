@@ -1,4 +1,4 @@
-# <img src="site/assets/icon-fork.svg" alt="" width="36" align="absmiddle"> Wye
+# <img src="site/assets/icon-dither.svg" alt="" width="36" align="absmiddle"> Wye
 
 [![ci](https://img.shields.io/github/actions/workflow/status/askrid/wye/ci.yml?branch=main&style=flat-square&label=ci&labelColor=151515)](https://github.com/askrid/wye/actions/workflows/ci.yml) [![release](https://img.shields.io/github/v/release/askrid/wye?include_prereleases&style=flat-square&label=release&labelColor=151515&color=f2b544)](https://github.com/askrid/wye/releases) [![license](https://img.shields.io/github/license/askrid/wye?style=flat-square&labelColor=151515&color=3a3a3a)](LICENSE)
 
