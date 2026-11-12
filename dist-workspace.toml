@@ -19,6 +19,10 @@ install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
 hosting = "github"
 # Whether to install an updater program
 install-updater = false
+# GitHub retired the macos-14 runner dist picks for Apple silicon by
+# default ("The configuration 'macos-14-arm64-us-default' is not
+# supported", v0.1.0's first release run); macos-15 is what ci.yml runs.
+github-custom-runners = { aarch64-apple-darwin = "macos-15" }
 # Signed build provenance for every artifact (`gh attestation verify`).
 github-attestations = true
 # Actions by commit, not by tag: a moved tag cannot change what a release
