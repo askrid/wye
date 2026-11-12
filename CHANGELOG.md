@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0
+
+The first release. Config and the command line get smaller: one list of upstreams, failover without a setting, one shape for secrets and durations, and every command on the same conventions. Usage logs rotate. Each release now ships a container image for amd64 and arm64 and a shell installer that needs no Rust, and its binaries carry no debug info. Many changes are breaking (marked below); a 0.1.0-rc.2 config needs the changes listed under "Breaking, config".
 
 - Breaking, CLI: every command follows the [command-line conventions](docs/development.md#command-line-conventions), with no aliases. `wye init --out <path>` is `wye init -c <path>`; without it, `init` writes the config `$WYE_CONFIG` names, else `~/.wye/wye.toml`, as every command reads. `wye explain --token-file` defaults to the token in `$WYE_TOKEN`, as `wye claude` and `wye codex` do. `wye service uninstall` shows what it stops, removes, and keeps, and asks first (`-y` skips the question, `--dry-run` only shows). Exit status: wrong usage exits 2 instead of 1 (an unknown command or option, a missing argument, a value a command cannot read such as `--ttl 1w`, or `service install` or `uninstall` without a terminal or `-y`); `doctor` and `policy-test` exit 1 instead of 3 when they find problems, as does `service status` for a service that does not answer; 3 now means done, with something to act on (a refusal from `explain`, widened access from `policy-diff`, nothing installed for `service status`). Streams: `wye init` prints what it wrote and the next steps on stderr, `wye token keygen` prints only the `signing_keys` line on stdout, and `wye service` prints its progress and question on stderr, keeping stdout for the plan.
 - Each flag that several commands take reads the same in all their help (`-c`, `--url`, `--token-file`, `-y`, `--dry-run`, and how a duration is written), and defaults name `$WYE_HOME` rather than `~/.wye`.
@@ -35,7 +37,7 @@
 ### Security
 
 - `SECURITY.md` says how to report a vulnerability privately, what a running gateway holds and reaches, and how releases are built and verified.
-- The install command in the README and the guide builds the latest release tag (`--tag v0.1.0-rc.2`) instead of `main`, and both show how to check a release archive with `gh attestation verify <archive> --repo askrid/wye`.
+- The install command in the README and the guide builds the latest release tag (`--tag v0.1.0`) instead of `main`, and both show how to check a release archive with `gh attestation verify <archive> --repo askrid/wye`.
 - A version tag publishes a release only if `ci` passed on that commit on `main`; a tag on a red or unmerged commit publishes nothing.
 - The release workflow pins every action to a commit SHA, like the other workflows, and the `Dockerfile` pins its base images by digest.
 - `cargo deny check advisories` runs weekly, so an advisory against a locked dependency is caught between changes.

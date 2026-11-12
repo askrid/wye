@@ -25,7 +25,7 @@ curl --proto '=https' --tlsv1.2 -LsSf \
 `cargo install` builds the latest release from source into `~/.cargo/bin` (Rust 1.99 or later); without `--tag`, the unreleased `main`:
 
 ```bash
-cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
+cargo install --git https://github.com/askrid/wye --tag v0.1.0 wye --locked
 ```
 
 Linux and macOS archives are on the [releases page](https://github.com/askrid/wye/releases); `gh attestation verify <archive> --repo askrid/wye` shows the tag and commit one was built from ([SECURITY.md](../SECURITY.md#releases)).

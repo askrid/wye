@@ -4,7 +4,7 @@ Status, build order, open work, and exit criteria. Each milestone leaves a runna
 
 ## Status
 
-Prerelease `0.1.0-rc.2` is tested and benchmarked on one machine, and in use with Claude Code on a claude.ai subscription since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions).
+Release `0.1.0` is tested and benchmarked on one machine, its Linux service and image checked on Ubuntu 24.04, and in use with Claude Code on a claude.ai subscription since 2026-10-30 (streaming, tool use, prompt caching, extended thinking, token counting, background sessions).
 
 Work continues in this order:
 
@@ -12,7 +12,7 @@ Work continues in this order:
 2. Provider-held budgets ([M2](#m2-cost-policy-for-claude)).
 3. The live checks: M0's API-key session, M3's Codex session, M4's live requests, and `wye service` on Linux.
 4. The cost ceiling (M2).
-5. A published container image, which the [principles](product.md#principles) promise, and a Compose example ([M1](#m1-team-ready-claude-code)).
+5. A Compose example ([M1](#m1-team-ready-claude-code)).
 6. Narrowable tokens (M1).
 7. Vertex AI and AWS SigV4 ([M4](#m4-claude-across-providers-and-accounts)).
 
@@ -26,11 +26,11 @@ Exit: a real Claude Code session, with an API key and with a claude.ai login thr
 
 ### M1: team-ready Claude Code
 
-Wye tokens and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, secrets from files (`{ file = "..." }`), a local OCI image with a smoke test, and release archives from a `v*` tag are built.
+Wye tokens and identity-provider tokens, model permissions and output-token ceilings, `apiKeyHelper` renewal ([operations.md](operations.md#token-renewal)), the usage scanner, OTLP logs, metrics, and traces, `wye claude`, `wye service`, `wye probe`, secrets from files (`{ file = "..." }`), an OCI image with a smoke test, and release archives, a shell installer, and a published image (`ghcr.io/askrid/wye`) from a `v*` tag are built.
 
 These are open:
 
-- Published images, a Compose example, and a Helm chart (internal service, health probes, secret references).
+- A Compose example and a Helm chart (internal service, health probes, secret references).
 - Every secret from a file too (`hash_key_file` for cache diagnostics and `otlp_headers_file` for OTLP), since `wye service` cannot pass environment secrets ([running as a service](operations.md#running-as-a-service)).
 - A deny list in config (token subjects or key ids), so offboarding need not wait for the last token to expire; it takes effect on the next restart or rollout ([revocation](policy.md#revocation)).
 - A Docker Swarm service updating without dropping streams.
@@ -175,9 +175,9 @@ What must be true to tag it:
 
 - [x] The release workflow publishes a GitHub Release from a `v*` tag ([`v0.1.0-rc.1`](https://github.com/askrid/wye/releases/tag/v0.1.0-rc.1)).
 - [x] `gh attestation verify` passes on its archives.
-- [ ] `wye service` has run on a real Linux machine, or the release notes say the systemd path is untested.
-- [ ] One full Claude Code session with an API key.
-- [ ] A container image on GHCR.
+- [x] `wye service` has run on a real Linux machine (Ubuntu 24.04 on EC2, 2026-11-12).
+- [ ] One full Claude Code session with an API key. Not run for 0.1.0; the README says it is tested only against mocks.
+- [x] A container image on GHCR, published by the release workflow from 0.1.0 on.
 
 CONTRIBUTING, issue forms, Discussions, and code of conduct are postponed while solo-maintained.
 

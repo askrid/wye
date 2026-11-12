@@ -8,7 +8,7 @@ One small, stateless binary and one TOML file, under a millisecond per request (
 
 ## Quick start
 
-Prerelease, tested on one machine ([status](#status)).
+The first release, 0.1.0 ([status](#status)).
 
 ```bash
 curl -LsSf https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
@@ -17,7 +17,7 @@ curl -LsSf https://github.com/askrid/wye/releases/latest/download/wye-installer.
 Or with Rust:
 
 ```bash
-cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
+cargo install --git https://github.com/askrid/wye --tag v0.1.0 wye --locked
 ```
 
 Write a config and run the gateway in the background; neither needs a key, and the service install shows what it sets up before it asks:
@@ -162,7 +162,7 @@ decision: forward
 
 Everything under [What it does](#what-it-does) is built and covered by tests. I've run Claude Code through Wye on a claude.ai subscription since 2026-10-30.
 
-Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS are tested only against mocks so far. `wye service` hasn't run under systemd on a real Linux machine.
+Claude Code with an API key, Codex, Bedrock, and Claude Platform on AWS are tested only against mocks so far. `wye service` has run under systemd on Ubuntu 24.04.
 
 Next comes a report of which tokens were wasted and what each fix would save, and a smaller model for small background requests, then provider-held budgets per team. Vertex AI and AWS SigV4 are not built. Details in [docs/roadmap.md](docs/roadmap.md#status).
 
