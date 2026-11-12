@@ -47,8 +47,11 @@ await_holding_lock = "deny"
 [profile.release]
 debug = "line-tables-only"
 
-# Release archives are built with this profile. It is the benchmarked
-# release profile unchanged: LTO and other tuning land only with a measured
-# before/after (docs/research.md, "Performance techniques").
+# Release archives and the image are built with this profile: the
+# benchmarked release profile, with debug info stripped at link time, which
+# leaves the code as benchmarked. Symbols stay, so a panic's backtrace still
+# names functions, without file and line. LTO and other tuning land only with
+# a measured before/after (docs/research.md, "Performance techniques").
 [profile.dist]
 inherits = "release"
+strip = "debuginfo"

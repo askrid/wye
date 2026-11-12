@@ -5,9 +5,10 @@
 #   docker build -t wye .
 #   docker run -p 8080:8080 -v ./wye.toml:/etc/wye/wye.toml:ro -e ANTHROPIC_API_KEY wye
 #
-# The release (.github/workflows/image.yml) builds the published image from
-# the binaries it has already published and attested instead, unchanged (so
-# not stripped), for both platforms at once with no compiler and no
+# This builds with the release archives' `dist` profile (debug info stripped,
+# symbols kept). The release (.github/workflows/image.yml) builds the
+# published image from the binaries it has already published and attested
+# instead, unchanged, for both platforms at once with no compiler and no
 # emulation: the runtime stage only copies files. The context is a directory
 # holding linux-amd64/wye and linux-arm64/wye:
 #
@@ -31,14 +32,12 @@ FROM rust:1.99.1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639d
 WORKDIR /src
 COPY . .
 # target/ is a cache mount, gone after this RUN, so the binary is copied out
-# within it. This build strips the binary, so line tables (the release
-# profile's debug setting) would be built only to be thrown away.
+# within it.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/target,sharing=locked \
-    CARGO_PROFILE_RELEASE_DEBUG=false cargo build --release --locked -p wye \
-    && cp target/release/wye /wye \
-    && strip /wye
+    cargo build --profile dist --locked -p wye \
+    && cp target/dist/wye /wye
 
 FROM scratch AS prebuilt
 ARG TARGETARCH
