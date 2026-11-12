@@ -30,7 +30,7 @@ cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
 
 Linux and macOS archives are on the [releases page](https://github.com/askrid/wye/releases); `gh attestation verify <archive> --repo askrid/wye` shows the tag and commit one was built from ([SECURITY.md](../SECURITY.md#releases)).
 
-Keep one `wye` on `PATH`. When you move from `cargo install` to the installer, run `cargo uninstall wye`, then `wye service install` again if you use the service, so it runs the new path ([running as a service](operations.md#running-as-a-service)).
+Keep one `wye` on `PATH`. When you move to the installer from `cargo install`, run `cargo uninstall wye`; from the installer of 0.1.0-rc.2 or earlier, which also put it in `~/.cargo/bin`, run `rm ~/.cargo/bin/wye` (the new installer warns that the old one shadows it). Then run `wye service install` again if you use the service, so it runs the new path ([running as a service](operations.md#running-as-a-service)).
 
 The container image `ghcr.io/askrid/wye` runs the gateway on linux/amd64 and linux/arm64. Inside a container Wye listens on `0.0.0.0`, which requires `[auth]`, so mount a config that has it ([for a team](#using-it-for-a-team)) at `/etc/wye/wye.toml`:
 
