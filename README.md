@@ -10,14 +10,11 @@ One small, stateless binary and one TOML file, under a millisecond per request (
 
 Prerelease, tested on one machine ([status](#status)).
 
-Install on macOS or Linux, no Rust needed; the installer is the release's own script, and puts `wye` in `~/.local/bin`:
-
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf \
-    https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
+curl -LsSf https://github.com/askrid/wye/releases/latest/download/wye-installer.sh | sh
 ```
 
-Or with Rust 1.99+:
+Or with Rust:
 
 ```bash
 cargo install --git https://github.com/askrid/wye --tag v0.1.0-rc.2 wye --locked
