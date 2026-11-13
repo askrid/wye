@@ -4,7 +4,7 @@
 
 **LLM gateway without bloat.**
 
-One small, stateless binary and one TOML file, under a millisecond per request ([p99 on c7i.4xlarge](#performance)), with the features a gateway needs and no more.
+One small, stateless binary and one TOML file, under a millisecond per request ([p99 on c7i.4xlarge](#performance)), with the features a gateway needs and no more. It passes Anthropic Messages, OpenAI Responses, and OpenAI Chat Completions through untranslated.
 
 ## Quick start
 
