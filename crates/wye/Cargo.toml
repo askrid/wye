@@ -16,6 +16,9 @@ alloc-stats = []
 gateway-core.workspace = true
 base64.workspace = true
 bytes.workspace = true
+# Its error type, to read a failed upstream stream's GOAWAY or RST_STREAM
+# code (already in the graph via hyper's HTTP/2 client).
+h2.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["client", "http1", "server"] }

@@ -35,7 +35,7 @@ async fn completed_stream_logs_usage_without_changing_bytes() {
 
     let record = h.usage_record().await;
     assert_eq!(record["event"], "request");
-    assert_eq!(record["v"], 2, "the record format's version");
+    assert_eq!(record["v"], 3, "the record format's version");
     assert_eq!(record["endpoint"], "/v1/messages");
     assert!(record.get("path").is_none(), "v2 renamed it");
     assert_eq!(record["status"], 200);

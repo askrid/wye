@@ -40,7 +40,7 @@ use hyper_util::{
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair, KeyUsagePurpose};
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
 /// A CA and a server certificate it signed for `127.0.0.1`.
@@ -108,6 +108,16 @@ impl TestCa {
     /// The CA certificate as PEM, for an upstream's `ca_file`.
     pub fn ca_pem(&self) -> &str {
         &self.ca_pem
+    }
+
+    /// `stream` after the server's TLS handshake, which offers HTTP/2 and
+    /// HTTP/1.1 by ALPN: for a test's own server, speaking a protocol by
+    /// hand.
+    pub async fn accept(
+        &self,
+        stream: TcpStream,
+    ) -> std::io::Result<tokio_rustls::server::TlsStream<TcpStream>> {
+        self.acceptor.accept(stream).await
     }
 }
 

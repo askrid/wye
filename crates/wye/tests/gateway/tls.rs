@@ -31,7 +31,7 @@ async fn untrusted_upstream_certificate_is_rejected() {
     let record = h.usage_record().await;
     assert_eq!(record["outcome"], "upstream_error");
     assert_eq!(
-        record["upstream_error"], "connect",
+        record["upstream_error"], "connect_tls",
         "a failed TLS handshake"
     );
 }

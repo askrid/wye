@@ -1109,6 +1109,7 @@ dependencies = [
  "base64",
  "bytes",
  "gateway-core",
+ "h2",
  "http",
  "http-body-util",
  "hyper",

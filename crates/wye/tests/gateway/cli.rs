@@ -353,7 +353,7 @@ async fn serve_writes_records_to_the_usage_log_it_is_given() {
     );
     let record: serde_json::Value = serde_json::from_str(&record).unwrap();
     assert_eq!(record["event"], "request");
-    assert_eq!(record["v"], 2);
+    assert_eq!(record["v"], 3);
     assert_eq!(stdout, "", "records go to the file only");
     #[cfg(unix)]
     {

@@ -21,6 +21,7 @@
 
 mod body;
 mod connect;
+mod error;
 mod pool;
 mod refusal;
 
@@ -44,7 +45,8 @@ use hyper_util::{
 use rustls::pki_types::CertificateDer;
 
 pub(crate) use body::UpstreamBody;
-use connect::ConnectTimeout;
+use connect::{ConnectTimeout, Resolver};
+pub(crate) use error::UpstreamError;
 use pool::ClientPool;
 pub(crate) use refusal::BodyRefusal;
 use refusal::{RefusalSlot, Refusing, body_refusal};
@@ -65,7 +67,7 @@ pub(crate) type SendBody = FailoverBody<RequestBody<ClientBody>>;
 /// Sends a [`SendBody`], read for upgrade checks and prompt hashes in
 /// passing.
 type UpstreamClient = Client<
-    ConnectTimeout<HttpsConnector<HttpConnector>>,
+    ConnectTimeout<HttpsConnector<HttpConnector<Resolver>>>,
     ScannedBody<ScannedBody<Refusing<SendBody>, UpgradeScanner>, PromptScanner>,
 >;
 
@@ -112,31 +114,6 @@ pub(crate) enum ForwardError {
     Body(BodyRefusal),
 }
 
-/// Why an upstream gave no usable response, in records as `upstream_error`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UpstreamError {
-    /// The connection could not be made, TLS included: the request never
-    /// reached the provider.
-    Connect,
-    /// No response headers within `response_header_timeout`.
-    Timeout,
-    /// TLS or protocol failure, or a connection lost, after connecting and
-    /// before response headers. A failing client body is
-    /// `Body(BodyRefusal::Broken)` instead.
-    Reset,
-}
-
-impl UpstreamError {
-    /// The record's `upstream_error`.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Connect => "connect",
-            Self::Timeout => "timeout",
-            Self::Reset => "reset",
-        }
-    }
-}
-
 /// HTTP/2 receive window per upstream stream: what one response may buffer
 /// in Wye while its client is not reading (heap per stalled stream: 0.56 MB;
 /// 2.2 MB at 1 MiB). It sustains about 5 MB/s per response at 50 ms round
@@ -177,7 +154,7 @@ impl Upstream {
         auth: UpstreamAuth,
         extra_roots: &[CertificateDer<'static>],
     ) -> Result<Self, StartupError> {
-        let mut http = HttpConnector::new();
+        let mut http = HttpConnector::new_with_resolver(Resolver::new());
         http.enforce_http(false);
         // Per address; ConnectTimeout bounds the whole connect, TLS included.
         http.set_connect_timeout(Some(config.connect_timeout));
@@ -272,8 +249,7 @@ impl Upstream {
                 let refusal = refused.as_ref().and_then(|r| r.get().copied());
                 match refusal.or_else(|| body_refusal(&e)) {
                     Some(refusal) => ForwardError::Body(refusal),
-                    None if e.is_connect() => ForwardError::Upstream(UpstreamError::Connect),
-                    None => ForwardError::Upstream(UpstreamError::Reset),
+                    None => ForwardError::Upstream(UpstreamError::of_request(&e)),
                 }
             })?;
 
@@ -298,7 +274,7 @@ impl Upstream {
             (false, pq) => {
                 let suffix = pq.map_or("/", PathAndQuery::as_str);
                 PathAndQuery::try_from(format!("{}{suffix}", self.path_prefix))
-                    .map_err(|_| ForwardError::Upstream(UpstreamError::Reset))?
+                    .map_err(|_| ForwardError::Upstream(UpstreamError::Other))?
             }
         };
         Uri::builder()
@@ -306,7 +282,7 @@ impl Upstream {
             .authority(self.authority.clone())
             .path_and_query(path_and_query)
             .build()
-            .map_err(|_| ForwardError::Upstream(UpstreamError::Reset))
+            .map_err(|_| ForwardError::Upstream(UpstreamError::Other))
     }
 }
 

@@ -1,4 +1,5 @@
-//! The connect timeout over the whole connect: TCP and the TLS handshake.
+//! The connect timeout over the whole connect, TCP and the TLS handshake,
+//! and the resolver that names its own failure.
 //!
 //! hyper-util's connect timeout covers the TCP connect only (per address, so
 //! a host with several addresses moves on from one that hangs). A peer that
@@ -16,8 +17,10 @@ use std::{
 };
 
 use http::Uri;
+use hyper_util::client::legacy::connect::dns::{GaiAddrs, GaiFuture, GaiResolver, Name};
 use tower_service::Service;
 
+use super::error::{ConnectTimedOut, Unresolved};
 use crate::BoxError;
 
 /// `inner`, failing any connect that takes longer than `timeout`.
@@ -55,8 +58,46 @@ where
         Box::pin(async move {
             match tokio::time::timeout(timeout, connecting).await {
                 Ok(connected) => connected.map_err(Into::into),
-                Err(_) => Err("connect (TCP and TLS) timed out".into()),
+                Err(_) => Err(Box::new(ConnectTimedOut) as BoxError),
             }
         })
+    }
+}
+
+/// The system resolver, failing with [`Unresolved`]: hyper-util reports a
+/// resolver's failure only as a message, so the type is what tells a host
+/// name that did not resolve from a connection that failed. It runs once per
+/// new connection to a host name; an IP address skips it.
+#[derive(Clone)]
+pub(super) struct Resolver(GaiResolver);
+
+impl Resolver {
+    pub(super) fn new() -> Self {
+        Self(GaiResolver::new())
+    }
+}
+
+impl Service<Name> for Resolver {
+    type Response = GaiAddrs;
+    type Error = Unresolved;
+    type Future = Resolving;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Unresolved>> {
+        self.0.poll_ready(cx).map_err(Unresolved)
+    }
+
+    fn call(&mut self, name: Name) -> Resolving {
+        Resolving(self.0.call(name))
+    }
+}
+
+/// A [`Resolver`] lookup in flight.
+pub(super) struct Resolving(GaiFuture);
+
+impl Future for Resolving {
+    type Output = Result<GaiAddrs, Unresolved>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx).map_err(Unresolved)
     }
 }

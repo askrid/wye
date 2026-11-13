@@ -173,7 +173,8 @@ impl Gateway {
             if let (Some(reason), Some(handback), Some(next)) =
                 (rejection(&result), handback.as_mut(), next)
             {
-                let cut = matches!(result, Err(ForwardError::Upstream(UpstreamError::Reset)));
+                let cut =
+                    matches!(result, Err(ForwardError::Upstream(e)) if !e.before_connecting());
                 if let Some(resend) = handed_back(handback, cut).await.and_then(|mut resend| {
                     let at = model_span.as_ref();
                     give_model_id(at, next, &mut prefix_sent, |span, value| {
@@ -225,9 +226,8 @@ fn rejection(
 ) -> Option<FailoverReason> {
     match result {
         Ok(res) => FailoverReason::of_status(res.status().as_u16()),
-        Err(ForwardError::Upstream(UpstreamError::Connect | UpstreamError::Reset)) => {
-            Some(FailoverReason::Connect)
-        }
+        Err(ForwardError::Upstream(UpstreamError::Timeout)) => None,
+        Err(ForwardError::Upstream(_)) => Some(FailoverReason::Connect),
         Err(_) => None,
     }
 }

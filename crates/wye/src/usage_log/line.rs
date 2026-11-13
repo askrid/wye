@@ -12,8 +12,8 @@ use http::HeaderValue;
 use serde::{Serialize, Serializer};
 
 use super::{
-    Outcome, Record, RejectedAttempt, agent::ToolDurations, prompt_hashes::PromptRecord,
-    upgrade_issues::UpgradeIssues,
+    Outcome, Record, RejectedAttempt, UpstreamError, agent::ToolDurations,
+    prompt_hashes::PromptRecord, upgrade_issues::UpgradeIssues,
 };
 
 /// The `usage_status` of a response that carries no usage: an error,
@@ -22,8 +22,10 @@ const NO_USAGE: &str = "none";
 
 /// The record format's version, every line's `v`: raised by any change that
 /// renames a field or changes its meaning, so a reader can tell formats
-/// apart. Added fields keep it. 2: `path` became `endpoint`.
-pub(super) const RECORD_VERSION: u8 = 2;
+/// apart. Added fields keep it. 2: `path` became `endpoint`. 3:
+/// `upstream_error` names the cause, not only the phase (`connect` and
+/// `reset` split), and `truncated` records carry it too.
+pub(super) const RECORD_VERSION: u8 = 3;
 
 /// What the writer adds to every record: keys, prices, upgrade targets.
 pub(super) struct Context<'a> {
@@ -51,10 +53,14 @@ pub(super) struct Line<'a> {
     pub(super) status: u16,
     #[serde(serialize_with = "outcome")]
     pub(super) outcome: Outcome,
-    /// Why the upstream gave no usable response, for an `upstream_error`
-    /// outcome only.
+    /// Why the upstream gave no usable response, or broke its response
+    /// after the headers: on `upstream_error` and `truncated` outcomes only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) upstream_error: Option<&'static str>,
+    /// The HTTP/2 error code of an `upstream_error` of `goaway` or
+    /// `stream_reset`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) h2_error_code: Option<&'static str>,
     /// From the request's arrival to its record: the response's end, or
     /// Wye's own answer.
     pub(super) duration_ms: f64,
@@ -147,6 +153,7 @@ impl Line<'_> {
             status: 200,
             outcome: Outcome::Completed,
             upstream_error: None,
+            h2_error_code: None,
             duration_ms: 0.0,
             response_headers_ms: None,
             upstream: None,
@@ -227,10 +234,11 @@ pub(super) fn line<'a>(r: &'a Record, context: &Context<'a>) -> Line<'a> {
         provider_name: r.info.provider.otel_name(),
         status: r.status.as_u16(),
         outcome: r.outcome,
-        upstream_error: match r.outcome {
-            Outcome::UpstreamError(error) => Some(error.as_str()),
-            _ => None,
-        },
+        upstream_error: r.outcome.upstream_error().map(UpstreamError::as_str),
+        h2_error_code: r
+            .outcome
+            .upstream_error()
+            .and_then(UpstreamError::h2_error_code),
         duration_ms: ms(r.duration),
         response_headers_ms: r.seen.as_ref().map(|seen| ms(seen.headers_after)),
         upstream: r.info.upstream.as_deref(),
@@ -342,7 +350,7 @@ mod tests {
         push_line(&mut buf, &Line::blank());
         let text = String::from_utf8_lossy(&buf);
         assert!(
-            text.starts_with(r#"{"event":"request","v":2,"unix_ms":0,"endpoint":"#),
+            text.starts_with(r#"{"event":"request","v":3,"unix_ms":0,"endpoint":"#),
             "{text}"
         );
     }

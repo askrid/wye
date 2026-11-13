@@ -74,7 +74,9 @@ mod tests {
 
     fn pool() -> ClientPool {
         ClientPool::new(|| {
-            let http = hyper_util::client::legacy::connect::HttpConnector::new();
+            let http = hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(
+                super::super::Resolver::new(),
+            );
             let https = hyper_rustls::HttpsConnectorBuilder::new()
                 .with_tls_config(crate::tls::client_config(&[]).unwrap())
                 .https_or_http()

@@ -261,6 +261,6 @@ async fn spans_a_collector_refuses_are_counted_as_lost() {
     // The shutdown summary follows the request's record.
     let summary = h.usage_record().await;
     assert_eq!(summary["event"], "otlp_dropped", "{summary}");
-    assert_eq!(summary["v"], 2, "{summary}");
+    assert_eq!(summary["v"], 3, "{summary}");
     assert_eq!(summary["records"], 1, "{summary}");
 }

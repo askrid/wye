@@ -270,7 +270,7 @@ An example, from a Claude Code session that failed over:
 ```json
 {
   "event": "request",
-  "v": 2,
+  "v": 3,
   "unix_ms": 1793178637975,
   "endpoint": "/v1/messages",
   "status": 200,
@@ -305,15 +305,20 @@ Client-supplied values are labels, never authorization. Closed vocabularies map 
 ### Request and outcome
 
 - `event`, `unix_ms`, `endpoint`, `status`: `request`, time, [endpoint](glossary.md#requests-and-where-they-go), HTTP status.
-- `v`: the record format's version, `2`, right after `event` on every line, the `usage_log_dropped` and `otlp_dropped` events included. It goes up with any change that renames a field or changes its meaning; a new field leaves it. Version 1 named the endpoint `path`, and lines written before versions have no `v`; `wye report` reads all three. Not exported over OTLP.
+- `v`: the record format's version, `3`, right after `event` on every line, the `usage_log_dropped` and `otlp_dropped` events included. It goes up with any change that renames a field or changes its meaning; a new field leaves it. Version 2 named only the phase in `upstream_error` (`connect`, `timeout`, `reset`), on `upstream_error` outcomes only; version 1 also named the endpoint `path`, and lines written before versions have no `v`; `wye report` reads all four. Not exported over OTLP.
 - `outcome`: recorded when the response body is dropped, so every outcome is counted. An upstream's answer, error statuses included, is `completed`, `cancelled`, or `truncated`; Wye's own answer is `refused`, `upstream_error`, or `gateway_error`:
   - `completed`: the upstream's response body ended.
   - `cancelled`: the client left first; one that leaves before the response headers has `status` `499`.
-  - `truncated`: the upstream's response broke after its headers were sent, by the idle timeout or a reset.
+  - `truncated`: the upstream's response broke after its headers were sent, by the idle timeout or a failed connection.
   - `refused`: Wye's [refusal](glossary.md#decisions), its overload included; no upstream response.
   - `upstream_error`: no usable upstream response ([upstream error](glossary.md#requests-and-where-they-go)).
   - `gateway_error`: Wye's own fault, such as the `500` for an alias it could not apply.
-- `upstream_error`, on `upstream_error` outcomes only: `connect` (no connection or TLS handshake, `502`), `timeout` (no response headers within `response_header_timeout`, `504`), `reset` (the request failed after connecting, before the response headers, `502`).
+- `upstream_error`, on `upstream_error` and `truncated` outcomes only: why the upstream gave no usable response, or broke its response after the headers. A client that leaves is `cancelled`, never an upstream error.
+  - Before a connection, `502`, the [failover reason](glossary.md#requests-and-where-they-go) `connect`: `connect_dns` (the host name did not resolve), `connect_refused` (the upstream refused the TCP connection), `connect_unreachable` (no route to its network or host, as while this machine's network is down), `connect_timeout` (no connection and TLS handshake within `connect_timeout`), `connect_tls` (the TLS handshake failed: a certificate Wye does not trust, a TLS alert, or the connection closed or reset during it), `connect_other`.
+  - `timeout`: no response headers within `response_header_timeout`, `504`.
+  - On an open connection, before the response headers (`502`) or after them (`truncated`): `closed` (the upstream closed the connection, also after an HTTP/2 `GOAWAY` that covered the request), `reset` (the connection was reset), `lost` (the operating system dropped the connection: the upstream stopped acknowledging what Wye sent, `ETIMEDOUT`, or its network or host became unreachable), `goaway` (an HTTP/2 `GOAWAY` that refused the request), `stream_reset` (the upstream reset the request's HTTP/2 stream), `protocol` (a response Wye could not read as HTTP, or HTTP/2 frames its client refused), `other`.
+  - `idle_timeout`, on `truncated` only: the upstream sent nothing for `stream_idle_timeout`.
+- `h2_error_code`, with `goaway` and `stream_reset` only: the HTTP/2 error code the upstream sent, by its RFC 9113 name (`NO_ERROR`, `INTERNAL_ERROR`, `REFUSED_STREAM`, `ENHANCE_YOUR_CALM`, ...), or `UNKNOWN` for a code outside it.
 - `duration_ms`, `response_headers_ms`: milliseconds, in all and to the response headers.
 - `upstream`: the upstream's `id` (by default its provider's name, such as `anthropic`); absent for requests refused before upstream selection.
 - `failovers`, such as `[{"upstream": "a", "reason": "429"}]`: attempts rejected before the one that answered, in order, each with its [failover reason](glossary.md#requests-and-where-they-go) ([failover](architecture.md#failover)); absent when none.
@@ -348,7 +353,7 @@ Each record becomes a log record at `{otlp_endpoint}/v1/logs`, resource `service
 - OpenTelemetry semantic conventions where they exist: `gen_ai.provider.name`, `gen_ai.request.model` (`requested_model`), `gen_ai.response.model`, `gen_ai.usage.*_tokens`, `http.route`, `http.response.status_code`, `session.id`, `enduser.id`.
 - `gen_ai.provider.name` is the provider of the upstream that served the request, `anthropic` (also for `claude-platform-aws`), `aws.bedrock`, or `openai`; for a request refused before an upstream was chosen, the endpoint's (`anthropic` or `openai`).
 - Then the agent fields of either client: `gen_ai.agent.id`, `gen_ai.agent.name` for the agent type, `wye.parent_agent_id`, `wye.request_class`, `wye.prompt_id`, `wye.compaction`, `wye.after_compaction`.
-- `wye.*` for the rest: `wye.outcome`, `wye.upstream_error`, `wye.duration_ms`, `wye.response_headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
+- `wye.*` for the rest: `wye.outcome`, `wye.upstream_error`, `wye.h2_error_code`, `wye.duration_ms`, `wye.response_headers_ms`, `wye.usage_status`, `wye.upstream`, `wye.cost_usd`, `wye.cost_status`, `wye.pricing_version`, `wye.cache_miss`; `wye.tool_calls`, `wye.failovers`, `wye.prompt_hashes`, and `wye.upgrade_issues` as JSON strings.
 
 ### OTLP metrics
 

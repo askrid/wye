@@ -82,7 +82,9 @@ async fn stalled_event_stream_ends_with_an_error_event() {
             ),
         "{text}"
     );
-    assert_eq!(h.usage_record().await["outcome"], "truncated");
+    let record = h.usage_record().await;
+    assert_eq!(record["outcome"], "truncated");
+    assert_eq!(record["upstream_error"], "idle_timeout");
 
     let res = h
         .send(

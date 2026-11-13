@@ -92,6 +92,7 @@ pub(super) fn write_record_attributes(buf: &mut Vec<u8>, line: &Line<'_>) {
             (attr::STATUS, Some(Value::Int(u64::from(line.status)))),
             (attr::OUTCOME, Some(Value::Str(line.outcome.as_str()))),
             ("wye.upstream_error", line.upstream_error.map(Value::Str)),
+            ("wye.h2_error_code", line.h2_error_code.map(Value::Str)),
             ("wye.duration_ms", Some(Value::Double(line.duration_ms))),
             (
                 "wye.response_headers_ms",
@@ -212,7 +213,7 @@ pub(super) fn write_span(
     // span's 4xx unset; Wye's own overload (`529`, `503`) is one too.
     let failed = match line.outcome {
         Outcome::Refused => false,
-        Outcome::UpstreamError(_) | Outcome::GatewayError | Outcome::Truncated => true,
+        Outcome::UpstreamError(_) | Outcome::GatewayError | Outcome::Truncated(_) => true,
         Outcome::Completed | Outcome::Cancelled => line.status >= 500,
     };
     // STATUS_CODE_ERROR = 2, STATUS_CODE_UNSET = 0.
@@ -413,7 +414,8 @@ mod tests {
             2
         );
         assert_eq!(status(Outcome::GatewayError, 500), 2);
-        assert_eq!(status(Outcome::Truncated, 200), 2);
+        let idle = Outcome::Truncated(UpstreamError::IdleTimeout);
+        assert_eq!(status(idle, 200), 2);
         assert_eq!(status(Outcome::Cancelled, 499), 0);
     }
 

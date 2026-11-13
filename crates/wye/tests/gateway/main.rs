@@ -22,5 +22,6 @@ mod routes;
 mod streaming;
 mod telemetry;
 mod tls;
+mod upstream_errors;
 mod usage_log;
 mod web_pages;

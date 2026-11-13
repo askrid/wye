@@ -12,7 +12,7 @@ use http::{HeaderValue, StatusCode};
 use hyper::body::{Body, Frame, SizeHint};
 
 use super::{Outcome, RequestInfo, Seen, UsageLog};
-use crate::gauge::Reserved;
+use crate::{BoxError, gauge::Reserved, upstream::UpstreamError};
 
 /// Sent when a successful Messages event stream fails at an event boundary
 /// (an idle timeout or a broken upstream body), so the client sees a
@@ -83,15 +83,15 @@ impl<B: Body> Observed<B> {
 
 impl<B> Body for Observed<B>
 where
-    B: Body<Data = Bytes> + Unpin,
+    B: Body<Data = Bytes, Error = BoxError> + Unpin,
 {
     type Data = Bytes;
-    type Error = B::Error;
+    type Error = BoxError;
 
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, B::Error>>> {
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
         let this = self.get_mut();
         if this.closed {
             return Poll::Ready(None);
@@ -113,8 +113,8 @@ where
                     this.outcome = Outcome::Completed;
                 }
             }
-            Poll::Ready(Some(Err(_))) => {
-                this.outcome = Outcome::Truncated;
+            Poll::Ready(Some(Err(e))) => {
+                this.outcome = Outcome::Truncated(UpstreamError::of_body(&**e));
                 if matches!(this.scanner, Some(UsageScanner::Messages(_))) && this.at_boundary {
                     this.closed = true;
                     return Poll::Ready(Some(Ok(Frame::data(Bytes::from_static(STALLED_EVENT)))));

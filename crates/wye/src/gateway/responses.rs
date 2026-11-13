@@ -55,7 +55,7 @@ pub(super) fn forward_error(api: Api, e: ForwardError) -> Response<ResBody> {
             "timeout_error",
             "upstream did not respond in time",
         ),
-        ForwardError::Upstream(UpstreamError::Connect | UpstreamError::Reset) => error(
+        ForwardError::Upstream(_) => error(
             api,
             StatusCode::BAD_GATEWAY,
             "api_error",

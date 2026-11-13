@@ -389,7 +389,7 @@ async fn a_connection_lost_after_the_whole_body_is_not_failed_over() {
     let record = h.usage_record().await;
     assert!(record.get("failovers").is_none());
     assert_eq!(record["outcome"], "upstream_error");
-    assert_eq!(record["upstream_error"], "reset");
+    assert_eq!(record["upstream_error"], "closed");
 }
 
 #[tokio::test]

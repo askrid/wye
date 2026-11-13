@@ -201,7 +201,7 @@ fn route_upstreams_split_requests_tokens_and_costs() {
 fn upstream_errors_of_every_kind_are_one_outcome_series() {
     use crate::usage_log::{Outcome, UpstreamError};
     let mut metrics = Metrics::new(0);
-    for error in [UpstreamError::Connect, UpstreamError::Reset] {
+    for error in [UpstreamError::ConnectRefused, UpstreamError::Reset] {
         metrics.record(&Line {
             outcome: Outcome::UpstreamError(error),
             ..line("/v1/messages", 502, 1.0, None)

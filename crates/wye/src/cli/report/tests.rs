@@ -341,12 +341,14 @@ fn upstream_errors_are_counted_by_why() {
 {"event":"request","status":504,"outcome":"upstream_error","upstream_error":"timeout","session_id":"s"}
 {"event":"request","status":502,"outcome":"upstream_error","upstream_error":"connect","session_id":"s"}
 {"event":"request","status":200,"outcome":"truncated","session_id":"s"}
+{"event":"request","v":3,"status":502,"outcome":"upstream_error","upstream_error":"connect_dns","session_id":"s"}
+{"event":"request","v":3,"status":200,"outcome":"truncated","upstream_error":"idle_timeout","session_id":"s"}
 "#;
     let out = flat(&report(log.as_bytes(), Paint::OFF).unwrap());
     assert!(
         out.contains(
-            "outcomes: truncated 1, upstream_error 3 error statuses: 502 2, 504 1 \
-             upstream errors: connect 2, timeout 1 "
+            "outcomes: truncated 2, upstream_error 4 error statuses: 502 3, 504 1 \
+             upstream errors: connect 2, connect_dns 1, idle_timeout 1, timeout 1 "
         ),
         "{out}"
     );

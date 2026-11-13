@@ -72,8 +72,8 @@ pub(crate) enum Outcome {
     /// Wye's own fault, such as an alias it could not apply (`500`).
     GatewayError,
     /// The upstream body broke after the response headers were sent: the
-    /// idle timeout, or a reset.
-    Truncated,
+    /// idle timeout, or a connection that failed.
+    Truncated(UpstreamError),
 }
 
 impl Outcome {
@@ -85,7 +85,15 @@ impl Outcome {
             Self::Refused => "refused",
             Self::UpstreamError(_) => "upstream_error",
             Self::GatewayError => "gateway_error",
-            Self::Truncated => "truncated",
+            Self::Truncated(_) => "truncated",
+        }
+    }
+
+    /// Why the upstream failed, for the outcomes it caused.
+    pub(crate) fn upstream_error(self) -> Option<UpstreamError> {
+        match self {
+            Self::UpstreamError(error) | Self::Truncated(error) => Some(error),
+            _ => None,
         }
     }
 }

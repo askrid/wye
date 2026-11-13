@@ -150,9 +150,9 @@ Downstream body polling applies backpressure. No unbounded queues or detached re
 
 ### Errors
 
-Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded as a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with `connect`, `timeout`, or `reset`), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#usage-records-and-telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`).
+Before downstream headers are sent, local failures produce Wye's own error answer in the client-facing API's error shape, recorded as a refusal (`refused`), an upstream that gave no usable response (`upstream_error`, with its [kind](operations.md#request-and-outcome): a failed connect, the response header timeout, or a connection that failed after connecting), or Wye's own fault (`gateway_error`) ([outcomes](operations.md#usage-records-and-telemetry)). Upstream error bodies pass through unmodified. A refusal the request body raises after forwarding began (a late output-token field, a repeated `model`, the size limit) aborts the upstream request and gets its own status, from an HTTP/1.1 or HTTP/2 upstream alike (`upstream/refusal.rs`).
 
-After headers are sent, an upstream failure terminates the stream (`truncated`); it cannot become a new JSON error response.
+After headers are sent, an upstream failure terminates the stream (`truncated`, with the same kinds and `idle_timeout`); it cannot become a new JSON error response. `upstream/error.rs` reads the kind from the failure's error chain, only when a request fails.
 
 ### Timeouts
 

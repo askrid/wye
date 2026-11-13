@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Breaking, records: usage records are format `"v":3`, and `upstream_error` says why an upstream failed, not only when. `connect` splits into `connect_dns`, `connect_refused`, `connect_unreachable`, `connect_timeout`, `connect_tls`, and `connect_other`; `reset` into `closed`, `reset` (the connection was reset), `lost` (the operating system dropped the connection), `goaway`, `stream_reset`, `protocol`, and `other`; `timeout` stays. A `truncated` record carries the kind too, `idle_timeout` for `stream_idle_timeout`. With `goaway` and `stream_reset`, `h2_error_code` names the HTTP/2 error code the upstream sent (`ENHANCE_YOUR_CALM`); OTLP logs and spans carry `wye.h2_error_code`. `wye report` counts the kinds of every format as written ([fields](docs/operations.md#request-and-outcome)).
+
 ## 0.1.0
 
 The first release. Config and the command line get smaller: one list of upstreams, failover without a setting, one shape for secrets and durations, and every command on the same conventions. Usage logs rotate. Each release now ships a container image for amd64 and arm64 and a shell installer that needs no Rust, and its binaries carry no debug info. Many changes are breaking (marked below); a 0.1.0-rc.2 config needs the changes listed under "Breaking, config".

@@ -10,6 +10,7 @@ use std::{
 use bytes::Bytes;
 use hyper::body::{Body, Frame, SizeHint};
 
+use super::error::IdleTimeout;
 use crate::{BoxError, gauge::Reserved, idle::IdleTimer};
 
 /// Fails the stream when the upstream sends nothing for `timeout`. The timer
@@ -51,7 +52,7 @@ where
             }
             Poll::Pending => {
                 ready!(this.idle.poll_expired(cx));
-                Poll::Ready(Some(Err("upstream stream idle timeout".into())))
+                Poll::Ready(Some(Err(Box::new(IdleTimeout))))
             }
         }
     }

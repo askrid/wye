@@ -82,7 +82,7 @@ Then start your agent with `wye claude` or `wye codex`, which set its base URL a
 
 `wye report` summarizes `~/.wye/usage.jsonl` and its rotated files, or the files you name (`-` for standard input), with no OpenTelemetry backend; `--since 7d` keeps the last week ([options](operations.md#commands)). The [README](../README.md#quick-start) shows a sample.
 
-- **First lines:** requests, sessions, the window if one was given, lines skipped if any, outcomes, error statuses, and upstream errors by kind (`connect`, `timeout`, `reset`). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
+- **First lines:** requests, sessions, the window if one was given, lines skipped if any, outcomes, error statuses, and upstream errors by kind (`connect_refused`, `timeout`, `closed`, ...). A 429 [rejection](glossary.md#requests-and-where-they-go) is an answer, so its outcome reads `completed`, and its status is listed ([outcomes](operations.md#usage-records-and-telemetry)).
 - **By [request class](glossary.md#usage-and-cost), by [upstream](glossary.md#requests-and-where-they-go)** (with two or more): tokens, cache-hit rate (cache reads as a share of prompt tokens), cost with `[pricing]`, and time in the model and in tools. Requests without a class hint, such as an SDK's, are `(unclassified)`. Cost is marked `+` when it includes partial or unknown costs, or records written without `[pricing]`.
 - **Cache misses**, when there are any: a cache write with nothing read. The first write of a session or a subagent is expected, as are compactions and the request after one; `count_tokens` and refused requests before it do not count. Unexplained ones are worth a look.
 - **Failovers, upgrade issues:** when records have them.
@@ -210,7 +210,7 @@ Edit the config or install a new `wye`, run `wye doctor`, then `wye service rest
 
 Run `wye doctor` first. It checks secrets, files, and upstreams, lists every problem, and bills nothing.
 
-Startup failures and the gateway's messages go to stderr, the message log (`~/.wye/wye.log`) under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log. A `502` or `504` of Wye's own records why in `upstream_error` (`connect`, `timeout`, or `reset`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
+Startup failures and the gateway's messages go to stderr, the message log (`~/.wye/wye.log`) under the service. Request failures are not logged there. Each request's `status` and `outcome` are in the usage log. A `502` or `504` of Wye's own, and a response cut off after its headers, records why in `upstream_error` (such as `connect_dns`, `timeout`, or `lost`), which `wye report` counts ([fields](operations.md#usage-records-and-telemetry)).
 
 `wye explain request.json` shows what the gateway would do with one request, offline, and why it would refuse.
 

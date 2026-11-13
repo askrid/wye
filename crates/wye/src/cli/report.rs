@@ -39,7 +39,8 @@ const TOP: usize = 10;
 
 /// The usage-record fields the report reads; everything else is ignored, so
 /// every format version reads alike: v2 renamed only `path`, which the
-/// report does not read. Its strings borrow from the line.
+/// report does not read, and v3 split `upstream_error`'s values, which it
+/// counts as written. Its strings borrow from the line.
 #[derive(Deserialize)]
 struct Record<'a> {
     #[serde(borrow)]
@@ -51,8 +52,10 @@ struct Record<'a> {
     status: Option<u16>,
     #[serde(borrow)]
     outcome: Option<Text<'a>>,
-    /// Why an upstream gave no usable response: `connect`, `timeout`, or
-    /// `reset`.
+    /// Why an upstream gave no usable response, or broke its response:
+    /// a kind such as `connect_refused`, `timeout`, or `closed` (before
+    /// format 3, `connect`, `timeout`, or `reset`, on `upstream_error`
+    /// outcomes only).
     #[serde(borrow)]
     upstream_error: Option<Text<'a>>,
     #[serde(borrow)]
@@ -317,7 +320,7 @@ struct Summary {
     outcomes: HashMap<String, u64>,
     /// Requests answered with a 4xx or 5xx status, by status.
     errors: HashMap<u16, u64>,
-    /// `upstream_error` outcomes by why.
+    /// `upstream_error` and `truncated` outcomes by why.
     upstream_errors: HashMap<String, u64>,
     classes: HashMap<String, Group>,
     /// Route upstreams, by the id records name them by.
