@@ -90,6 +90,11 @@ function hero(period, reduce) {
     return;
   }
   canvas.setAttribute("aria-hidden", "true");
+  // One canvas pixel per cell of the drawing, as the still image has; the
+  // page scales both alike.
+  const still = period.querySelector("img");
+  canvas.width = Number(still.getAttribute("width"));
+  canvas.height = Number(still.getAttribute("height"));
   period.append(canvas);
   const style = getComputedStyle(period);
   const rgb = (name) => [1, 3, 5].map((i) => parseInt(style.getPropertyValue(name).trim().slice(i, i + 2), 16) / 255);
@@ -132,7 +137,6 @@ function hero(period, reduce) {
     document.documentElement[listen]("pointerleave", forget);
     if (!on) worker.postMessage({ stop: true });
   };
-  new ResizeObserver(([entry]) => worker.postMessage({ size: [Math.round(entry.contentRect.width), Math.round(entry.contentRect.height)] })).observe(canvas);
   // The latest entry: a fast scroll can deliver several at once.
   new IntersectionObserver((entries) => {
     visible = entries[entries.length - 1].isIntersecting;

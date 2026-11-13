@@ -229,14 +229,16 @@ h1 { font-size: var(--h1); line-height: 1.08; letter-spacing: -0.02em; }
 
 /* The drawing is the headline's period: a hundred threads meet at the dot
    and part into ten streams, as thick as their weights; one thread leaves
-   in the accent. It fades out from the dot, so it has no edges. Drawn once,
-   in em, so it scales with the headline and stays on its period; behind the
-   text, and clipped at the window's edges (html). It reaches past the
-   headline, over the header's links; no layer of it takes the pointer, so
-   what lies under it stays clickable. */
+   in the accent. It fades out from the dot, so it has no edges. It is one
+   image in one-bit dither, as the mark is (assets/strings.png, drawn by
+   share/strings.html): a pixel per 2-unit cell of the drawing, scaled
+   without smoothing. Sized in em, so it scales with the headline and stays
+   on its period; behind the text, and clipped at the window's edges (html).
+   It reaches past the headline, over the header's links; no layer of it
+   takes the pointer, so what lies under it stays clickable. */
 html, body { overflow-x: clip; }
 .period { position: relative; display: inline-block; width: 0.26em; height: 0.26em; margin-left: 0.04em; }
-.period :is(svg, canvas) {
+.period :is(img, canvas) {
   position: absolute;
   z-index: -1;
   left: calc(0.13em - 10.714em);
@@ -244,18 +246,23 @@ html, body { overflow-x: clip; }
   width: 17.857em;
   height: 7.143em;
   pointer-events: none;
+  image-rendering: pixelated;
 }
-/* The fade is the strokes' own paint, a gradient from the dot to nothing
-   before the drawing's edges; the canvas's shaders draw the same fade
-   (assets/strings.js). */
-.period .strands path { fill: none; stroke: url(#period-fade); stroke-width: 0.9; opacity: 0.2; }
-.period .thread { fill: none; stroke: url(#period-fade-thread); stroke-width: 1.6; }
-.period stop { stop-color: var(--ink); }
-.period #period-fade-thread stop { stop-color: var(--accent); }
-.period stop.end { stop-opacity: 0; }
-.period circle { fill: var(--ink); }
-/* Nothing here moves by itself. A string the reader plucks rings on the
-   canvas over the drawing (assets/strings.js), drawn only while it moves. */
+/* The paths the image was drawn from stay in the page, unseen: the worker
+   that draws what moves reads them (assets/strings.js). Nothing here moves
+   by itself. A string the reader plucks rings on the canvas over the image,
+   drawn only while it moves, on the image's own cells. */
+.period svg { display: none; }
+/* Where the headline takes three lines, the strings out fall across the
+   lede under it. From there down they are dimmed to the grey of the strings
+   in, which the words stand clear of; left of the dot, and above the lede
+   (61% of the way down), the drawing is whole. */
+@media (max-width: 40rem) {
+  .period :is(img, canvas) {
+    -webkit-mask: linear-gradient(#000, #000) left / 60% 100% no-repeat, linear-gradient(#000 61%, rgb(0 0 0 / 0.36) 66%) right / 40.1% 100% no-repeat;
+    mask: linear-gradient(#000, #000) left / 60% 100% no-repeat, linear-gradient(#000 61%, rgb(0 0 0 / 0.36) 66%) right / 40.1% 100% no-repeat;
+  }
+}
 
 /* A request's path: the stops, the sections in the order a request meets
    them; on wide screens the rail beside them is the table of contents,

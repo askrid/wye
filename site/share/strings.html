@@ -1,0 +1,108 @@
+<!doctype html>
+<!-- The hero's still, assets/strings.png: the file this page's link saves,
+     the picture shown as a four-colour PNG (see site/README.md). The strings
+     are the paths in pages/index.html, painted here as thin lines that fade
+     out from the dot, then reduced to one bit: 2-unit cells, each on where
+     its brightness passes its place in a 4 by 4 Bayer grid. The strings in, which run
+     behind the headline, are a grey the words stand clear of; the dot and
+     the strings out are ink; the thread is the accent. assets/strings.js
+     draws what moves on the same cells and the same grid. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+html, body { margin: 0; background: #070707; }
+canvas { display: block; width: 1500px; height: 600px; image-rendering: pixelated; }
+a { display: block; margin: 16px; color: #ededed; font: 16px monospace; }
+</style>
+</head>
+<body>
+<canvas width="750" height="300"></canvas>
+<a download="strings.png">save strings.png</a>
+<script type="module">
+// The picture's colours, by number: nothing, the grey of the strings in,
+// ink, the accent.
+const COLOURS = [[0, 0, 0, 0], [86, 86, 86, 255], [237, 237, 237, 255], [242, 181, 68, 255]];
+const DIM = 1, INK = 2, ACCENT = 3;
+const WIDTH = 750, HEIGHT = 300;
+const CELL = 2, GAIN = 2.2, GAMMA = 0.75;
+const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+// The paths, as the page carries them: the strings in, the strings out, and
+// the thread.
+const page = new DOMParser().parseFromString(await (await fetch("../pages/index.html")).text(), "text/html");
+const paths = (selector, attributes) => [...page.querySelectorAll(selector)].map((path) => `<path ${attributes} d="${path.getAttribute("d")}"/>`).join("");
+// One layer of the drawing as the browser paints it, read back as each
+// pixel's brightness, 0 to 1. The fade is the strokes' own paint: full to
+// 35% of the way out of an ellipse about (850, 300), then to nothing.
+const layer = async (body) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 600" width="1500" height="600">
+    <defs><radialGradient id="fade" gradientUnits="userSpaceOnUse" cx="850" cy="300" r="640" gradientTransform="translate(850 300) scale(1 0.506) translate(-850 -300)">
+      <stop offset="0.35" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+    <rect width="1500" height="600"/>${body}</svg>`;
+  const image = new Image();
+  image.src = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  await image.decode();
+  const context = new OffscreenCanvas(1500, 600).getContext("2d");
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, 1500, 600);
+  return (x, y) => data[(y * 1500 + x) * 4] / 255;
+};
+// The strings, each a fifth opaque so that where they crowd they add up,
+// and the dot; then the thread alone, to tell which cells are its.
+const strands = await layer(`<g fill="none" stroke="url(#fade)" stroke-width="0.9">${paths(".period .strands path", `opacity="0.2"`)}</g><circle cx="900" cy="300" r="11" fill="#fff"/>`);
+const thread = await layer(`<g fill="none" stroke="url(#fade)" stroke-width="1.6">${paths(".period .thread", "")}</g>`);
+const cells = new Uint8Array(WIDTH * HEIGHT);
+for (let cy = 0; cy < HEIGHT; cy++) {
+  for (let cx = 0; cx < WIDTH; cx++) {
+    let all = 0, accent = 0;
+    for (let y = cy * CELL; y < (cy + 1) * CELL; y++) {
+      for (let x = cx * CELL; x < (cx + 1) * CELL; x++) {
+        const t = thread(x, y);
+        accent += t;
+        all += Math.max(strands(x, y), t);
+      }
+    }
+    const brightness = Math.min(1, (all / (CELL * CELL)) * GAIN) ** GAMMA;
+    if (brightness <= (BAYER[cy % 4][cx % 4] + 0.5) / 16) continue;
+    const x = (cx + 0.5) * CELL, y = (cy + 0.5) * CELL;
+    cells[cy * WIDTH + cx] = Math.hypot(x - 900, y - 300) <= 12 ? INK : accent / all > 0.4 ? ACCENT : x < 900 ? DIM : INK;
+  }
+}
+const context = document.querySelector("canvas").getContext("2d");
+const shown = context.createImageData(WIDTH, HEIGHT);
+cells.forEach((colour, i) => shown.data.set(COLOURS[colour], i * 4));
+context.putImageData(shown, 0, 0);
+// The file: a PNG of two bits a pixel with the four colours as its palette,
+// a fifth the size of the canvas's own full-colour PNG.
+const row = Math.ceil(WIDTH / 4) + 1, raw = new Uint8Array(row * HEIGHT);
+cells.forEach((colour, i) => {
+  const x = i % WIDTH;
+  raw[Math.floor(i / WIDTH) * row + 1 + (x >> 2)] |= colour << (6 - 2 * (x & 3));
+});
+const packed = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate"))).arrayBuffer());
+const crc = (bytes) => {
+  let c = ~0;
+  for (const byte of bytes) {
+    c ^= byte;
+    for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+  }
+  return ~c >>> 0;
+};
+const be = (n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+const chunk = (type, data) => {
+  const body = [...type].map((ch) => ch.charCodeAt(0)).concat([...data]);
+  return [...be(data.length), ...body, ...be(crc(body))];
+};
+const png = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10,
+  ...chunk("IHDR", [...be(WIDTH), ...be(HEIGHT), 2, 3, 0, 0, 0]),
+  ...chunk("PLTE", COLOURS.flatMap((colour) => colour.slice(0, 3))),
+  ...chunk("tRNS", [0]),
+  ...chunk("IDAT", packed),
+  ...chunk("IEND", []),
+]);
+document.querySelector("a").href = URL.createObjectURL(new Blob([png], { type: "image/png" }));
+document.title = "ready";
+</script>
+</body>
+</html>

@@ -2,15 +2,16 @@
 // so creating the WebGL context (190 ms on a first visit, as the GPU process
 // starts; about 40 after) and every frame stay off the page's main thread.
 // site.js sends the drawing's paths and colours with the canvas, then the
-// canvas's size, the pointer's place in the drawing's units, when to forget
-// it, and when to stop.
+// pointer's place in the drawing's units, when to forget it, and when to
+// stop.
 const start = ({ canvas, paths, ink, accent }) => {
-  const gl = canvas.getContext("webgl", { antialias: true, premultipliedAlpha: true, powerPreference: "low-power" });
+  const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: true, powerPreference: "low-power" });
   if (!gl) return () => {};
   // Each string as 40 segments, and an out string's straight tail as one
   // more; a vertex is x, y, how much a pluck moves it (the curve's middle
   // control points' weight, 3t(1-t)), and its string.
   const vertices = [];
+  let inVertices = 0;
   const lines = paths.map((d, i) => {
     const [x0, y0, x1, y1, x2, y2, x3, y3, tail] = d.match(/-?[\d.]+/g).map(Number);
     const at = [];
@@ -23,6 +24,7 @@ const start = ({ canvas, paths, ink, accent }) => {
       ]);
     }
     if (tail) at.push([tail, y3, 0]);
+    if (i === 100) inVertices = vertices.length / 4;
     for (let k = 1; k < at.length; k++) vertices.push(...at[k - 1], i, ...at[k], i);
     return { at, amp: 0, since: 0 };
   });
@@ -43,15 +45,26 @@ const start = ({ canvas, paths, ink, accent }) => {
     gl.linkProgram(p);
     return p;
   };
-  // The fade both programs share, the drawing's own (#period-fade): an
+  // The fade both programs share, the still image's own (share/strings.html): an
   // ellipse about (850, 300), 640 wide and 640 x 0.506 tall, full to 35% of
   // the way out, then to nothing, so a string glows only where it is drawn.
   const fade = "clamp((1.0 - length((v_pos - vec2(850.0, 300.0)) / vec2(640.0, 323.84))) / 0.65, 0.0, 1.0)";
+  // The canvas comes at the still image's size, a pixel per cell of the
+  // drawing, and is never resized. Every pixel is on or off: a brightness
+  // is a share of pixels, those whose place in a 4 by 4 Bayer grid it
+  // passes, the grid the still image was drawn on (rows counted from the
+  // top).
+  const cell = (1500 / canvas.width).toFixed(1), top = (canvas.height - 1).toFixed(1);
+  const threshold = `
+    float b2(vec2 p) { return 2.0 * p.x + 3.0 * p.y - 4.0 * p.x * p.y; }
+    float threshold() {
+      vec2 c = vec2(floor(gl_FragCoord.x), ${top} - floor(gl_FragCoord.y));
+      return (4.0 * b2(mod(c, 2.0)) + b2(mod(floor(c / 2.0), 2.0)) + 0.5) / 16.0;
+    }`;
   const strings = program(`
     attribute vec4 a;
     uniform vec4 u_dy[50];
     uniform vec4 u_glow[50];
-    uniform float u_solid;
     varying vec2 v_pos;
     varying float v_alpha;
     void main() {
@@ -61,7 +74,7 @@ const start = ({ canvas, paths, ink, accent }) => {
       vec2 p = vec2(a.x, a.y + a.z * dot(u_dy[i], m));
       float glow = dot(u_glow[i], m);
       v_pos = p;
-      v_alpha = u_solid > 0.5 ? min(1.0, glow * 1.8) : glow;
+      v_alpha = min(1.0, glow * 3.0);
       // A string at rest is not drawn at all: all its points fall outside
       // the view, so the GPU fills no pixel for it.
       gl_Position = glow == 0.0 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p.x / 750.0 - 1.0, 1.0 - p.y / 300.0, 0.0, 1.0);
@@ -70,11 +83,15 @@ const start = ({ canvas, paths, ink, accent }) => {
     uniform vec3 u_colour;
     varying vec2 v_pos;
     varying float v_alpha;
+    ${threshold}
     void main() {
-      float a = v_alpha * ${fade};
-      gl_FragColor = vec4(u_colour * a, a);
+      // Nothing rings over the dot, which the still draws (11 units about
+      // (900, 300), and a cell's margin).
+      if (v_alpha * ${fade} <= threshold() || distance(v_pos, vec2(900.0, 300.0)) < 12.5) discard;
+      gl_FragColor = vec4(u_colour, 1.0);
     }`);
-  // A pulse is a soft point of light: x, y, brightness, size.
+  // A pulse is a point of light: x, y, brightness, size (in the drawing's
+  // units).
   const pulses = program(`
     attribute vec4 a;
     varying vec2 v_pos;
@@ -82,17 +99,18 @@ const start = ({ canvas, paths, ink, accent }) => {
     void main() {
       v_pos = a.xy;
       v_alpha = a.z;
-      gl_PointSize = a.w;
+      gl_PointSize = max(1.0, a.w / ${cell});
       gl_Position = vec4(a.x / 750.0 - 1.0, 1.0 - a.y / 300.0, 0.0, 1.0);
     }`, `
     precision mediump float;
     uniform vec3 u_colour;
     varying vec2 v_pos;
     varying float v_alpha;
+    ${threshold}
     void main() {
       vec2 c = gl_PointCoord * 2.0 - 1.0;
-      float a = v_alpha * exp(-4.0 * dot(c, c)) * ${fade};
-      gl_FragColor = vec4(u_colour * a, a);
+      if (v_alpha * 1.6 * exp(-3.0 * dot(c, c)) * ${fade} <= threshold()) discard;
+      gl_FragColor = vec4(u_colour, 1.0);
     }`);
   const lineBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
@@ -100,20 +118,19 @@ const start = ({ canvas, paths, ink, accent }) => {
   const pulseBuffer = gl.createBuffer();
   const pulseData = new Float32Array((48 * 10 + 1) * 4);
   gl.enableVertexAttribArray(0);
-  gl.enable(gl.BLEND);
   // The shaders' inputs; asking for them waits for the programs to link,
   // which in a worker keeps no one waiting.
   const where = (p, name) => gl.getUniformLocation(p, name);
   const u = {
-    dy: where(strings, "u_dy"), glow: where(strings, "u_glow"), solid: where(strings, "u_solid"),
+    dy: where(strings, "u_dy"), glow: where(strings, "u_glow"),
     lineColour: where(strings, "u_colour"), pulseColour: where(pulses, "u_colour"),
   };
+  const dim = ink.map((c) => c * 0.6);
   const dys = new Float32Array(200);
   const glows = new Float32Array(200);
   // blank: the canvas holds nothing, so a frame with nothing to show is
-  // skipped; size: the canvas's next size, set at the next frame drawn, so
-  // a window being resized costs nothing while the strings are still.
-  let halo = 0, frame = 0, last = 0, blank = true, size = null;
+  // skipped.
+  let halo = 0, frame = 0, last = 0, blank = true;
   // The pointer: its latest place in the drawing's units, read once a frame,
   // and the place read the frame before.
   let pointerX = 0, pointerY = 0, pending = false, previousX = 0, previousY = 0, havePrevious = false;
@@ -248,28 +265,24 @@ const start = ({ canvas, paths, ink, accent }) => {
       return;
     }
     blank = still;
-    if (size) {
-      [canvas.width, canvas.height] = size;
-      gl.viewport(0, 0, size[0], size[1]);
-      size = null;
-    }
     gl.clear(gl.COLOR_BUFFER_BIT);
     // The ringing strings.
     gl.useProgram(strings);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindBuffer(gl.ARRAY_BUFFER, lineBuffer);
     gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
     gl.uniform4fv(u.dy, dys);
     gl.uniform4fv(u.glow, glows);
-    gl.uniform1f(u.solid, 0);
+    // The strings in run behind the headline, so they ring in a grey the
+    // words stand clear of, as the still draws them; the strings out ring
+    // in ink.
+    gl.uniform3fv(u.lineColour, dim);
+    gl.drawArrays(gl.LINES, 0, inVertices);
     gl.uniform3fv(u.lineColour, ink);
-    gl.drawArrays(gl.LINES, 0, strandVertices);
-    gl.uniform1f(u.solid, 1);
+    gl.drawArrays(gl.LINES, inVertices, strandVertices - inVertices);
     gl.uniform3fv(u.lineColour, accent);
     gl.drawArrays(gl.LINES, strandVertices, vertices.length / 4 - strandVertices);
-    // The requests, added light on light.
+    // The requests, over the strings.
     gl.useProgram(pulses);
-    gl.blendFunc(gl.ONE, gl.ONE);
     gl.bindBuffer(gl.ARRAY_BUFFER, pulseBuffer);
     // Fresh storage each frame, so the GPU never makes the worker wait for
     // it to finish reading last frame's.
@@ -296,10 +309,8 @@ const start = ({ canvas, paths, ink, accent }) => {
     for (const line of lines) line.amp = 0;
     frame = blank ? 0 : requestAnimationFrame(draw);
   };
-  // One canvas pixel per CSS pixel: a ringing string draws a pixel wide, as
-  // the drawing's 0.9-unit strokes do, and the pulses are soft anyway.
+  // A ringing string draws one cell wide.
   return (data) => {
-    if (data.size) size = data.size;
     if (data.forget) havePrevious = pending = false;
     if (data.stop) silence();
     if (data.at) {
