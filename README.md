@@ -34,7 +34,9 @@ wye claude
 wye report
 ```
 
-By default Wye uses your own Claude login or API key, listens only on this machine, and stores no key. Linux and macOS binaries are on the [releases page](https://github.com/askrid/wye/releases) ([verifying one](SECURITY.md#releases)); a shared gateway for a team or an app is in the [guide](docs/guide.md).
+By default Wye uses your own Claude login or API key, listens only on this machine, and stores no key. Claude Code's docs [describe a claude.ai login through a gateway](https://code.claude.com/docs/en/llm-gateway#subscriptions-and-gateways), with the plan's usage limits and billing unchanged.
+
+Linux and macOS binaries are on the [releases page](https://github.com/askrid/wye/releases) ([verifying one](SECURITY.md#releases)); a shared gateway for a team or an app is in the [guide](docs/guide.md).
 
 After a short Claude Code session:
 
@@ -62,7 +64,7 @@ By request class
 
 ## Performance
 
-Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four other gateways in the same session against a mock provider, every gateway pinned to the same two physical cores; one command reproduces them ([reference environment](docs/benchmarks.md#reference-environment)). Each cell is the gateway's median divided by Wye's (TLS to the upstream; stream events with 2,000 token-paced streams):
+Lab results from three fresh AWS `c7i.4xlarge` hosts, each running Wye and four other gateways in the same session against a mock provider, every gateway at its [documented best case](docs/benchmarks.md#comparison-runs) (LiteLLM with one worker per vCPU) and pinned to the same two physical cores; one command reproduces them ([reference environment](docs/benchmarks.md#reference-environment)). Each cell is the gateway's median divided by Wye's (TLS to the upstream; stream events with 2,000 token-paced streams):
 
 | Gateway | Added latency (p50) | CPU per request | CPU per streamed event | Memory after load |
 |---|---|---|---|---|
@@ -103,6 +105,8 @@ Most rows follow from two choices, passing native APIs through and keeping nothi
 | One API for every provider | No. For many providers behind one API, LiteLLM or OpenRouter fit better |
 | Guardrails, redaction, response caching | No. [What Wye will not do](#what-wye-will-not-do) says why |
 | Scale out by adding replicas | Yes. Behind any load balancer. The provider keys' rate limits are the ceiling; more keys raise it |
+
+[agentgateway](https://agentgateway.dev), a Linux Foundation project in Rust, is the closest in kind and does more. Pick it to proxy MCP or A2A traffic, to run as a Kubernetes Gateway API implementation, or for budgets, rate limits, guardrails, or Gemini; since 1.7 it also records Claude Code's session. Wye's records also name each request's subagent, request class, and tool time without extra config, and give the reason for every prompt-cache miss. `wye policy-test` and `wye policy-diff` check its one TOML file in CI.
 
 A team that runs only Claude Code with SSO may prefer Anthropic's own self-hosted gateway for Claude Code, which follows every Claude Code release.
 

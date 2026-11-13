@@ -246,7 +246,7 @@ A config decides where your credentials go, so Wye reads one only when you name 
 
 ### Does my subscription work?
 
-Yes, for Claude Code on a claude.ai plan (Pro or Max) with the passthrough setup (`wye init`), on this machine only ([caller-credential passthrough](policy.md#caller-credential-passthrough)).
+Yes, for Claude Code on a claude.ai plan (Pro or Max) with the passthrough setup (`wye init`), on this machine only ([caller-credential passthrough](policy.md#caller-credential-passthrough)). Claude Code's docs [describe a claude.ai login through a gateway](https://code.claude.com/docs/en/llm-gateway#subscriptions-and-gateways): the login stays the credential, and the plan's usage limits and billing apply.
 
 ### Can I cap what a team spends?
 
