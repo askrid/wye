@@ -28,7 +28,7 @@
 # Where /wye comes from: `source` or `prebuilt`, the stages below.
 ARG BINARY=source
 
-FROM rust:1.99.1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639dce7d5542eb7bcd797e32aa AS source
+FROM rust:1.100.0-slim-bookworm@sha256:7c7d4eb4d05b7781187a327809466cfddf29753f6defdc3d19a0e291951b7a37 AS source
 WORKDIR /src
 COPY . .
 # target/ is a cache mount, gone after this RUN, so the binary is copied out
